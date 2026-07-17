@@ -2599,7 +2599,10 @@ function turnkeyMapsKey(){try{return (window.TURNKEY_CONFIG&&window.TURNKEY_CONF
 function backendHeaders(){return {'Content-Type':'application/json','X-Turnkey-Key':backendKey()};}
 let backendOnline=false, pushTimer=null;
 function pushStateRemote(){
-  const url=backendUrl(); if(!url||typeof fetch!=='function')return;
+  // Unlike lead polling, /api/state still requires SYNC_KEY server-side —
+  // backendUrl() alone is no longer a reliable "opt-in" signal since it's
+  // now always populated from config.js, so gate on backendKey() too.
+  const url=backendUrl(),key=backendKey(); if(!url||!key||typeof fetch!=='function')return;
   clearTimeout(pushTimer);
   pushTimer=setTimeout(()=>{
     let raw=null; try{raw=localStorage.getItem(STORE_KEY);}catch(e){}
@@ -2611,7 +2614,7 @@ function pushStateRemote(){
   },1500); // debounce: batch rapid edits into one push
 }
 function pullStateRemote(){
-  const url=backendUrl(); if(!url||typeof fetch!=='function')return;
+  const url=backendUrl(),key=backendKey(); if(!url||!key||typeof fetch!=='function')return;
   fetch(url+'/api/state',{headers:backendHeaders()}).then(r=>r.json()).then(j=>{
     backendOnline=true;
     if(!j||!j.state)return;
