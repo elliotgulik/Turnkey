@@ -65,16 +65,18 @@ export function createSupabaseStorage(url, serviceRoleKey) {
       }))
     },
 
-    async ackLeads(ids) {
-      if (!ids.length) return { acked: 0 }
+    async ackLeads(businessId, ids) {
+      if (!businessId || !ids.length) return { acked: 0 }
 
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('leads')
         .update({ acked_at: new Date().toISOString() })
         .in('id', ids)
+        .eq('business_id', businessId)
+        .select('id')
 
       if (error) throw error
-      return { acked: ids.length }
+      return { acked: data?.length ?? 0 }
     },
   }
 }

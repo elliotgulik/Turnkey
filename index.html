@@ -1316,7 +1316,7 @@ function renderQuoteMap(r){
 
   // === Case 3: Manually-entered lead — no customer drawing. Show the property if we can. ===
   if(!addr){ zone.innerHTML=''; return; }
-  const mapsKey=(function(){try{return localStorage.getItem('turnkey-maps-key')||''}catch(e){return ''}})();
+  const mapsKey=turnkeyMapsKey();
 
   if(mapsKey){
     // Geocode → static satellite of the property
@@ -2587,9 +2587,15 @@ document.querySelectorAll('.overlay').forEach(o=>o.addEventListener('click',e=>{
 let toastTimer;
 function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.remove('show'),2200)}
 
-/* ===== BACKEND: one URL + one key = sync + 24/7 lead inbox ===== */
-function backendUrl(){try{return (localStorage.getItem('turnkey-backend-url')||'').replace(/\/+$/,'')}catch(e){return ''}}
+/* ===== BACKEND: one URL + one key = sync + 24/7 lead inbox =====
+   URL comes from config.js automatically; the access code (SYNC_KEY) stays a
+   manual per-device entry — it's never shipped in a public file since it's
+   the only thing gating write access to synced CRM state. */
+function backendUrl(){try{return ((window.TURNKEY_CONFIG&&window.TURNKEY_CONFIG.backendUrl)||localStorage.getItem('turnkey-backend-url')||'').replace(/\/+$/,'')}catch(e){return ''}}
 function backendKey(){try{return localStorage.getItem('turnkey-backend-key')||''}catch(e){return ''}}
+/* Google Maps key is safe to auto-configure from config.js (restrict it by HTTP
+   referrer in Google Cloud Console); localStorage remains as a manual override. */
+function turnkeyMapsKey(){try{return (window.TURNKEY_CONFIG&&window.TURNKEY_CONFIG.mapsKey)||localStorage.getItem('turnkey-maps-key')||''}catch(e){return ''}}
 function backendHeaders(){return {'Content-Type':'application/json','X-Turnkey-Key':backendKey()};}
 let backendOnline=false, pushTimer=null;
 function pushStateRemote(){
@@ -2618,15 +2624,19 @@ function pullStateRemote(){
   }).catch(()=>{backendOnline=false;});
 }
 async function pollBackendLeads(){
+  // Leads are authenticated purely by the CRM's own Supabase session — no
+  // SYNC_KEY involved, so this needs no manual "Connect" step at all. The
+  // backend verifies the token and derives business_id server-side, so one
+  // business can never see or ack another's leads.
   const url=backendUrl(); if(!url||typeof fetch!=='function'||!sb)return;
   const {data:{session}}=await sb.auth.getSession();
   if(!session)return; // backend derives business_id from this session — nothing to poll without one
-  const headers=Object.assign({},backendHeaders(),{'Authorization':'Bearer '+session.access_token});
+  const headers={'Authorization':'Bearer '+session.access_token};
   fetch(url+'/api/leads/pending',{headers}).then(r=>r.json()).then(j=>{
     backendOnline=true;
     if(!j.leads||!j.leads.length)return;
     j.leads.forEach(l=>ingestQuoteRequest(l.payload));
-    fetch(url+'/api/leads/ack',{method:'POST',headers:backendHeaders(),body:JSON.stringify({ids:j.leads.map(l=>l.id)})}).catch(()=>{});
+    fetch(url+'/api/leads/ack',{method:'POST',headers:Object.assign({'Content-Type':'application/json'},headers),body:JSON.stringify({ids:j.leads.map(l=>l.id)})}).catch(()=>{});
   }).catch(()=>{backendOnline=false;});
 }
 function connectBackend(){
@@ -2649,7 +2659,7 @@ try{window.addEventListener('focus',pollBackendLeads);}catch(e){}
 
 /* ===== CONNECTIONS: live status of each integration ===== */
 function openConnections(){
-  const mapsKey=localStorage.getItem('turnkey-maps-key')||'';
+  const mapsKey=turnkeyMapsKey();
   const beUrl=backendUrl(), beKey=backendKey();
   const wxWhen=weatherFetchedAt?new Date(weatherFetchedAt).toLocaleTimeString('en-NZ',{hour:'numeric',minute:'2-digit'}):null;
   const bookingLink=currentBusinessId?`${location.origin}/booking.html?biz=${currentBusinessId}`:'';
@@ -2659,11 +2669,11 @@ function openConnections(){
       <p>Share this with customers — no login needed on their end. Every quote request they submit lands straight in your Pipeline/Leads.</p>
       ${bookingLink?`<div class="conn-keyrow"><input id="conn-booking-link" readonly value="${bookingLink}" onclick="this.select()"><button class="btn accent sm" onclick="copyBookingLink()" id="copy-booking-btn">Copy link</button></div>`:''}
     </div>
-    <div class="conn-card ${beUrl&&backendOnline?'live':''}">
-      <div class="conn-top"><span class="conn-name">\ud83e\udde0 Backend \u2014 sync + 24/7 lead inbox</span><span class="conn-badge ${beUrl?(backendOnline?'on':'off'):'off'}">${beUrl?(backendOnline?'\u25cf LIVE':'saved \u2014 checking\u2026'):'not connected'}</span></div>
-      <p><b>What it does:</b> your phone and laptop share the same data, and the booking page delivers quote requests here 24/7 \u2014 the app collects them every 30 seconds. <b>Setup:</b> deploy the turnkey-backend folder (10-minute steps in its README), then paste your URL + access code below.</p>
+    <div class="conn-card ${backendOnline?'live':''}">
+      <div class="conn-top"><span class="conn-name">\ud83e\udde0 Backend \u2014 access code (optional)</span><span class="conn-badge ${backendOnline?'on':(beKey?'off':'')}">${backendOnline?'\u25cf LIVE':(beKey?'saved \u2014 checking\u2026':'lead inbox already live')}</span></div>
+      <p><b>Lead inbox:</b> already automatic \u2014 your Supabase login is all that's needed, the booking page delivers quote requests here 24/7 and the app collects them every 30 seconds. <b>This access code is only for:</b> cross-device backup sync (state) and Gmail sending \u2014 optional. Paste it below only if you want those.</p>
       <div class="conn-keyrow"><input id="conn-be-url" placeholder="https://turnkey-backend-xxxx.onrender.com" value="${beUrl.replace(/"/g,'&quot;')}"></div>
-      <div class="conn-keyrow"><input id="conn-be-key" type="password" placeholder="your SYNC_KEY access code" value="${beKey.replace(/"/g,'&quot;')}"><button class="btn accent sm" onclick="connectBackend()">${beUrl?'Update':'Connect'}</button></div>
+      <div class="conn-keyrow"><input id="conn-be-key" type="password" placeholder="your SYNC_KEY access code" value="${beKey.replace(/"/g,'&quot;')}"><button class="btn accent sm" onclick="connectBackend()">${beKey?'Update':'Connect'}</button></div>
     </div>
     <div class="conn-card ${weatherLive?'live':''}">
       <div class="conn-top"><span class="conn-name">🌤️ Weather — Open-Meteo</span><span class="conn-badge ${weatherLive?'on':'off'}">${weatherLive?'● LIVE':'sample data'}</span></div>
@@ -2671,12 +2681,8 @@ function openConnections(){
       ${!weatherLive?'<button class="btn ghost sm" onclick="fetchLiveWeather()">Try now</button>':''}
     </div>
     <div class="conn-card ${mapsKey?'live':''}">
-      <div class="conn-top"><span class="conn-name">🛰️ Satellite maps — Google Maps</span><span class="conn-badge ${mapsKey?'on':'off'}">${mapsKey?'● KEY ACTIVE':'needs a key'}</span></div>
-      <p>Paste a Google Maps API key and the customer booking page switches from the stylised map to <b>real satellite imagery</b> of the customer's address, with real-world scale for accurate m². Get one at console.cloud.google.com (Maps Static API — free tier covers thousands of quotes/month).</p>
-      <div class="conn-keyrow">
-        <input id="conn-maps-key" placeholder="AIza..." value="${mapsKey.replace(/"/g,'&quot;')}">
-        <button class="btn accent sm" onclick="saveMapsKey()">${mapsKey?'Update':'Activate'}</button>
-      </div>
+      <div class="conn-top"><span class="conn-name">🛰️ Satellite maps — Google Maps</span><span class="conn-badge ${mapsKey?'on':'off'}">${mapsKey?'● KEY ACTIVE':'no key set'}</span></div>
+      <p>${mapsKey?`Configured automatically via config.js — the booking page and CRM both switch from the stylised map to <b>real satellite imagery</b>, with real-world scale for accurate m². No per-device setup needed.`:`Set <code>mapsKey</code> in config.js (Maps Static + Geocoding + Places APIs, restricted by HTTP referrer to your domain) to switch on real satellite imagery automatically — get one at console.cloud.google.com.`}</p>
     </div>
     <div class="conn-card ${gmailStatus.connected?'live':(gmailStatus.ready?'':'locked')}">
       <div class="conn-top"><span class="conn-name">✉️ Gmail — real sending</span><span class="conn-badge ${gmailStatus.connected?'on':'off'}">${gmailStatus.connected?'● CONNECTED':(gmailStatus.ready?'ready to connect':'using mailto: fallback')}</span></div>
@@ -2717,13 +2723,6 @@ function refreshGmailStatus(){
     if(document.getElementById('conn-overlay').classList.contains('open'))openConnections();
   }).catch(()=>{});
 }
-function saveMapsKey(){
-  const v=document.getElementById('conn-maps-key').value.trim();
-  if(v)localStorage.setItem('turnkey-maps-key',v);else localStorage.removeItem('turnkey-maps-key');
-  toast(v?'Maps key saved — booking page now uses real satellite':'Maps key removed');
-  openConnections();
-}
-
 /* ===== PERSISTENCE: everything auto-saves locally on this device ===== */
 const STORE_KEY='turnkey-app-v1';
 function saveState(){

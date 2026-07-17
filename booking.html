@@ -177,7 +177,9 @@
 // Load Google Places autocomplete only when a Maps key is present
 (function(){
   try{
-    var k=localStorage.getItem('turnkey-maps-key')||'';
+    var k='';
+    if(window.TURNKEY_CONFIG&&window.TURNKEY_CONFIG.mapsKey)k=window.TURNKEY_CONFIG.mapsKey;
+    try{var stored=localStorage.getItem('turnkey-maps-key');if(stored)k=stored;}catch(e){}
     try{var u=new URL(location.href);if(u.searchParams.get('tkkey'))k=u.searchParams.get('tkkey');}catch(e){}
     if(!k)return;
     var s=document.createElement('script');
@@ -392,11 +394,11 @@ const STOREY_TYPES = {
 const GRID = 40;
 const M_PER_GRID = 1.3; // each grid square ≈ 1.3m for the demo scale note
 let SCALE = M_PER_GRID / GRID; // metres per pixel (demo). Satellite mode replaces this with real-world scale.
-// Real satellite via Google Static Maps when a key is saved from the Turnkey app (Connections).
-// Key can come from three places: localStorage (standalone), ?tkkey=... in URL (embed with key),
-// or postMessage from a parent frame (operator's Customer view forwards it).
+// Real satellite via Google Static Maps — automatic from config.js (mapsKey),
+// with localStorage / ?tkkey=... / postMessage available as manual overrides.
 let MAPS_KEY='';
-try{MAPS_KEY=localStorage.getItem('turnkey-maps-key')||'';}catch(e){}
+if(window.TURNKEY_CONFIG&&window.TURNKEY_CONFIG.mapsKey)MAPS_KEY=window.TURNKEY_CONFIG.mapsKey;
+try{const stored=localStorage.getItem('turnkey-maps-key');if(stored)MAPS_KEY=stored;}catch(e){}
 try{const u=new URL(location.href); if(u.searchParams.get('tkkey'))MAPS_KEY=u.searchParams.get('tkkey');}catch(e){}
 window.addEventListener('message',function(e){
   const d=e.data;

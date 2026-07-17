@@ -197,7 +197,7 @@ app.post('/api/leads', async (req, res) => {
 })
 
 
-app.get('/api/leads/pending', requireKey, requireBusiness, async (req, res) => {
+app.get('/api/leads/pending', requireBusiness, async (req, res) => {
   try {
     const leads = await storage.getPendingLeads(req.businessId)
 
@@ -218,11 +218,11 @@ app.get('/api/leads/pending', requireKey, requireBusiness, async (req, res) => {
 })
 
 
-app.post('/api/leads/ack', requireKey, async (req, res) => {
+app.post('/api/leads/ack', requireBusiness, async (req, res) => {
   try {
     const ids = req.body?.ids ?? []
 
-    const result = await storage.ackLeads(ids)
+    const result = await storage.ackLeads(req.businessId, ids)
 
     res.json(result)
 

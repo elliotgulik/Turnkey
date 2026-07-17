@@ -55,15 +55,20 @@ export function createFileStorage(dataDir) {
       return leads.filter((l) => !l.ackedAt && l.businessId === businessId)
     },
 
-    async ackLeads(ids) {
+    async ackLeads(businessId, ids) {
+      if (!businessId) return { acked: 0 }
       const leads = await readJson(leadsPath, [])
       const idSet = new Set(ids)
       const now = Date.now()
+      let acked = 0
       for (const lead of leads) {
-        if (idSet.has(lead.id)) lead.ackedAt = now
+        if (idSet.has(lead.id) && lead.businessId === businessId) {
+          lead.ackedAt = now
+          acked++
+        }
       }
       await writeJson(leadsPath, leads)
-      return { acked: ids.length }
+      return { acked }
     },
   }
 }
