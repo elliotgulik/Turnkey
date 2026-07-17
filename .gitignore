@@ -1,0 +1,19 @@
+# Logs
+*.log
+.DS_Store
+
+# Env
+.env
+.env.local
+.env.*.local
+backend/.env
+backend/data/
+
+# Node
+node_modules/
+backend/node_modules/
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea

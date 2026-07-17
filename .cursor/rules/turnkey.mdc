@@ -1,0 +1,33 @@
+---
+description: TurnKey CRM project conventions
+globs:
+alwaysApply: true
+---
+
+# TurnKey CRM
+
+You are working on TurnKey, a CRM with React + Vite frontend, Supabase backend, and Netlify deployment.
+
+## Architecture
+
+- Frontend talks directly to Supabase via `@supabase/supabase-js`
+- Database schema lives in `supabase/migrations/`
+- Types are in `src/lib/database.types.ts` (regenerate with `npm run db:types`)
+- Netlify serves the Vite SPA from `dist/` with SPA redirects in `netlify.toml`
+
+## Code style
+
+- TypeScript strict mode
+- Use `@/` imports
+- Keep pages in `src/pages/`, shared UI in `src/components/`
+- Minimal scope changes — match existing patterns
+
+## Supabase rules
+
+- Every new table needs RLS enabled and explicit policies
+- Never expose service role keys to the frontend
+- Migrations are the source of truth for schema
+
+## Multi-tool workflow
+
+This repo is shared across Cursor, Claude Code, and ChatGPT. Before large changes, check `docs/DEVELOPMENT.md` for the agreed workflow. Update `CLAUDE.md` when architecture changes.

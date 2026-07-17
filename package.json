@@ -1,0 +1,17 @@
+{
+  "name": "turnkey",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "config": "node scripts/generate-config.js",
+    "backend": "cd backend && npm run dev",
+    "backend:install": "cd backend && npm install"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.110.6",
+    "dotenv": "^17.4.2"
+  }
+}

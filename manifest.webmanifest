@@ -1,0 +1,14 @@
+{
+  "name": "Turnkey — Service Business OS",
+  "short_name": "Turnkey",
+  "description": "The operating system for service businesses. Pipeline, quoting, scheduling, invoicing — in one app.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#fbfcfd",
+  "theme_color": "#138a72",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
