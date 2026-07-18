@@ -2684,8 +2684,12 @@ function openConnections(){
       ${!weatherLive?'<button class="btn ghost sm" onclick="fetchLiveWeather()">Try now</button>':''}
     </div>
     <div class="conn-card ${mapsKey?'live':''}">
-      <div class="conn-top"><span class="conn-name">🛰️ Satellite maps — Google Maps</span><span class="conn-badge ${mapsKey?'on':'off'}">${mapsKey?'● KEY ACTIVE':'no key set'}</span></div>
-      <p>${mapsKey?`Configured automatically via config.js — the booking page and CRM both switch from the stylised map to <b>real satellite imagery</b>, with real-world scale for accurate m². No per-device setup needed.`:`Set <code>mapsKey</code> in config.js (Maps Static + Geocoding + Places APIs, restricted by HTTP referrer to your domain) to switch on real satellite imagery automatically — get one at console.cloud.google.com.`}</p>
+      <div class="conn-top"><span class="conn-name">🛰️ Satellite maps — Google Maps</span><span class="conn-badge ${mapsKey?'on':'off'}">${mapsKey?'● KEY ACTIVE':'needs a key'}</span></div>
+      <p>Set it once in <code>config.js</code> (<code>mapsKey</code>) to configure it for every device automatically, or paste one here just for this device. Switches the property map from the stylised/street view to <b>real satellite imagery</b>, with real-world scale for accurate m². Get one at console.cloud.google.com (restrict it by HTTP referrer to your domain).</p>
+      <div class="conn-keyrow">
+        <input id="conn-maps-key" placeholder="AIza..." value="${mapsKey.replace(/"/g,'&quot;')}">
+        <button class="btn accent sm" onclick="saveMapsKey()">${mapsKey?'Update':'Activate'}</button>
+      </div>
     </div>
     <div class="conn-card ${gmailStatus.connected?'live':(gmailStatus.ready?'':'locked')}">
       <div class="conn-top"><span class="conn-name">✉️ Gmail — real sending</span><span class="conn-badge ${gmailStatus.connected?'on':'off'}">${gmailStatus.connected?'● CONNECTED':(gmailStatus.ready?'ready to connect':'using mailto: fallback')}</span></div>
@@ -2725,6 +2729,12 @@ function refreshGmailStatus(){
     gmailStatus={ready:!!j.ready,connected:!!j.connected};
     if(document.getElementById('conn-overlay').classList.contains('open'))openConnections();
   }).catch(()=>{});
+}
+function saveMapsKey(){
+  const v=document.getElementById('conn-maps-key').value.trim();
+  if(v)localStorage.setItem('turnkey-maps-key',v);else localStorage.removeItem('turnkey-maps-key');
+  toast(v?'Maps key saved — satellite imagery active on this device':'Maps key removed');
+  openConnections();
 }
 /* ===== PERSISTENCE: everything auto-saves locally on this device ===== */
 const STORE_KEY='turnkey-app-v1';
