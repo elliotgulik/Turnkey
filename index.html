@@ -1305,65 +1305,75 @@ function renderQuoteMap(r){
     return;
   }
 
-  // === Case 2: Booking-widget lead drawn on the demo grid (no satellite) ===
+  // === Case 2: No captured satellite snapshot, but we have an address — always
+  // prefer a real satellite (or street) map of the property over the flat sketch
+  // grid, whether or not the customer traced areas. If they did, overlay their
+  // traced areas on top rather than letting the sketch replace the real map. ===
+  if(addr){
+    const mapsKey=turnkeyMapsKey();
+
+    if(mapsKey){
+      // Geocode → static satellite of the property
+      zone.innerHTML=`<div class="qmap"><div class="qmap-h">📍 ${addr} <span class="demo-tag">satellite</span></div>
+        <div class="qmap-stage placeholder" id="qmap-sat-stage"><span>Loading satellite…</span></div></div>`;
+      const fullAddr=encodeURIComponent(addr+', Auckland, NZ');
+      fetch('https://maps.googleapis.com/maps/api/geocode/json?address='+fullAddr+'&key='+encodeURIComponent(mapsKey))
+        .then(res=>res.json()).then(j=>{
+          const stage=document.getElementById('qmap-sat-stage'); if(!stage)return;
+          if(j.status!=='OK'){stage.innerHTML=`<span>Satellite unavailable — ${j.status==='REQUEST_DENIED'?'check the Maps API key':'address not found'}</span>`;return;}
+          const loc=j.results&&j.results[0]?j.results[0].geometry.location:null;
+          const center=loc?loc.lat+','+loc.lng:fullAddr;
+          const url='https://maps.googleapis.com/maps/api/staticmap?center='+center+'&zoom=19&size=800x600&scale=2&maptype=satellite&key='+encodeURIComponent(mapsKey);
+          stage.className='qmap-stage';
+          stage.style.cssText=`background-image:url("${url}");background-size:cover;background-position:center`;
+          stage.innerHTML=polysSVG();
+        }).catch(()=>{
+          const stage=document.getElementById('qmap-sat-stage');
+          if(stage)stage.innerHTML='<span>Satellite unavailable — network error</span>';
+        });
+      return;
+    }
+
+    // No key: free OSM street map of the property via Nominatim geocode + tile grid
+    zone.innerHTML=`<div class="qmap"><div class="qmap-h">📍 ${addr} <span class="demo-tag">street map — no Maps key set</span></div>
+      <div class="qmap-stage placeholder" id="qmap-osm-stage"><span>Loading map…</span></div></div>`;
+    fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(addr+', Auckland, New Zealand'))
+      .then(res=>res.json()).then(results=>{
+        const stage=document.getElementById('qmap-osm-stage'); if(!stage)return;
+        if(!results||!results.length){stage.innerHTML='<span>Address not found</span>';return;}
+        const lat=parseFloat(results[0].lat), lon=parseFloat(results[0].lon), z=18;
+        const n=Math.pow(2,z);
+        const xF=(lon+180)/360*n;
+        const yF=(1-Math.log(Math.tan(lat*Math.PI/180)+1/Math.cos(lat*Math.PI/180))/Math.PI)/2*n;
+        const tx=Math.floor(xF), ty=Math.floor(yF);
+        // fractional offset of the property inside its tile → shift the 3x3 grid so the property is centred
+        const offX=(xF-tx-0.5)*100, offY=(yF-ty-0.5)*100;
+        let imgs='';
+        for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++)
+          imgs+=`<img src="https://tile.openstreetmap.org/${z}/${tx+dx}/${ty+dy}.png" style="width:33.34%;height:33.34%;position:absolute;left:${(dx+1)*33.33-offX/3}%;top:${(dy+1)*33.33-offY/3}%" loading="lazy">`;
+        stage.className='qmap-stage';
+        stage.style.cssText='overflow:hidden;position:relative';
+        stage.innerHTML=`<div style="position:absolute;inset:0">${imgs}</div>
+          <div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-100%);font-size:22px">📍</div>${polysSVG()}`;
+      }).catch(()=>{
+        const stage=document.getElementById('qmap-osm-stage');
+        if(stage)stage.innerHTML='<span>Map unavailable offline</span>';
+      });
+    return;
+  }
+
+  // === Case 3: No address at all — last resort, show the customer's sketch on
+  // the flat demo grid (nothing to geocode, so a real map isn't possible). ===
   if(polys&&polys.length){
     zone.innerHTML=`<div class="qmap">
-      <div class="qmap-h">📍 Areas the customer outlined <span class="demo-tag">customer sketch — not to satellite</span></div>
+      <div class="qmap-h">📍 Areas the customer outlined <span class="demo-tag">customer sketch — no address to map</span></div>
       <div class="qmap-stage" style="background:#e8eeec">${gridBG()}${polysSVG()}</div>
       ${legend()}</div>`;
     return;
   }
 
-  // === Case 3: Manually-entered lead — no customer drawing. Show the property if we can. ===
-  if(!addr){ zone.innerHTML=''; return; }
-  const mapsKey=turnkeyMapsKey();
-
-  if(mapsKey){
-    // Geocode → static satellite of the property
-    zone.innerHTML=`<div class="qmap"><div class="qmap-h">📍 ${addr} <span class="demo-tag">satellite</span></div>
-      <div class="qmap-stage placeholder" id="qmap-sat-stage"><span>Loading satellite…</span></div></div>`;
-    const fullAddr=encodeURIComponent(addr+', Auckland, NZ');
-    fetch('https://maps.googleapis.com/maps/api/geocode/json?address='+fullAddr+'&key='+encodeURIComponent(mapsKey))
-      .then(res=>res.json()).then(j=>{
-        const stage=document.getElementById('qmap-sat-stage'); if(!stage)return;
-        const loc=(j.status==='OK'&&j.results&&j.results[0])?j.results[0].geometry.location:null;
-        const center=loc?loc.lat+','+loc.lng:fullAddr;
-        const url='https://maps.googleapis.com/maps/api/staticmap?center='+center+'&zoom=19&size=800x600&scale=2&maptype=satellite&key='+encodeURIComponent(mapsKey);
-        stage.className='qmap-stage';
-        stage.style.cssText=`background-image:url("${url}");background-size:cover;background-position:center`;
-        stage.innerHTML='';
-      }).catch(()=>{
-        const stage=document.getElementById('qmap-sat-stage');
-        if(stage)stage.innerHTML='<span>Satellite unavailable</span>';
-      });
-    return;
-  }
-
-  // No key: free OSM street map of the property via Nominatim geocode + tile grid
-  zone.innerHTML=`<div class="qmap"><div class="qmap-h">📍 ${addr} <span class="demo-tag">street map</span></div>
-    <div class="qmap-stage placeholder" id="qmap-osm-stage"><span>Loading map…</span></div></div>`;
-  fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(addr+', Auckland, New Zealand'))
-    .then(res=>res.json()).then(results=>{
-      const stage=document.getElementById('qmap-osm-stage'); if(!stage)return;
-      if(!results||!results.length){stage.innerHTML='<span>Address not found</span>';return;}
-      const lat=parseFloat(results[0].lat), lon=parseFloat(results[0].lon), z=18;
-      const n=Math.pow(2,z);
-      const xF=(lon+180)/360*n;
-      const yF=(1-Math.log(Math.tan(lat*Math.PI/180)+1/Math.cos(lat*Math.PI/180))/Math.PI)/2*n;
-      const tx=Math.floor(xF), ty=Math.floor(yF);
-      // fractional offset of the property inside its tile → shift the 3x3 grid so the property is centred
-      const offX=(xF-tx-0.5)*100, offY=(yF-ty-0.5)*100;
-      let imgs='';
-      for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++)
-        imgs+=`<img src="https://tile.openstreetmap.org/${z}/${tx+dx}/${ty+dy}.png" style="width:33.34%;height:33.34%;position:absolute;left:${(dx+1)*33.33-offX/3}%;top:${(dy+1)*33.33-offY/3}%" loading="lazy">`;
-      stage.className='qmap-stage';
-      stage.style.cssText='overflow:hidden;position:relative';
-      stage.innerHTML=`<div style="position:absolute;inset:0">${imgs}</div>
-        <div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-100%);font-size:22px">📍</div>`;
-    }).catch(()=>{
-      const stage=document.getElementById('qmap-osm-stage');
-      if(stage)stage.innerHTML='<span>Map unavailable offline</span>';
-    });
+  // Nothing to show
+  zone.innerHTML='';
 }
 function reviewQuote(){
   const lines=draftLines.filter(l=>(parseFloat(l.qty)||0)>0);
