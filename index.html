@@ -411,6 +411,32 @@
     .ops-grid,.detail-grid{grid-template-columns:1fr}
   }
 
+  /* ===== bottom nav — mobile only, thumb-reachable core tabs. Supplements
+     (doesn't replace) the top nav.tabs, which stays for the rest. ===== */
+  .bottom-nav{display:none}
+  @media(max-width:720px){
+    .bottom-nav{
+      display:flex;position:fixed;left:0;right:0;bottom:0;z-index:40;
+      background:var(--surface);border-top:1px solid var(--line);
+      padding:6px max(6px,env(safe-area-inset-left)) max(6px,env(safe-area-inset-bottom)) max(6px,env(safe-area-inset-right));
+      box-shadow:0 -2px 10px rgba(10,28,43,.05);
+    }
+    .bottom-nav button{
+      flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;
+      padding:6px 2px;font-size:10.5px;font-weight:600;color:var(--ink-faint);border-radius:12px;
+    }
+    .bottom-nav button.active{color:var(--teal);background:var(--teal-wash)}
+    .bottom-nav .bn-ico{font-size:19px;line-height:1}
+    main{padding-bottom:78px} /* keep content clear of the fixed bar */
+  }
+
+  /* ===== technician mode — bigger tap targets everywhere, one-handed/gloved use ===== */
+  body.tech-mode .btn{min-height:46px;font-size:15px}
+  body.tech-mode .btn.sm{min-height:38px}
+  body.tech-mode .sop-check{width:34px;height:34px}
+  body.tech-mode .photo-slot{min-height:64px}
+  body.tech-mode nav.tabs button{padding:12px 16px;font-size:14.5px}
+
   /* ===== v5 additions: colour, logo ===== */
   /* logo lockup in header */
   .brand .logo{display:flex;align-items:center;gap:11px}
@@ -442,6 +468,12 @@
   .fc-wrap .fc-toolbar-title{font-size:17px;color:var(--ink)}
   .fc-wrap .fc-daygrid-day-number,.fc-wrap .fc-col-header-cell-cushion{color:var(--ink-soft);font-size:12.5px}
   .fc-wrap .fc-event{cursor:pointer;font-size:11.5px;padding:1px 4px;border:none}
+  .fc-wx-badge{font-size:9.5px;font-weight:700;letter-spacing:.02em;text-transform:uppercase;padding:1px 5px;border-radius:980px;display:inline-block;margin:2px 4px 0 auto}
+  .fc-wx-badge.fc-wx-good{background:var(--teal-wash);color:var(--teal)}
+  .fc-wx-badge.fc-wx-warn{background:#fbf6ec;color:#9a7a32}
+  .fc-wx-badge.fc-wx-bad{background:#fbf0ec;color:#b5573e}
+  .fc-wx-badge.fc-wx-hist{opacity:.55;border:1px dashed currentColor;background:transparent}
+  .fc-daygrid-day-top{display:flex;align-items:center;justify-content:space-between}
   .fc-wrap .fc-button{box-shadow:none!important;text-transform:capitalize}
   @media(max-width:640px){
     .fc-wrap{padding:10px}
@@ -861,6 +893,13 @@
     <button data-view="dashboard">Dashboard</button>
     <button data-view="goals">Goals</button>
   </nav>
+  <nav class="bottom-nav" id="bottom-nav">
+    <button data-view="pipeline" class="active"><span class="bn-ico">📋</span>Pipeline</button>
+    <button data-view="jobsflow"><span class="bn-ico">🧽</span>Jobs</button>
+    <button data-view="calendar"><span class="bn-ico">📅</span>Calendar</button>
+    <button data-view="ops"><span class="bn-ico">🚚</span>Ops</button>
+    <button onclick="openSettings()"><span class="bn-ico">⚙️</span>Settings</button>
+  </nav>
   <main>
     <section class="view active" id="view-pipeline"></section>
     <section class="view" id="view-jobsflow"></section>
@@ -1138,12 +1177,17 @@ const CHEMICALS = {
   softWash:{ label:'Soft-wash mix (surfactant)', perL:5.80 },
   degreaser:{ label:'Degreaser', perL:4.50 }
 };
+// Every field here is editable in the Pricing tab (setCostInput()) and
+// persisted per-business via savePricingConfig() — nothing in the cost
+// model is a fixed, invisible constant a business can't see or change.
 const COST_INPUTS = {
   wage:32,        // $/hour per crew member on the job
   crew:2,         // people on a typical job
   setupMin:25,    // setup/pack-down per job (minutes)
   fuelPerKm:0.28, // running cost $/km
   avgKm:14,       // avg round-trip drive to a job (tune this to your area)
+  equipmentPerJob:8,   // equipment wear/maintenance allowance per job
+  consumablesPerJob:5, // PPE, rags, misc supplies per job
   targetMargin:0.55 // owner's target gross margin → drives recommended price
 };
 // Estimate labour hours, costs and a recommended price for a set of services.
@@ -1161,11 +1205,13 @@ function estimateJob(services){
   const labourHrs = labourMin/60;
   const wageCost = labourHrs * COST_INPUTS.wage * COST_INPUTS.crew;
   const fuelCost = COST_INPUTS.avgKm * COST_INPUTS.fuelPerKm;
-  const cost = wageCost + chem + fuelCost;
+  const equipmentCost = COST_INPUTS.equipmentPerJob||0;
+  const consumablesCost = COST_INPUTS.consumablesPerJob||0;
+  const cost = wageCost + chem + fuelCost + equipmentCost + consumablesCost;
   const recommended = COST_INPUTS.targetMargin<1 ? cost/(1-COST_INPUTS.targetMargin) : cost;
   return {
     labourMin:Math.round(labourMin), labourHrs,
-    wageCost, chem, litres, fuelCost, cost,
+    wageCost, chem, litres, fuelCost, equipmentCost, consumablesCost, cost,
     recommended:Math.round(recommended/5)*5  // round to nearest $5
   };
 }
@@ -1510,6 +1556,55 @@ async function sendLifecycleEmail(r,key){
   if(ok)logActivity(r.customerId,r.jobId,'email_sent',subject);
 }
 
+/* ===== Owner-facing notifications — distinct from the customer-facing
+   lifecycle emails above: these tell the BUSINESS when something in their
+   own pipeline needs attention. Email is wired up now; SMS/push are
+   architecture only (schema + UI toggle exist, no provider connected yet —
+   flip email_enabled-style columns live once a provider is added later). */
+const NOTIFICATION_EVENTS=[
+  {key:'new_lead',label:'New lead arrives'},
+  {key:'quote_accepted',label:'Quote accepted'},
+  {key:'job_booked',label:'Job booked'},
+  {key:'job_tomorrow',label:"Job scheduled for tomorrow"},
+  {key:'invoice_overdue',label:'Invoice overdue'},
+  {key:'payment_received',label:'Payment received'},
+  {key:'review_requested',label:'Review requested'}
+];
+let notificationPrefs={};
+async function loadNotificationPrefs(){
+  if(!sb||!currentBusinessId)return;
+  const {data,error}=await sb.from('notification_preferences').select('*').eq('business_id',currentBusinessId);
+  if(error){console.error('Load notification preferences failed',error);return;}
+  const byKey={};
+  (data||[]).forEach(row=>{byKey[row.event]=row;});
+  notificationPrefs=byKey;
+}
+// Sends a short plain-text alert to the OWNER (not the customer) via the
+// same connected Gmail account used for everything else. Silently does
+// nothing if Gmail isn't connected or this event's been turned off —
+// notifications are a convenience layer, never a blocker.
+function notifyOwner(event,subject,bodyText){
+  const pref=notificationPrefs[event];
+  if(pref&&pref.email_enabled===false)return;
+  if(!emailAccount)return;
+  const to=(pref&&pref.notify_email)||(currentBusinessProfile&&currentBusinessProfile.email)||'';
+  if(!to)return;
+  const bodyHtml=`<div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;max-width:520px;margin:0 auto;color:#1a1a1a;line-height:1.6"><p>${bodyText.replace(/\n/g,'<br>')}</p></div>`;
+  sendEmailViaBackend({to,subject,bodyText,bodyHtml});
+}
+async function saveNotificationPrefs(){
+  if(!sb||!currentBusinessId){toast('Something went wrong — try refreshing the page');return;}
+  const notifyEmail=document.getElementById('notif-email').value.trim();
+  for(const ev of NOTIFICATION_EVENTS){
+    const enabled=document.getElementById(`notif-${ev.key}`).checked;
+    const payload={business_id:currentBusinessId,event:ev.key,email_enabled:enabled,notify_email:notifyEmail||null};
+    const {data,error}=await sb.from('notification_preferences').upsert(payload,{onConflict:'business_id,event'}).select('*').maybeSingle();
+    if(error)console.error('Save notification preference failed',ev.key,error);
+    else notificationPrefs[ev.key]=data;
+  }
+  toast('Notification preferences saved');
+}
+
 function money(n){return '$'+Math.round(n).toLocaleString('en-NZ')}
 function segOf(t){return t>=1200?'Large':t>=500?'Mid':'Small'}
 
@@ -1580,8 +1675,9 @@ function resetAll(){
 }
 
 document.getElementById('tabs').addEventListener('click',e=>{const b=e.target.closest('button[data-view]');if(b)switchView(b.dataset.view)});
+document.getElementById('bottom-nav').addEventListener('click',e=>{const b=e.target.closest('button[data-view]');if(b)switchView(b.dataset.view)});
 function switchView(v){
-  document.querySelectorAll('nav.tabs button[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===v));
+  document.querySelectorAll('nav.tabs button[data-view], .bottom-nav button[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===v));
   document.querySelectorAll('.view').forEach(s=>s.classList.remove('active'));
   document.getElementById('view-'+v).classList.add('active');
   setAccent(v);
@@ -2194,13 +2290,22 @@ function buildDocPDF(mode,r,outputType){
   // header bar
   doc.setFillColor(ac.r,ac.g,ac.b);
   doc.rect(0,0,W,22,'F');
-  // logo initials box
+  // logo — the business's real uploaded logo when there is one, else a
+  // coloured-initials mark (cachedLogoDataUrl is preloaded once at sign-in
+  // by preloadLogoDataUrl(), since jsPDF can't fetch a remote URL itself).
   doc.setFillColor(255,255,255);
   doc.roundedRect(ML,4,14,14,2,2,'F');
-  const initials=(t.business||'').trim()?t.business.trim().split(/\s+/).map(function(w){return w[0]||'';}).slice(0,2).join('').toUpperCase():'TK';
-  doc.setFont('helvetica','bold');doc.setFontSize(9);
-  doc.setTextColor(ac.r,ac.g,ac.b);
-  doc.text(initials,ML+7,13,{align:'center'});
+  if(cachedLogoDataUrl){
+    try{
+      const fmt=/data:image\/(\w+)/.exec(cachedLogoDataUrl);
+      doc.addImage(cachedLogoDataUrl,(fmt&&fmt[1]?fmt[1]:'PNG').toUpperCase(),ML+1,5,12,12);
+    }catch(e){console.warn('Logo image failed in PDF, falling back to initials',e);}
+  }else{
+    const initials=(t.business||'').trim()?t.business.trim().split(/\s+/).map(function(w){return w[0]||'';}).slice(0,2).join('').toUpperCase():'TK';
+    doc.setFont('helvetica','bold');doc.setFontSize(9);
+    doc.setTextColor(ac.r,ac.g,ac.b);
+    doc.text(initials,ML+7,13,{align:'center'});
+  }
   // business name + tagline
   doc.setTextColor(255,255,255);
   doc.setFont('helvetica','bold');doc.setFontSize(11);
@@ -2355,7 +2460,7 @@ function renderDocHTML(mode,r){
   return `<div class="doc" style="--doc-accent:${t.accent}">
     <div class="doc-top">
       <div class="doc-brand">
-        <div class="doc-logo" style="background:${t.accent}">${initials}</div>
+        <div class="doc-logo" style="background:${t.accent}">${currentBusinessProfile&&currentBusinessProfile.logo_url?`<img src="${currentBusinessProfile.logo_url}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:12px">`:initials}</div>
         <div><div class="doc-biz">${bizName}</div>${t.tagline?`<div class="doc-tag">${t.tagline}</div>`:''}</div>
       </div>
       <div class="doc-meta">
@@ -2501,6 +2606,10 @@ async function saveTemplate(){
   docTemplate.invoiceTerms=g('tpl-iterms');docTemplate.footer=g('tpl-footer');
   saveState();
   if(sb&&currentBusinessId){
+    // Persist the accent colour server-side (previously only in localStorage,
+    // so it never synced across devices or reached the public booking page).
+    const {data:bizData,error:bizErr}=await sb.from('businesses').upsert({id:currentBusinessId,accent_color:docTemplate.accent}).select('*').maybeSingle();
+    if(!bizErr)currentBusinessProfile=bizData;
     for(const type of ['quote','invoice']){
       const payload={
         business_id:currentBusinessId,type,
@@ -2663,7 +2772,7 @@ function openDetail(id){
   const done=r.sop.filter(Boolean).length;
   const pct=checklist.steps.length?Math.round(done/checklist.steps.length*100):0;
   const stageObj=STAGES.find(s=>s.key===r.stage)||EXTRA_STAGES.find(s=>s.key===r.stage);
-  const allDone=lastIdx>=0&&r.sop.slice(0,lastIdx).every(Boolean)&&r.photoBefore&&r.photoAfter;
+  const allDone=r.skipChecklist?(r.photoBefore&&r.photoAfter):(lastIdx>=0&&r.sop.slice(0,lastIdx).every(Boolean)&&r.photoBefore&&r.photoAfter);
   const approved=lastIdx>=0&&r.sop[lastIdx];
   const svcRows=r.services.map(s=>{const svc=SERVICES[s.svc];const rt=s.roofType?' · '+ROOF_TYPES[s.roofType].label:'';return `<div class="kv"><span class="k">${svc.label} · ${s.qty}${svc.unit}${rt}</span><span class="v">${money(lineSubtotal(s))}</span></div>`}).join('')||'<div class="kv"><span class="k">No services yet</span><span class="v">—</span></div>';
   const sopHtml=checklist.steps.map((step,i)=>{const checked=r.sop[i];const locked=i===lastIdx&&!allDone;return `<div class="sop-step ${checked?'checked':''} ${locked?'locked':''}"><button class="sop-check" onclick="toggleSop(${id},${i})" ${locked?'disabled':''}>${checked?'✓':''}</button><span class="sop-num">${i+1}</span><span class="sop-label">${step.t}${step.s?`<small>${step.s}</small>`:''}</span></div>`}).join('');
@@ -2730,12 +2839,14 @@ function openDetail(id){
       </div>
       <div>
         ${isJob(r)?`
-        <div class="panel"><h4>${checklist.name} — ${done}/${checklist.steps.length} <span class="eng-badge">Operations</span></h4>
+        <div class="panel"><h4>${r.skipChecklist?'Job progress':checklist.name+' — '+done+'/'+checklist.steps.length} <span class="eng-badge">Operations</span></h4>
           ${r.stage==='scheduled'&&!r.startedAt?`<button class="btn accent block" style="margin-bottom:14px" onclick="startJob(${id})">▶ Start job</button>`:''}
           ${r.startedAt?`<p style="font-size:12px;color:var(--ink-faint);margin:-6px 0 14px">Started ${timeAgo(r.startedAt)}</p>`:''}
+          ${r.skipChecklist?`<p style="font-size:12px;color:var(--ink-faint);margin:-6px 0 14px">Checklist turned off for this job — just photos and sign-off. <a href="#" onclick="toggleSkipChecklist(${id});return false" style="color:var(--teal)">Turn it back on</a></p>`:`
           <div class="progress-wrap"><div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div><div class="progress-txt">${pct}% — every step logs to the record</div></div>
           <div class="sop">${sopHtml}</div>
-          <div class="photo-row"><div class="photo-slot ${r.photoBefore?'filled':''}" onclick="pickJobPhoto(${id},'before')"><span style="font-size:18px">${r.photoBefore?'✓':'+'}</span><span>Before</span></div><div class="photo-slot ${r.photoAfter?'filled':''}" onclick="pickJobPhoto(${id},'after')"><span style="font-size:18px">${r.photoAfter?'✓':'+'}</span><span>After</span></div></div>
+          <p style="font-size:11px;color:var(--ink-faint);margin:8px 0 0"><a href="#" onclick="toggleSkipChecklist(${id});return false" style="color:var(--ink-faint)">Skip the checklist for this job</a></p>`}
+          <div class="photo-row" style="margin-top:14px"><div class="photo-slot ${r.photoBefore?'filled':''}" onclick="pickJobPhoto(${id},'before')"><span style="font-size:18px">${r.photoBefore?'✓':'+'}</span><span>Before</span></div><div class="photo-slot ${r.photoAfter?'filled':''}" onclick="pickJobPhoto(${id},'after')"><span style="font-size:18px">${r.photoAfter?'✓':'+'}</span><span>After</span></div></div>
           ${approvalHtml}
         </div>`:`
         <div class="panel"><h4>Job SOP <span class="eng-badge">Operations</span></h4>
@@ -2751,6 +2862,11 @@ function openDetail(id){
   switchView('detail');
 }
 function startJob(id){const r=records.find(x=>x.id===id);r.startedAt=Date.now();logActivity(r.customerId,r.jobId,'status_change',r.name+"'s job started");openDetail(id);toast('Job started ✓')}
+// SOPs are useful but not every business/job needs them — this just hides
+// the step list for this one job (before/after photos and sign-off still
+// apply); the underlying steps aren't lost, so turning it back on picks up
+// wherever they left off.
+function toggleSkipChecklist(id){const r=records.find(x=>x.id===id);r.skipChecklist=!r.skipChecklist;openDetail(id);}
 // Only fires the "job completed" lifecycle email on the actual scheduled→completed
 // transition, never on repeat calls once a job is already completed.
 function markJobCompleted(r){if(r.stage==='scheduled'){r.stage='completed';sendLifecycleEmail(r,'job_completed');}}
@@ -3290,11 +3406,60 @@ function renderPricing(){
           return `<div class="kv"><span class="k">${v.label.split(' (')[0]}</span><span class="v">${(sc.litrePerM2*1000).toFixed(0)} mL/${v.unit} ${chem?'· '+chem.label.split(' (')[0]:''} · ${money(costPerUnit)}/${v.unit}</span></div>`;
         }).join('')}
       </div>
-    </div>`;
+    </div>
+    <div class="panel" style="margin-top:14px"><h4>Labour, travel &amp; overheads</h4>
+      <p style="font-size:13px;color:var(--ink-soft);margin:-4px 0 14px">Every number behind "cost to deliver" on a quote — nothing here is fixed, tune it to how your business actually runs.</p>
+      <div class="rate-tier" style="padding:9px 0;border-bottom:1px solid var(--line-soft)"><label>Crew wage</label><div class="ri"><span>$</span><input type="number" value="${COST_INPUTS.wage}" onchange="setCostInput('wage',this.value)"><span>/hr per person</span></div></div>
+      <div class="rate-tier" style="padding:9px 0;border-bottom:1px solid var(--line-soft)"><label>Crew size</label><div class="ri"><input type="number" value="${COST_INPUTS.crew}" onchange="setCostInput('crew',this.value)"><span>people on a typical job</span></div></div>
+      <div class="rate-tier" style="padding:9px 0;border-bottom:1px solid var(--line-soft)"><label>Setup / pack-down</label><div class="ri"><input type="number" value="${COST_INPUTS.setupMin}" onchange="setCostInput('setupMin',this.value)"><span>min per job</span></div></div>
+      <div class="rate-tier" style="padding:9px 0;border-bottom:1px solid var(--line-soft)"><label>Fuel cost</label><div class="ri"><span>$</span><input type="number" step="0.01" value="${COST_INPUTS.fuelPerKm}" onchange="setCostInput('fuelPerKm',this.value)"><span>/km</span></div></div>
+      <div class="rate-tier" style="padding:9px 0;border-bottom:1px solid var(--line-soft)"><label>Avg round-trip drive</label><div class="ri"><input type="number" value="${COST_INPUTS.avgKm}" onchange="setCostInput('avgKm',this.value)"><span>km per job</span></div></div>
+      <div class="rate-tier" style="padding:9px 0;border-bottom:1px solid var(--line-soft)"><label>Equipment</label><div class="ri"><span>$</span><input type="number" value="${COST_INPUTS.equipmentPerJob}" onchange="setCostInput('equipmentPerJob',this.value)"><span>/job (wear &amp; maintenance)</span></div></div>
+      <div class="rate-tier" style="padding:9px 0;border-bottom:1px solid var(--line-soft)"><label>Consumables</label><div class="ri"><span>$</span><input type="number" value="${COST_INPUTS.consumablesPerJob}" onchange="setCostInput('consumablesPerJob',this.value)"><span>/job (PPE, misc supplies)</span></div></div>
+      <div class="rate-tier" style="padding:9px 0"><label>Target profit margin</label><div class="ri"><input type="number" value="${Math.round(COST_INPUTS.targetMargin*100)}" onchange="setCostInput('targetMargin',this.value/100)"><span>% — drives the recommended price on every quote</span></div></div>
+    </div>
+    ${renderPricingStats()}`;
 }
-function setRate(k,val){SERVICES[k].rate=parseFloat(val)||0;saveState();toast(SERVICES[k].label+' rate updated')}
-function setRoofRate(rk,val){const base=parseFloat(val)/ROOF_TYPES[rk].mult;SERVICES.roof.rate=base;toast('Roof rate updated')}
-function setChemPrice(ck,val){CHEMICALS[ck].perL=parseFloat(val)||0;saveState();renderPricing();toast(CHEMICALS[ck].label.split(' (')[0]+' price updated')}
+// Per-service statistics: real counts from records, not fabricated —
+// how often each service has been quoted, its win rate, and the average
+// price it's actually gone out at, so pricing decisions use real history.
+function renderPricingStats(){
+  const rows=Object.entries(SERVICES).map(([k,v])=>{
+    const withSvc=records.filter(r=>r.services.some(s=>s.svc===k));
+    const won=withSvc.filter(isWon);
+    if(!withSvc.length)return null;
+    const avgTotal=won.length?Math.round(won.reduce((s,r)=>s+(r.total||0),0)/won.length):0;
+    const winRate=withSvc.length?Math.round(won.length/withSvc.length*100):0;
+    return `<div class="kv"><span class="k">${v.label}</span><span class="v">${withSvc.length} quoted · ${winRate}% won · avg ${avgTotal?money(avgTotal):'—'}</span></div>`;
+  }).filter(Boolean);
+  return `<div class="panel" style="margin-top:14px"><h4>Per-service performance</h4>
+    ${rows.length?rows.join(''):'<div class="empty-state" style="padding:16px"><div class="sm">No quotes yet — this fills in once you\'ve sent a few.</div></div>'}
+  </div>`;
+}
+function setRate(k,val){SERVICES[k].rate=parseFloat(val)||0;saveState();savePricingConfig();toast(SERVICES[k].label+' rate updated')}
+function setRoofRate(rk,val){const base=parseFloat(val)/ROOF_TYPES[rk].mult;SERVICES.roof.rate=base;savePricingConfig();toast('Roof rate updated')}
+function setChemPrice(ck,val){CHEMICALS[ck].perL=parseFloat(val)||0;saveState();savePricingConfig();renderPricing();toast(CHEMICALS[ck].label.split(' (')[0]+' price updated')}
+function setCostInput(key,val){COST_INPUTS[key]=parseFloat(val)||0;saveState();savePricingConfig();toast('Pricing input updated')}
+// Every rate/chemical price/cost input is business-specific and persisted
+// server-side (not a shared hardcoded default) — this snapshots the whole
+// in-memory pricing model and syncs it, so it's the same on every device
+// and never silently resets.
+async function savePricingConfig(){
+  if(!sb||!currentBusinessId)return;
+  const config={
+    rates:Object.fromEntries(Object.entries(SERVICES).map(([k,v])=>[k,v.rate])),
+    chemicals:Object.fromEntries(Object.entries(CHEMICALS).map(([k,v])=>[k,v.perL])),
+    costInputs:Object.assign({},COST_INPUTS)
+  };
+  const {error}=await sb.from('businesses').upsert({id:currentBusinessId,pricing_config:config});
+  if(error)console.error('Save pricing config failed',error);
+}
+function applyPricingConfig(config){
+  if(!config)return;
+  if(config.rates)Object.entries(config.rates).forEach(([k,v])=>{if(SERVICES[k])SERVICES[k].rate=v;});
+  if(config.chemicals)Object.entries(config.chemicals).forEach(([k,v])=>{if(CHEMICALS[k])CHEMICALS[k].perL=v;});
+  if(config.costInputs)Object.assign(COST_INPUTS,config.costInputs);
+}
 
 /* ---------- D. DASHBOARD ---------- */
 // "Today's priorities" — the stuff an owner actually needs to act on, ranked
@@ -3551,8 +3716,8 @@ function renderJobsFlow(){
     </div>`;
 }
 // workflow transition helpers
-function markWon(id){const r=records.find(x=>x.id===id);if(!r.services.length){toast('Build a quote first');openQuoteModal(id);return;}r.stage='won';r.clientResponded=true;render();renderAll();openSchedule(id);}
-function markPaid(id,method){const r=records.find(x=>x.id===id);r.stage='paid';r.paidAt=Date.now();r.paymentStatus='paid';r.paymentMethod=method||r.paymentMethod||'Not specified';render();renderAll();if(document.getElementById('view-jobsflow').classList.contains('active'))renderJobsFlow();toast(`${r.name} marked paid ✓`);sendLifecycleEmail(r,'review_request');}
+function markWon(id){const r=records.find(x=>x.id===id);if(!r.services.length){toast('Build a quote first');openQuoteModal(id);return;}r.stage='won';r.clientResponded=true;render();renderAll();openSchedule(id);notifyOwner('quote_accepted','Quote accepted — '+r.name,r.name+' accepted their quote for '+money(r.total||0)+'. Time to book it in.');}
+function markPaid(id,method){const r=records.find(x=>x.id===id);r.stage='paid';r.paidAt=Date.now();r.paymentStatus='paid';r.paymentMethod=method||r.paymentMethod||'Not specified';render();renderAll();if(document.getElementById('view-jobsflow').classList.contains('active'))renderJobsFlow();toast(`${r.name} marked paid ✓`);sendLifecycleEmail(r,'review_request');notifyOwner('payment_received','Payment received — '+money(r.total||0),r.name+' paid '+money(r.total||0)+' ('+(method||'method not specified')+').');}
 // Cancelled jobs leave the active Pipeline board (it isn't one of STAGES'
 // board columns) but keep their full history — reachable from the customer
 // profile and dashboard the same as any other job, just visually distinct.
@@ -3661,6 +3826,36 @@ function fcHandleEventClick(info){
 function fcHandleDateClick(info){
   openCalPicker(info.dateStr.slice(0,10));
 }
+// Compact weather rating for a calendar day cell — Excellent/Good/Rain
+// Risk/High Wind, using live forecast where available and falling back to
+// the historical average further out (dashed styling flags which it is,
+// same honesty rule as everywhere else weather is shown).
+function calendarDayWeatherBadge(dateISO){
+  const info=weatherForDate(dateISO);
+  if(info.type==='unavailable')return null;
+  const rainPct=info.type==='forecast'?info.rainPct:info.rainDayPct;
+  const windKmh=info.type==='forecast'?info.windKmh:15;
+  const tempHi=info.type==='forecast'?info.tempHi:info.avgHighTemp;
+  let label,cls;
+  if(rainPct>=60){label='Rain Risk';cls='bad';}
+  else if(windKmh>=30){label='High Wind';cls='bad';}
+  else if(rainPct>=30||windKmh>=20){label='Fair';cls='warn';}
+  else if(rainPct<15&&windKmh<15&&tempHi>=14){label='Excellent';cls='good';}
+  else{label='Good';cls='good';}
+  return {label,cls,forecast:info.type==='forecast'};
+}
+function fcDayCellDidMount(arg){
+  const d=arg.date;
+  const iso=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  const badge=calendarDayWeatherBadge(iso);
+  if(!badge)return;
+  const el=document.createElement('span');
+  el.className='fc-wx-badge fc-wx-'+badge.cls+(badge.forecast?'':' fc-wx-hist');
+  el.textContent=badge.label;
+  el.title=badge.forecast?'Live forecast':'Historical average for this month — not a forecast';
+  const frame=arg.el.querySelector('.fc-daygrid-day-top');
+  if(frame)frame.appendChild(el);
+}
 function openCalPicker(iso){
   const unscheduled=records.filter(r=>r.stage==='won'||(isWon(r)&&!r.scheduledDateISO));
   document.getElementById('cp-title').textContent='Schedule a job — '+isoToLabel(iso);
@@ -3744,7 +3939,8 @@ function renderCalendar(){
       events:()=>buildCalendarEvents(),
       eventDrop:fcHandleEventDrop,
       eventClick:fcHandleEventClick,
-      dateClick:fcHandleDateClick
+      dateClick:fcHandleDateClick,
+      dayCellDidMount:fcDayCellDidMount
     });
     fcCalendarInstance.render();
   }else{
@@ -3948,6 +4144,32 @@ function openSettings(){
         <button class="btn ghost sm" onclick="closeModal('settings-overlay');openTemplateEditor()">Email &amp; document templates</button>
         <button class="btn ghost sm" onclick="closeModal('settings-overlay');openImportWizard()">Import customers</button>
       </div>
+    </div>
+    <div class="conn-card">
+      <div class="conn-top"><span class="conn-name">🔔 Notifications</span></div>
+      <p>Get told when something needs you — sent to the address below by email. SMS and push are on the roadmap.</p>
+      <div class="field"><label>Send notifications to</label><input id="notif-email" type="email" placeholder="${(biz.email||'your email')}" value="${(NOTIFICATION_EVENTS.map(e=>notificationPrefs[e.key]&&notificationPrefs[e.key].notify_email).find(Boolean)||'').replace(/"/g,'&quot;')}"></div>
+      ${NOTIFICATION_EVENTS.map(ev=>{
+        const pref=notificationPrefs[ev.key];
+        const emailOn=!pref||pref.email_enabled!==false;
+        return `<div class="kv"><span class="k">${ev.label}</span><span class="v" style="display:flex;gap:10px;align-items:center">
+          <label style="display:flex;align-items:center;gap:4px;font-size:12px"><input type="checkbox" id="notif-${ev.key}" ${emailOn?'checked':''}> Email</label>
+          <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--ink-faint)"><input type="checkbox" disabled title="Coming soon"> SMS</label>
+          <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--ink-faint)"><input type="checkbox" disabled title="Coming soon"> Push</label>
+        </span></div>`;
+      }).join('')}
+      <button class="btn accent sm" style="margin-top:10px" onclick="saveNotificationPrefs()">Save notification preferences</button>
+    </div>
+    <div class="conn-card">
+      <div class="conn-top"><span class="conn-name">🔐 Permissions</span></div>
+      <div class="kv"><span class="k">Owner</span><span class="v">Everything</span></div>
+      <div class="kv"><span class="k">Manager</span><span class="v">Operations, customers, jobs, quotes</span></div>
+      <div class="kv"><span class="k">Worker</span><span class="v">Assigned jobs only</span></div>
+      <p style="font-size:12px;color:var(--ink-faint);margin-top:10px">Set a teammate's role from <a href="#" onclick="closeModal('settings-overlay');openTeam();return false" style="color:var(--teal)">Team</a>.</p>
+    </div>
+    <div class="conn-card">
+      <div class="conn-top"><span class="conn-name">💳 Billing</span><span class="conn-badge">coming soon</span></div>
+      <p>Your Turnkey subscription and billing details will show up here.</p>
     </div>
     <div class="conn-card">
       <div class="conn-top"><span class="conn-name">💾 Backup &amp; data</span></div>
@@ -4184,8 +4406,8 @@ async function syncEmail(){
 function saveMapsKey(){
   const v=document.getElementById('conn-maps-key').value.trim();
   if(v)localStorage.setItem('turnkey-maps-key',v);else localStorage.removeItem('turnkey-maps-key');
-  toast(v?'Maps key saved — satellite imagery active on this device':'Maps key removed');
-  openConnections();
+  toast(v?'Satellite maps active on this device':'Satellite map access removed');
+  openSettings();
 }
 /* ===== PERSISTENCE: everything auto-saves locally on this device ===== */
 const STORE_KEY='turnkey-app-v1';
@@ -4267,6 +4489,7 @@ async function handleAuthedSession(session){
   await loadStaffAndInvites();
   await loadBusinessProfile();
   seedDocTemplateFromProfile();
+  preloadLogoDataUrl();
   if(currentUserRole==='technician')switchView('jobsflow');
   fetchLiveWeather();
   fetchClimateNormals();
@@ -4279,6 +4502,7 @@ async function handleAuthedSession(session){
   loadLifecycleEmails();
   loadCalendarConnections();
   loadCalendarBusyBlocks();
+  loadNotificationPrefs();
   retryPendingPhotos();
 }
 
@@ -4293,6 +4517,9 @@ function applyRoleVisibility(){
     const btn=document.querySelector(`nav.tabs button[data-view="${v}"]`);
     if(btn)btn.style.display=hide?'none':'';
   });
+  // Bigger buttons/tap targets everywhere for technicians on mobile — they're
+  // usually operating one-handed, often with wet or gloved hands.
+  document.body.classList.toggle('tech-mode',hide);
 }
 
 let staff=[];
@@ -4378,10 +4605,30 @@ async function loadBusinessProfile(){
   if(!sb||!currentBusinessId)return;
   const {data,error}=await sb.from('businesses').select('*').eq('id',currentBusinessId).maybeSingle();
   if(error){console.error('Load business profile failed',error);return;}
-  if(data){currentBusinessProfile=data;return;}
+  if(data){currentBusinessProfile=data;applyPricingConfig(data.pricing_config);return;}
   const {data:created,error:cErr}=await sb.from('businesses').upsert({id:currentBusinessId}).select('*').maybeSingle();
   if(cErr){console.error('Backfill business profile failed',cErr);return;} // e.g. schema not migrated yet
   currentBusinessProfile=created;
+}
+// Quote/invoice PDFs need the logo as a data URL (jsPDF can't fetch a remote
+// URL itself), so it's preloaded once here rather than on every PDF build.
+// Falls back to the coloured-initials mark used throughout if there's no
+// logo yet, or the fetch fails for any reason (e.g. offline).
+let cachedLogoDataUrl=null;
+async function preloadLogoDataUrl(){
+  cachedLogoDataUrl=null;
+  const url=currentBusinessProfile&&currentBusinessProfile.logo_url;
+  if(!url)return;
+  try{
+    const res=await fetch(url);
+    const blob=await res.blob();
+    cachedLogoDataUrl=await new Promise((resolve,reject)=>{
+      const reader=new FileReader();
+      reader.onload=()=>resolve(reader.result);
+      reader.onerror=reject;
+      reader.readAsDataURL(blob);
+    });
+  }catch(e){console.warn('Logo preload failed',e);}
 }
 // One-way seed, not a sync: only fills in docTemplate fields that are still
 // blank, so it never overwrites a template a business has already customised
@@ -4423,7 +4670,7 @@ async function saveBusinessProfile(){
   if(error){console.error('Save business profile failed',error);toast('Could not save business profile — try again');return;}
   currentBusinessProfile=data;
   toast('Business profile saved');
-  openConnections();
+  openSettings();
 }
 const LOGO_BUCKET='business-logos';
 async function uploadBusinessLogo(file){
@@ -4438,8 +4685,9 @@ async function uploadBusinessLogo(file){
   const {data,error}=await sb.from('businesses').upsert({id:currentBusinessId,logo_url:logoUrl}).select('*').maybeSingle();
   if(error){console.error('Save logo url failed',error);toast('Logo uploaded but could not save — try again');return;}
   currentBusinessProfile=data;
+  await preloadLogoDataUrl();
   toast('Logo updated');
-  openConnections();
+  openSettings();
 }
 
 /* =====================================================================
@@ -5144,6 +5392,7 @@ function ingestQuoteRequest(payload){
   if(fb){fb.textContent='✓ New lead from '+rec.name+' ('+services.length+' areas · '+money(total)+' — ready to review & send)';fb.classList.add('show');setTimeout(()=>fb.classList.remove('show'),5000);}
   if(rec.pendingPhotos.length)flushPendingPhotos(rec); // fire-and-forget — don't block ingest on uploads
   sendLifecycleEmail(rec,'new_lead');
+  notifyOwner('new_lead','New lead — '+rec.name,rec.name+' requested a quote for '+(rec.suburb||rec.address||'an address you’ll want to check')+' ('+services.length+' area'+(services.length!==1?'s':'')+', '+money(total)+' self-estimated).');
 }
 
 /* ===== Upload photos that arrived with a lead (public booking page can't

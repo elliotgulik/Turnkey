@@ -80,7 +80,7 @@
   .map-zoom{display:flex;align-items:center;gap:6px;background:rgba(0,0,0,.55);border-radius:980px;padding:4px 10px}
   .zoom-label{font-size:10px;font-weight:700;color:rgba(255,255,255,.7);letter-spacing:.04em;text-transform:uppercase}
   .zoom-val{font-size:13px;font-weight:700;color:#fff;min-width:20px;text-align:center}
-  .zoom-btn{font-size:17px;font-weight:700;color:#fff;padding:0 4px;line-height:1;opacity:.8}
+  .zoom-btn{font-size:19px;font-weight:700;color:#fff;padding:0;width:34px;height:34px;line-height:1;opacity:.85;display:flex;align-items:center;justify-content:center;touch-action:manipulation}
   .zoom-btn:hover{opacity:1}
   .map-note{font-size:11.5px;color:var(--ink-faint)}
   .map-btns{display:flex;gap:8px}
@@ -332,10 +332,10 @@ function initPlacesAutocomplete(){
     <h3 style="font-size:19px;margin-bottom:4px">Almost done — where do we send the quote?</h3>
     <p style="font-size:13.5px;color:var(--ink-soft);margin-bottom:18px">We'll review your mapped areas and send a firm quote, usually same day.</p>
     <div class="form-grid">
-      <div class="field"><label>Full name</label><input id="c-name" placeholder="Sarah Thompson"></div>
-      <div class="field"><label>Phone</label><input id="c-phone" placeholder="021 555 0123"></div>
-      <div class="field full"><label>Email</label><input id="c-email" placeholder="sarah@email.com"></div>
-      <div class="field full"><label>Property address</label><input id="c-addr" placeholder="12 Hurstmere Road, Takapuna"></div>
+      <div class="field"><label>Full name *</label><input id="c-name" placeholder="Sarah Thompson"></div>
+      <div class="field"><label>Phone *</label><input id="c-phone" type="tel" placeholder="021 555 0123"></div>
+      <div class="field full"><label>Email *</label><input id="c-email" type="email" placeholder="sarah@email.com"></div>
+      <div class="field full"><label>Property address *</label><input id="c-addr" placeholder="12 Hurstmere Road, Takapuna"></div>
       <div class="field full"><label>Anything we should know? <span style="color:var(--ink-faint);font-weight:400">(optional)</span></label><textarea id="c-notes" rows="2" placeholder="e.g. heavy moss on the south side, dog in the yard"></textarea></div>
       <div class="field"><label>Preferred timing</label><select id="c-timing"><option>As soon as possible</option><option>Within 2 weeks</option><option>This month</option><option>Just getting a price</option></select></div>
       <div class="field"><label>How did you find us?</label><select id="c-source"><option>Google search</option><option>Facebook</option><option>Referral</option><option>Repeat customer</option><option>Other</option></select></div>
@@ -432,7 +432,7 @@ try{const u=new URL(location.href);EMBED_MODE=u.searchParams.get('embed')==='1';
 (function(){
   if(!TURNKEY_BUSINESS_ID)return;
   if(!window.TURNKEY_CONFIG||!window.TURNKEY_CONFIG.supabaseUrl||!window.TURNKEY_CONFIG.supabaseAnonKey)return;
-  const url=window.TURNKEY_CONFIG.supabaseUrl+'/rest/v1/businesses?id=eq.'+encodeURIComponent(TURNKEY_BUSINESS_ID)+'&select=name,phone,email,region,logo_url';
+  const url=window.TURNKEY_CONFIG.supabaseUrl+'/rest/v1/businesses?id=eq.'+encodeURIComponent(TURNKEY_BUSINESS_ID)+'&select=name,phone,email,region,logo_url,accent_color';
   fetch(url,{headers:{apikey:window.TURNKEY_CONFIG.supabaseAnonKey}})
     .then(r=>r.json()).then(rows=>{
       const biz=(rows&&rows[0])||null;
@@ -451,6 +451,13 @@ try{const u=new URL(location.href);EMBED_MODE=u.searchParams.get('embed')==='1';
       const regionEl=document.getElementById('biz-region-trust');
       if(regionEl&&biz.region)regionEl.textContent='📍 '+biz.region;
       if(biz.region)BIZ_REGION=biz.region;
+      // Match the booking page's accent to the business's own brand colour
+      // (set in Turnkey → Settings → Email & document templates) instead of
+      // always showing the generic teal.
+      if(biz.accent_color&&/^#[0-9a-fA-F]{6}$/.test(biz.accent_color)){
+        document.documentElement.style.setProperty('--teal',biz.accent_color);
+        document.documentElement.style.setProperty('--teal-bright',biz.accent_color);
+      }
     }).catch(()=>{}); // network/RLS failure → keep the generic fallback copy already in the HTML
 })();
 
@@ -723,7 +730,9 @@ function stageToSvg(clientX,clientY){
   const y=(clientY-r.top)/r.height*600;
   return {x:Math.max(0,Math.min(800,x)),y:Math.max(0,Math.min(600,y))};
 }
+let suppressNextStageClick=false;
 function onStageClick(e){
+  if(suppressNextStageClick){suppressNextStageClick=false;return;} // just finished dragging a point — don't also add a new one
   const p=stageToSvg(e.clientX,e.clientY);
   // close polygon if near first point and have >=3 pts
   if(drawing.length>=3){
@@ -741,9 +750,39 @@ function renderDraw(){
   const hex=SERVICES[activeSvc].hex;
   const pts=drawing.map(p=>`${p.x},${p.y}`).join(' ');
   let s='';
-  if(drawing.length>1)s+=`<polyline points="${pts}" fill="${hex}22" stroke="${hex}" stroke-width="3" stroke-linejoin="round"/>`;
-  drawing.forEach((p,i)=>{s+=`<circle cx="${p.x}" cy="${p.y}" r="${i===0?7:5}" fill="#fff" stroke="${hex}" stroke-width="3"/>`;});
+  if(drawing.length>1)s+=`<polyline points="${pts}" fill="${hex}22" stroke="${hex}" stroke-width="3" stroke-linejoin="round" style="pointer-events:none"/>`;
+  drawing.forEach((p,i)=>{s+=`<circle class="pt-handle" data-idx="${i}" cx="${p.x}" cy="${p.y}" r="${i===0?10:8}" fill="#fff" stroke="${hex}" stroke-width="3" style="cursor:grab;touch-action:none"/>`;});
   layer.innerHTML=s;
+}
+// Drag an already-placed (but not yet committed) point to fine-tune it,
+// instead of only being able to undo and re-tap. Uses pointer events so it
+// works the same with mouse and touch. Attached to #stage (present in the
+// static HTML from page load) via delegation rather than #layer-draw, which
+// is only created later inside buildMap()'s dynamically-generated SVG.
+let draggingPointIdx=null;
+function initPointDragHandlers(){
+  const stageEl=document.getElementById('stage');
+  stageEl.addEventListener('pointerdown',e=>{
+    const handle=e.target.closest('.pt-handle');
+    if(!handle)return;
+    draggingPointIdx=+handle.dataset.idx;
+    handle.setPointerCapture(e.pointerId);
+    handle.style.cursor='grabbing';
+    e.stopPropagation();
+  });
+  stageEl.addEventListener('pointermove',e=>{
+    if(draggingPointIdx==null)return;
+    const p=stageToSvg(e.clientX,e.clientY);
+    drawing[draggingPointIdx]=p;
+    drawingGeoPts[draggingPointIdx]=svgToLatLng(p);
+    renderDraw();
+  });
+  stageEl.addEventListener('pointerup',()=>{
+    if(draggingPointIdx==null)return;
+    draggingPointIdx=null;
+    suppressNextStageClick=true;
+    updateHint();
+  });
 }
 function commitArea(){
   if(drawing.length<3){return;}
@@ -916,9 +955,14 @@ function buildPayload(){
 }
 async function submitRequest(){
   const name=document.getElementById('c-name').value.trim();
-  const contact=document.getElementById('c-phone').value.trim()||document.getElementById('c-email').value.trim();
+  const phone=document.getElementById('c-phone').value.trim();
+  const email=document.getElementById('c-email').value.trim();
+  const addr=document.getElementById('c-addr').value.trim();
   if(!name){alert('Please add your name');return;}
-  if(!contact){alert('Please add a phone or email so we can send your quote');return;}
+  if(!phone){alert('Please add a phone number so we can reach you');return;}
+  if(!email){alert('Please add an email so we can send your quote');return;}
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){alert('That email address doesn’t look right — please check it');return;}
+  if(!addr){alert('Please add the property address');return;}
   if(window.TURNKEY_WEBHOOK&&!TURNKEY_BUSINESS_ID){alert('This booking link looks incomplete — please ask the business for their correct booking link.');return;}
   const payload=buildPayload();
   const status=document.getElementById('submit-status');
@@ -1001,7 +1045,7 @@ stage.addEventListener('click',onStageClick);
 stage.addEventListener('dblclick',e=>{e.preventDefault();if(drawing.length>=3)commitArea();});
 
 // init
-buildMap();buildSvcPicker();updateHint();
+buildMap();buildSvcPicker();updateHint();initPointDragHandlers();
 // On load: if we already have a key and an address, drop satellite immediately.
 setTimeout(tryAutoSatellite,60);
 </script>
