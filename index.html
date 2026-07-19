@@ -1037,9 +1037,14 @@ function fetchLiveWeather(){
     if(c&&(Date.now()-c.at)<3*60*60*1000){applyWeather(c.days);weatherFetchedAt=c.at;render();renderAll();}
   }catch(e){}
   if(typeof fetch!=='function')return;
-  const url=`https://api.open-meteo.com/v1/forecast?latitude=${WX_LAT}&longitude=${WX_LON}`+
+  // Use the business's own geocoded region when set (saved via the Business
+  // profile card), falling back to the original Auckland default otherwise —
+  // timezone=auto resolves correctly for whichever coordinates are used.
+  const lat=(currentBusinessProfile&&currentBusinessProfile.region_lat)||WX_LAT;
+  const lon=(currentBusinessProfile&&currentBusinessProfile.region_lng)||WX_LON;
+  const url=`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}`+
     `&daily=weather_code,temperature_2m_max,precipitation_probability_max,wind_speed_10m_max`+
-    `&timezone=Pacific%2FAuckland&forecast_days=7`;
+    `&timezone=auto&forecast_days=7`;
   fetch(url).then(r=>r.json()).then(j=>{
     if(!j.daily||!j.daily.time)return;
     const days=j.daily.time.map((iso,i)=>{
@@ -1311,12 +1316,15 @@ function renderQuoteMap(r){
   // traced areas on top rather than letting the sketch replace the real map. ===
   if(addr){
     const mapsKey=turnkeyMapsKey();
+    // Region suffix for geocoding — the business's own configured region
+    // (Business profile in Connections) when set, else the original default.
+    const geoRegion=(currentBusinessProfile&&currentBusinessProfile.region)||'Auckland, New Zealand';
 
     if(mapsKey){
       // Geocode → static satellite of the property
       zone.innerHTML=`<div class="qmap"><div class="qmap-h">📍 ${addr} <span class="demo-tag">satellite</span></div>
         <div class="qmap-stage placeholder" id="qmap-sat-stage"><span>Loading satellite…</span></div></div>`;
-      const fullAddr=encodeURIComponent(addr+', Auckland, NZ');
+      const fullAddr=encodeURIComponent(addr+', '+geoRegion);
       fetch('https://maps.googleapis.com/maps/api/geocode/json?address='+fullAddr+'&key='+encodeURIComponent(mapsKey))
         .then(res=>res.json()).then(j=>{
           const stage=document.getElementById('qmap-sat-stage'); if(!stage)return;
@@ -1337,7 +1345,7 @@ function renderQuoteMap(r){
     // No key: free OSM street map of the property via Nominatim geocode + tile grid
     zone.innerHTML=`<div class="qmap"><div class="qmap-h">📍 ${addr} <span class="demo-tag">street map — no Maps key set</span></div>
       <div class="qmap-stage placeholder" id="qmap-osm-stage"><span>Loading map…</span></div></div>`;
-    fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(addr+', Auckland, New Zealand'))
+    fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(addr+', '+geoRegion))
       .then(res=>res.json()).then(results=>{
         const stage=document.getElementById('qmap-osm-stage'); if(!stage)return;
         if(!results||!results.length){stage.innerHTML='<span>Address not found</span>';return;}
@@ -2469,7 +2477,7 @@ function renderCalendar(){
 
   document.getElementById('view-calendar').innerHTML=`
     <div class="view-head"><div><h2>Calendar</h2><p>Book around the weather. Turnkey reads the local forecast, recommends the best wash days, warns you before rain hits a job, and pairs up nearby work.</p></div><span class="eng-badge">Scheduling</span></div>
-    <div class="info-strip">${weatherLive?'<span class="demo-tag" style="background:#dcf0e9;color:#16745f">Live</span> &nbsp;Real 7-day North Shore forecast via Open-Meteo, refreshed every 3 hours.':'<span class="demo-tag">Sample</span> &nbsp;Offline — showing sample forecast. Live data loads automatically when connected.'}</div>
+    <div class="info-strip">${weatherLive?'<span class="demo-tag" style="background:#dcf0e9;color:#16745f">Live</span> &nbsp;Real 7-day forecast for your area via Open-Meteo, refreshed every 3 hours.':'<span class="demo-tag">Sample</span> &nbsp;Offline — showing sample forecast. Live data loads automatically when connected.'}</div>
 
     <div class="panel"><h4>7-day forecast \u2014 North Shore</h4>
       <div class="wx-row">${WEATHER.map(dayCard).join('')}</div>
@@ -2676,11 +2684,41 @@ function openConnections(){
   const beUrl=backendUrl(), beKey=backendKey();
   const wxWhen=weatherFetchedAt?new Date(weatherFetchedAt).toLocaleTimeString('en-NZ',{hour:'numeric',minute:'2-digit'}):null;
   const bookingLink=currentBusinessId?`${location.origin}/booking.html?biz=${currentBusinessId}`:'';
+  const embedCode=bookingLink?`<iframe\n  src="${location.origin}/booking.html?biz=${currentBusinessId}&embed=1"\n  width="100%"\n  height="900"\n  frameborder="0">\n</iframe>`:'';
+  const canEditBusiness=currentUserRole==='owner'||currentUserRole==='manager';
+  const biz=currentBusinessProfile||{};
   document.getElementById('conn-body').innerHTML=`
+    <div class="conn-card ${biz.name?'live':''}">
+      <div class="conn-top"><span class="conn-name">🏢 Business profile</span><span class="conn-badge ${biz.name?'on':'off'}">${biz.name?'● SET':'not set yet'}</span></div>
+      <p>Shown to your customers on your public booking page — replaces the generic placeholder with your real name, logo and contact details.</p>
+      <div style="display:flex;gap:14px;align-items:center;margin-bottom:10px">
+        <div style="width:56px;height:56px;border-radius:12px;overflow:hidden;background:var(--surface-2);display:flex;align-items:center;justify-content:center;flex-shrink:0">
+          ${biz.logo_url?`<img src="${biz.logo_url}" style="width:100%;height:100%;object-fit:cover">`:`<span style="font-size:22px">🏢</span>`}
+        </div>
+        ${canEditBusiness?`<div><input type="file" id="biz-logo-input" accept="image/*" style="display:none" onchange="onBizLogoChosen(this)"><button class="btn ghost sm" onclick="document.getElementById('biz-logo-input').click()">${biz.logo_url?'Change logo':'Upload logo'}</button></div>`:''}
+      </div>
+      ${canEditBusiness?`
+      <div class="field"><label>Business name</label><input id="biz-name-input" placeholder="e.g. North Shore Pressure Wash" value="${(biz.name||'').replace(/"/g,'&quot;')}"></div>
+      <div class="field"><label>Phone</label><input id="biz-phone-input" placeholder="e.g. 021 000 0000" value="${(biz.phone||'').replace(/"/g,'&quot;')}"></div>
+      <div class="field"><label>Email</label><input id="biz-email-input" type="email" placeholder="e.g. hello@yourbusiness.co.nz" value="${(biz.email||'').replace(/"/g,'&quot;')}"></div>
+      <div class="field"><label>Location / region</label><input id="biz-region-input" placeholder="e.g. Auckland, New Zealand" value="${(biz.region||'').replace(/"/g,'&quot;')}"></div>
+      <p style="font-size:11px;color:var(--ink-faint);margin:4px 0 10px">Also drives weather and the property map's geocoding — set this to where you actually operate.</p>
+      <button class="btn primary sm" onclick="saveBusinessProfile()">Save business profile</button>
+      `:`<p style="font-size:12px;color:var(--ink-faint)">Only an owner or manager can edit this.</p>`}
+    </div>
     <div class="conn-card ${bookingLink?'live':''}">
       <div class="conn-top"><span class="conn-name">🔗 Your booking link</span><span class="conn-badge ${bookingLink?'on':'off'}">${bookingLink?'● READY TO SHARE':'sign in first'}</span></div>
       <p>Share this with customers — no login needed on their end. Every quote request they submit lands straight in your Pipeline/Leads.</p>
       ${bookingLink?`<div class="conn-keyrow"><input id="conn-booking-link" readonly value="${bookingLink}" onclick="this.select()"><button class="btn accent sm" onclick="copyBookingLink()" id="copy-booking-btn">Copy link</button></div>`:''}
+    </div>
+    <div class="conn-card ${bookingLink?'live':''}">
+      <div class="conn-top"><span class="conn-name">🧩 Embed on your website</span><span class="conn-badge ${bookingLink?'on':'off'}">${bookingLink?'● READY':'sign in first'}</span></div>
+      <p>Paste this into Wix (or any site builder) to show the quote form directly on your own page — the direct link above still works too, this doesn't replace it.</p>
+      ${bookingLink?`
+      <textarea id="conn-embed-code" readonly onclick="this.select()" style="width:100%;min-height:92px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;padding:10px 12px;border:1px solid var(--line);border-radius:var(--radius-sm);resize:vertical;color:var(--ink)">${embedCode}</textarea>
+      <button class="btn accent sm" style="margin-top:8px" onclick="copyEmbedCode()" id="copy-embed-btn">Copy code</button>
+      <p style="font-size:12px;color:var(--ink-faint);margin-top:10px"><b>In Wix:</b> Add Elements → Embed → Embed a Widget (or "HTML iframe") → paste the code above → Publish. Custom-code embeds need a Wix plan that supports them.</p>
+      `:''}
     </div>
     <div class="conn-card ${backendOnline?'live':''}">
       <div class="conn-top"><span class="conn-name">\ud83e\udde0 Backend \u2014 access code (optional)</span><span class="conn-badge ${backendOnline?'on':(beKey?'off':'')}">${backendOnline?'\u25cf LIVE':(beKey?'saved \u2014 checking\u2026':'lead inbox already live')}</span></div>
@@ -2690,7 +2728,7 @@ function openConnections(){
     </div>
     <div class="conn-card ${weatherLive?'live':''}">
       <div class="conn-top"><span class="conn-name">🌤️ Weather — Open-Meteo</span><span class="conn-badge ${weatherLive?'on':'off'}">${weatherLive?'● LIVE':'sample data'}</span></div>
-      <p>${weatherLive?`Real 7-day North Shore forecast, fetched ${wxWhen}. Free public API, no key, no account. Drives the calendar, scheduling and weather alerts.`:`Loads automatically when online — free public API, nothing to set up.`}</p>
+      <p>${weatherLive?`Real 7-day forecast for your area, fetched ${wxWhen}. Free public API, no key, no account. Drives the calendar, scheduling and weather alerts.`:`Loads automatically when online — free public API, nothing to set up.`}</p>
       ${!weatherLive?'<button class="btn ghost sm" onclick="fetchLiveWeather()">Try now</button>':''}
     </div>
     <div class="conn-card ${mapsKey?'live':''}">
@@ -2717,6 +2755,17 @@ function copyBookingLink(){
   navigator.clipboard?.writeText(input.value).then(()=>{
     const b=document.getElementById('copy-booking-btn');if(b){b.textContent='Copied ✓';setTimeout(()=>b.textContent='Copy link',1600);}
   });
+}
+function copyEmbedCode(){
+  const input=document.getElementById('conn-embed-code');if(!input)return;
+  navigator.clipboard?.writeText(input.value).then(()=>{
+    const b=document.getElementById('copy-embed-btn');if(b){b.textContent='Copied ✓';setTimeout(()=>b.textContent='Copy code',1600);}
+  });
+}
+function onBizLogoChosen(el){
+  const file=el.files&&el.files[0];
+  if(file)uploadBusinessLogo(file);
+  el.value='';
 }
 function connectGmail(){
   const url=backendUrl(),key=backendKey();
@@ -2771,6 +2820,7 @@ const sb=(window.TURNKEY_CONFIG&&window.TURNKEY_CONFIG.supabaseUrl&&window.TURNK
   ?window.supabase.createClient(window.TURNKEY_CONFIG.supabaseUrl,window.TURNKEY_CONFIG.supabaseAnonKey)
   :null;
 let currentBusinessId=null;
+let currentBusinessProfile=null;
 let supabaseSyncTimer=null;
 
 function showAuth(){
@@ -2823,6 +2873,7 @@ async function handleAuthedSession(session){
   showApp();
   await loadFromSupabase();
   await loadStaffAndInvites();
+  await loadBusinessProfile();
   if(currentUserRole==='technician')switchView('jobsflow');
   fetchLiveWeather();
   pullStateRemote();
@@ -2916,6 +2967,67 @@ async function removeStaff(id){
   if(error){console.error('Remove staff failed',error);toast('Could not remove staff');return;}
   await loadStaffAndInvites();renderTeam();
   toast('Staff member removed');
+}
+
+/* ===== Business profile: name/phone/email/region/logo shown on the public
+   booking page instead of a hardcoded placeholder. Auto-provisioned for every
+   new owner by the handle_new_user() trigger (schema-business-profile.sql);
+   loadBusinessProfile() self-heals (upserts a blank row) for any account that
+   predates that trigger, so no manual backfill is ever needed. ===== */
+async function loadBusinessProfile(){
+  if(!sb||!currentBusinessId)return;
+  const {data,error}=await sb.from('businesses').select('*').eq('id',currentBusinessId).maybeSingle();
+  if(error){console.error('Load business profile failed',error);return;}
+  if(data){currentBusinessProfile=data;return;}
+  const {data:created,error:cErr}=await sb.from('businesses').upsert({id:currentBusinessId}).select('*').maybeSingle();
+  if(cErr){console.error('Backfill business profile failed',cErr);return;} // e.g. schema not migrated yet
+  currentBusinessProfile=created;
+}
+async function geocodeRegion(region){
+  if(!region)return null;
+  try{
+    const res=await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(region));
+    const results=await res.json();
+    if(!results||!results.length)return null;
+    return {lat:parseFloat(results[0].lat),lng:parseFloat(results[0].lon)};
+  }catch(e){return null;}
+}
+async function saveBusinessProfile(){
+  if(!sb||!currentBusinessId)return;
+  const name=document.getElementById('biz-name-input').value.trim();
+  const phone=document.getElementById('biz-phone-input').value.trim();
+  const email=document.getElementById('biz-email-input').value.trim();
+  const region=document.getElementById('biz-region-input').value.trim();
+  const payload={id:currentBusinessId,name,phone,email,region};
+  // Only re-geocode when the region text actually changed, so unrelated
+  // name/phone/email edits don't hammer Nominatim on every save.
+  if(region&&region!==(currentBusinessProfile&&currentBusinessProfile.region)){
+    const loc=await geocodeRegion(region);
+    if(loc){payload.region_lat=loc.lat;payload.region_lng=loc.lng;}
+  }else if(!region){
+    payload.region_lat=null;payload.region_lng=null;
+  }
+  const {data,error}=await sb.from('businesses').upsert(payload).select('*').maybeSingle();
+  if(error){console.error('Save business profile failed',error);toast('Could not save business profile — check console');return;}
+  currentBusinessProfile=data;
+  toast('Business profile saved');
+  openConnections();
+}
+const LOGO_BUCKET='business-logos';
+async function uploadBusinessLogo(file){
+  if(!sb||!currentBusinessId||!file)return;
+  if(!file.type||!file.type.startsWith('image/')){toast('Logo must be an image file');return;}
+  const ext=(file.name.split('.').pop()||'png').toLowerCase().replace(/[^a-z0-9]/g,'')||'png';
+  const path=`${currentBusinessId}/logo.${ext}`;
+  const {error:upErr}=await sb.storage.from(LOGO_BUCKET).upload(path,file,{contentType:file.type,upsert:true});
+  if(upErr){console.error('Logo upload failed',upErr);toast('Logo upload failed — check console');return;}
+  const {data:pub}=sb.storage.from(LOGO_BUCKET).getPublicUrl(path);
+  const logoUrl=pub.publicUrl+'?v='+Date.now(); // cache-bust so a re-upload shows immediately
+  const {data,error}=await sb.from('businesses').upsert({id:currentBusinessId,logo_url:logoUrl}).select('*').maybeSingle();
+  if(error){console.error('Save logo url failed',error);toast('Logo uploaded but could not save — check console');return;}
+  currentBusinessProfile=data;
+  toast('Logo updated');
+  openConnections();
 }
 
 function parseScheduledDate(s){

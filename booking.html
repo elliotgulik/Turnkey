@@ -27,6 +27,12 @@
 
   /* header */
   header{background:var(--surface);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20}
+  /* Embed mode (?embed=1, set by the CRM's generated iframe code): the host
+     page already has its own header/branding, so drop ours and tighten the
+     top margin instead of showing two headers stacked in a Wix iframe. */
+  html.embedded header{display:none}
+  html.embedded .wrap{padding-top:14px}
+  html.embedded .hero{margin-top:0}
   .head-in{max-width:1080px;margin:0 auto;padding:14px 18px;display:flex;align-items:center;justify-content:space-between;gap:12px}
   .brand{display:flex;align-items:center;gap:11px}
   .brand svg{display:block}
@@ -216,16 +222,18 @@ function initPlacesAutocomplete(){
 <header>
   <div class="head-in">
     <div class="brand">
-      <svg width="34" height="34" viewBox="0 0 48 48" aria-label="Turnkey">
-        <defs><linearGradient id="tkg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1aa888"/><stop offset="1" stop-color="#138a72"/></linearGradient></defs>
-        <rect x="2.5" y="2.5" width="43" height="43" rx="11" fill="url(#tkg)"/>
-        <circle cx="19" cy="18" r="10" fill="#fff"/>
-        <g transform="rotate(-45 19 18)"><path d="M19 18 L25.5 18 L25.5 27 L27.9 27 L27.9 29 L25.5 29 L25.5 31 L27.9 31 L27.9 33 L25.5 33 L25.5 35 L27.9 35 L27.9 37 L25.5 37 L25.5 39 L19 39 Z" fill="#fff"/><rect x="19.9" y="20.5" width="1" height="16.5" rx="0.5" fill="#138a72"/></g>
-        <g fill="#138a72"><rect x="13.7" y="12.9" width="10.6" height="3" rx="1.5"/><rect x="17.5" y="13.7" width="3" height="9.4" rx="1.5"/></g>
-      </svg>
-      <div><div class="bt" id="biz-name">North Shore Pressure Wash</div><div class="bs">Powered by Turnkey</div></div>
+      <span id="biz-logo-slot" style="display:inline-flex;width:34px;height:34px;border-radius:9px;overflow:hidden;flex-shrink:0">
+        <svg width="34" height="34" viewBox="0 0 48 48" aria-label="Turnkey">
+          <defs><linearGradient id="tkg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1aa888"/><stop offset="1" stop-color="#138a72"/></linearGradient></defs>
+          <rect x="2.5" y="2.5" width="43" height="43" rx="11" fill="url(#tkg)"/>
+          <circle cx="19" cy="18" r="10" fill="#fff"/>
+          <g transform="rotate(-45 19 18)"><path d="M19 18 L25.5 18 L25.5 27 L27.9 27 L27.9 29 L25.5 29 L25.5 31 L27.9 31 L27.9 33 L25.5 33 L25.5 35 L27.9 35 L27.9 37 L25.5 37 L25.5 39 L19 39 Z" fill="#fff"/><rect x="19.9" y="20.5" width="1" height="16.5" rx="0.5" fill="#138a72"/></g>
+          <g fill="#138a72"><rect x="13.7" y="12.9" width="10.6" height="3" rx="1.5"/><rect x="17.5" y="13.7" width="3" height="9.4" rx="1.5"/></g>
+        </svg>
+      </span>
+      <div><div class="bt" id="biz-name">Get an instant wash quote</div><div class="bs">Powered by Turnkey</div></div>
     </div>
-    <div class="head-cta">⭐ 4.9 · 320+ jobs on the Shore</div>
+    <div class="head-cta" id="biz-contact"></div>
   </div>
 </header>
 
@@ -349,23 +357,18 @@ function initPlacesAutocomplete(){
     <button class="btn primary" style="max-width:280px;margin:24px auto 0" onclick="startOver()">Map another property</button>
   </div>
 
-  <!-- integration explainer (standalone only) -->
-  <div class="integration" id="integration">
-    <h4>🔌 Add this to your Wix / Squarespace / any website</h4>
-    <p>This page works two ways: link customers straight to it, or drop the snippet below into any site builder's <b>Embed / HTML</b> block. Submissions post to your Turnkey CRM as a new lead with the mapped areas attached — the same webhook works with Wix Automations, Zapier or Make.</p>
-    <div class="code" id="embed-code">&lt;!-- Turnkey quote widget --&gt;
-&lt;iframe src="https://book.turnkey.app/q/north-shore-pw"
-        style="width:100%;height:880px;border:0;border-radius:16px"
-        title="Get a wash quote"&gt;&lt;/iframe&gt;</div>
-    <span class="copy" onclick="copyEmbed()" id="copy-btn">Copy embed snippet</span>
-    <p style="margin-top:14px;font-size:12px;color:#8aa3ab">Webhook on submit → <span style="color:#a9e8d8">POST https://api.turnkey.app/v1/leads</span> · configurable to your Wix form handler or automation tool.</p>
+  <!-- integration explainer (standalone only) — the real, business-specific embed
+       code now lives in the CRM's Connections panel, not hardcoded here. -->
+  <div class="integration hidden" id="integration">
+    <h4>🔌 Want this on your own website?</h4>
+    <p>Log into your Turnkey CRM → <b>Connections</b> → <b>Embed on your website</b> for your personalised embed code and Wix instructions.</p>
   </div>
 
   <div class="trust">
     <span>🛡️ Fully insured</span>
     <span>💧 Soft-wash safe</span>
     <span>⚡ Same-day quotes</span>
-    <span>📍 North Shore, Auckland</span>
+    <span id="biz-region-trust">📍 Local &amp; insured</span>
   </div>
 </div>
 
@@ -415,6 +418,40 @@ window.addEventListener('message',function(e){
 // Which business this link belongs to — every business shares its own booking.html?biz=<id> link.
 let TURNKEY_BUSINESS_ID='';
 try{const u=new URL(location.href);TURNKEY_BUSINESS_ID=u.searchParams.get('biz')||'';}catch(e){}
+// ?embed=1 is set by the iframe code the CRM generates (Connections → Embed on
+// your website) — switches to a tighter layout with no redundant header bar.
+let EMBED_MODE=false;
+try{const u=new URL(location.href);EMBED_MODE=u.searchParams.get('embed')==='1';}catch(e){}
+
+/* ===== Business profile: name/logo/phone/region, loaded per ?biz= id from the
+   public.businesses table (public-read RLS — see schema-business-profile.sql).
+   Plain REST fetch, not the full supabase-js SDK, since this is a customer-
+   facing page and it's a single anonymous read. Falls back to generic copy
+   (never another business's name) if unset or the request fails. ===== */
+(function(){
+  if(!TURNKEY_BUSINESS_ID)return;
+  if(!window.TURNKEY_CONFIG||!window.TURNKEY_CONFIG.supabaseUrl||!window.TURNKEY_CONFIG.supabaseAnonKey)return;
+  const url=window.TURNKEY_CONFIG.supabaseUrl+'/rest/v1/businesses?id=eq.'+encodeURIComponent(TURNKEY_BUSINESS_ID)+'&select=name,phone,email,region,logo_url';
+  fetch(url,{headers:{apikey:window.TURNKEY_CONFIG.supabaseAnonKey}})
+    .then(r=>r.json()).then(rows=>{
+      const biz=(rows&&rows[0])||null;
+      if(!biz)return;
+      if(biz.name){
+        const nameEl=document.getElementById('biz-name');
+        if(nameEl)nameEl.textContent=biz.name;
+        document.title=biz.name+' — get an instant wash quote';
+      }
+      if(biz.logo_url){
+        const slot=document.getElementById('biz-logo-slot');
+        if(slot)slot.innerHTML=`<img src="${biz.logo_url.replace(/"/g,'&quot;')}" alt="" style="width:100%;height:100%;object-fit:cover">`;
+      }
+      const contactEl=document.getElementById('biz-contact');
+      if(contactEl&&biz.phone)contactEl.textContent='📞 '+biz.phone;
+      const regionEl=document.getElementById('biz-region-trust');
+      if(regionEl&&biz.region)regionEl.textContent='📍 '+biz.region;
+    }).catch(()=>{}); // network/RLS failure → keep the generic fallback copy already in the HTML
+})();
+
 const SAT_ZOOM_DEFAULT=19; // covers ~153m×115m — right for a full NZ residential section
 let SAT_ZOOM=SAT_ZOOM_DEFAULT;  // may be overridden per-property based on geocode viewport
 let SAT_LAT=-36.8;              // updated to actual property lat after geocoding
@@ -877,17 +914,17 @@ function locateAddr(){
   if(MAPS_KEY){enableSatellite(v);}
   else{document.getElementById('hint').textContent='No Maps key \u2014 tracing on demo map. Add a Google Maps key in Connections for real satellite.';}
 }
-function copyEmbed(){
-  const code=document.getElementById('embed-code').textContent;
-  navigator.clipboard?.writeText(code).then(()=>{
-    const b=document.getElementById('copy-btn');b.textContent='Copied ✓';setTimeout(()=>b.textContent='Copy embed snippet',1600);
-  });
+function toggleIntegration(){
+  const el=document.getElementById('integration');
+  el.classList.toggle('hidden');
+  if(!el.classList.contains('hidden'))el.scrollIntoView({behavior:'smooth'});
 }
-function toggleIntegration(){const el=document.getElementById('integration');el.scrollIntoView({behavior:'smooth'});}
 
-// detect embed vs standalone (hide the integration explainer when embedded)
-const standalone = (window.self===window.top);
-if(!standalone){document.getElementById('integration').classList.add('hidden');}
+// Embedded mode: ?embed=1 (used by the CRM's generated iframe code) switches to a
+// tighter layout that drops the redundant header bar — the business's own site
+// already has one. The "For business owners" explainer stays hidden either way;
+// it's just a pointer to the CRM now, not something a customer needs to see.
+if(EMBED_MODE)document.documentElement.classList.add('embedded');
 
 // pointer handling
 const stage=document.getElementById('stage');
