@@ -1025,6 +1025,32 @@
   <div class="modal-foot"><button class="btn ghost" onclick="closeModal('send-doc-overlay')">Cancel</button><button class="btn ghost" id="sd-draft-btn" onclick="saveSendDocDraft()">Save draft</button><button class="btn primary" id="sd-send-btn" onclick="confirmSendDocEmail()">Send email</button></div>
 </div></div>
 
+<div class="overlay" id="marketing-overlay"><div class="modal wide">
+  <div class="modal-head"><div><h3>Marketing</h3><p>Generate ready-to-use ad copy and messages for your business.</p></div><button class="x" aria-label="Close" onclick="closeModal('marketing-overlay')">×</button></div>
+  <div class="modal-body">
+    <div class="field-row">
+      <div class="field"><label>What do you need?</label>
+        <select id="mk-type">
+          <option value="Facebook ad (short, with a hook and a call to action)">Facebook ad</option>
+          <option value="Google Ads text ad (headline + description, character-limit aware)">Google ad</option>
+          <option value="Instagram caption with relevant hashtags">Instagram caption</option>
+          <option value="Email campaign to past customers">Email campaign</option>
+          <option value="Referral campaign message (ask happy customers to refer a friend)">Referral campaign</option>
+          <option value="Friendly review request message">Review request</option>
+          <option value="Limited-time special offer promotion">Special offer</option>
+          <option value="Seasonal promotion (tie it to the current season)">Seasonal promotion</option>
+        </select>
+      </div>
+      <div class="field"><label>Anything specific? <span style="color:var(--ink-faint);font-weight:400">(optional)</span></label><input id="mk-brief" placeholder="e.g. 20% off gutter cleaning this month"></div>
+    </div>
+    <button class="btn accent" onclick="generateMarketingContent()" id="mk-gen-btn">✨ Generate</button>
+    <div style="margin-top:16px"><label style="font-size:12px;font-weight:600;color:var(--ink-soft)">Result</label>
+      <textarea id="mk-output" rows="10" placeholder="Your generated copy will appear here — fully editable, copy and paste anywhere." style="margin-top:6px"></textarea>
+    </div>
+  </div>
+  <div class="modal-foot"><button class="btn ghost" onclick="closeModal('marketing-overlay')">Close</button><button class="btn primary" onclick="copyMarketingContent()">Copy</button></div>
+</div></div>
+
 <div class="overlay" id="cal-pick-overlay"><div class="modal">
   <div class="modal-head"><div><h3 id="cp-title">Schedule a job</h3><p>Pick a won job to book on this date.</p></div><button class="x" aria-label="Close" onclick="closeModal('cal-pick-overlay')">×</button></div>
   <div class="modal-body"><div id="cp-list"></div></div>
@@ -1229,6 +1255,7 @@ function isoToLabel(iso){
   return ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()]+' '+d.getDate()+' '+['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
 }
 function addDaysISO(iso,n){const d=new Date(iso+'T12:00:00');d.setDate(d.getDate()+n);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+function addMonthsISO(iso,n){const d=new Date(iso+'T12:00:00');d.setMonth(d.getMonth()+n);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
 // Lay out a day's jobs back-to-back from 8am (+15min travel between). Returns [{job, start, end}].
 function dayTimeline(dateISO, extraJob){
   const jobs=records.filter(x=>isBooked(x)&&x.scheduledDateISO===dateISO&&x!==extraJob);
@@ -2681,6 +2708,15 @@ function openSchedule(id,presetISO){
     <div class="field" style="margin-top:18px"><label>Assign crew</label>
       <select id="sched-tech"><option value="">Unassigned</option>${techOptions}</select>
     </div>
+    <div class="field"><label>Repeat clean <span style="color:var(--ink-faint);font-weight:400">(optional — quarterly gutters, 6-monthly wash, etc)</span></label>
+      <select id="sched-repeat">
+        <option value="">Just this once</option>
+        <option value="1" ${r.repeatMonths===1?'selected':''}>Every month</option>
+        <option value="3" ${r.repeatMonths===3?'selected':''}>Every 3 months</option>
+        <option value="6" ${r.repeatMonths===6?'selected':''}>Every 6 months</option>
+        <option value="12" ${r.repeatMonths===12?'selected':''}>Every 12 months</option>
+      </select>
+    </div>
     <div id="sched-warn"></div>
     <div id="sched-day-detail"></div>`;
   updateSchedWarn();
@@ -2753,6 +2789,9 @@ function confirmSchedule(){
   const techUser=staff.find(u=>u.id===techId);
   r.assignedStaffId=techId||null;
   r.tech=techUser?(techUser.name||techUser.email||'Unnamed'):'Unassigned';
+  const repeatEl=document.getElementById('sched-repeat');
+  r.repeatMonths=repeatEl&&repeatEl.value?parseInt(repeatEl.value,10):null;
+  r.nextDueDate=r.repeatMonths?addMonthsISO(iso,r.repeatMonths):null;
   r.stage='scheduled';
   if(!r.follows||!r.follows.length)r.follows=defaultFollows();
   closeModal('schedule-overlay');
@@ -3484,6 +3523,8 @@ function dashboardAlerts(){
   if(wonUnscheduled)alerts.push({icon:'📅',tone:'warn',text:`${wonUnscheduled} won job${wonUnscheduled!==1?'s':''} still need${wonUnscheduled===1?'s':''} a date booked.`,onclick:"switchView('pipeline')"});
   const todayCount=records.filter(r=>isBooked(r)&&r.scheduledDateISO===todayIso).length;
   if(todayCount)alerts.push({icon:'✅',tone:'good',text:`${todayCount} job${todayCount!==1?'s':''} scheduled today.`,onclick:"switchView('ops')"});
+  const dueRepeats=records.filter(r=>r.nextDueDate&&r.nextDueDate<=todayIso).length;
+  if(dueRepeats)alerts.push({icon:'🔁',tone:'warn',text:`${dueRepeats} customer${dueRepeats!==1?'s are':' is'} due for their repeat clean.`,onclick:"openDueRepeats()"});
   const tone=(a)=>({bad:0,warn:1,good:2})[a.tone];
   return alerts.sort((a,b)=>tone(a)-tone(b));
 }
@@ -3621,6 +3662,48 @@ async function askAi(){
     if(!res.ok){if(out)out.textContent=j.error||'Could not get an answer';return;}
     if(out)out.textContent=j.answer;
   }catch(e){console.error('AI ask failed',e);if(out)out.textContent='Couldn\u2019t connect \u2014 check your internet connection and try again';}
+}
+
+/* ===== Marketing: AI-generated ad copy/captions/campaigns \u2014 text only, no
+   image generation. Grounded in the business's own real services/region so
+   it never invents an offer or service that doesn't exist. ===== */
+function openMarketing(){
+  document.getElementById('mk-brief').value='';
+  document.getElementById('mk-output').value='';
+  openModal('marketing-overlay');
+}
+async function generateMarketingContent(){
+  const type=document.getElementById('mk-type').value;
+  const brief=document.getElementById('mk-brief').value.trim();
+  const out=document.getElementById('mk-output');
+  const btn=document.getElementById('mk-gen-btn');
+  const url=backendUrl();
+  const {data:{session}}=await sb.auth.getSession();
+  if(!url||!session){toast('Something went wrong \u2014 try refreshing the page');return;}
+  btn.disabled=true;btn.textContent='Generating\u2026';
+  out.value='';
+  const businessContext={
+    business_name:docBizName(),
+    services:Object.values(SERVICES).map(s=>s.label),
+    region:(currentBusinessProfile&&currentBusinessProfile.region)||null,
+    tagline:docTemplate.tagline||null
+  };
+  try{
+    const res=await fetch(`${url}/api/ai/marketing`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.access_token},body:JSON.stringify({contentType:type,brief,businessContext})});
+    const j=await res.json();
+    btn.disabled=false;btn.textContent='\u2728 Generate';
+    if(!res.ok){toast(j.error||'Could not generate content');return;}
+    out.value=j.content;
+  }catch(e){
+    console.error('Marketing generate failed',e);
+    btn.disabled=false;btn.textContent='\u2728 Generate';
+    toast('Couldn\u2019t connect \u2014 check your internet connection and try again');
+  }
+}
+function copyMarketingContent(){
+  const out=document.getElementById('mk-output');
+  if(!out||!out.value){toast('Generate something first');return;}
+  navigator.clipboard?.writeText(out.value).then(()=>toast('Copied \u2713'));
 }
 
 
@@ -3862,6 +3945,19 @@ function openCalPicker(iso){
   document.getElementById('cp-list').innerHTML=unscheduled.length
     ?unscheduled.map(r=>`<div class="kv" style="cursor:pointer" onclick="closeModal('cal-pick-overlay');openSchedule(${r.id},'${iso}')"><span class="k">${r.name}</span><span class="v">${r.suburb||''} · ${r.total?money(r.total):'no quote'}</span></div>`).join('')
     :'<div class="empty-state" style="padding:20px"><div class="sm">No won jobs waiting to be scheduled. Mark a quote as won in Pipeline first.</div></div>';
+  openModal('cal-pick-overlay');
+}
+// Customers whose last job set a repeat interval (e.g. "every 6 months")
+// and whose next-due date has arrived — rebooking is a manual click, not
+// an auto-created job, so the pipeline never fills up with jobs the
+// business hasn't actually confirmed.
+function openDueRepeats(){
+  const todayIso=todayISO();
+  const due=records.filter(r=>r.nextDueDate&&r.nextDueDate<=todayIso);
+  document.getElementById('cp-title').textContent='Due for their repeat clean';
+  document.getElementById('cp-list').innerHTML=due.length
+    ?due.map(r=>`<div class="kv"><span class="k">${r.name}${r.suburb?' · '+r.suburb:''}</span><span class="v">due ${isoToLabel(r.nextDueDate)} <button class="btn accent sm" style="margin-left:8px" onclick="closeModal('cal-pick-overlay');openNewJobModal('${r.customerId||''}')">Book next visit</button></span></div>`).join('')
+    :'<div class="empty-state" style="padding:20px"><div class="sm">Nobody\'s due right now.</div></div>';
   openModal('cal-pick-overlay');
 }
 function renderCalendarSidebar(){
@@ -4143,6 +4239,7 @@ function openSettings(){
         <button class="btn ghost sm" onclick="closeModal('settings-overlay');openTeam()">Team</button>
         <button class="btn ghost sm" onclick="closeModal('settings-overlay');openTemplateEditor()">Email &amp; document templates</button>
         <button class="btn ghost sm" onclick="closeModal('settings-overlay');openImportWizard()">Import customers</button>
+        <button class="btn ghost sm" onclick="closeModal('settings-overlay');openMarketing()">✨ Marketing</button>
       </div>
     </div>
     <div class="conn-card">

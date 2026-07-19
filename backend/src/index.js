@@ -777,6 +777,39 @@ app.post('/api/ai/ask', requireBusiness, async (req, res) => {
   }
 })
 
+// Separate from /api/ai/ask on purpose: that route is deliberately
+// constrained to only ever state facts from the business's own data
+// (never invents a customer or amount); marketing copy needs the opposite
+// instinct — persuasive, creative writing — so it gets its own system
+// prompt rather than fighting the data-only constraint. Text only, same as
+// /api/ai/ask — no image generation.
+app.post('/api/ai/marketing', requireBusiness, async (req, res) => {
+  if (!isAiConfigured()) return res.status(501).json({ error: 'AI assistant is not configured on this server yet — ask whoever manages your TurnKey deployment to add ANTHROPIC_API_KEY' })
+  try {
+    const { contentType, brief, businessContext } = req.body || {}
+    if (!contentType) return res.status(400).json({ error: 'A content type is required' })
+    const system = 'You are a marketing copywriter for small local service businesses (exterior cleaning, roofing, ' +
+      'pressure washing). Write ready-to-use copy — no placeholder brackets like [Business Name], no meta-commentary ' +
+      'before or after, just the copy itself. Keep it grounded in the real business details given; don\'t invent ' +
+      'services, prices, or offers the business didn\'t mention.'
+    const aiRes = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-5', max_tokens: 700, system,
+        messages: [{ role: 'user', content: `Business details:\n${JSON.stringify(businessContext || {}).slice(0, 4000)}\n\nWrite a: ${contentType}${brief ? '\n\nAdditional brief: ' + String(brief).slice(0, 1000) : ''}` }]
+      })
+    })
+    if (!aiRes.ok) throw new Error('Anthropic API call failed: ' + await aiRes.text())
+    const data = await aiRes.json()
+    const content = (data.content || []).map(b => b.text || '').join('').trim() || 'No content returned.'
+    res.json({ ok: true, content })
+  } catch (err) {
+    console.error('POST /api/ai/marketing', err)
+    res.status(500).json({ error: 'Could not reach the AI assistant' })
+  }
+})
+
 app.listen(PORT, () => {
   console.log(`🚀 TurnKey backend running on port ${PORT}`)
   console.log(`📦 Storage mode: ${STORAGE}`)
