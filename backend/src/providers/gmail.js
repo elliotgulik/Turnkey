@@ -114,34 +114,59 @@ function encodeHeaderValue(v) {
   return '=?UTF-8?B?' + Buffer.from(v, 'utf8').toString('base64') + '?='
 }
 
-function buildRawMessage({ from, to, subject, bodyText, bodyHtml, inReplyTo, references }) {
+function buildRawMessage({ from, to, subject, bodyText, bodyHtml, inReplyTo, references, attachment }) {
   const headers = [
     `From: ${from}`, `To: ${to}`, `Subject: ${encodeHeaderValue(subject || '')}`, 'MIME-Version: 1.0'
   ]
   if (inReplyTo) headers.push(`In-Reply-To: ${inReplyTo}`)
   if (references) headers.push(`References: ${references}`)
 
-  if (bodyHtml) {
-    // multipart/alternative: plain-text fallback first, HTML second — the
-    // standard shape for a "professional" HTML email that still degrades
-    // gracefully in text-only clients.
-    const boundary = 'turnkey_' + Math.random().toString(36).slice(2)
-    headers.push(`Content-Type: multipart/alternative; boundary="${boundary}"`)
+  // multipart/alternative: plain-text fallback first, HTML second — the
+  // standard shape for a "professional" HTML email that still degrades
+  // gracefully in text-only clients.
+  const altBoundary = 'turnkey_alt_' + Math.random().toString(36).slice(2)
+  const altLines = [
+    `--${altBoundary}`, 'Content-Type: text/plain; charset="UTF-8"', '',
+    bodyText || (bodyHtml || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(),
+    `--${altBoundary}`, 'Content-Type: text/html; charset="UTF-8"', '',
+    bodyHtml || '', `--${altBoundary}--`
+  ]
+
+  if (attachment && attachment.contentBase64) {
+    // multipart/mixed: the alternative text+html body as one part, the PDF
+    // (or whatever) attachment as another — this is what makes "attach the
+    // quote/invoice PDF automatically" possible without asking the user to
+    // download anything first and reattach it by hand.
+    const mixedBoundary = 'turnkey_mix_' + Math.random().toString(36).slice(2)
+    headers.push(`Content-Type: multipart/mixed; boundary="${mixedBoundary}"`)
+    const filename = (attachment.filename || 'attachment.pdf').replace(/[^\w.\- ]/g, '_')
+    const mimeType = attachment.mimeType || 'application/pdf'
+    const base64 = String(attachment.contentBase64).replace(/\r?\n/g, '')
+    const wrapped = base64.match(/.{1,76}/g)?.join('\r\n') || base64
     const parts = [
-      '', `--${boundary}`, 'Content-Type: text/plain; charset="UTF-8"', '',
-      bodyText || bodyHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(),
-      `--${boundary}`, 'Content-Type: text/html; charset="UTF-8"', '',
-      bodyHtml, `--${boundary}--`
+      '', `--${mixedBoundary}`, `Content-Type: multipart/alternative; boundary="${altBoundary}"`, '',
+      ...altLines,
+      `--${mixedBoundary}`,
+      `Content-Type: ${mimeType}; name="${filename}"`,
+      `Content-Disposition: attachment; filename="${filename}"`,
+      'Content-Transfer-Encoding: base64', '',
+      wrapped,
+      `--${mixedBoundary}--`
     ]
     return Buffer.from(headers.join('\r\n') + parts.join('\r\n'), 'utf8').toString('base64url')
+  }
+
+  if (bodyHtml) {
+    headers.push(`Content-Type: multipart/alternative; boundary="${altBoundary}"`)
+    return Buffer.from(headers.join('\r\n') + '\r\n' + altLines.join('\r\n'), 'utf8').toString('base64url')
   }
 
   headers.push('Content-Type: text/plain; charset="UTF-8"')
   return Buffer.from(headers.join('\r\n') + '\r\n\r\n' + (bodyText || ''), 'utf8').toString('base64url')
 }
 
-export async function sendMessage(accessToken, { from, to, subject, bodyText, bodyHtml, threadId, inReplyTo, references }) {
-  const raw = buildRawMessage({ from, to, subject, bodyText, bodyHtml, inReplyTo, references })
+export async function sendMessage(accessToken, { from, to, subject, bodyText, bodyHtml, threadId, inReplyTo, references, attachment }) {
+  const raw = buildRawMessage({ from, to, subject, bodyText, bodyHtml, inReplyTo, references, attachment })
   const body = { raw }
   if (threadId) body.threadId = threadId
   const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {

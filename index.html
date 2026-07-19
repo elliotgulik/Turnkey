@@ -974,13 +974,14 @@
 </div></div>
 
 <div class="overlay" id="send-doc-overlay"><div class="modal wide">
-  <div class="modal-head"><div><h3 id="sd-title">Send</h3><p>Sends from your connected Gmail — no download needed.</p></div><button class="x" aria-label="Close" onclick="closeModal('send-doc-overlay')">×</button></div>
+  <div class="modal-head"><div><h3 id="sd-title">Send</h3><p>Sends from your connected Gmail — nothing to download.</p></div><button class="x" aria-label="Close" onclick="closeModal('send-doc-overlay')">×</button></div>
   <div class="modal-body">
     <div class="field-row"><div class="field"><label>To</label><input id="sd-to" type="email"></div><div class="field"><label>Subject</label><input id="sd-subject"></div></div>
-    <p style="font-size:12px;color:var(--ink-faint);margin:2px 0 8px">Preview of the email your customer will receive — <a href="#" onclick="closeModal('send-doc-overlay');openTemplateEditor();return false" style="color:var(--teal)">edit the template</a> to change the wording.</p>
-    <div id="sd-preview" style="border:1px solid var(--line);border-radius:var(--radius-sm);padding:18px;max-height:360px;overflow-y:auto;background:var(--surface-2)"></div>
+    <div class="field"><label>Message</label><textarea id="sd-body" rows="10"></textarea></div>
+    <p style="font-size:12px;color:var(--ink-faint);margin:2px 0 0" id="sd-attach-note">📎 <span id="sd-attach-name"></span> will be attached automatically.</p>
+    <p style="font-size:12px;color:var(--ink-faint);margin:4px 0 0">Loaded from your <a href="#" onclick="closeModal('send-doc-overlay');openTemplateEditor();return false" style="color:var(--teal)">email template</a> — edit freely, it only affects this send.</p>
   </div>
-  <div class="modal-foot"><button class="btn ghost" onclick="closeModal('send-doc-overlay')">Cancel</button><button class="btn primary" id="sd-send-btn" onclick="confirmSendDocEmail()">Send email</button></div>
+  <div class="modal-foot"><button class="btn ghost" onclick="closeModal('send-doc-overlay')">Cancel</button><button class="btn ghost" id="sd-draft-btn" onclick="saveSendDocDraft()">Save draft</button><button class="btn primary" id="sd-send-btn" onclick="confirmSendDocEmail()">Send email</button></div>
 </div></div>
 
 <div class="overlay" id="cal-pick-overlay"><div class="modal">
@@ -1396,20 +1397,20 @@ function docBizName(){return (docTemplate.business||'').trim()||'Your Business';
    ===================================================================== */
 const EMAIL_TEMPLATE_DEFAULTS={
   quote:{
-    subject:'Your quote from {{business_name}} — {{quote_total}}',
+    subject:'Your quote from {{business_name}}',
     greeting:'Hi {{customer_name}},',
-    body:'Thanks for the chance to quote your exterior clean. Here\'s what we\'d propose:',
-    cta:'Reply to this email or give us a call to lock in your date — quotes are valid for 30 days.',
+    body:'Thanks for getting in touch with {{business_name}}.\n\nWe\'ve prepared your quote for the requested work at:\n\n{{address}}\n\nYour quote is attached.',
+    cta:'If you have any questions please reply to this email.\n\nWe look forward to helping you.',
     payment_instructions:'',
-    signature:'Cheers,\n{{business_name}}'
+    signature:'{{business_name}}'
   },
   invoice:{
-    subject:'Invoice from {{business_name}} — {{invoice_total}} due',
+    subject:'Invoice from {{business_name}}',
     greeting:'Hi {{customer_name}},',
-    body:'Thanks for having us out — here\'s the invoice for the completed work.',
+    body:'Thanks for choosing {{business_name}}.\n\nYour invoice is attached.',
     cta:'',
-    payment_instructions:'Payment is due within 7 days. Reply to this email if you have any questions about the invoice.',
-    signature:'Cheers,\n{{business_name}}'
+    payment_instructions:'Payment details:\nDue within 7 days.\n{{payment_link}}\n\nReply to this email if you have any questions about the invoice.',
+    signature:'{{business_name}}'
   }
 };
 let emailTemplates={quote:null,invoice:null};
@@ -1427,15 +1428,25 @@ async function loadEmailTemplates(){
     }
   }
 }
-// {{customer_name}}, {{business_name}}, {{quote_total}}, {{invoice_total}}, {{job_address}}, {{scheduled_date}}
+// {{customer_name}}, {{business_name}}, {{address}}, {{quote_total}}, {{invoice_total}},
+// {{job_date}}, {{services}}, {{payment_link}} — plus the original
+// {{job_address}}/{{scheduled_date}} names kept as aliases so templates
+// saved before this pass keep resolving correctly.
 function emailTemplateVars(r,mode){
+  const addr=[r.address,r.suburb].filter(Boolean).join(', ')||'—';
+  const servicesList=(r.services||[]).map(s=>{
+    const v=SERVICES[s.svc];
+    return v?v.label+(s.qty?' ('+s.qty+' '+v.unit+')':''):s.svc;
+  }).join(', ')||'—';
   return {
     customer_name:(r.name||'').split(' ')[0]||r.name||'there',
     business_name:docBizName(),
     quote_total:mode==='quote'?money(r.total||0):'',
     invoice_total:mode==='invoice'?money(r.total||0):'',
-    job_address:[r.address,r.suburb].filter(Boolean).join(', ')||'—',
-    scheduled_date:r.scheduledDate||'to be confirmed'
+    job_address:addr, address:addr,
+    scheduled_date:r.scheduledDate||'to be confirmed', job_date:r.scheduledDate||'to be confirmed',
+    services:servicesList,
+    payment_link:r.paymentLinkUrl||'', payment_details:r.paymentLinkUrl||''
   };
 }
 function fillTemplate(str,vars){
@@ -1453,9 +1464,9 @@ function fillTemplate(str,vars){
 const LIFECYCLE_DEFAULTS={
   new_lead:{subject:'Thanks for requesting a quote, {{customer_name}}!',body:'Thanks for reaching out to {{business_name}} — we\'ve got your request for {{job_address}} and will be in touch with a quote shortly.'},
   quote_reminder:{subject:'Still thinking it over? Your quote from {{business_name}}',body:'Just following up on the quote we sent for {{job_address}} — {{quote_total}}. Happy to answer any questions or adjust anything. Reply any time.'},
-  job_booked:{subject:'Your service is confirmed — {{scheduled_date}}',body:'Hi {{customer_name}}, you\'re booked in with {{business_name}} for {{scheduled_date}} at {{job_address}}. See you then!'},
+  job_booked:{subject:'Your booking is confirmed — {{job_date}}',body:'Hi {{customer_name}},\n\nYour booking has been confirmed.\n\nDate:\n{{job_date}}\n\nServices:\n{{services}}\n\nWe look forward to seeing you.'},
   day_before_reminder:{subject:'Reminder: {{business_name}} is coming tomorrow',body:'Hi {{customer_name}}, just a reminder we\'ll be at {{job_address}} tomorrow ({{scheduled_date}}). Let us know if anything\'s changed.'},
-  job_completed:{subject:'The work\'s done — invoice on its way',body:'Hi {{customer_name}}, we\'ve finished up at {{job_address}}. Your invoice will follow shortly. Thanks for choosing {{business_name}}!'},
+  job_completed:{subject:'Your job has been completed',body:'Hi {{customer_name}},\n\nYour job has been completed.\n\nThanks for choosing {{business_name}}.\n\nIf you are happy with the service we would appreciate a review.'},
   invoice_overdue:{subject:'Reminder: invoice from {{business_name}} is overdue',body:'Hi {{customer_name}}, just a friendly reminder that your invoice for {{invoice_total}} is now overdue. Reply if you\'d like to sort out payment or have any questions.'},
   review_request:{subject:'How did we do?',body:'Hi {{customer_name}}, thanks again for choosing {{business_name}}! If you have a minute, we\'d really appreciate a quick review — it helps us a lot.'}
 };
@@ -2039,10 +2050,11 @@ function logActivity(customerId,jobId,type,summary,detail){
 
 function generateAndSendDoc(mode,r){
   // Preferred path: Gmail connected → compose + send inside TurnKey, no
-  // download required. Falls back to the PDF-download+mailto flow below
-  // when Gmail isn't connected or the customer has no email on file —
-  // existing behaviour is untouched for anyone not using email integration.
-  if(emailAccount&&r.email){openSendDocModal(mode,r);return;}
+  // download required — recipient is editable in the composer, so a missing
+  // email on file no longer blocks this path, just leaves it blank to fill in.
+  // Falls back to the PDF-download+mailto flow below only when Gmail isn't
+  // connected at all — there's no other way to actually send email.
+  if(emailAccount){openSendDocModal(mode,r);return;}
   const num=docNumber(mode,r);
   const filename=(mode==='quote'?'Quote':'Invoice')+'-'+num+'.pdf';
   const bizName=docBizName();
@@ -2060,18 +2072,18 @@ function generateAndSendDoc(mode,r){
         setTimeout(function(){
           window.location.href='mailto:'+encodeURIComponent(r.email)+'?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(shortBody);
         },600);
-        toast('PDF saved \u2014 attach '+filename+' in the email that just opened');
+        toast('PDF saved \u2014 attach '+filename+' in the email that just opened. Connect Gmail in Settings to send in one step next time.');
       }else{
         toast('PDF saved as '+filename+'. No email on file for '+r.name+'.');
       }
-      logActivity(r.customerId,r.jobId,mode==='quote'?'quote_sent':'invoice_sent',(mode==='quote'?'Quote ':'Invoice ')+num+' sent to '+r.name);
+      logActivity(r.customerId,r.jobId,mode==='quote'?'quote_sent':'invoice_sent',(mode==='quote'?'Quote sent \u2014 ':'Invoice sent \u2014 ')+money(r.total||0)+(r.email?' to '+r.email:''));
       return;
     }catch(e){console.warn('PDF generation failed, falling back:',e);}
   }
   if(r.email){
     window.location.href='mailto:'+encodeURIComponent(r.email)+'?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(buildDocEmailBody(mode,r));
     toast('Email opened for '+r.name);
-    logActivity(r.customerId,r.jobId,mode==='quote'?'quote_sent':'invoice_sent',(mode==='quote'?'Quote ':'Invoice ')+num+' sent to '+r.name);
+    logActivity(r.customerId,r.jobId,mode==='quote'?'quote_sent':'invoice_sent',(mode==='quote'?'Quote sent \u2014 ':'Invoice sent \u2014 ')+money(r.total||0)+' to '+r.email);
   }else{
     toast((mode==='quote'?'Quote':'Invoice')+' saved. No email on file for '+r.name+'.');
   }
@@ -2082,40 +2094,22 @@ function generateAndSendDoc(mode,r){
 // {{variables}} filled in, plus an embedded quote/invoice details table —
 // this is the "attaches or embeds the quote" requirement, done as an embed
 // so nothing needs downloading first.
-function renderEmailBodyHtml(mode,r){
+// Plain-text body from the business's editable template — this is what the
+// user actually edits in the composer. The pricing/line-item breakdown lives
+// in the attached PDF now, not duplicated inline in the email, so this reads
+// like a normal short email (matches the template examples in Settings).
+function buildEmailPlainBody(mode,r){
   const tpl=emailTemplates[mode]||EMAIL_TEMPLATE_DEFAULTS[mode];
   const vars=emailTemplateVars(r,mode);
   const greeting=fillTemplate(tpl.greeting,vars);
   const body=fillTemplate(tpl.body,vars);
   const ctaOrPayment=fillTemplate(mode==='quote'?(tpl.cta||''):(tpl.payment_instructions||''),vars);
-  const signature=fillTemplate(tpl.signature,vars).replace(/\n/g,'<br>');
-  const allSvcs=r.services.slice();
-  if(r.windows&&r.windows.panes>0)allSvcs.push({svc:'windows',qty:r.windows.panes,_price:r.windows.price});
-  const rows=allSvcs.map(s=>{
-    const v=SERVICES[s.svc];
-    const rate=s.customRate!=null?parseFloat(s.customRate):(s.svc==='roof'&&s.roofType&&ROOF_TYPES[s.roofType]?v.rate*ROOF_TYPES[s.roofType].mult:(s.svc==='housewash'&&s.storeys&&STOREY_TYPES[s.storeys]?v.rate*STOREY_TYPES[s.storeys].mult:v.rate));
-    const amt=s._price!=null?s._price:(s.fixedPrice!=null?Math.round(parseFloat(s.fixedPrice)||0):Math.round((parseFloat(s.qty)||0)*rate));
-    const desc=s._price!=null?v.label+' ('+s.qty+' panes)':s.fixedPrice!=null?v.label+' (fixed price)':v.label+' · '+s.qty+' '+v.unit;
-    return `<tr><td style="padding:6px 0;color:#1a1a1a;font-size:14px">${desc}</td><td style="padding:6px 0;text-align:right;color:#1a1a1a;font-size:14px;white-space:nowrap">${money(amt)}</td></tr>`;
-  }).join('');
-  const total=r.total||0;
-  const gst=Math.round(total-total/1.15);
-  const dueRow=mode==='invoice'?`<tr><td style="padding:10px 0 0;color:#666;font-size:13px">Due date</td><td style="padding:10px 0 0;text-align:right;color:#666;font-size:13px">${vars.scheduled_date}</td></tr>`:'';
-  return `<div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;max-width:560px;margin:0 auto;color:#1a1a1a;line-height:1.5">
-    <p>${greeting}</p>
-    <p>${body}</p>
-    <table style="width:100%;border-collapse:collapse;margin:16px 0;border-top:1px solid #e2e2e2;border-bottom:1px solid #e2e2e2">
-      <tbody>${rows}</tbody>
-      <tfoot>
-        <tr><td style="padding:10px 0 0;color:#666;font-size:13px">Subtotal (excl. GST)</td><td style="padding:10px 0 0;text-align:right;color:#666;font-size:13px">${money(total-gst)}</td></tr>
-        <tr><td style="padding:2px 0;color:#666;font-size:13px">GST 15%</td><td style="padding:2px 0;text-align:right;color:#666;font-size:13px">${money(gst)}</td></tr>
-        <tr><td style="padding:8px 0 0;font-weight:700">${mode==='quote'?'Quote total':'Amount due'}</td><td style="padding:8px 0 0;text-align:right;font-weight:700">${money(total)}</td></tr>
-        ${dueRow}
-      </tfoot>
-    </table>
-    ${ctaOrPayment?`<p>${ctaOrPayment}</p>`:''}
-    <p>${signature}</p>
-  </div>`;
+  const signature=fillTemplate(tpl.signature,vars);
+  return [greeting,body,ctaOrPayment,signature].filter(Boolean).join('\n\n');
+}
+function renderEmailBodyHtml(bodyText){
+  const esc=(bodyText||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return `<div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;max-width:560px;margin:0 auto;color:#1a1a1a;line-height:1.6;white-space:pre-wrap">${esc}</div>`;
 }
 function openSendDocModal(mode,r){
   sendDocCtx={mode,recordId:r.id};
@@ -2124,8 +2118,22 @@ function openSendDocModal(mode,r){
   document.getElementById('sd-title').textContent=(mode==='quote'?'Send quote to ':'Send invoice to ')+(r.name||'');
   document.getElementById('sd-to').value=r.email||'';
   document.getElementById('sd-subject').value=fillTemplate(tpl.subject,vars);
-  document.getElementById('sd-preview').innerHTML=renderEmailBodyHtml(mode,r);
+  document.getElementById('sd-body').value=buildEmailPlainBody(mode,r);
+  document.getElementById('sd-attach-name').textContent=(mode==='quote'?'Quote-':'Invoice-')+docNumber(mode,r)+'.pdf';
   openModal('send-doc-overlay');
+}
+async function saveSendDocDraft(){
+  const r=records.find(x=>x.id===sendDocCtx.recordId);
+  if(!r||!sb||!currentBusinessId){toast('Could not save draft');return;}
+  const payload={
+    business_id:currentBusinessId,customer_id:r.customerId||null,job_id:r.jobId||null,type:sendDocCtx.mode,
+    recipient:document.getElementById('sd-to').value.trim(),subject:document.getElementById('sd-subject').value.trim(),
+    body:document.getElementById('sd-body').value,updated_at:new Date().toISOString()
+  };
+  const {error}=await sb.from('email_drafts').insert(payload);
+  if(error){console.error('Save draft failed',error);toast('Could not save draft');return;}
+  closeModal('send-doc-overlay');
+  toast('Draft saved');
 }
 async function confirmSendDocEmail(){
   const r=records.find(x=>x.id===sendDocCtx.recordId);
@@ -2133,16 +2141,22 @@ async function confirmSendDocEmail(){
   const mode=sendDocCtx.mode;
   const to=document.getElementById('sd-to').value.trim();
   const subject=document.getElementById('sd-subject').value.trim();
+  const bodyText=document.getElementById('sd-body').value;
   if(!to||!subject){toast('Add a recipient and subject');return;}
   const btn=document.getElementById('sd-send-btn');
   btn.disabled=true;btn.textContent='Sending…';
-  const bodyHtml=renderEmailBodyHtml(mode,r);
-  const ok=await sendEmailViaBackend({to,subject,bodyHtml,customerId:r.customerId});
+  const bodyHtml=renderEmailBodyHtml(bodyText);
+  let attachment=null;
+  try{
+    const base64=buildDocPDF(mode,r,'base64');
+    attachment={filename:(mode==='quote'?'Quote-':'Invoice-')+docNumber(mode,r)+'.pdf',contentBase64:base64,mimeType:'application/pdf'};
+  }catch(e){console.warn('PDF generation failed — sending without attachment',e);}
+  const ok=await sendEmailViaBackend({to,subject,bodyText,bodyHtml,customerId:r.customerId,attachment,
+    quoteId:r.quoteId||null,invoiceId:r.invoiceId||null,type:mode==='quote'?'quote_sent':'invoice_sent'});
   btn.disabled=false;btn.textContent='Send email';
   if(!ok)return;
   closeModal('send-doc-overlay');
-  const num=docNumber(mode,r);
-  logActivity(r.customerId,r.jobId,mode==='quote'?'quote_sent':'invoice_sent',(mode==='quote'?'Quote ':'Invoice ')+num+' sent to '+r.name);
+  logActivity(r.customerId,r.jobId,mode==='quote'?'quote_sent':'invoice_sent',(mode==='quote'?'Quote sent — ':'Invoice sent — ')+money(r.total||0)+' to '+to);
 }
 
 function downloadBlob(blob,filename){
@@ -2157,7 +2171,7 @@ function hexToRgb(hex){
   return m?{r:parseInt(m[0],16),g:parseInt(m[1],16),b:parseInt(m[2],16)}:{r:19,g:138,b:114};
 }
 
-function buildDocPDF(mode,r){
+function buildDocPDF(mode,r,outputType){
   const jsPDF=window.jspdf.jsPDF;
   const doc=new jsPDF({unit:'mm',format:'a4'});
   const t=docTemplate;
@@ -2275,6 +2289,10 @@ function buildDocPDF(mode,r){
   doc.setFont('helvetica','italic');doc.setFontSize(8);doc.setTextColor(150,160,170);
   doc.text(t.footer||'',W/2,y,{align:'center'});
 
+  // datauristring is "data:application/pdf;...;base64,XXXX" — the prefix varies
+  // slightly by jsPDF version/options, so split on the base64 marker itself
+  // rather than matching an exact prefix.
+  if(outputType==='base64')return doc.output('datauristring').split(';base64,').pop();
   return doc.output('blob');
 }
 
@@ -2374,7 +2392,7 @@ function tplEmailSection(type){
   const t=emailTemplates[type]||EMAIL_TEMPLATE_DEFAULTS[type];
   const isQuote=type==='quote';
   return `<div class="panel" style="margin-top:16px">
-    <h4>${isQuote?'Quote':'Invoice'} email</h4>
+    <div style="display:flex;justify-content:space-between;align-items:center"><h4>${isQuote?'Quote':'Invoice'} email</h4><button class="btn ghost sm" onclick="restoreEmailTemplateDefaults('${type}')">Restore defaults</button></div>
     <div class="field"><label>Subject</label><input id="tpl-${type}-subject" value="${(t.subject||'').replace(/"/g,'&quot;')}"></div>
     <div class="field"><label>Greeting</label><input id="tpl-${type}-greeting" value="${(t.greeting||'').replace(/"/g,'&quot;')}"></div>
     <div class="field"><label>Body</label><textarea id="tpl-${type}-body" rows="3">${t.body||''}</textarea></div>
@@ -2382,6 +2400,18 @@ function tplEmailSection(type){
       :`<div class="field"><label>Payment instructions</label><textarea id="tpl-invoice-payment" rows="2">${t.payment_instructions||''}</textarea></div>`}
     <div class="field"><label>Signature</label><textarea id="tpl-${type}-signature" rows="2">${t.signature||''}</textarea></div>
   </div>`;
+}
+// Resets the on-screen fields to the built-in defaults — not saved until
+// "Save Templates" is clicked, same as any other edit in this form.
+function restoreEmailTemplateDefaults(type){
+  const d=EMAIL_TEMPLATE_DEFAULTS[type];
+  document.getElementById(`tpl-${type}-subject`).value=d.subject;
+  document.getElementById(`tpl-${type}-greeting`).value=d.greeting;
+  document.getElementById(`tpl-${type}-body`).value=d.body;
+  document.getElementById(`tpl-${type}-signature`).value=d.signature;
+  if(type==='quote')document.getElementById('tpl-quote-cta').value=d.cta;
+  else document.getElementById('tpl-invoice-payment').value=d.payment_instructions;
+  toast('Restored — click Save to keep it');
 }
 function openTemplateEditor(){
   const t=docTemplate;
@@ -2394,7 +2424,7 @@ function openTemplateEditor(){
     <div class="field"><label>Quote terms</label><textarea id="tpl-qterms" rows="3">${t.quoteTerms||''}</textarea></div>
     <div class="field"><label>Invoice / payment terms</label><textarea id="tpl-iterms" rows="3">${t.invoiceTerms||''}</textarea></div>
     <div class="field"><label>Footer line</label><input id="tpl-footer" value="${(t.footer||'').replace(/"/g,'&quot;')}"></div>
-    <p style="font-size:12px;color:var(--ink-faint);margin:18px 0 -4px">Below is the actual <b>email</b> sent when you click Send Quote / Send Invoice (separate from the PDF style above). Use <code>{{customer_name}}</code>, <code>{{business_name}}</code>, <code>{{quote_total}}</code>, <code>{{invoice_total}}</code>, <code>{{job_address}}</code>, <code>{{scheduled_date}}</code> anywhere in these fields.</p>
+    <p style="font-size:12px;color:var(--ink-faint);margin:18px 0 -4px">Below is the actual <b>email</b> sent when you click Send Quote / Send Invoice (separate from the PDF style above — the PDF itself is attached automatically, nothing to download). Use <code>{{customer_name}}</code>, <code>{{business_name}}</code>, <code>{{address}}</code>, <code>{{quote_total}}</code>, <code>{{invoice_total}}</code>, <code>{{job_date}}</code>, <code>{{services}}</code>, <code>{{payment_link}}</code> anywhere in these fields.</p>
     ${tplEmailSection('quote')}
     ${tplEmailSection('invoice')}
     ${tplChecklistSection()}
@@ -2406,16 +2436,25 @@ function tplLifecycleSection(){
   const labels={new_lead:'New lead',quote_reminder:'Quote reminder — auto, 3 days after no reply',job_booked:'Job booked',day_before_reminder:'Day-before reminder — needs a backend sweep, see Connections',job_completed:'Job completed',invoice_overdue:'Invoice overdue — needs a backend sweep, see Connections',review_request:'Review request — after payment'};
   return `<div class="panel" style="margin-top:16px">
     <h4>Automated emails</h4>
-    <p style="font-size:12px;color:var(--ink-faint);margin:-4px 0 10px">Short automatic notices sent alongside the main quote/invoice emails, when Gmail is connected and the customer has an email on file. Use <code>{{customer_name}}</code>, <code>{{business_name}}</code>, <code>{{quote_total}}</code>, <code>{{invoice_total}}</code>, <code>{{job_address}}</code>, <code>{{scheduled_date}}</code>.</p>
+    <p style="font-size:12px;color:var(--ink-faint);margin:-4px 0 10px">Short automatic notices sent alongside the main quote/invoice emails, when Gmail is connected and the customer has an email on file. Use <code>{{customer_name}}</code>, <code>{{business_name}}</code>, <code>{{address}}</code>, <code>{{quote_total}}</code>, <code>{{invoice_total}}</code>, <code>{{job_date}}</code>, <code>{{services}}</code>, <code>{{payment_link}}</code>.</p>
     ${Object.keys(LIFECYCLE_DEFAULTS).map(k=>{
       const t=lifecycleEmails[k]||LIFECYCLE_DEFAULTS[k];
       return `<div style="border-top:1px solid var(--line);padding:12px 0">
-        <label style="display:flex;align-items:center;gap:8px;font-weight:600;font-size:13.5px"><input type="checkbox" id="lc-${k}-enabled" ${t.enabled!==false?'checked':''}> ${labels[k]||k}</label>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <label style="display:flex;align-items:center;gap:8px;font-weight:600;font-size:13.5px"><input type="checkbox" id="lc-${k}-enabled" ${t.enabled!==false?'checked':''}> ${labels[k]||k}</label>
+          <button class="btn ghost sm" onclick="restoreLifecycleTemplateDefaults('${k}')">Restore defaults</button>
+        </div>
         <div class="field" style="margin-top:8px"><label>Subject</label><input id="lc-${k}-subject" value="${(t.subject||'').replace(/"/g,'&quot;')}"></div>
         <div class="field"><label>Body</label><textarea id="lc-${k}-body" rows="2">${t.body||''}</textarea></div>
       </div>`;
     }).join('')}
   </div>`;
+}
+function restoreLifecycleTemplateDefaults(key){
+  const d=LIFECYCLE_DEFAULTS[key];
+  document.getElementById(`lc-${key}-subject`).value=d.subject;
+  document.getElementById(`lc-${key}-body`).value=d.body;
+  toast('Restored — click Save to keep it');
 }
 function tplChecklistSection(){
   const opts=[['','Default — any service without its own checklist'],...Object.entries(SERVICES).map(([k,v])=>[k,v.label])];
@@ -3114,12 +3153,12 @@ async function sendReply(){
   document.getElementById('ib-reply-text').value='';
   renderInbox();
 }
-async function sendEmailViaBackend({to,subject,bodyText,bodyHtml,threadId,customerId}){
+async function sendEmailViaBackend({to,subject,bodyText,bodyHtml,threadId,customerId,attachment,quoteId,invoiceId,type}){
   const url=backendUrl();
   const {data:{session}}=await sb.auth.getSession();
   if(!url||!session||!emailAccount){toast('Connect Gmail first');return false;}
   try{
-    const res=await fetch(`${url}/api/email/send`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.access_token},body:JSON.stringify({to,subject,bodyText,bodyHtml,threadId,customerId})});
+    const res=await fetch(`${url}/api/email/send`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.access_token},body:JSON.stringify({to,subject,bodyText,bodyHtml,threadId,customerId,attachment,quoteId,invoiceId,type})});
     const j=await res.json();
     if(!res.ok){toast(j.error||'Could not send email');return false;}
     toast('Email sent ✓');

@@ -352,17 +352,23 @@ app.post('/api/email/disconnect', requireBusiness, async (req, res) => {
 })
 
 app.post('/api/email/send', requireBusiness, async (req, res) => {
+  // attachment: {filename, contentBase64, mimeType} — the client generates the
+  // PDF itself (jsPDF, same renderer the old download button used) and hands
+  // it over base64-encoded so nothing needs to touch the user's downloads
+  // folder. quoteId/invoiceId/type are optional — set them to also record this
+  // send in email_logs (the structured "quote/invoice sent" audit trail,
+  // distinct from the `emails` table which mirrors the whole Gmail thread).
+  const { to, subject, bodyText, bodyHtml, customerId, threadId, inReplyTo, references, attachment, quoteId, invoiceId, type } = req.body || {}
+  if (!to || !subject) return res.status(400).json({ error: 'Missing to/subject' })
+  let custId = customerId || null
   try {
-    const { to, subject, bodyText, bodyHtml, customerId, threadId, inReplyTo, references } = req.body || {}
-    if (!to || !subject) return res.status(400).json({ error: 'Missing to/subject' })
     const auth = await getValidAccessToken(req.businessId, req.userId, 'gmail')
     if (!auth) return res.status(400).json({ error: 'Connect your Gmail account first (Connections)' })
 
     const sent = await gmail.sendMessage(auth.accessToken, {
-      from: auth.account.email_address, to, subject, bodyText, bodyHtml, threadId, inReplyTo, references
+      from: auth.account.email_address, to, subject, bodyText, bodyHtml, threadId, inReplyTo, references, attachment
     })
 
-    let custId = customerId || null
     if (!custId) {
       const { data: cust } = await authClient.from('customers').select('id')
         .eq('business_id', req.businessId).ilike('email', escLike(to)).maybeSingle()
@@ -380,9 +386,21 @@ app.post('/api/email/send', requireBusiness, async (req, res) => {
         summary: 'Email sent: ' + subject, created_by: req.userId
       })
     }
+    if (type) {
+      await authClient.from('email_logs').insert({
+        business_id: req.businessId, customer_id: custId, quote_id: quoteId || null, invoice_id: invoiceId || null,
+        type, recipient: to, subject, body: bodyText || bodyHtml || null, sent_at: new Date().toISOString(), status: 'sent'
+      })
+    }
     res.json({ ok: true, id: sent.id, threadId: sent.threadId })
   } catch (err) {
     console.error('POST /api/email/send', err)
+    if (type) {
+      await authClient.from('email_logs').insert({
+        business_id: req.businessId, customer_id: custId, quote_id: quoteId || null, invoice_id: invoiceId || null,
+        type, recipient: to, subject, body: bodyText || bodyHtml || null, sent_at: null, status: 'failed'
+      }).catch(() => {})
+    }
     res.status(500).json({ error: 'Failed to send email' })
   }
 })
