@@ -133,6 +133,7 @@
   .pill.completed{background:var(--m-dash-wash);color:var(--m-dash)}
   .pill.paid{background:var(--teal-wash);color:var(--teal)}
   .pill.bad{background:var(--coral-wash);color:var(--coral)}
+  .pill.cancelled{background:#f0f0f0;color:#6b6b6b}
 
   /* buttons — pill, restrained */
   .btn{display:inline-flex;align-items:center;gap:7px;justify-content:center;font-size:14px;font-weight:500;padding:11px 20px;border-radius:980px;transition:background .15s,border-color .15s,opacity .15s,transform .1s;letter-spacing:-.01em}
@@ -479,6 +480,8 @@
   .wx-alert:last-child{margin-bottom:0}
   .wx-alert.bad{background:#fbf0ec;border-color:#eccfc6}
   .wx-alert.warn{background:#fbf6ec;border-color:#ecdcc2}
+  .wx-alert.good{background:var(--teal-wash);border-color:#cde8df}
+  .wx-alert-btn{background:none;border:none;padding:0;cursor:pointer;text-align:left;width:100%}
   .wx-alert-ico{font-size:24px}
   .wx-alert-body{flex:1}
   .wx-alert-ttl{font-size:13.5px;font-weight:600}
@@ -841,17 +844,10 @@
       </div>
     </div>
     <div class="util">
-      <button onclick="openTeam()">Team</button>
-      <button onclick="openConnections()">Connections</button>
-      <button onclick="openImportWizard()">Import</button>
-      <button onclick="openTemplateEditor()">Templates</button>
-      <button onclick="exportData()">Backup</button>
-      <button onclick="document.getElementById('import-file').click()">Restore</button>
       <input type="file" id="import-file" accept=".json,application/json" style="display:none" onchange="importData(this)">
       <input type="file" id="photo-upload-input" accept="image/*" style="display:none" onchange="onPhotoChosen(this)">
       <input type="file" id="quote-attach-input" accept="image/*,application/pdf" style="display:none" onchange="onQuoteAttachChosen(this)">
-      <button onclick="resetAll()" title="Clear this device's local view (your saved data isn't affected)">Reset view</button>
-      <button onclick="handleLogout()">Log out</button>
+      <button onclick="openSettings()">⚙ Settings</button>
     </div>
   </header>
   <nav class="tabs" id="tabs">
@@ -940,6 +936,12 @@
   <div class="modal-foot" id="doc-preview-foot"></div>
 </div></div>
 
+<div class="overlay" id="settings-overlay"><div class="modal wide">
+  <div class="modal-head"><div><h3>Settings</h3><p>Everything about how your business runs in Turnkey.</p></div><button class="x" aria-label="Close" onclick="closeModal('settings-overlay')">×</button></div>
+  <div class="modal-body" id="settings-body"></div>
+  <div class="modal-foot"><button class="btn primary" onclick="closeModal('settings-overlay')">Done</button></div>
+</div></div>
+
 <div class="overlay" id="team-overlay"><div class="modal">
   <div class="modal-head"><div><h3>Team</h3><p>Staff, roles and invites for your business.</p></div><button class="x" aria-label="Close" onclick="closeModal('team-overlay')">×</button></div>
   <div class="modal-body" id="team-body"></div>
@@ -947,7 +949,7 @@
 </div></div>
 
 <div class="overlay" id="conn-overlay"><div class="modal">
-  <div class="modal-head"><div><h3>Connections</h3><p>What's live, what needs a key, and what needs a backend.</p></div><button class="x" aria-label="Close" onclick="closeModal('conn-overlay')">×</button></div>
+  <div class="modal-head"><div><h3>Connections</h3><p>Connect Gmail, Calendar and Stripe — everything else here works automatically.</p></div><button class="x" aria-label="Close" onclick="closeModal('conn-overlay')">×</button></div>
   <div class="modal-body" id="conn-body"></div>
   <div class="modal-foot"><button class="btn primary" onclick="closeModal('conn-overlay')">Done</button></div>
 </div></div>
@@ -1100,12 +1102,19 @@ const STAGES = [
   {key:'completed',label:'Completed',   short:'Done',      cls:'completed', dot:'#3a5e9c', tone:'#3a5e9c', wash:'#edf1f9'},
   {key:'paid',     label:'Paid',        short:'Paid',      cls:'paid',      dot:'#0f7d6b', tone:'#0f7d6b', wash:'#eaf6f3'}
 ];
-function stageObj(key){return STAGES.find(s=>s.key===key)||STAGES[0]}
+// Stages that exist but deliberately aren't columns on the Pipeline kanban
+// board (that grid is fixed at 7 columns) — still shown as ordinary badges
+// anywhere a job's status is displayed (job detail, customer profile, etc).
+const EXTRA_STAGES = [
+  {key:'cancelled',label:'Cancelled',short:'Cancelled',cls:'cancelled',dot:'#8a8a8a',tone:'#8a8a8a',wash:'#f0f0f0'}
+];
+function stageObj(key){return STAGES.find(s=>s.key===key)||EXTRA_STAGES.find(s=>s.key===key)||STAGES[0]}
 // Semantic groupings for the 7-stage flow
 function isWon(r){return ['won','scheduled','completed','paid'].includes(r.stage)}      // deal closed
 function isPaid(r){return r.stage==='paid'}                                              // cash in
 function isBooked(r){return r.stage==='scheduled'||r.stage==='completed'}                // has a day on the calendar
-function isJob(r){return r.stage!=='new'&&r.stage!=='quoted'&&r.stage!=='followup'}      // past the sales stages
+function isJob(r){return r.stage!=='new'&&r.stage!=='quoted'&&r.stage!=='followup'&&r.stage!=='cancelled'}      // past the sales stages, still an active job
+function isCancelled(r){return r.stage==='cancelled'}
 function isOpenSale(r){return r.stage==='new'||r.stage==='quoted'||r.stage==='followup'} // still selling
 // Days a quote can sit before Follow-Up auto-triggers (only if the client hasn't responded)
 const FOLLOWUP_DAYS = 3;
@@ -1673,7 +1682,7 @@ async function onQuoteAttachChosen(input){
   const file=input.files&&input.files[0];input.value='';
   if(!file)return;
   const r=records.find(x=>x.id===activeLeadId);if(!r)return;
-  if(!sb){toast('Supabase is not configured');return;}
+  if(!sb){toast('Something went wrong — try refreshing the page');return;}
   toast('Uploading…');
   await ensureRecordSynced(r);
   const row=await uploadAttachment(file,'quote_attachment',{jobId:r.jobId,customerId:r.customerId});
@@ -1756,7 +1765,7 @@ function renderQuoteMap(r){
       fetch('https://maps.googleapis.com/maps/api/geocode/json?address='+fullAddr+'&key='+encodeURIComponent(mapsKey))
         .then(res=>res.json()).then(j=>{
           const stage=document.getElementById('qmap-sat-stage'); if(!stage)return;
-          if(j.status!=='OK'){stage.innerHTML=`<span>Satellite unavailable — ${j.status==='REQUEST_DENIED'?'check the Maps API key':'address not found'}</span>`;return;}
+          if(j.status!=='OK'){stage.innerHTML=`<span>Satellite unavailable — ${j.status==='REQUEST_DENIED'?'check your satellite map setup':'address not found'}</span>`;return;}
           const loc=j.results&&j.results[0]?j.results[0].geometry.location:null;
           const center=loc?loc.lat+','+loc.lng:fullAddr;
           const url='https://maps.googleapis.com/maps/api/staticmap?center='+center+'&zoom=19&size=800x600&scale=2&maptype=satellite&key='+encodeURIComponent(mapsKey);
@@ -2474,7 +2483,7 @@ function renderChecklistEditorFor(key){
   if(sel)sel.value=key;
 }
 async function saveChecklistNow(){
-  if(!sb||!currentBusinessId){toast('Supabase is not configured');return;}
+  if(!sb||!currentBusinessId){toast('Something went wrong — try refreshing the page');return;}
   const key=document.getElementById('tpl-checklist-key').value;
   const steps=document.getElementById('tpl-checklist-steps').value.split('\n').map(s=>s.trim()).filter(Boolean).map(t=>({t,s:''}));
   if(!steps.length){toast('Add at least one step');return;}
@@ -2653,7 +2662,7 @@ function openDetail(id){
   const lastIdx=checklist.steps.length-1;
   const done=r.sop.filter(Boolean).length;
   const pct=checklist.steps.length?Math.round(done/checklist.steps.length*100):0;
-  const stageObj=STAGES.find(s=>s.key===r.stage);
+  const stageObj=STAGES.find(s=>s.key===r.stage)||EXTRA_STAGES.find(s=>s.key===r.stage);
   const allDone=lastIdx>=0&&r.sop.slice(0,lastIdx).every(Boolean)&&r.photoBefore&&r.photoAfter;
   const approved=lastIdx>=0&&r.sop[lastIdx];
   const svcRows=r.services.map(s=>{const svc=SERVICES[s.svc];const rt=s.roofType?' · '+ROOF_TYPES[s.roofType].label:'';return `<div class="kv"><span class="k">${svc.label} · ${s.qty}${svc.unit}${rt}</span><span class="v">${money(lineSubtotal(s))}</span></div>`}).join('')||'<div class="kv"><span class="k">No services yet</span><span class="v">—</span></div>';
@@ -2689,7 +2698,7 @@ function openDetail(id){
 
   document.getElementById('view-detail').innerHTML=`
     <a class="back-link" onclick="render();switchView('pipeline')">← Back to pipeline</a>
-    <div class="view-head"><div><h2>${r.name}</h2><p>${r.address||'—'}${r.suburb?', '+r.suburb:''} · ${r.phone||'no phone'}</p></div><div style="display:flex;align-items:center;gap:10px"><button class="btn ghost sm" onclick="openCustomerProfile(${id})">👤 Full profile</button><span class="pill ${stageObj.cls}">${stageObj.label}</span></div></div>
+    <div class="view-head"><div><h2>${r.name}</h2><p>${r.address||'—'}${r.suburb?', '+r.suburb:''} · ${r.phone||'no phone'}</p></div><div style="display:flex;align-items:center;gap:10px"><button class="btn ghost sm" onclick="openCustomerProfile(${id})">👤 Full profile</button><span class="pill ${stageObj.cls}">${stageObj.label}</span>${r.stage!=='cancelled'&&r.stage!=='paid'?`<button class="btn ghost sm" onclick="cancelJob(${id})" title="Mark this job as cancelled">Cancel</button>`:''}</div></div>
     <div class="detail-grid">
       <div>
         <div class="panel"><h4>Contact <span class="eng-badge">Client</span></h4>
@@ -2754,7 +2763,7 @@ async function onPhotoChosen(input){
   if(!file||!pendingPhotoTarget)return;
   const {id,slot,kind}=pendingPhotoTarget;pendingPhotoTarget=null;
   const r=records.find(x=>x.id===id);if(!r)return;
-  if(!sb){toast('Supabase is not configured');return;}
+  if(!sb){toast('Something went wrong — try refreshing the page');return;}
   toast('Uploading photo…');
   await ensureRecordSynced(r);
   const row=await uploadAttachment(file,kind,{jobId:r.jobId,customerId:r.customerId});
@@ -2920,9 +2929,13 @@ function render(){
 function cardHtml(r){
   const tags=r.services.map(s=>`<span class="tag">${SERVICES[s.svc].label.split(' ')[0]}</span>`).join('');
   const flag=cardFlag(r);
+  // "Invoiced" is a secondary badge, not a Pipeline stage — the invoice has
+  // its own payment status (draft/sent/viewed/approved/paid/overdue)
+  // independent of the job's own stage, shown alongside it here.
+  const invoiceBadge=(r.stage!=='paid'&&r.paymentStatus==='sent')?`<span class="pill" style="margin-left:6px">Invoiced</span>`:'';
   return `<button class="card${flag?' has-flag flag-'+flag.tone:''}" onclick="openDetail(${r.id})">
     ${flag?`<div class="card-flag ${flag.tone}">${flag.label}</div>`:''}
-    <div class="name">${r.name}</div>
+    <div class="name">${r.name}${invoiceBadge}</div>
     <div class="meta">${r.suburb||r.address||'—'}</div>
     ${tags?`<div class="svc-tags">${tags}</div>`:''}
     <div class="foot"><span class="price">${r.total?money(r.total):'No quote'}</span><span class="meta">${r.source||''}</span></div>
@@ -3053,7 +3066,7 @@ async function saveCustomerContact(){
   };
   if(!payload.name){toast('Name is required');return;}
   const {error}=await sb.from('customers').update(payload).eq('id',ctx.customerId);
-  if(error){console.error('Save customer failed',error);toast('Could not save — check console');return;}
+  if(error){console.error('Save customer failed',error);toast('Could not save — try again');return;}
   records.filter(r=>r.customerId===ctx.customerId).forEach(r=>Object.assign(r,payload));
   saveState();render();renderAll();renderCustomerProfile();
   toast('Contact details saved');
@@ -3062,7 +3075,7 @@ async function saveCustomerNotes(){
   const ctx=customerProfileCtx;if(!ctx||!sb)return;
   const notes=document.getElementById('cp-notes').value;
   const {error}=await sb.from('customers').update({notes}).eq('id',ctx.customerId);
-  if(error){console.error('Save notes failed',error);toast('Could not save — check console');return;}
+  if(error){console.error('Save notes failed',error);toast('Could not save — try again');return;}
   records.filter(r=>r.customerId===ctx.customerId).forEach(r=>r.notes=notes);
   saveState();
   logActivity(ctx.customerId,null,'note','Note updated');
@@ -3097,7 +3110,7 @@ async function renderInbox(){
   zone.innerHTML=`<div class="view-head"><div><h2>Inbox</h2><p>Connected as ${emailAccount.email_address}</p></div><button class="btn accent sm" onclick="openComposeModal()">✎ Compose</button></div>
     <div id="inbox-body"><div class="empty-state"><div class="sm">Loading…</div></div></div>`;
   const {data,error}=await sb.from('emails').select('*').order('sent_at',{ascending:false}).limit(200);
-  if(error){document.getElementById('inbox-body').innerHTML='<div class="empty-state"><div class="sm">Could not load emails — check console.</div></div>';console.error('Load emails failed',error);return;}
+  if(error){document.getElementById('inbox-body').innerHTML='<div class="empty-state"><div class="sm">Could not load emails — try again, or contact support if it keeps happening.</div></div>';console.error('Load emails failed',error);return;}
   const byThread={};
   (data||[]).forEach(e=>{const key=e.thread_id||e.id;if(!byThread[key])byThread[key]=[];byThread[key].push(e);});
   inboxThreads=Object.values(byThread).map(msgs=>msgs.sort((a,b)=>new Date(a.sent_at)-new Date(b.sent_at)))
@@ -3163,7 +3176,7 @@ async function sendEmailViaBackend({to,subject,bodyText,bodyHtml,threadId,custom
     if(!res.ok){toast(j.error||'Could not send email');return false;}
     toast('Email sent ✓');
     return true;
-  }catch(e){console.error('Send failed',e);toast('Could not send — check console');return false;}
+  }catch(e){console.error('Send failed',e);toast('Could not send — try again');return false;}
 }
 function openComposeModal(ctx){
   ctx=ctx||{};
@@ -3244,7 +3257,7 @@ function renderOpsMap(stops,mapsKey){
   const url=`https://maps.googleapis.com/maps/api/staticmap?size=640x480&scale=2&maptype=roadmap&${markers}&key=${encodeURIComponent(mapsKey)}`;
   const img=new Image();
   img.onload=()=>{box.style.cssText='background-image:url("'+url+'");background-size:cover;background-position:center';box.innerHTML='';};
-  img.onerror=()=>{box.innerHTML='<div class="empty-state" style="padding:20px"><div class="sm">Map unavailable — check your Maps API key in Connections.</div></div>';};
+  img.onerror=()=>{box.innerHTML='<div class="empty-state" style="padding:20px"><div class="sm">Map unavailable — check your satellite map setup in Settings.</div></div>';};
   img.src=url;
 }
 
@@ -3284,6 +3297,31 @@ function setRoofRate(rk,val){const base=parseFloat(val)/ROOF_TYPES[rk].mult;SERV
 function setChemPrice(ck,val){CHEMICALS[ck].perL=parseFloat(val)||0;saveState();renderPricing();toast(CHEMICALS[ck].label.split(' (')[0]+' price updated')}
 
 /* ---------- D. DASHBOARD ---------- */
+// "Today's priorities" — the stuff an owner actually needs to act on, ranked
+// by urgency (bad > warn > good), pulled from data that's already loaded.
+// Nothing here is fabricated: every count traces back to real records.
+function dashboardAlerts(){
+  const alerts=[];
+  const followupCount=records.filter(r=>r.stage==='followup').length;
+  if(followupCount)alerts.push({icon:'📝',tone:'warn',text:`${followupCount} quote${followupCount!==1?'s':''} need${followupCount===1?'s':''} following up.`,onclick:"switchView('pipeline')"});
+  const overdueCount=records.filter(r=>invoiceDisplayStatus(r)==='overdue').length;
+  if(overdueCount)alerts.push({icon:'🧾',tone:'bad',text:`${overdueCount} invoice${overdueCount!==1?'s':''} overdue.`,onclick:"switchView('pipeline')"});
+  weatherAlerts().slice(0,2).forEach(a=>{
+    alerts.push({icon:'🌧️',tone:a.rating.rating==='poor'?'bad':'warn',
+      text:`${isoToLabel(a.r.scheduledDateISO)} — weather may affect ${a.r.name}'s job.`,onclick:"switchView('calendar')"});
+  });
+  const todayIso=todayISO(), weekAhead=addDaysISO(todayIso,7);
+  staff.filter(u=>u.role==='technician').forEach(t=>{
+    const hasWork=records.some(r=>r.assignedStaffId===t.id&&r.scheduledDateISO&&r.scheduledDateISO>=todayIso&&r.scheduledDateISO<=weekAhead);
+    if(!hasWork)alerts.push({icon:'👷',tone:'warn',text:`${t.name||t.email||'One technician'} has no work scheduled this week.`,onclick:"switchView('ops')"});
+  });
+  const wonUnscheduled=records.filter(r=>r.stage==='won').length;
+  if(wonUnscheduled)alerts.push({icon:'📅',tone:'warn',text:`${wonUnscheduled} won job${wonUnscheduled!==1?'s':''} still need${wonUnscheduled===1?'s':''} a date booked.`,onclick:"switchView('pipeline')"});
+  const todayCount=records.filter(r=>isBooked(r)&&r.scheduledDateISO===todayIso).length;
+  if(todayCount)alerts.push({icon:'✅',tone:'good',text:`${todayCount} job${todayCount!==1?'s':''} scheduled today.`,onclick:"switchView('ops')"});
+  const tone=(a)=>({bad:0,warn:1,good:2})[a.tone];
+  return alerts.sort((a,b)=>tone(a)-tone(b));
+}
 function renderDashboard(){
   const won=records.filter(isWon);
   const leadsTotal=records.length;
@@ -3303,6 +3341,7 @@ function renderDashboard(){
   const byTech=techs.map(t=>({t,v:won.filter(r=>r.tech===t).reduce((s,r)=>s+r.total,0)}));
   const maxV=Math.max(1,...byTech.map(b=>b.v));
   const metric=(label,val,note,pct,color)=>`<div class="metric"><div class="m-label">${label}</div><div class="m-val">${val}</div>${pct!=null?`<div class="m-bar"><div style="width:${pct}%;background:${color}"></div></div>`:''}<div class="m-note">${note}</div></div>`;
+  const alerts=dashboardAlerts();
 
   // ===== Revenue: monthly/yearly (paid work only — money actually collected), outstanding invoices =====
   const paidJobs=records.filter(isPaid);
@@ -3337,6 +3376,12 @@ function renderDashboard(){
 
   document.getElementById('view-dashboard').innerHTML=`
     <div class="view-head"><div><h2>Dashboard</h2><p>The health of the business at a glance — the numbers you normally only find out at tax time, live instead.</p></div><span class="eng-badge">Dashboard</span></div>
+    <div class="panel" style="margin-bottom:18px"><h4>Today's priorities</h4>
+      ${alerts.length?alerts.map(a=>`<button class="wx-alert-btn" onclick="${a.onclick}"><div class="wx-alert ${a.tone}">
+          <div class="wx-alert-ico">${a.icon}</div>
+          <div class="wx-alert-body"><div class="wx-alert-ttl">${a.text}</div></div>
+        </div></button>`).join(''):'<div class="empty-state" style="padding:20px"><div class="sm">Nothing needs your attention right now — nice.</div></div>'}
+    </div>
     <div class="dash-grid">
       ${metric('Customer acquisition cost (CAC)','No data yet','Connect a marketing/ad integration to calculate this',null)}
       ${metric('Close rate',closeRate+'%','Leads that became approved jobs',closeRate,'#0f7d6b')}
@@ -3376,7 +3421,7 @@ function renderDashboard(){
       <p style="font-size:12px;color:var(--ink-faint);margin-top:12px">Cost per lead needs ad-spend data — connect a marketing integration to calculate this.</p>
     </div>
     <div class="panel" style="margin-top:16px"><h4>Ask TurnKey</h4>
-      <p style="font-size:12px;color:var(--ink-faint);margin:-4px 0 10px">Ask about your own data — "what should I schedule this week", "who owes money", "which customers need follow up". Needs an AI assistant key configured on the backend (Connections).</p>
+      <p style="font-size:12px;color:var(--ink-faint);margin:-4px 0 10px">Ask about your own data — "what should I schedule this week", "who owes money", "which customers need follow up". Not turned on for your account yet.</p>
       <div class="conn-keyrow"><input id="ai-question" placeholder="Who owes money?" onkeydown="if(event.key==='Enter')askAi()"><button class="btn accent sm" onclick="askAi()">Ask</button></div>
       <div id="ai-answer" style="margin-top:10px;font-size:13.5px;color:var(--ink);white-space:pre-wrap"></div>
     </div>`;
@@ -3404,13 +3449,13 @@ async function askAi(){
   if(out)out.textContent='Thinking…';
   const url=backendUrl();
   const {data:{session}}=await sb.auth.getSession();
-  if(!url||!session){if(out)out.textContent='Backend not configured.';return;}
+  if(!url||!session){if(out)out.textContent='Something\u2019s not set up right \u2014 contact support.';return;}
   try{
     const res=await fetch(`${url}/api/ai/ask`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.access_token},body:JSON.stringify({question:q,businessSummary:buildAiBusinessSummary()})});
     const j=await res.json();
     if(!res.ok){if(out)out.textContent=j.error||'Could not get an answer';return;}
     if(out)out.textContent=j.answer;
-  }catch(e){console.error('AI ask failed',e);if(out)out.textContent='Could not reach the backend — check console';}
+  }catch(e){console.error('AI ask failed',e);if(out)out.textContent='Couldn\u2019t connect \u2014 check your internet connection and try again';}
 }
 
 
@@ -3508,6 +3553,17 @@ function renderJobsFlow(){
 // workflow transition helpers
 function markWon(id){const r=records.find(x=>x.id===id);if(!r.services.length){toast('Build a quote first');openQuoteModal(id);return;}r.stage='won';r.clientResponded=true;render();renderAll();openSchedule(id);}
 function markPaid(id,method){const r=records.find(x=>x.id===id);r.stage='paid';r.paidAt=Date.now();r.paymentStatus='paid';r.paymentMethod=method||r.paymentMethod||'Not specified';render();renderAll();if(document.getElementById('view-jobsflow').classList.contains('active'))renderJobsFlow();toast(`${r.name} marked paid ✓`);sendLifecycleEmail(r,'review_request');}
+// Cancelled jobs leave the active Pipeline board (it isn't one of STAGES'
+// board columns) but keep their full history — reachable from the customer
+// profile and dashboard the same as any other job, just visually distinct.
+function cancelJob(id){
+  const r=records.find(x=>x.id===id);if(!r)return;
+  if(!confirm('Mark '+r.name+"'s job as cancelled? It'll come off the active pipeline but stay in their history."))return;
+  r.stage='cancelled';r.cancelledAt=Date.now();
+  render();renderAll();
+  toast(r.name+' marked cancelled');
+  logActivity(r.customerId,r.jobId,'status_change',r.name+"'s job was cancelled");
+}
 function setPaymentMethod(id,method){const r=records.find(x=>x.id===id);if(!r)return;r.paymentMethod=method;saveState();scheduleSupabaseSync();}
 // Stripe Payment Links — no-op with a clear message until STRIPE_SECRET_KEY
 // is configured on the backend (see /api/payments/create-link).
@@ -3515,7 +3571,7 @@ async function sendPaymentLink(id){
   const r=records.find(x=>x.id===id);if(!r)return;
   const url=backendUrl();
   const {data:{session}}=await sb.auth.getSession();
-  if(!url||!session){toast('Backend not configured');return;}
+  if(!url||!session){toast('Something went wrong \u2014 try again');return;}
   await ensureRecordSynced(r);
   toast('Creating payment link…');
   try{
@@ -3526,7 +3582,7 @@ async function sendPaymentLink(id){
     r.paymentLinkUrl=j.url;renderCustomerProfile();
     navigator.clipboard?.writeText(j.url).catch(()=>{});
     toast('Payment link created — copied to clipboard ✓');
-  }catch(e){console.error('Payment link failed',e);toast('Could not reach the backend — check console');}
+  }catch(e){console.error('Payment link failed',e);toast('Couldn’t connect — check your internet connection and try again');}
 }
 // Honest overdue check: only meaningful once an invoice's been sent with a due date.
 function invoiceDisplayStatus(r){
@@ -3846,19 +3902,19 @@ try{window.addEventListener('focus',pollBackendLeads);}catch(e){}
 setInterval(syncEmail,90000);
 try{window.addEventListener('focus',syncEmail);}catch(e){}
 
-/* ===== CONNECTIONS: live status of each integration ===== */
-function openConnections(){
-  const mapsKey=turnkeyMapsKey();
-  const beUrl=backendUrl(), beKey=backendKey();
-  const wxWhen=weatherFetchedAt?new Date(weatherFetchedAt).toLocaleTimeString('en-NZ',{hour:'numeric',minute:'2-digit'}):null;
+/* ===== SETTINGS: one home for everything about how the business runs —
+   business profile, booking page, connections, team, templates, imports,
+   and account/data actions. Replaces the old flat row of header buttons. ===== */
+function openSettings(){
   const bookingLink=currentBusinessId?`${location.origin}/booking.html?biz=${currentBusinessId}`:'';
   const embedCode=bookingLink?`<iframe\n  src="${location.origin}/booking.html?biz=${currentBusinessId}&embed=1"\n  width="100%"\n  height="900"\n  frameborder="0">\n</iframe>`:'';
   const canEditBusiness=currentUserRole==='owner'||currentUserRole==='manager';
   const biz=currentBusinessProfile||{};
-  document.getElementById('conn-body').innerHTML=`
+  const mapsKey=turnkeyMapsKey();
+  document.getElementById('settings-body').innerHTML=`
     <div class="conn-card ${biz.name?'live':''}">
       <div class="conn-top"><span class="conn-name">🏢 Business profile</span><span class="conn-badge ${biz.name?'on':'off'}">${biz.name?'● SET':'not set yet'}</span></div>
-      <p>Shown to your customers on your public booking page — replaces the generic placeholder with your real name, logo and contact details.</p>
+      <p>Shown to your customers on your booking page and in every quote/invoice — your name, logo and contact details.</p>
       <div style="display:flex;gap:14px;align-items:center;margin-bottom:10px">
         <div style="width:56px;height:56px;border-radius:12px;overflow:hidden;background:var(--surface-2);display:flex;align-items:center;justify-content:center;flex-shrink:0">
           ${biz.logo_url?`<img src="${biz.logo_url}" alt="Your business logo" style="width:100%;height:100%;object-fit:cover">`:`<span style="font-size:22px">🏢</span>`}
@@ -3870,65 +3926,84 @@ function openConnections(){
       <div class="field"><label>Phone</label><input id="biz-phone-input" placeholder="e.g. 021 000 0000" value="${(biz.phone||'').replace(/"/g,'&quot;')}"></div>
       <div class="field"><label>Email</label><input id="biz-email-input" type="email" placeholder="e.g. hello@yourbusiness.co.nz" value="${(biz.email||'').replace(/"/g,'&quot;')}"></div>
       <div class="field"><label>Location / region</label><input id="biz-region-input" placeholder="e.g. Auckland, New Zealand" value="${(biz.region||'').replace(/"/g,'&quot;')}"></div>
-      <p style="font-size:11px;color:var(--ink-faint);margin:4px 0 10px">Also drives weather and the property map's geocoding — set this to where you actually operate.</p>
+      <p style="font-size:11px;color:var(--ink-faint);margin:4px 0 10px">Also drives weather and satellite maps — set this to where you actually operate.</p>
       <button class="btn primary sm" onclick="saveBusinessProfile()">Save business profile</button>
       `:`<p style="font-size:12px;color:var(--ink-faint)">Only an owner or manager can edit this.</p>`}
     </div>
     <div class="conn-card ${bookingLink?'live':''}">
-      <div class="conn-top"><span class="conn-name">🔗 Your booking link</span><span class="conn-badge ${bookingLink?'on':'off'}">${bookingLink?'● READY TO SHARE':'sign in first'}</span></div>
-      <p>Share this with customers — no login needed on their end. Every quote request they submit lands straight in your Pipeline/Leads.</p>
-      ${bookingLink?`<div class="conn-keyrow"><input id="conn-booking-link" readonly value="${bookingLink}" onclick="this.select()"><button class="btn accent sm" onclick="copyBookingLink()" id="copy-booking-btn">Copy link</button></div>`:''}
+      <div class="conn-top"><span class="conn-name">🔗 Booking page</span><span class="conn-badge ${bookingLink?'on':'off'}">${bookingLink?'● READY TO SHARE':'sign in first'}</span></div>
+      <p>Share this with customers — every quote request they submit lands straight in your Pipeline.</p>
+      ${bookingLink?`<div class="conn-keyrow"><input id="conn-booking-link" readonly value="${bookingLink}" onclick="this.select()"><button class="btn accent sm" onclick="copyBookingLink()" id="copy-booking-btn">Copy link</button></div>
+      <p style="font-size:12px;color:var(--ink-faint);margin-top:12px">Want it directly on your own website instead? Copy the code below into Wix, Squarespace or WordPress.</p>
+      <textarea id="conn-embed-code" readonly onclick="this.select()" style="width:100%;min-height:80px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;padding:10px 12px;border:1px solid var(--line);border-radius:var(--radius-sm);resize:vertical;color:var(--ink)">${embedCode}</textarea>
+      <button class="btn accent sm" style="margin-top:8px" onclick="copyEmbedCode()" id="copy-embed-btn">Copy embed code</button>
+      <p style="font-size:11px;color:var(--ink-faint);margin-top:10px"><b>Wix:</b> Add Elements → Embed → Embed a Widget → paste the code → Publish. <b>Squarespace:</b> Add a Code Block, paste the code. <b>WordPress:</b> Add a Custom HTML block, paste the code.</p>`:''}
     </div>
-    <div class="conn-card ${bookingLink?'live':''}">
-      <div class="conn-top"><span class="conn-name">🧩 Embed on your website</span><span class="conn-badge ${bookingLink?'on':'off'}">${bookingLink?'● READY':'sign in first'}</span></div>
-      <p>Paste this into Wix (or any site builder) to show the quote form directly on your own page — the direct link above still works too, this doesn't replace it.</p>
-      ${bookingLink?`
-      <textarea id="conn-embed-code" readonly onclick="this.select()" style="width:100%;min-height:92px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;padding:10px 12px;border:1px solid var(--line);border-radius:var(--radius-sm);resize:vertical;color:var(--ink)">${embedCode}</textarea>
-      <button class="btn accent sm" style="margin-top:8px" onclick="copyEmbedCode()" id="copy-embed-btn">Copy code</button>
-      <p style="font-size:12px;color:var(--ink-faint);margin-top:10px"><b>In Wix:</b> Add Elements → Embed → Embed a Widget (or "HTML iframe") → paste the code above → Publish. Custom-code embeds need a Wix plan that supports them.</p>
-      `:''}
-    </div>
-    <div class="conn-card ${backendOnline?'live':''}">
-      <div class="conn-top"><span class="conn-name">\ud83e\udde0 Backend \u2014 access code (optional)</span><span class="conn-badge ${backendOnline?'on':(beKey?'off':'')}">${backendOnline?'\u25cf LIVE':(beKey?'saved \u2014 checking\u2026':'lead inbox already live')}</span></div>
-      <p><b>Lead inbox:</b> already automatic \u2014 your Supabase login is all that's needed, the booking page delivers quote requests here 24/7 and the app collects them every 30 seconds. <b>This access code is only for:</b> cross-device backup sync (state) and Gmail sending \u2014 optional. Paste it below only if you want those.</p>
-      <div class="conn-keyrow"><input id="conn-be-url" placeholder="https://turnkey-backend-xxxx.onrender.com" value="${beUrl.replace(/"/g,'&quot;')}"></div>
-      <div class="conn-keyrow"><input id="conn-be-key" type="password" placeholder="your SYNC_KEY access code" value="${beKey.replace(/"/g,'&quot;')}"><button class="btn accent sm" onclick="connectBackend()">${beKey?'Update':'Connect'}</button></div>
-    </div>
-    <div class="conn-card ${weatherLive?'live':''}">
-      <div class="conn-top"><span class="conn-name">🌤️ Weather — Open-Meteo</span><span class="conn-badge ${weatherLive?'on':'off'}">${weatherLive?'● LIVE':'sample data'}</span></div>
-      <p>${weatherLive?`Real 7-day forecast for your area, fetched ${wxWhen}. Free public API, no key, no account. Drives the calendar, scheduling and weather alerts.`:`Loads automatically when online — free public API, nothing to set up.`}</p>
-      ${!weatherLive?'<button class="btn ghost sm" onclick="fetchLiveWeather()">Try now</button>':''}
-    </div>
-    <div class="conn-card ${mapsKey?'live':''}">
-      <div class="conn-top"><span class="conn-name">🛰️ Satellite maps — Google Maps</span><span class="conn-badge ${mapsKey?'on':'off'}">${mapsKey?'● KEY ACTIVE':'needs a key'}</span></div>
-      <p>Set it once in <code>config.js</code> (<code>mapsKey</code>) to configure it for every device automatically, or paste one here just for this device. Switches the property map from the stylised/street view to <b>real satellite imagery</b>, with real-world scale for accurate m². Get one at console.cloud.google.com (restrict it by HTTP referrer to your domain).</p>
-      <div class="conn-keyrow">
-        <input id="conn-maps-key" placeholder="AIza..." value="${mapsKey.replace(/"/g,'&quot;')}">
-        <button class="btn accent sm" onclick="saveMapsKey()">${mapsKey?'Update':'Activate'}</button>
+    <div class="conn-card">
+      <div class="conn-top"><span class="conn-name">🧰 Your tools</span></div>
+      <p>Everything else about how your business runs in Turnkey.</p>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">
+        <button class="btn ghost sm" onclick="closeModal('settings-overlay');openConnections()">Connections</button>
+        <button class="btn ghost sm" onclick="closeModal('settings-overlay');openTeam()">Team</button>
+        <button class="btn ghost sm" onclick="closeModal('settings-overlay');openTemplateEditor()">Email &amp; document templates</button>
+        <button class="btn ghost sm" onclick="closeModal('settings-overlay');openImportWizard()">Import customers</button>
       </div>
     </div>
+    <div class="conn-card">
+      <div class="conn-top"><span class="conn-name">💾 Backup &amp; data</span></div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">
+        <button class="btn ghost sm" onclick="exportData()">Download a backup</button>
+        <button class="btn ghost sm" onclick="document.getElementById('import-file').click()">Restore from a backup</button>
+        <button class="btn ghost sm" onclick="resetAll()" title="Clear this device's local view — your saved data isn't affected">Reset this device's view</button>
+      </div>
+    </div>
+    <div class="conn-card">
+      <div class="conn-top"><span class="conn-name">👤 Account</span></div>
+      <button class="btn ghost sm" style="margin-top:8px" onclick="handleLogout()">Log out</button>
+    </div>
+    <details style="margin-top:16px">
+      <summary style="cursor:pointer;font-size:12.5px;color:var(--ink-faint)">Advanced</summary>
+      <div class="conn-card ${mapsKey?'live':''}" style="margin-top:10px">
+        <div class="conn-top"><span class="conn-name">🛰️ Satellite map imagery</span><span class="conn-badge ${mapsKey?'on':'off'}">${mapsKey?'● ACTIVE':'not set'}</span></div>
+        <p>Shows real satellite photos of a property when building a quote, with accurate scale. Contact support if you'd like this turned on for your account.</p>
+        <div class="conn-keyrow">
+          <input id="conn-maps-key" placeholder="Paste access code" value="${mapsKey.replace(/"/g,'&quot;')}">
+          <button class="btn accent sm" onclick="saveMapsKey()">${mapsKey?'Update':'Activate'}</button>
+        </div>
+      </div>
+    </details>`;
+  openModal('settings-overlay');
+}
+
+/* ===== CONNECTIONS: Gmail, Calendar, Stripe — the only three things a
+   business ever needs to actively connect. Everything else works
+   automatically. ===== */
+function openConnections(){
+  const hasGoogleCal=calendarConnections.some(c=>c.provider==='google');
+  const icalConns=calendarConnections.filter(c=>c.provider==='ical');
+  document.getElementById('conn-body').innerHTML=`
     <div class="conn-card ${emailAccount?'live':''}">
       <div class="conn-top"><span class="conn-name">✉️ Gmail — inbox &amp; sending</span><span class="conn-badge ${emailAccount?'on':'off'}">${emailAccount?'● CONNECTED':'not connected'}</span></div>
       ${emailAccount?
-        `<p><b>Connected as ${emailAccount.email_address}.</b> Emails to/from your customers show up in their profile and the Inbox tab. Each teammate connects their own account — everyone stays isolated to your business.</p><button class="btn ghost sm" onclick="disconnectGmailAccount()">Disconnect</button>`:
-        `<p>Connect your own Gmail to send, receive, reply and forward customer emails right inside TurnKey — they're automatically linked to the right customer profile. Each teammate connects separately.</p><button class="btn accent sm" onclick="connectGmailOAuth()">Connect Gmail</button>`}
+        `<p><b>Connected as ${emailAccount.email_address}.</b> Emails to/from your customers show up in their profile and the Inbox tab. Each teammate connects their own account.</p><button class="btn ghost sm" onclick="disconnectGmailAccount()">Disconnect</button>`:
+        `<p>Connect Gmail to send and receive customer emails right inside Turnkey — quotes, invoices, replies, all automatically linked to the right customer.</p><button class="btn accent sm" onclick="connectGmailOAuth()">Connect Gmail</button>`}
     </div>
-    <div class="conn-card ${calendarConnections.some(c=>c.provider==='google')?'live':''}">
-      <div class="conn-top"><span class="conn-name">📅 Google Calendar</span><span class="conn-badge ${calendarConnections.some(c=>c.provider==='google')?'on':'off'}">${calendarConnections.some(c=>c.provider==='google')?'● CONNECTED':'not connected'}</span></div>
-      ${!googleCalendarConfigured?
-        `<p>Not configured on this server yet — set <code>GOOGLE_CALENDAR_CLIENT_ID</code>/<code>GOOGLE_CALENDAR_CLIENT_SECRET</code> in the backend environment (or it reuses your Gmail OAuth client if those are already set). Ask whoever manages your TurnKey deployment.</p>`:
+    <div class="conn-card ${hasGoogleCal||icalConns.length?'live':''}">
+      <div class="conn-top"><span class="conn-name">📅 Calendar</span><span class="conn-badge ${hasGoogleCal||icalConns.length?'on':'off'}">${hasGoogleCal||icalConns.length?'● CONNECTED':'not connected'}</span></div>
+      ${!googleCalendarConfigured?`<p>Calendar connections aren't turned on for your account yet — contact support to enable this.</p>`:
         (()=>{const gc=calendarConnections.find(c=>c.provider==='google');
-          return gc?`<p><b>Connected.</b> Existing events on your primary calendar block scheduling conflicts.${gc.sync_status==='error'?' ⚠️ Last sync failed: '+(gc.sync_error||'unknown error'):''} Last synced: ${gc.last_synced_at?timeAgo(new Date(gc.last_synced_at).getTime()):'never — click Sync now'}.</p><button class="btn ghost sm" onclick="syncGoogleCalendarNow()">Sync now</button> <button class="btn ghost sm" onclick="disconnectGoogleCalendar()">Disconnect</button>`
-            :`<p>Connect your Google Calendar so TurnKey knows your existing commitments when scheduling jobs — busy times block conflicting bookings.</p><button class="btn accent sm" onclick="connectGoogleCalendarOAuth()">Connect Google Calendar</button>`;
+          return gc?`<p><b>Connected.</b> Existing events on your calendar block scheduling conflicts.${gc.sync_status==='error'?' ⚠️ Last sync failed.':''} Last synced: ${gc.last_synced_at?timeAgo(new Date(gc.last_synced_at).getTime()):'never — click Sync now'}.</p><button class="btn ghost sm" onclick="syncGoogleCalendarNow()">Sync now</button> <button class="btn ghost sm" onclick="disconnectGoogleCalendar()">Disconnect</button>`
+            :`<p>Connect your calendar so Turnkey knows your existing commitments and avoids double-booking.</p><button class="btn accent sm" onclick="connectGoogleCalendarOAuth()">Connect Calendar</button>`;
         })()}
+      <p style="font-size:12px;color:var(--ink-faint);margin-top:12px">Using an iPhone/iCloud calendar instead? Paste your calendar's share link below to block that time too.</p>
+      <div class="conn-keyrow"><input id="conn-ical-url" placeholder="Paste your calendar link"><button class="btn ghost sm" onclick="connectIcalFeed()">Add</button></div>
+      ${icalConns.map(c=>`<div class="kv"><span class="k">${(c.ical_url||'').slice(0,40)}${(c.ical_url||'').length>40?'…':''}${c.sync_status==='error'?' ⚠️':''}</span><span class="v"><button class="btn ghost sm" onclick="syncIcalFeedNow('${(c.ical_url||'').replace(/'/g,"%27")}')">Sync</button> <button class="btn ghost sm" onclick="disconnectIcalFeed('${(c.ical_url||'').replace(/'/g,"%27")}')">Remove</button></span></div>`).join('')}
     </div>
-    <div class="conn-card ${calendarConnections.some(c=>c.provider==='ical')?'live':''}">
-      <div class="conn-top"><span class="conn-name">🍎 Apple / iCal calendar feed</span><span class="conn-badge ${calendarConnections.some(c=>c.provider==='ical')?'on':'off'}">${calendarConnections.filter(c=>c.provider==='ical').length?'● '+calendarConnections.filter(c=>c.provider==='ical').length+' CONNECTED':'not connected'}</span></div>
-      <p>Paste a public iCal/ICS feed URL — from iCloud: Calendar app → hover a calendar → Share Calendar → check "Public Calendar" → copy link. Read-only: TurnKey can block time from it, but can't write jobs back to Apple Calendar (Apple has no equivalent open OAuth API) — use Google Calendar above for two-way sync, or subscribe to TurnKey's own feed from Apple Calendar instead (coming soon).</p>
-      <div class="conn-keyrow"><input id="conn-ical-url" placeholder="webcal://... or https://...ics"><button class="btn accent sm" onclick="connectIcalFeed()">Add feed</button></div>
-      ${calendarConnections.filter(c=>c.provider==='ical').map(c=>`<div class="kv"><span class="k">${(c.ical_url||'').slice(0,50)}${(c.ical_url||'').length>50?'…':''}${c.sync_status==='error'?' ⚠️':''}</span><span class="v"><button class="btn ghost sm" onclick="syncIcalFeedNow('${(c.ical_url||'').replace(/'/g,"%27")}')">Sync</button> <button class="btn ghost sm" onclick="disconnectIcalFeed('${(c.ical_url||'').replace(/'/g,"%27")}')">Remove</button></span></div>`).join('')}
+    <div class="conn-card">
+      <div class="conn-top"><span class="conn-name">💳 Stripe — accept card payments</span><span class="conn-badge">coming soon</span></div>
+      <p>Let customers pay their invoice online by card. Not available yet — invoices can still be marked paid manually today.</p>
     </div>
-    <div class="conn-note">${emailAccount?"You're fully live. Nice.":"Connect Gmail to bring email into TurnKey — everything else here is already live."}</div>`;
+    <div class="conn-note">${emailAccount?"You're fully connected. Nice.":"Connect Gmail to send quotes and invoices straight from Turnkey."}</div>`;
   openModal('conn-overlay');
 }
 function copyBookingLink(){
@@ -3969,7 +4044,7 @@ async function connectGmailOAuth(){
     const j=await res.json();
     if(!res.ok||!j.url){toast(j.error||'Could not start Gmail connection');return;}
     window.location.href=j.url; // full-page redirect through Google's consent screen, then back here
-  }catch(e){console.error('Gmail connect failed',e);toast('Could not reach the backend — check console');}
+  }catch(e){console.error('Gmail connect failed',e);toast('Couldn’t connect — check your internet connection and try again');}
 }
 async function disconnectGmailAccount(){
   if(!confirm('Disconnect Gmail? You can reconnect anytime — nothing already synced is deleted.'))return;
@@ -4019,7 +4094,7 @@ async function connectGoogleCalendarOAuth(){
     const j=await res.json();
     if(!res.ok||!j.url){toast(j.error||'Could not start Google Calendar connection');return;}
     window.location.href=j.url;
-  }catch(e){console.error('Google Calendar connect failed',e);toast('Could not reach the backend — check console');}
+  }catch(e){console.error('Google Calendar connect failed',e);toast('Couldn’t connect — check your internet connection and try again');}
 }
 async function disconnectGoogleCalendar(){
   if(!confirm('Disconnect Google Calendar? You can reconnect anytime.'))return;
@@ -4040,7 +4115,7 @@ async function syncGoogleCalendarNow(){
     if(!res.ok){toast(j.error||'Sync failed');return;}
     toast(`Synced ${j.imported} event${j.imported===1?'':'s'} ✓`);
     await loadCalendarConnections();openConnections();
-  }catch(e){console.error('Google Calendar sync failed',e);toast('Sync failed — check console');}
+  }catch(e){console.error('Google Calendar sync failed',e);toast('Sync failed — try again');}
 }
 async function connectIcalFeed(){
   const input=document.getElementById('conn-ical-url');
@@ -4058,7 +4133,7 @@ async function connectIcalFeed(){
     toast(`Feed connected — ${j.imported} event${j.imported===1?'':'s'} imported ✓`);
     if(input)input.value='';
     await loadCalendarConnections();openConnections();
-  }catch(e){console.error('iCal connect failed',e);toast('Could not reach the backend — check console');}
+  }catch(e){console.error('iCal connect failed',e);toast('Couldn’t connect — check your internet connection and try again');}
 }
 async function disconnectIcalFeed(icalUrl){
   if(!confirm('Remove this calendar feed?'))return;
@@ -4079,7 +4154,7 @@ async function syncIcalFeedNow(icalUrl){
     if(!res.ok){toast(j.error||'Sync failed');return;}
     toast(`Synced ${j.imported} event${j.imported===1?'':'s'} ✓`);
     await loadCalendarConnections();openConnections();
-  }catch(e){console.error('iCal sync failed',e);toast('Sync failed — check console');}
+  }catch(e){console.error('iCal sync failed',e);toast('Sync failed — try again');}
 }
 async function syncEmail(){
   const url=backendUrl();
@@ -4151,7 +4226,7 @@ function showApp(){
 function setAuthMsg(m){const el=document.getElementById('auth-msg');if(el)el.textContent=m||'';}
 
 async function handleSignIn(){
-  if(!sb){setAuthMsg('Supabase is not configured (config.js)');return;}
+  if(!sb){setAuthMsg('Turnkey isn\u2019t finished setting up yet \u2014 contact support');return;}
   const email=document.getElementById('auth-email').value.trim();
   const password=document.getElementById('auth-password').value;
   if(!email||!password){setAuthMsg('Enter email and password');return;}
@@ -4160,7 +4235,7 @@ async function handleSignIn(){
   if(error)setAuthMsg(error.message);
 }
 async function handleSignUp(){
-  if(!sb){setAuthMsg('Supabase is not configured (config.js)');return;}
+  if(!sb){setAuthMsg('Turnkey isn\u2019t finished setting up yet \u2014 contact support');return;}
   const email=document.getElementById('auth-email').value.trim();
   const password=document.getElementById('auth-password').value;
   if(!email||!password){setAuthMsg('Enter email and password');return;}
@@ -4232,7 +4307,7 @@ async function loadStaffAndInvites(){
   }else pendingInvites=[];
 }
 async function openTeam(){
-  if(!sb||!currentBusinessId){toast('Not connected to Supabase yet');return;}
+  if(!sb||!currentBusinessId){toast('Not connected yet \u2014 try refreshing the page');return;}
   await loadStaffAndInvites();
   renderTeam();
   openModal('team-overlay');
@@ -4271,7 +4346,7 @@ async function sendInvite(){
   const role=document.getElementById('invite-role').value;
   if(!email){toast('Enter an email');return;}
   const {error}=await sb.from('invites').insert({business_id:currentBusinessId,email,role,invited_by:currentUserId});
-  if(error){console.error('Invite failed',error);toast('Could not send invite — check console');return;}
+  if(error){console.error('Invite failed',error);toast('Could not send invite — try again');return;}
   toast('Invite created — '+email+' can now sign up to join');
   await loadStaffAndInvites();renderTeam();
 }
@@ -4282,7 +4357,7 @@ async function cancelInvite(id){
 }
 async function changeStaffRole(id,role){
   const {error}=await sb.rpc('set_staff_role',{target_id:id,new_role:role});
-  if(error){console.error('Role change failed',error);toast('Could not change role — check console');}
+  if(error){console.error('Role change failed',error);toast('Could not change role — try again');}
   else toast('Role updated');
   await loadStaffAndInvites();renderTeam();
 }
@@ -4345,7 +4420,7 @@ async function saveBusinessProfile(){
     payload.region_lat=null;payload.region_lng=null;
   }
   const {data,error}=await sb.from('businesses').upsert(payload).select('*').maybeSingle();
-  if(error){console.error('Save business profile failed',error);toast('Could not save business profile — check console');return;}
+  if(error){console.error('Save business profile failed',error);toast('Could not save business profile — try again');return;}
   currentBusinessProfile=data;
   toast('Business profile saved');
   openConnections();
@@ -4357,11 +4432,11 @@ async function uploadBusinessLogo(file){
   const ext=(file.name.split('.').pop()||'png').toLowerCase().replace(/[^a-z0-9]/g,'')||'png';
   const path=`${currentBusinessId}/logo.${ext}`;
   const {error:upErr}=await sb.storage.from(LOGO_BUCKET).upload(path,file,{contentType:file.type,upsert:true});
-  if(upErr){console.error('Logo upload failed',upErr);toast('Logo upload failed — check console');return;}
+  if(upErr){console.error('Logo upload failed',upErr);toast('Logo upload failed — try again');return;}
   const {data:pub}=sb.storage.from(LOGO_BUCKET).getPublicUrl(path);
   const logoUrl=pub.publicUrl+'?v='+Date.now(); // cache-bust so a re-upload shows immediately
   const {data,error}=await sb.from('businesses').upsert({id:currentBusinessId,logo_url:logoUrl}).select('*').maybeSingle();
-  if(error){console.error('Save logo url failed',error);toast('Logo uploaded but could not save — check console');return;}
+  if(error){console.error('Save logo url failed',error);toast('Logo uploaded but could not save — try again');return;}
   currentBusinessProfile=data;
   toast('Logo updated');
   openConnections();
@@ -4768,7 +4843,7 @@ async function iwRunImport(){
     importWizard.result=data;
   }catch(e){
     console.error('Import failed',e);
-    importWizard.result={error:e.message||'Import failed — check console'};
+    importWizard.result={error:e.message||'Import failed — try again'};
   }
   importWizard.running=false;
   renderImportWizard();
@@ -4812,7 +4887,7 @@ function iwRenderRun(){
 async function iwUndoBatch(batchId){
   if(!confirm('Undo this import? This permanently deletes every customer, job, quote and invoice it created — including any changes made to them since. This cannot be undone.'))return;
   const {data,error}=await sb.rpc('undo_import',{p_batch_id:batchId});
-  if(error){console.error('Undo failed',error);toast('Could not undo — check console');return;}
+  if(error){console.error('Undo failed',error);toast('Could not undo — try again');return;}
   toast(`Undone — ${data.rows_deleted} record(s) removed`);
   await loadFromSupabase();
   if(importWizard){await iwLoadHistory();renderImportWizard();}
@@ -4847,10 +4922,10 @@ async function loadFromSupabase(){
       });
     });
     render();renderAll();
-    toast(records.length?`Loaded ${records.length} job${records.length===1?'':'s'} from Supabase`:'Connected — no jobs yet, add a lead to get started');
+    toast(records.length?`Loaded ${records.length} job${records.length===1?'':'s'}`:'Connected — no jobs yet, add a lead to get started');
   }catch(e){
     console.error('Supabase load failed',e);
-    toast('Could not load data from Supabase — check console');
+    toast('Couldn\u2019t load your data \u2014 check your connection and try again');
   }
 }
 
@@ -4940,14 +5015,14 @@ async function ensureRecordSynced(r){
   return r;
 }
 async function uploadAttachment(file,kind,{customerId,jobId}={}){
-  if(!sb||!currentBusinessId){toast('Not connected to Supabase yet');return null;}
+  if(!sb||!currentBusinessId){toast('Not connected yet \u2014 try refreshing the page');return null;}
   const safe=(file.name||'file').replace(/[^a-zA-Z0-9_.-]/g,'_');
   const path=`${currentBusinessId}/${kind}/${Date.now()}-${Math.random().toString(36).slice(2,8)}-${safe}`;
   const {error:upErr}=await sb.storage.from(UPLOAD_BUCKET).upload(path,file,{contentType:file.type||undefined});
-  if(upErr){console.error('Upload failed',upErr);toast('Upload failed — check console');return null;}
+  if(upErr){console.error('Upload failed',upErr);toast('Upload failed — try again');return null;}
   const row={business_id:currentBusinessId,customer_id:customerId||null,job_id:jobId||null,kind,path,filename:file.name};
   const {data,error}=await sb.from('attachments').insert(row).select('*').single();
-  if(error){console.error('Attachment record failed',error);toast('Upload saved but record failed — check console');return null;}
+  if(error){console.error('Attachment record failed',error);toast('Upload saved but record failed — try again');return null;}
   return data;
 }
 async function signedUrlFor(path){
@@ -5007,7 +5082,7 @@ if(sb){
     if(event==='SIGNED_OUT'){records=[];currentBusinessId=null;currentUserId=null;currentUserRole='owner';staff=[];pendingInvites=[];render();renderAll();showAuth();}
   });
 }else{
-  setAuthMsg('Supabase is not configured — set supabaseUrl/supabaseAnonKey in config.js');
+  setAuthMsg('Turnkey isn\u2019t finished setting up yet \u2014 contact support');
 }
 
 // Install as an app when hosted (PWA) — no-op when opened as a plain file.

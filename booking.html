@@ -919,7 +919,7 @@ async function submitRequest(){
   const contact=document.getElementById('c-phone').value.trim()||document.getElementById('c-email').value.trim();
   if(!name){alert('Please add your name');return;}
   if(!contact){alert('Please add a phone or email so we can send your quote');return;}
-  if(window.TURNKEY_WEBHOOK&&!TURNKEY_BUSINESS_ID){alert('This booking link is missing its business ID — ask the business for their booking.html?biz=... link.');return;}
+  if(window.TURNKEY_WEBHOOK&&!TURNKEY_BUSINESS_ID){alert('This booking link looks incomplete — please ask the business for their correct booking link.');return;}
   const payload=buildPayload();
   const status=document.getElementById('submit-status');
   const btn=document.querySelector('#details .btn.primary');
