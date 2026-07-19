@@ -308,6 +308,37 @@
   .map-line{position:absolute;stroke-dasharray:4 4}
   .demo-tag{font-size:10px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;color:var(--ink-soft);background:var(--surface-2);padding:3px 8px;border-radius:980px}
 
+  /* import wizard */
+  .modal.wide{max-width:760px}
+  .iw-steps{display:flex;flex-wrap:wrap;gap:4px 10px;margin-bottom:18px;padding-bottom:14px;border-bottom:1px solid var(--line-soft)}
+  .iw-step{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--ink-faint)}
+  .iw-step .iw-dot{width:20px;height:20px;border-radius:50%;background:var(--surface-2);color:var(--ink-soft);display:flex;align-items:center;justify-content:center;font-size:10.5px;font-weight:700;flex-shrink:0}
+  .iw-step.sel{color:var(--ink)}
+  .iw-step.sel .iw-dot{background:var(--teal);color:#fff}
+  .iw-step.done .iw-dot{background:var(--teal-wash);color:var(--teal)}
+  .iw-step .iw-lbl{display:none}
+  @media(min-width:640px){.iw-step .iw-lbl{display:inline}}
+  .iw-src-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px}
+  .iw-src{display:flex;flex-direction:column;align-items:center;gap:8px;padding:18px 10px;border:1.5px solid var(--line);border-radius:var(--radius-sm);background:var(--surface);font-size:13px;font-weight:600;cursor:pointer;transition:border-color .15s}
+  .iw-src:hover{border-color:var(--teal-bright)}
+  .iw-src.sel{border-color:var(--teal);background:var(--teal-wash);color:var(--teal)}
+  .iw-src-ico{font-size:26px}
+  .iw-instr{padding-left:20px;font-size:13.5px;color:var(--ink-soft);line-height:1.7}
+  .iw-instr li{margin-bottom:4px}
+  .iw-upload-row{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid var(--line-soft)}
+  .iw-upload-label{min-width:160px;font-size:13.5px}
+  .iw-upload-status{font-size:12px;color:var(--teal)}
+  .iw-map-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:9px 0;border-bottom:1px solid var(--line-soft)}
+  .iw-map-row label{flex:1;min-width:160px;font-size:13px}
+  .iw-map-row select{flex:1;min-width:160px;padding:8px 10px;border:1px solid var(--line);border-radius:var(--radius-sm);font-size:13px;background:var(--surface)}
+  .iw-map-hint{font-size:11px;color:var(--ink-faint);font-weight:400;margin-top:2px}
+  .iw-foot{display:flex;align-items:center;gap:10px;margin-top:18px;padding-top:16px;border-top:1px solid var(--line)}
+  .iw-running{display:flex;flex-direction:column;align-items:center;gap:16px;padding:50px 20px;text-align:center;color:var(--ink-soft);font-size:13.5px}
+  .iw-spinner{width:32px;height:32px;border-radius:50%;border:3px solid var(--line);border-top-color:var(--teal);animation:iwspin .8s linear infinite}
+  @keyframes iwspin{to{transform:rotate(360deg)}}
+  .iw-err-row{font-size:12.5px;color:var(--ink-soft);padding:6px 0;border-bottom:1px solid var(--line-soft)}
+  @media(max-width:640px){.iw-src-grid{grid-template-columns:repeat(2,1fr)}.iw-upload-label{min-width:100%}.iw-foot{flex-wrap:wrap}}
+
   /* pricing */
   .rate-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:20px 22px;margin-bottom:14px}
   .rate-card .rc-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
@@ -753,6 +784,7 @@
     <div class="util">
       <button onclick="openTeam()">Team</button>
       <button onclick="openConnections()">Connections</button>
+      <button onclick="openImportWizard()">Import</button>
       <button onclick="openTemplateEditor()">Templates</button>
       <button onclick="exportData()">Backup</button>
       <button onclick="document.getElementById('import-file').click()">Restore</button>
@@ -857,6 +889,11 @@
   <div class="modal-head"><div><h3>Connections</h3><p>What's live, what needs a key, and what needs a backend.</p></div><button class="x" aria-label="Close" onclick="closeModal('conn-overlay')">×</button></div>
   <div class="modal-body" id="conn-body"></div>
   <div class="modal-foot"><button class="btn primary" onclick="closeModal('conn-overlay')">Done</button></div>
+</div></div>
+
+<div class="overlay" id="import-overlay"><div class="modal wide">
+  <div class="modal-head"><div><h3>Import from another CRM</h3><p>Bring your customers, jobs, quotes and invoices over from ServiceM8, Jobber, Housecall Pro, Tradify, Fergus or any CSV.</p></div><button class="x" aria-label="Close" onclick="closeImportWizard()">×</button></div>
+  <div class="modal-body" id="import-body"></div>
 </div></div>
 
 <div class="overlay" id="tpl-overlay"><div class="modal">
@@ -3063,6 +3100,457 @@ async function uploadBusinessLogo(file){
   currentBusinessProfile=data;
   toast('Logo updated');
   openConnections();
+}
+
+/* =====================================================================
+   IMPORT WIZARD — onboard a business from another CRM via CSV.
+   Everything through "build the mapped rows" is client-side JS; the only
+   database call is run_import() (schema-import-wizard.sql), one atomic
+   RPC that writes customers/jobs/quotes/invoices in a single Postgres
+   transaction. A future API-based importer (pulling straight from a
+   source CRM's API instead of a CSV export) would produce the exact same
+   {ref, ...fields} row shape and call the same run_import() — nothing in
+   this file is CSV-specific except parseCSV() and the file-upload step.
+   ===================================================================== */
+
+/* ---------- CSV parsing: handles quoted fields, embedded commas/newlines,
+   escaped quotes ("") — a hand-rolled parser rather than a dependency,
+   consistent with this app having no build step / no npm frontend deps. */
+function parseCSV(text){
+  const rows=[];let row=[];let field='';let inQuotes=false;
+  // Normalise line endings up front so \r\n inside/outside quotes behaves the same.
+  text=text.replace(/\r\n/g,'\n').replace(/\r/g,'\n');
+  for(let i=0;i<text.length;i++){
+    const c=text[i];
+    if(inQuotes){
+      if(c==='"'){
+        if(text[i+1]==='"'){field+='"';i++;}
+        else inQuotes=false;
+      }else field+=c;
+    }else{
+      if(c==='"')inQuotes=true;
+      else if(c===','){row.push(field);field='';}
+      else if(c==='\n'){row.push(field);rows.push(row);row=[];field='';}
+      else field+=c;
+    }
+  }
+  if(field.length||row.length){row.push(field);rows.push(row);}
+  // Drop fully-blank trailing rows (common at end of exported files).
+  while(rows.length&&rows[rows.length-1].every(c=>c.trim()==='')) rows.pop();
+  if(!rows.length)return {headers:[],rows:[]};
+  const headers=rows[0].map(h=>h.trim());
+  return {headers,rows:rows.slice(1).map(r=>{
+    // Pad/truncate ragged rows to the header width so every row has a stable shape.
+    const out=headers.map((_,i)=>(r[i]!==undefined?r[i]:'').trim());
+    return out;
+  })};
+}
+
+/* ---------- Target field catalogue per entity — what the mapping UI offers ---------- */
+const IMPORT_ENTITIES={
+  customers:{
+    label:'Customers',required:true,
+    fields:[
+      {key:'ref',label:'Customer ID (for linking jobs/quotes)',hint:'Optional — if absent, jobs can still link by matching customer name'},
+      {key:'name',label:'Name',required:true},
+      {key:'email',label:'Email'},{key:'phone',label:'Phone'},
+      {key:'address',label:'Address'},{key:'suburb',label:'Suburb / City'},
+      {key:'notes',label:'Notes'},{key:'source',label:'Lead source'}
+    ]
+  },
+  jobs:{
+    label:'Jobs',required:false,
+    fields:[
+      {key:'ref',label:'Job ID'},
+      {key:'customer_ref',label:'Customer (ID or name)',required:true,hint:'Must match a Customer ID or Name from the customers file'},
+      {key:'status',label:'Status'},{key:'scheduled_date',label:'Scheduled date'},
+      {key:'total',label:'Total amount'},{key:'notes',label:'Notes'}
+    ]
+  },
+  quotes:{
+    label:'Quotes',required:false,
+    fields:[
+      {key:'ref',label:'Quote ID'},
+      {key:'customer_ref',label:'Customer (ID or name)',required:true},
+      {key:'job_ref',label:'Related Job ID',hint:'Optional — links this quote to a job from the jobs file'},
+      {key:'amount',label:'Amount'},{key:'status',label:'Status'}
+    ]
+  },
+  invoices:{
+    label:'Invoices',required:false,
+    fields:[
+      {key:'ref',label:'Invoice ID'},
+      {key:'job_ref',label:'Job ID',required:true,hint:'Must match a Job ID from the jobs file'},
+      {key:'amount',label:'Amount'},{key:'paid',label:'Paid? (yes/no)'}
+    ]
+  }
+};
+
+/* ---------- Fuzzy header matching: generic alias list (used for every source,
+   including "Generic CSV") plus per-source hints that bias the guess when a
+   header could plausibly match more than one field. These are best-effort —
+   exact export column names vary by plan/version of each product, which is
+   exactly what the Step 5 review screen is for. */
+const IMPORT_FIELD_ALIASES={
+  ref:['id','customer id','client id','contact id','record id','#','number'],
+  name:['name','customer','client','contact','company','company name','client name','customer name','full name'],
+  email:['email','e-mail','email address'],
+  phone:['phone','mobile','cell','telephone','contact number','phone number'],
+  address:['address','street','street address','property address','service address','job address'],
+  suburb:['suburb','city','town','region'],
+  notes:['notes','note','description','comments','details'],
+  source:['source','lead source','referral','how heard'],
+  customer_ref:['customer id','client id','customer','client','customer name','client name','contact'],
+  job_ref:['job id','job number','job #','related job','work order','work order id'],
+  status:['status','job status','stage','state'],
+  scheduled_date:['scheduled date','date','job date','start date','service date','due date'],
+  total:['total','amount','price','job total','value'],
+  amount:['amount','total','price','value','quote amount','invoice amount','invoice total'],
+  paid:['paid','payment status','is paid']
+};
+const IMPORT_SOURCE_HINTS={
+  servicem8:{ref:['job uuid','job number'],name:['company name'],address:['job address'],status:['job status']},
+  jobber:{name:['client name'],address:['property address'],status:['job status']},
+  housecallpro:{name:['customer name'],address:['service address']},
+  tradify:{name:['client'],status:['job status']},
+  fergus:{name:['customer'],status:['site status']},
+  generic:{}
+};
+
+function normalizeHeader(h){return (h||'').toLowerCase().replace(/[_\-]/g,' ').replace(/[^a-z0-9 ]/g,'').replace(/\s+/g,' ').trim();}
+
+// Best-guess mapping of {targetFieldKey: csvHeaderName} for one uploaded file.
+function autoMapColumns(headers,entityKey,source){
+  const norm=headers.map(normalizeHeader);
+  const fields=IMPORT_ENTITIES[entityKey].fields;
+  const hints=IMPORT_SOURCE_HINTS[source]||{};
+  const mapping={};
+  fields.forEach(f=>{
+    const aliases=[...(hints[f.key]||[]),...(IMPORT_FIELD_ALIASES[f.key]||[])].map(normalizeHeader);
+    // exact alias match first, then "header contains alias" as a looser fallback
+    let idx=norm.findIndex(h=>aliases.includes(h));
+    if(idx===-1)idx=norm.findIndex(h=>aliases.some(a=>a.length>2&&h.includes(a)));
+    if(idx!==-1)mapping[f.key]=headers[idx];
+  });
+  return mapping;
+}
+
+/* ---------- Data cleaning: CSV text → the plain types run_import() expects.
+   Kept client-side so the RPC only ever sees already-normalized values —
+   the per-row exception handling in run_import() is a safety net for
+   genuinely bad data, not a substitute for cleaning what we can up front. */
+function cleanAmount(v){
+  if(v==null||v==='')return null;
+  const n=parseFloat(String(v).replace(/[^0-9.\-]/g,''));
+  return isNaN(n)?null:n;
+}
+function cleanDate(v){
+  if(!v)return null;
+  v=String(v).trim();
+  let m=v.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if(m)return `${m[1]}-${m[2]}-${m[3]}`;
+  // DD/MM/YYYY or MM/DD/YYYY — ambiguous; assumes DD/MM (NZ/AU locale, matching
+  // the rest of this app) unless the first number can only be a month.
+  m=v.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if(m){
+    let day=+m[1],mon=+m[2];
+    if(day>12){/* unambiguous DD/MM */}
+    else if(mon>12){[day,mon]=[mon,day];} // must have been MM/DD
+    if(mon>=1&&mon<=12&&day>=1&&day<=31)return `${m[3]}-${String(mon).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+  }
+  const d=new Date(v);
+  return isNaN(d)?null:d.toISOString().slice(0,10);
+}
+function cleanPaid(v){
+  if(v==null||v==='')return false;
+  return /^(y|yes|true|paid|1)$/i.test(String(v).trim());
+}
+
+/* ---------- Wizard state ---------- */
+const IMPORT_SOURCES=[
+  {key:'servicem8',label:'ServiceM8',icon:'🔧'},
+  {key:'jobber',label:'Jobber',icon:'📋'},
+  {key:'housecallpro',label:'Housecall Pro',icon:'🏠'},
+  {key:'tradify',label:'Tradify',icon:'🛠️'},
+  {key:'fergus',label:'Fergus',icon:'📐'},
+  {key:'generic',label:'Generic CSV',icon:'📄'}
+];
+let importWizard=null;
+function iwFresh(){
+  return {step:1,source:null,files:{customers:null,jobs:null,quotes:null,invoices:null},
+    mapping:{customers:{},jobs:{},quotes:{},invoices:{}},running:false,result:null,history:[]};
+}
+async function openImportWizard(){
+  importWizard=iwFresh();
+  await iwLoadHistory();
+  renderImportWizard();
+  openModal('import-overlay');
+}
+function closeImportWizard(){closeModal('import-overlay');}
+async function iwLoadHistory(){
+  if(!sb||!currentBusinessId)return;
+  const {data,error}=await sb.from('import_batches').select('*').order('created_at',{ascending:false}).limit(10);
+  if(!error)importWizard.history=data||[];
+}
+function iwGoStep(n){importWizard.step=n;renderImportWizard();}
+
+function iwStepMeta(){
+  return [
+    null,
+    {label:'Choose CRM'},{label:'Instructions'},{label:'Upload'},
+    {label:'Detect columns'},{label:'Review mapping'},{label:'Preview'},{label:'Import'}
+  ];
+}
+function iwStepIndicator(){
+  const meta=iwStepMeta();
+  return `<div class="iw-steps">${[1,2,3,4,5,6,7].map(n=>`
+    <div class="iw-step ${n===importWizard.step?'sel':''} ${n<importWizard.step?'done':''}"><span class="iw-dot">${n<importWizard.step?'✓':n}</span><span class="iw-lbl">${meta[n].label}</span></div>`).join('')}</div>`;
+}
+
+function renderImportWizard(){
+  const body=document.getElementById('import-body');
+  if(!body)return;
+  const w=importWizard;
+  let content='';
+  if(w.step===1)content=iwRenderSource();
+  else if(w.step===2)content=iwRenderInstructions();
+  else if(w.step===3)content=iwRenderUpload();
+  else if(w.step===4)content=iwRenderDetect();
+  else if(w.step===5)content=iwRenderMapping();
+  else if(w.step===6)content=iwRenderPreview();
+  else if(w.step===7)content=iwRenderRun();
+  body.innerHTML=`${iwStepIndicator()}<div class="iw-body">${content}</div>`;
+}
+
+/* ===== Step 1: choose source CRM ===== */
+function iwRenderSource(){
+  const cards=IMPORT_SOURCES.map(s=>`
+    <button class="iw-src ${importWizard.source===s.key?'sel':''}" onclick="iwPickSource('${s.key}')">
+      <span class="iw-src-ico">${s.icon}</span><span>${s.label}</span>
+    </button>`).join('');
+  const hist=importWizard.history.length?`
+    <div class="panel" style="margin-top:20px"><h4>Recent imports</h4>
+      ${importWizard.history.map(b=>{
+        const c=b.counts||{};
+        const total=Object.values(c).reduce((s,e)=>s+(e?.inserted||0),0);
+        const when=new Date(b.created_at).toLocaleString('en-NZ',{day:'numeric',month:'short',hour:'numeric',minute:'2-digit'});
+        return `<div class="kv"><span class="k">${IMPORT_SOURCES.find(s=>s.key===b.source)?.label||b.source} · ${when}<br><span style="font-size:11px;color:var(--ink-faint)">${b.status==='undone'?'Undone':`${total} record${total!==1?'s':''} imported`}${b.status==='completed'&&(b.errors||[]).length?` · ${b.errors.length} error(s)`:''}</span></span>
+          <span class="v">${b.status==='completed'?`<button class="btn ghost sm" onclick="iwUndoBatch('${b.id}')">Undo</button>`:''}</span></div>`;
+      }).join('')}
+    </div>`:'';
+  return `<p style="font-size:13.5px;color:var(--ink-soft);margin-bottom:16px">Which CRM are you bringing data over from? We'll show the right export instructions for it.</p>
+    <div class="iw-src-grid">${cards}</div>
+    ${hist}
+    <div class="iw-foot"><div></div><button class="btn primary" ${importWizard.source?'':'disabled'} onclick="iwGoStep(2)">Continue →</button></div>`;
+}
+function iwPickSource(key){importWizard.source=key;renderImportWizard();}
+
+/* ===== Step 2: export instructions per source ===== */
+const IMPORT_INSTRUCTIONS={
+  servicem8:{files:'Clients and Jobs (Job Activity export, if available)',
+    steps:['In ServiceM8, open <b>Clients</b> and use its export/download-as-CSV option to get your client list.','For jobs, use the Jobs list export (or Reports → Job Activity) to get a CSV of your job history.','Exact menu names vary by ServiceM8 plan — look for an export/download icon on the list toolbar.']},
+  jobber:{files:'Clients and Jobs',
+    steps:['In Jobber, go to <b>Clients</b> and export your client list to CSV.','Go to <b>Jobs</b> and export your job list — this typically includes status and scheduled dates.','Jobber also supports exporting Quotes and Invoices separately if you want those carried over too.']},
+  housecallpro:{files:'Customers and Jobs',
+    steps:['In Housecall Pro, open <b>Customers</b> and use the export option to download a CSV.','Open <b>Jobs</b> (or Schedule) and export your job history to CSV.','Invoice exports are usually available from the Invoicing/Payments section.']},
+  tradify:{files:'Clients and Jobs',
+    steps:['In Tradify, open <b>Clients</b> and export to CSV.','Open <b>Jobs</b> and export your job list.','Quote and invoice exports are available from their respective list views.']},
+  fergus:{files:'Customers ("Sites") and Jobs',
+    steps:['In Fergus, open your Customers/Sites list and export to CSV.','Open <b>Jobs</b> and export your job history.','Quote and invoice CSVs are available from Fergus\'s reporting section if you use them.']},
+  generic:{files:'Any spreadsheet with customer/job/quote/invoice data',
+    steps:['Export whatever you have as CSV files — one file per type of record (customers, jobs, quotes, invoices) works best.','Keep a header row with column names — the wizard reads those to guess what each column is.','If your customer and job files share an ID or exact customer name in common, jobs will link to the right customer automatically.']}
+};
+function iwRenderInstructions(){
+  const info=IMPORT_INSTRUCTIONS[importWizard.source]||IMPORT_INSTRUCTIONS.generic;
+  return `<div class="info-strip"><b>What you'll need:</b> ${info.files}. Only a customers file is required — jobs, quotes and invoices are optional, and each is a separate CSV upload in the next step.</div>
+    <ol class="iw-instr">${info.steps.map(s=>`<li>${s}</li>`).join('')}</ol>
+    <p style="font-size:12px;color:var(--ink-faint);margin-top:6px">Exact menu names vary by plan and version — if you can't find an export option, check that product's help centre for "export CSV" or "download client list".</p>
+    <div class="iw-foot"><button class="btn ghost" onclick="iwGoStep(1)">← Back</button><button class="btn primary" onclick="iwGoStep(3)">Continue →</button></div>`;
+}
+
+/* ===== Step 3: upload CSV files ===== */
+function iwRenderUpload(){
+  const rows=Object.entries(IMPORT_ENTITIES).map(([key,ent])=>{
+    const f=importWizard.files[key];
+    return `<div class="iw-upload-row">
+      <div class="iw-upload-label"><b>${ent.label}</b>${ent.required?' <span style="color:var(--coral)">*</span>':' <span style="color:var(--ink-faint);font-weight:400">(optional)</span>'}</div>
+      <input type="file" accept=".csv,text/csv" id="iw-file-${key}" style="display:none" onchange="iwFileChosen('${key}',this)">
+      <button class="btn ghost sm" onclick="document.getElementById('iw-file-${key}').click()">${f?'Change file':'Choose CSV'}</button>
+      ${f?`<span class="iw-upload-status">✓ ${f.name} — ${f.rows.length} row${f.rows.length!==1?'s':''}</span>`:''}
+    </div>`;
+  }).join('');
+  const ready=!!importWizard.files.customers;
+  return `<p style="font-size:13.5px;color:var(--ink-soft);margin-bottom:16px">Upload each CSV you exported. Only Customers is required.</p>
+    ${rows}
+    <div class="iw-foot"><button class="btn ghost" onclick="iwGoStep(2)">← Back</button><button class="btn primary" ${ready?'':'disabled'} onclick="iwGoStep(4)">Continue →</button></div>`;
+}
+function iwFileChosen(key,el){
+  const file=el.files&&el.files[0];
+  if(!file)return;
+  const reader=new FileReader();
+  reader.onload=()=>{
+    try{
+      const {headers,rows}=parseCSV(String(reader.result));
+      if(!headers.length){toast('Could not read that file — is it a CSV?');return;}
+      importWizard.files[key]={name:file.name,headers,rows};
+      importWizard.mapping[key]=autoMapColumns(headers,key,importWizard.source);
+      renderImportWizard();
+    }catch(e){console.error('CSV parse failed',e);toast('Could not read that CSV — check the file and try again');}
+  };
+  reader.readAsText(file);
+}
+
+/* ===== Step 4: auto-detect summary ===== */
+function iwRenderDetect(){
+  const summary=Object.entries(IMPORT_ENTITIES).filter(([key])=>importWizard.files[key]).map(([key,ent])=>{
+    const f=importWizard.files[key];
+    const mapped=Object.keys(importWizard.mapping[key]||{}).length;
+    const missingRequired=ent.fields.filter(fl=>fl.required&&!importWizard.mapping[key][fl.key]);
+    return `<div class="kv"><span class="k">${ent.label}</span><span class="v">${mapped} of ${f.headers.length} columns matched${missingRequired.length?` · <span style="color:var(--coral)">${missingRequired.length} required field${missingRequired.length!==1?'s':''} need mapping</span>`:' · ✓'}</span></div>`;
+  }).join('');
+  return `<p style="font-size:13.5px;color:var(--ink-soft);margin-bottom:16px">We matched columns to TurnKey fields automatically based on their names.</p>
+    <div class="panel">${summary}</div>
+    <p style="font-size:12px;color:var(--ink-faint);margin-top:10px">Next, you can review and fix any of these before importing.</p>
+    <div class="iw-foot"><button class="btn ghost" onclick="iwGoStep(3)">← Back</button><button class="btn primary" onclick="iwGoStep(5)">Review mapping →</button></div>`;
+}
+
+/* ===== Step 5: editable mapping ===== */
+function iwRenderMapping(){
+  const sections=Object.entries(IMPORT_ENTITIES).filter(([key])=>importWizard.files[key]).map(([key,ent])=>{
+    const f=importWizard.files[key];
+    const rowsHtml=ent.fields.map(fl=>{
+      const current=importWizard.mapping[key][fl.key]||'';
+      const options=['<option value="">— Skip —</option>'].concat(f.headers.map(h=>`<option value="${h.replace(/"/g,'&quot;')}" ${h===current?'selected':''}>${h}</option>`)).join('');
+      return `<div class="iw-map-row"><label>${fl.label}${fl.required?' <span style="color:var(--coral)">*</span>':''}${fl.hint?`<div class="iw-map-hint">${fl.hint}</div>`:''}</label>
+        <select onchange="iwSetMapping('${key}','${fl.key}',this.value)">${options}</select></div>`;
+    }).join('');
+    return `<div class="panel" style="margin-bottom:14px"><h4>${ent.label} <span class="demo-tag">${f.name}</span></h4>${rowsHtml}</div>`;
+  }).join('');
+  const allRequiredMet=Object.entries(IMPORT_ENTITIES).filter(([key])=>importWizard.files[key])
+    .every(([key,ent])=>ent.fields.filter(fl=>fl.required).every(fl=>importWizard.mapping[key][fl.key]));
+  return `${sections}
+    ${!allRequiredMet?'<p style="font-size:12.5px;color:var(--coral);margin-bottom:10px">Map every required field (marked *) before continuing.</p>':''}
+    <div class="iw-foot"><button class="btn ghost" onclick="iwGoStep(4)">← Back</button><button class="btn primary" ${allRequiredMet?'':'disabled'} onclick="iwGoStep(6)">Preview import →</button></div>`;
+}
+function iwSetMapping(entityKey,fieldKey,header){
+  if(header)importWizard.mapping[entityKey][fieldKey]=header;
+  else delete importWizard.mapping[entityKey][fieldKey];
+  renderImportWizard();
+}
+
+/* ---------- Build normalized {ref,...} row objects from a mapped file ---------- */
+function iwBuildRows(entityKey){
+  const f=importWizard.files[entityKey];if(!f)return [];
+  const map=importWizard.mapping[entityKey];
+  return f.rows.map((r,i)=>{
+    const get=fk=>{const h=map[fk];if(!h)return null;const idx=f.headers.indexOf(h);return idx===-1?null:r[idx];};
+    const out={ref:get('ref')||('row'+(i+1))};
+    if(entityKey==='customers'){
+      out.name=get('name');out.email=get('email');out.phone=get('phone');
+      out.address=get('address');out.suburb=get('suburb');out.notes=get('notes');out.source=get('source');
+    }else if(entityKey==='jobs'){
+      out.customer_ref=get('customer_ref');out.status=get('status');out.raw_status=get('status');
+      out.scheduled_date=cleanDate(get('scheduled_date'));out.total=cleanAmount(get('total'));
+      out.notes=get('notes');out.customer_name=get('customer_ref');
+    }else if(entityKey==='quotes'){
+      out.customer_ref=get('customer_ref');out.job_ref=get('job_ref');
+      out.amount=cleanAmount(get('amount'));out.status=get('status');
+    }else if(entityKey==='invoices'){
+      out.job_ref=get('job_ref');out.amount=cleanAmount(get('amount'));out.paid=cleanPaid(get('paid'));
+    }
+    return out;
+  });
+}
+
+/* ===== Step 6: preview ===== */
+function iwRenderPreview(){
+  const summaries=Object.entries(IMPORT_ENTITIES).filter(([key])=>importWizard.files[key]).map(([key,ent])=>{
+    const rows=iwBuildRows(key);
+    const requiredFields=ent.fields.filter(fl=>fl.required);
+    const missing=rows.filter(r=>requiredFields.some(fl=>!r[fl.key]));
+    const sample=rows.slice(0,5);
+    const sampleCols=ent.fields.filter(fl=>importWizard.mapping[key][fl.key]);
+    return {key,ent,rows,missing,sample,sampleCols};
+  });
+  const body=summaries.map(({ent,rows,missing,sample,sampleCols})=>`
+    <div class="panel" style="margin-bottom:14px">
+      <h4>${ent.label} <span class="demo-tag">${rows.length} row${rows.length!==1?'s':''}</span></h4>
+      ${missing.length?`<p style="font-size:12.5px;color:var(--coral);margin-bottom:8px">${missing.length} row(s) are missing a required field and will be skipped with an error — you'll see exactly which after importing.</p>`:''}
+      <div style="overflow-x:auto"><table class="contact-table" style="min-width:480px">
+        <thead><tr>${sampleCols.map(fl=>`<th>${fl.label}</th>`).join('')}</tr></thead>
+        <tbody>${sample.map(r=>`<tr>${sampleCols.map(fl=>`<td>${(r[fl.key]??'').toString().slice(0,40)}</td>`).join('')}</tr>`).join('')}</tbody>
+      </table></div>
+      ${rows.length>5?`<p style="font-size:11px;color:var(--ink-faint);margin-top:6px">+ ${rows.length-5} more row(s) not shown</p>`:''}
+    </div>`).join('');
+  return `<div class="info-strip">Final duplicate/error counts are confirmed when you import — TurnKey checks against your existing customers at that point, not just this preview.</div>
+    ${body}
+    <div class="iw-foot"><button class="btn ghost" onclick="iwGoStep(5)">← Back</button><button class="btn primary" onclick="iwGoStep(7)">Start import →</button></div>`;
+}
+
+/* ===== Step 7: run the atomic import + show results ===== */
+async function iwRunImport(){
+  importWizard.running=true;renderImportWizard();
+  try{
+    const payload={
+      p_source: importWizard.source,
+      p_customers: iwBuildRows('customers'),
+      p_jobs: importWizard.files.jobs?iwBuildRows('jobs'):[],
+      p_quotes: importWizard.files.quotes?iwBuildRows('quotes'):[],
+      p_invoices: importWizard.files.invoices?iwBuildRows('invoices'):[]
+    };
+    const {data,error}=await sb.rpc('run_import',payload);
+    if(error)throw error;
+    importWizard.result=data;
+  }catch(e){
+    console.error('Import failed',e);
+    importWizard.result={error:e.message||'Import failed — check console'};
+  }
+  importWizard.running=false;
+  renderImportWizard();
+  if(importWizard.result&&!importWizard.result.error){
+    await loadFromSupabase(); // pull the newly-imported records straight into the live CRM view
+    await iwLoadHistory();
+  }
+}
+function iwRenderRun(){
+  if(importWizard.running){
+    return `<div class="iw-running"><div class="iw-spinner"></div><p>Importing your data… this can take a moment for larger files. Don't close this window.</p></div>`;
+  }
+  if(!importWizard.result){
+    setTimeout(iwRunImport,50); // first paint of this step kicks off the atomic RPC call
+    return `<div class="iw-running"><div class="iw-spinner"></div><p>Starting import…</p></div>`;
+  }
+  const r=importWizard.result;
+  if(r.error){
+    return `<div class="empty-state"><div class="big">Import failed</div><div class="sm">${r.error}</div></div>
+      <div class="iw-foot"><button class="btn ghost" onclick="iwGoStep(6)">← Back</button><button class="btn primary" onclick="importWizard.result=null;renderImportWizard()">Try again</button></div>`;
+  }
+  const c=r.counts||{};
+  const rows=Object.entries(IMPORT_ENTITIES).filter(([key])=>c[key]).map(([key,ent])=>{
+    const e=c[key];
+    return `<div class="kv"><span class="k">${ent.label}</span><span class="v">${e.inserted} imported${e.duplicates?` · ${e.duplicates} duplicate${e.duplicates!==1?'s':''} skipped`:''}${e.errors?` · <span style="color:var(--coral)">${e.errors} error${e.errors!==1?'s':''}</span>`:''}</span></div>`;
+  }).join('');
+  const errList=(r.errors||[]).length?`<div class="panel" style="margin-top:14px"><h4>Error report <span class="demo-tag">${r.errors.length}</span></h4>
+    <div style="max-height:220px;overflow-y:auto">${r.errors.map(e=>`<div class="iw-err-row"><b>${e.entity}</b>${e.ref?' ('+e.ref+')':''} — ${e.message}</div>`).join('')}</div></div>`:'';
+  return `<div class="empty-state" style="padding:20px 0"><div class="big">✓ Import complete</div></div>
+    <div class="panel">${rows}</div>
+    ${errList}
+    <div class="iw-foot" style="flex-wrap:wrap;gap:10px">
+      <button class="btn ghost" onclick="iwUndoBatch('${r.batch_id}')">Undo this import</button>
+      <div style="flex:1"></div>
+      <button class="btn ghost" onclick="importWizard=iwFresh();renderImportWizard()">Import another file</button>
+      <button class="btn primary" onclick="closeImportWizard()">Done</button>
+    </div>`;
+}
+
+/* ===== Undo (also reachable from the Step 1 history list for past imports) ===== */
+async function iwUndoBatch(batchId){
+  if(!confirm('Undo this import? This permanently deletes every customer, job, quote and invoice it created — including any changes made to them since. This cannot be undone.'))return;
+  const {data,error}=await sb.rpc('undo_import',{p_batch_id:batchId});
+  if(error){console.error('Undo failed',error);toast('Could not undo — check console');return;}
+  toast(`Undone — ${data.rows_deleted} record(s) removed`);
+  await loadFromSupabase();
+  if(importWizard){await iwLoadHistory();renderImportWizard();}
 }
 
 function parseScheduledDate(s){
