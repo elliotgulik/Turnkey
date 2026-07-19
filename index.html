@@ -6,6 +6,7 @@
 <title>Turnkey</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
 <script src="config.js"></script>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#138a72">
@@ -131,6 +132,7 @@
   .pill.scheduled{background:var(--m-money-wash);color:var(--m-money)}
   .pill.completed{background:var(--m-dash-wash);color:var(--m-dash)}
   .pill.paid{background:var(--teal-wash);color:var(--teal)}
+  .pill.bad{background:var(--coral-wash);color:var(--coral)}
 
   /* buttons — pill, restrained */
   .btn{display:inline-flex;align-items:center;gap:7px;justify-content:center;font-size:14px;font-weight:500;padding:11px 20px;border-radius:980px;transition:background .15s,border-color .15s,opacity .15s,transform .1s;letter-spacing:-.01em}
@@ -431,6 +433,22 @@
   .progress-fill{background:var(--accent)}
 
   /* ===== v6: calendar, cost estimate, goals ===== */
+  .fc-wrap{--fc-border-color:var(--line);--fc-button-bg-color:var(--surface);--fc-button-border-color:var(--line);
+    --fc-button-text-color:var(--ink);--fc-button-hover-bg-color:var(--surface-2);--fc-button-hover-border-color:var(--line);
+    --fc-button-active-bg-color:var(--teal);--fc-button-active-border-color:var(--teal);--fc-today-bg-color:var(--teal-wash);
+    --fc-page-bg-color:transparent;--fc-neutral-bg-color:var(--surface-2);
+    font-family:inherit;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:16px}
+  .fc-wrap .fc-toolbar-title{font-size:17px;color:var(--ink)}
+  .fc-wrap .fc-daygrid-day-number,.fc-wrap .fc-col-header-cell-cushion{color:var(--ink-soft);font-size:12.5px}
+  .fc-wrap .fc-event{cursor:pointer;font-size:11.5px;padding:1px 4px;border:none}
+  .fc-wrap .fc-button{box-shadow:none!important;text-transform:capitalize}
+  @media(max-width:640px){
+    .fc-wrap{padding:10px}
+    .fc-wrap .fc-toolbar{flex-direction:column;gap:8px;align-items:stretch}
+    .fc-wrap .fc-toolbar-chunk{display:flex;justify-content:center}
+    .fc-wrap .fc-toolbar-title{font-size:15px}
+    .fc-wrap .fc-button{padding:5px 8px;font-size:12px}
+  }
   .cal-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:18px}
   @media(max-width:720px){.cal-grid{grid-template-columns:1fr}}
   .wx-row{display:grid;grid-template-columns:repeat(7,1fr);gap:9px}
@@ -965,6 +983,12 @@
   <div class="modal-foot"><button class="btn ghost" onclick="closeModal('send-doc-overlay')">Cancel</button><button class="btn primary" id="sd-send-btn" onclick="confirmSendDocEmail()">Send email</button></div>
 </div></div>
 
+<div class="overlay" id="cal-pick-overlay"><div class="modal">
+  <div class="modal-head"><div><h3 id="cp-title">Schedule a job</h3><p>Pick a won job to book on this date.</p></div><button class="x" aria-label="Close" onclick="closeModal('cal-pick-overlay')">×</button></div>
+  <div class="modal-body"><div id="cp-list"></div></div>
+  <div class="modal-foot"><button class="btn ghost" onclick="closeModal('cal-pick-overlay')">Close</button></div>
+</div></div>
+
 <div class="overlay" id="tpl-overlay"><div class="modal">
   <div class="modal-head"><div><h3>Edit template</h3><p>Your header, contact details, colours and terms — applied to every quote and invoice.</p></div><button class="x" aria-label="Close" onclick="closeModal('tpl-overlay')">×</button></div>
   <div class="modal-body" id="tpl-body"></div>
@@ -1017,6 +1041,55 @@ const SOP_STEPS = [
   {t:'Post-photo',s:'Capture before/after'},
   {t:'Customer approval',s:'Final sign-off closes the job'}
 ];
+// Per-service default checklists — seeded into checklist_templates the first time
+// a business loads (see loadChecklistTemplates); businesses can edit/replace any
+// of these afterward. '' = the generic fallback used when a job's first service
+// has no dedicated template of its own.
+const CHECKLIST_DEFAULTS={
+  '':{name:'Job checklist',steps:SOP_STEPS},
+  housewash:{name:'House Wash',steps:[
+    {t:'Protect plants',s:''},{t:'Apply chemical',s:''},{t:'Soft wash walls',s:''},
+    {t:'Rinse windows',s:''},{t:'Final inspection',s:'Customer sign-off closes the job'}
+  ]},
+  roof:{name:'Roof Clean',steps:[
+    {t:'Safety setup',s:''},{t:'Chemical application',s:''},{t:'Rinse gutters',s:''},
+    {t:'Photos',s:'Customer sign-off closes the job'}
+  ]}
+};
+let checklistTemplates={'':CHECKLIST_DEFAULTS['']}; // keyed by service_key ('' = default), populated by loadChecklistTemplates()
+async function loadChecklistTemplates(){
+  if(!sb||!currentBusinessId)return;
+  const {data,error}=await sb.from('checklist_templates').select('*').eq('business_id',currentBusinessId);
+  if(error){console.error('Load checklist templates failed',error);return;}
+  const byKey={};
+  (data||[]).forEach(row=>{byKey[row.service_key]=row;});
+  if(!byKey['']){
+    const seed={business_id:currentBusinessId,service_key:'',name:CHECKLIST_DEFAULTS[''].name,steps:CHECKLIST_DEFAULTS[''].steps};
+    const {data:created,error:seedErr}=await sb.from('checklist_templates').upsert(seed,{onConflict:'business_id,service_key'}).select('*').maybeSingle();
+    if(!seedErr)byKey['']=created;
+  }
+  const merged={};
+  Object.entries(byKey).forEach(([k,row])=>{merged[k]={id:row.id,name:row.name,steps:(row.steps&&row.steps.length)?row.steps:CHECKLIST_DEFAULTS['']?.steps||SOP_STEPS};});
+  if(!merged[''])merged['']=CHECKLIST_DEFAULTS[''];
+  checklistTemplates=merged;
+}
+// Which checklist applies to a job: its first service's own template if the
+// business has one, else the generic default. A job with no services yet
+// still gets the default so the UI never has zero steps to show.
+function checklistForRecord(r){
+  const svc=r.services&&r.services[0]&&r.services[0].svc;
+  return (svc&&checklistTemplates[svc])||checklistTemplates['']||CHECKLIST_DEFAULTS[''];
+}
+// Grows/shrinks r.sop to match whichever checklist currently applies — jobs
+// created before a business customized their checklists, or whose service
+// changed, self-heal to the right length instead of erroring on a mismatch.
+function ensureSopSized(r){
+  const tpl=checklistForRecord(r);
+  if(!Array.isArray(r.sop))r.sop=[];
+  while(r.sop.length<tpl.steps.length)r.sop.push(false);
+  if(r.sop.length>tpl.steps.length)r.sop.length=tpl.steps.length;
+  return tpl;
+}
 const STAGES = [
   {key:'new',      label:'New Lead',    short:'New',       cls:'new',       dot:'#2f5d82', tone:'#2f5d82', wash:'#eef3f8'},
   {key:'quoted',   label:'Quote Sent',  short:'Quoted',    cls:'quoted',    dot:'#9a7a32', tone:'#9a7a32', wash:'#f8f2e0'},
@@ -1089,9 +1162,20 @@ function estimateJob(services){
 function fmtDur(min){const h=Math.floor(min/60),m=Math.round(min%60);return h?`${h}h ${m?m+'m':''}`.trim():`${m}m`}
 const DAY_START_MIN = 8*60; // crews start at 8:00am
 function fmtTime(mins){let h=Math.floor(mins/60),m=Math.round(mins%60);const ap=h>=12?'pm':'am';let h12=h%12;if(h12===0)h12=12;return `${h12}:${String(m).padStart(2,'0')}${ap}`;}
+/* ===== Real-date scheduling helpers — the calendar is no longer capped to a
+   rolling 7-day window; scheduledDateISO (YYYY-MM-DD) is the source of truth
+   for any job, arbitrarily far in the future. scheduledDate stays as a
+   human-readable label derived from it, kept for anything still reading it. */
+function todayISO(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+function isoToLabel(iso){
+  if(!iso)return null;
+  const d=new Date(iso+'T12:00:00');
+  return ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()]+' '+d.getDate()+' '+['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
+}
+function addDaysISO(iso,n){const d=new Date(iso+'T12:00:00');d.setDate(d.getDate()+n);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
 // Lay out a day's jobs back-to-back from 8am (+15min travel between). Returns [{job, start, end}].
-function dayTimeline(dayIdx, extraJob){
-  const jobs=records.filter(x=>isBooked(x)&&x.scheduledIdx===dayIdx);
+function dayTimeline(dateISO, extraJob){
+  const jobs=records.filter(x=>isBooked(x)&&x.scheduledDateISO===dateISO&&x!==extraJob);
   const all=extraJob?[...jobs,extraJob]:jobs;
   let t=DAY_START_MIN; const out=[];
   all.forEach((j,i)=>{
@@ -1103,18 +1187,25 @@ function dayTimeline(dayIdx, extraJob){
   return out;
 }
 
-/* ===== Weather: 7-day demo forecast for scheduling recommendations ===== */
-// Sample forecast — replaced by LIVE data from Open-Meteo (free, no key) when online.
+/* ===== Weather: forecast for scheduling recommendations =====
+   Provider: Open-Meteo (free, keyless). WX_FORECAST_DAYS is the honest ceiling —
+   16 days is the real limit of Open-Meteo's short/medium-range models; asking for
+   more just returns padded/low-confidence data, so we don't. Beyond that horizon
+   we show HISTORICAL averages (clearly labelled as such, see weatherForDate) or
+   an explicit "no data" state — never a fabricated "forecast". */
+const WX_FORECAST_DAYS=16;
+// Sample forecast — replaced by LIVE data from Open-Meteo when online.
 const WEATHER = [
-  {day:'Mon',date:'1 Jul',icon:'☀️',cond:'Sunny',tempHi:16,rainPct:5,windKmh:9},
-  {day:'Tue',date:'2 Jul',icon:'🌤️',cond:'Mostly fine',tempHi:15,rainPct:15,windKmh:12},
-  {day:'Wed',date:'3 Jul',icon:'🌧️',cond:'Rain',tempHi:13,rainPct:80,windKmh:24},
-  {day:'Thu',date:'4 Jul',icon:'⛅',cond:'Partly cloudy',tempHi:15,rainPct:25,windKmh:14},
-  {day:'Fri',date:'5 Jul',icon:'☀️',cond:'Sunny',tempHi:17,rainPct:5,windKmh:8},
-  {day:'Sat',date:'6 Jul',icon:'🌦️',cond:'Showers',tempHi:14,rainPct:55,windKmh:20},
-  {day:'Sun',date:'7 Jul',icon:'🌧️',cond:'Heavy rain',tempHi:12,rainPct:90,windKmh:30}
+  {day:'Mon',date:'1 Jul',iso:null,icon:'☀️',cond:'Sunny',tempHi:16,rainPct:5,windKmh:9},
+  {day:'Tue',date:'2 Jul',iso:null,icon:'🌤️',cond:'Mostly fine',tempHi:15,rainPct:15,windKmh:12},
+  {day:'Wed',date:'3 Jul',iso:null,icon:'🌧️',cond:'Rain',tempHi:13,rainPct:80,windKmh:24},
+  {day:'Thu',date:'4 Jul',iso:null,icon:'⛅',cond:'Partly cloudy',tempHi:15,rainPct:25,windKmh:14},
+  {day:'Fri',date:'5 Jul',iso:null,icon:'☀️',cond:'Sunny',tempHi:17,rainPct:5,windKmh:8},
+  {day:'Sat',date:'6 Jul',iso:null,icon:'🌦️',cond:'Showers',tempHi:14,rainPct:55,windKmh:20},
+  {day:'Sun',date:'7 Jul',iso:null,icon:'🌧️',cond:'Heavy rain',tempHi:12,rainPct:90,windKmh:30}
 ];
 let weatherLive=false, weatherFetchedAt=null;
+let climateNormals=null; // {month0..11: {rainDayPct, avgHighTemp}} — historical planning data, see fetchClimateNormals()
 const WX_LAT=-36.79, WX_LON=174.75; // fallback default (Auckland) — overridden by the business's own region once set in Connections
 function wxFromCode(code){
   if(code===0)return{icon:'☀️',cond:'Sunny'};
@@ -1131,8 +1222,6 @@ function applyWeather(days){
   WEATHER.length=0;
   days.forEach(d=>WEATHER.push(d));
   weatherLive=true;weatherFetchedAt=Date.now();
-  // keep booked jobs' date labels in sync with the real calendar
-  records.forEach(r=>{if(r.scheduledIdx!=null&&WEATHER[r.scheduledIdx])r.scheduledDate=WEATHER[r.scheduledIdx].day+' '+WEATHER[r.scheduledIdx].date;});
   try{localStorage.setItem('turnkey-wx',JSON.stringify({at:weatherFetchedAt,days}));}catch(e){}
 }
 function fetchLiveWeather(){
@@ -1149,7 +1238,7 @@ function fetchLiveWeather(){
   const lon=(currentBusinessProfile&&currentBusinessProfile.region_lng)||WX_LON;
   const url=`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}`+
     `&daily=weather_code,temperature_2m_max,precipitation_probability_max,wind_speed_10m_max`+
-    `&timezone=auto&forecast_days=7`;
+    `&timezone=auto&forecast_days=${WX_FORECAST_DAYS}`;
   fetch(url).then(r=>r.json()).then(j=>{
     if(!j.daily||!j.daily.time)return;
     const days=j.daily.time.map((iso,i)=>{
@@ -1158,6 +1247,7 @@ function fetchLiveWeather(){
       return {
         day:['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][dt.getDay()],
         date:dt.getDate()+' '+['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][dt.getMonth()],
+        iso,
         icon:wx.icon,cond:wx.cond,
         tempHi:Math.round(j.daily.temperature_2m_max[i]),
         rainPct:Math.round(j.daily.precipitation_probability_max[i]||0),
@@ -1168,7 +1258,7 @@ function fetchLiveWeather(){
     render();renderAll();
     const v=document.querySelector('nav.tabs button.active');
     if(v&&v.dataset.view==='calendar')renderCalendar();
-    toast('Live 7-day forecast loaded ✓');
+    toast('Live '+WX_FORECAST_DAYS+'-day forecast loaded ✓');
   }).catch(()=>{/* offline: sample data stays */});
 }
 function weatherScore(w){ // higher = better day to wash. Rain & wind hurt.
@@ -1179,6 +1269,77 @@ function weatherVerdict(w){
   if(w.rainPct>=70) return {tone:'bad',label:'Not suitable'};
   if(w.rainPct>=45||w.windKmh>=25) return {tone:'warn',label:'Marginal'};
   return {tone:'good',label:'Good to wash'};
+}
+// Richer working-condition rating with explicit, business-facing impact copy —
+// used by the calendar day view and scheduling modal. Distinct from
+// weatherVerdict() (kept as-is; still drives bestWashDays()/pipeline scoring).
+function workingConditionRating(w){
+  let rating='good',label='Good working conditions';
+  const notes=[];
+  if(w.rainPct>=70){rating='poor';label='Rain likely';notes.push('Possible rain delay — consider rescheduling');}
+  else if(w.rainPct>=40){rating='marginal';label='Rain possible';notes.push('Possible rain delay');}
+  if(w.windKmh>=35){rating='poor';label=notes.length?label:'High wind';notes.push('High wind — avoid roof work');}
+  else if(w.windKmh>=25){if(rating==='good')rating='marginal';notes.push('Breezy — caution on ladders/roofs');}
+  if(w.tempHi<=7){rating='poor';notes.push('Too cold for chemical application');}
+  else if(w.tempHi<=10&&rating==='good'){rating='marginal';notes.push('Cool — check chemical activity before use');}
+  if(rating==='good'&&w.rainPct<15&&w.windKmh<15&&w.tempHi>=14){label='Excellent exterior cleaning conditions';}
+  else if(rating==='marginal'&&!label){label='Marginal conditions';}
+  else if(rating==='poor'&&label==='Good working conditions'){label='Poor working conditions';}
+  return {rating,label,impact:notes.length?notes:[label]};
+}
+/* ===== Historical planning data: seasonal rainfall/temperature normals =====
+   For any date beyond the live forecast window (WX_FORECAST_DAYS), or when the
+   live forecast can't be reached at all, this is what backs scheduling decisions
+   — a real 3-year average from Open-Meteo's Archive API for the business's own
+   region, always labelled as historical, never presented as a forecast. */
+function fetchClimateNormals(){
+  try{
+    const c=JSON.parse(localStorage.getItem('turnkey-wx-normals')||'null');
+    if(c&&(Date.now()-c.at)<30*24*60*60*1000){climateNormals=c.normals;return;}
+  }catch(e){}
+  if(typeof fetch!=='function')return;
+  const lat=(currentBusinessProfile&&currentBusinessProfile.region_lat)||WX_LAT;
+  const lon=(currentBusinessProfile&&currentBusinessProfile.region_lng)||WX_LON;
+  const end=new Date(); end.setDate(end.getDate()-3); // archive API lags a couple of days behind real-time
+  const start=new Date(end); start.setFullYear(start.getFullYear()-3);
+  const iso=d=>d.toISOString().slice(0,10);
+  const url=`https://archive-api.open-meteo.com/v1/archive?latitude=${lat}&longitude=${lon}`+
+    `&start_date=${iso(start)}&end_date=${iso(end)}&daily=precipitation_sum,temperature_2m_max&timezone=auto`;
+  fetch(url).then(r=>r.json()).then(j=>{
+    if(!j.daily||!j.daily.time)return;
+    const byMonth=Array.from({length:12},()=>({rainDays:0,total:0,tempSum:0}));
+    j.daily.time.forEach((d,i)=>{
+      const m=new Date(d+'T12:00:00').getMonth();
+      byMonth[m].total++;
+      if((j.daily.precipitation_sum[i]||0)>=1)byMonth[m].rainDays++;
+      byMonth[m].tempSum+=(j.daily.temperature_2m_max[i]||0);
+    });
+    const normals=byMonth.map(m=>m.total?{
+      rainDayPct:Math.round(m.rainDays/m.total*100),
+      avgHighTemp:Math.round(m.tempSum/m.total)
+    }:null);
+    climateNormals=normals;
+    try{localStorage.setItem('turnkey-wx-normals',JSON.stringify({at:Date.now(),normals}));}catch(e){}
+  }).catch(()=>{/* offline: no historical panel shown until next successful fetch */});
+}
+// The single source of truth for "what do we know about this date's weather" —
+// returns exactly one of three honest states instead of ever pretending a
+// distant date has forecast-grade certainty.
+function weatherForDate(dateISO){
+  const w=WEATHER.find(d=>d.iso===dateISO);
+  if(w)return Object.assign({type:'forecast'},w,workingConditionRating(w));
+  if(climateNormals){
+    const m=new Date(dateISO+'T12:00:00').getMonth();
+    const n=climateNormals[m];
+    if(n){
+      const monthName=['January','February','March','April','May','June','July','August','September','October','November','December'][m];
+      const approxRating=workingConditionRating({rainPct:n.rainDayPct,windKmh:15,tempHi:n.avgHighTemp});
+      return {type:'historical',month:monthName,rainDayPct:n.rainDayPct,avgHighTemp:n.avgHighTemp,
+        note:`${n.rainDayPct}% of ${monthName} days had rain over the last 3 years — historical average, not a forecast for this specific date.`,
+        rating:approxRating.rating,label:approxRating.label};
+    }
+  }
+  return {type:'unavailable'};
 }
 
 /* ===== Goals: targets + the reward you promised yourself ===== */
@@ -1281,15 +1442,64 @@ function fillTemplate(str,vars){
   return (str||'').replace(/\{\{\s*([a-z_]+)\s*\}\}/gi,(m,key)=>vars[key]!=null?vars[key]:m);
 }
 
+/* ===== Lifecycle automation emails: short transactional notices distinct from
+   the full quote/invoice document emails above — "your quote is ready" style
+   nudges at each stage of lead → customer → job → invoice → review. Event-driven
+   keys fire directly from the state transition that earns them (see call sites:
+   ingestQuoteRequest, autoFollowUp, confirmSchedule, markJobCompleted, markPaid).
+   Time-based keys (day_before_reminder, invoice_overdue) can't fire from a
+   client state transition — those are swept by the backend's
+   /api/automations/run-due endpoint, meant to be hit by an external cron. */
+const LIFECYCLE_DEFAULTS={
+  new_lead:{subject:'Thanks for requesting a quote, {{customer_name}}!',body:'Thanks for reaching out to {{business_name}} — we\'ve got your request for {{job_address}} and will be in touch with a quote shortly.'},
+  quote_reminder:{subject:'Still thinking it over? Your quote from {{business_name}}',body:'Just following up on the quote we sent for {{job_address}} — {{quote_total}}. Happy to answer any questions or adjust anything. Reply any time.'},
+  job_booked:{subject:'Your service is confirmed — {{scheduled_date}}',body:'Hi {{customer_name}}, you\'re booked in with {{business_name}} for {{scheduled_date}} at {{job_address}}. See you then!'},
+  day_before_reminder:{subject:'Reminder: {{business_name}} is coming tomorrow',body:'Hi {{customer_name}}, just a reminder we\'ll be at {{job_address}} tomorrow ({{scheduled_date}}). Let us know if anything\'s changed.'},
+  job_completed:{subject:'The work\'s done — invoice on its way',body:'Hi {{customer_name}}, we\'ve finished up at {{job_address}}. Your invoice will follow shortly. Thanks for choosing {{business_name}}!'},
+  invoice_overdue:{subject:'Reminder: invoice from {{business_name}} is overdue',body:'Hi {{customer_name}}, just a friendly reminder that your invoice for {{invoice_total}} is now overdue. Reply if you\'d like to sort out payment or have any questions.'},
+  review_request:{subject:'How did we do?',body:'Hi {{customer_name}}, thanks again for choosing {{business_name}}! If you have a minute, we\'d really appreciate a quick review — it helps us a lot.'}
+};
+let lifecycleEmails={}; // keyed by automation key, self-healed from LIFECYCLE_DEFAULTS
+async function loadLifecycleEmails(){
+  if(!sb||!currentBusinessId)return;
+  const {data,error}=await sb.from('lifecycle_emails').select('*').eq('business_id',currentBusinessId);
+  if(error){console.error('Load lifecycle emails failed',error);return;}
+  const byKey={};
+  (data||[]).forEach(row=>{byKey[row.key]=row;});
+  for(const key of Object.keys(LIFECYCLE_DEFAULTS)){
+    if(!byKey[key]){
+      const seed=Object.assign({business_id:currentBusinessId,key,enabled:true},LIFECYCLE_DEFAULTS[key]);
+      const {data:created,error:seedErr}=await sb.from('lifecycle_emails').upsert(seed,{onConflict:'business_id,key'}).select('*').maybeSingle();
+      if(!seedErr)byKey[key]=created;
+    }
+  }
+  lifecycleEmails=byKey;
+}
+// Sends one lifecycle notice if: Gmail is connected, the customer has an email
+// on file, and the business hasn't disabled this key. Silent no-op otherwise —
+// these are a nice-to-have layered on top of the core flow, never a blocker.
+async function sendLifecycleEmail(r,key){
+  if(!emailAccount||!r.email)return;
+  const tpl=lifecycleEmails[key]||LIFECYCLE_DEFAULTS[key];
+  if(!tpl||tpl.enabled===false)return;
+  const vars=emailTemplateVars(r,r.stage==='paid'||r.invoiceId?'invoice':'quote');
+  const subject=fillTemplate(tpl.subject,vars);
+  const bodyText=fillTemplate(tpl.body,vars);
+  const bodyHtml=`<div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;max-width:520px;margin:0 auto;color:#1a1a1a;line-height:1.6"><p>${bodyText.replace(/\n/g,'<br>')}</p></div>`;
+  const ok=await sendEmailViaBackend({to:r.email,subject,bodyText,bodyHtml,customerId:r.customerId});
+  if(ok)logActivity(r.customerId,r.jobId,'email_sent',subject);
+}
+
 function money(n){return '$'+Math.round(n).toLocaleString('en-NZ')}
 function segOf(t){return t>=1200?'Large':t>=500?'Mid':'Small'}
 
 function newRecord(d){return Object.assign({
-  id:seq++,stage:'new',services:[],total:0,sop:SOP_STEPS.map(()=>false),
-  photoBefore:false,photoAfter:false,repeat:'no',callback:false,email:'',
-  tech:'Unassigned',gps:'pending',scheduledDate:null,scheduledIdx:null,createdAt:Date.now(),follows:[],
+  id:seq++,stage:'new',services:[],total:0,sop:[],
+  photoBefore:false,photoAfter:false,startedAt:null,repeat:'no',callback:false,email:'',
+  tech:'Unassigned',gps:'pending',scheduledDate:null,scheduledIdx:null,scheduledDateISO:null,createdAt:Date.now(),follows:[],
   quoteSentAt:null,clientResponded:false,paidAt:null,approvedAt:null,lastServiceDaysAgo:null,assumptions:null,areaPolys:null,selfPriced:false,
-  hasCustomerPhoto:false,customerPhotoPath:null,quoteAttachments:[],assignedStaffId:null
+  hasCustomerPhoto:false,customerPhotoPath:null,quoteAttachments:[],assignedStaffId:null,
+  paymentStatus:'draft',paymentMethod:null,dueDate:null
 },d)}
 
 let followSeq=1;
@@ -1810,6 +2020,8 @@ function sendQuoteDoc(){
 function sendInvoiceDoc(){
   const r=records.find(x=>x.id===docPreview.recordId);if(!r)return;
   r.invoiceSent=true;
+  r.paymentStatus='sent';
+  if(!r.dueDate)r.dueDate=addDaysISO(todayISO(),7); // matches the default invoice terms ("due within 7 days")
   closeDocPreview();
   generateAndSendDoc('invoice',r);
 }
@@ -2184,8 +2396,54 @@ function openTemplateEditor(){
     <div class="field"><label>Footer line</label><input id="tpl-footer" value="${(t.footer||'').replace(/"/g,'&quot;')}"></div>
     <p style="font-size:12px;color:var(--ink-faint);margin:18px 0 -4px">Below is the actual <b>email</b> sent when you click Send Quote / Send Invoice (separate from the PDF style above). Use <code>{{customer_name}}</code>, <code>{{business_name}}</code>, <code>{{quote_total}}</code>, <code>{{invoice_total}}</code>, <code>{{job_address}}</code>, <code>{{scheduled_date}}</code> anywhere in these fields.</p>
     ${tplEmailSection('quote')}
-    ${tplEmailSection('invoice')}`;
+    ${tplEmailSection('invoice')}
+    ${tplChecklistSection()}
+    ${tplLifecycleSection()}`;
+  renderChecklistEditorFor('');
   openModal('tpl-overlay');
+}
+function tplLifecycleSection(){
+  const labels={new_lead:'New lead',quote_reminder:'Quote reminder — auto, 3 days after no reply',job_booked:'Job booked',day_before_reminder:'Day-before reminder — needs a backend sweep, see Connections',job_completed:'Job completed',invoice_overdue:'Invoice overdue — needs a backend sweep, see Connections',review_request:'Review request — after payment'};
+  return `<div class="panel" style="margin-top:16px">
+    <h4>Automated emails</h4>
+    <p style="font-size:12px;color:var(--ink-faint);margin:-4px 0 10px">Short automatic notices sent alongside the main quote/invoice emails, when Gmail is connected and the customer has an email on file. Use <code>{{customer_name}}</code>, <code>{{business_name}}</code>, <code>{{quote_total}}</code>, <code>{{invoice_total}}</code>, <code>{{job_address}}</code>, <code>{{scheduled_date}}</code>.</p>
+    ${Object.keys(LIFECYCLE_DEFAULTS).map(k=>{
+      const t=lifecycleEmails[k]||LIFECYCLE_DEFAULTS[k];
+      return `<div style="border-top:1px solid var(--line);padding:12px 0">
+        <label style="display:flex;align-items:center;gap:8px;font-weight:600;font-size:13.5px"><input type="checkbox" id="lc-${k}-enabled" ${t.enabled!==false?'checked':''}> ${labels[k]||k}</label>
+        <div class="field" style="margin-top:8px"><label>Subject</label><input id="lc-${k}-subject" value="${(t.subject||'').replace(/"/g,'&quot;')}"></div>
+        <div class="field"><label>Body</label><textarea id="lc-${k}-body" rows="2">${t.body||''}</textarea></div>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+function tplChecklistSection(){
+  const opts=[['','Default — any service without its own checklist'],...Object.entries(SERVICES).map(([k,v])=>[k,v.label])];
+  return `<div class="panel" style="margin-top:16px">
+    <h4>Job checklists</h4>
+    <p style="font-size:12px;color:var(--ink-faint);margin:-4px 0 10px">One step per line — this replaces the default checklist for the picked service. The checklist shown on a job is chosen by its first service; jobs with no dedicated template use Default. Switching the dropdown below discards unsaved edits — use "Save this checklist" first.</p>
+    <div class="field"><label>Checklist for</label><select id="tpl-checklist-key" onchange="renderChecklistEditorFor(this.value)">${opts.map(([k,label])=>`<option value="${k}">${label}</option>`).join('')}</select></div>
+    <div class="field"><label>Steps</label><textarea id="tpl-checklist-steps" rows="6" placeholder="One step per line"></textarea></div>
+    <button class="btn ghost sm" onclick="saveChecklistNow()">Save this checklist</button>
+  </div>`;
+}
+function renderChecklistEditorFor(key){
+  const tpl=checklistTemplates[key]||CHECKLIST_DEFAULTS[key]||{steps:[]};
+  const el=document.getElementById('tpl-checklist-steps');
+  if(el)el.value=tpl.steps.map(s=>typeof s==='string'?s:s.t).join('\n');
+  const sel=document.getElementById('tpl-checklist-key');
+  if(sel)sel.value=key;
+}
+async function saveChecklistNow(){
+  if(!sb||!currentBusinessId){toast('Supabase is not configured');return;}
+  const key=document.getElementById('tpl-checklist-key').value;
+  const steps=document.getElementById('tpl-checklist-steps').value.split('\n').map(s=>s.trim()).filter(Boolean).map(t=>({t,s:''}));
+  if(!steps.length){toast('Add at least one step');return;}
+  const name=key?(SERVICES[key]?SERVICES[key].label:key):'Job checklist';
+  const {data,error}=await sb.from('checklist_templates').upsert({business_id:currentBusinessId,service_key:key,name,steps},{onConflict:'business_id,service_key'}).select('*').maybeSingle();
+  if(error){console.error('Save checklist failed',error);toast('Could not save checklist');return;}
+  checklistTemplates[key]={id:data.id,name:data.name,steps:data.steps};
+  toast('Checklist saved ✓');
 }
 async function saveTemplate(){
   const g=id=>document.getElementById(id).value;
@@ -2207,6 +2465,14 @@ async function saveTemplate(){
       if(error)console.error('Save '+type+' email template failed',error);
       else emailTemplates[type]=data;
     }
+    for(const key of Object.keys(LIFECYCLE_DEFAULTS)){
+      const enabledEl=document.getElementById(`lc-${key}-enabled`);
+      if(!enabledEl)continue; // section wasn't rendered this time (shouldn't happen, defensive)
+      const payload={business_id:currentBusinessId,key,enabled:enabledEl.checked,subject:g(`lc-${key}-subject`),body:g(`lc-${key}-body`)};
+      const {data,error}=await sb.from('lifecycle_emails').upsert(payload,{onConflict:'business_id,key'}).select('*').maybeSingle();
+      if(error)console.error('Save '+key+' lifecycle email failed',error);
+      else lifecycleEmails[key]=data;
+    }
   }
   closeModal('tpl-overlay');
   // re-render the open preview with the new template
@@ -2217,44 +2483,44 @@ async function saveTemplate(){
   toast('Templates saved');
 }
 
-/* ---------- SCHEDULING: pick a weather-aware date after quoting ---------- */
+/* ---------- SCHEDULING: pick any future date, weather-aware where data exists ----------
+   scheduleChoice holds an ISO date string (YYYY-MM-DD), not a 0-6 index — a job can be
+   booked arbitrarily far out. The weather quick-pick strip only covers the accurate
+   forecast window (WX_FORECAST_DAYS); a real <input type=date> handles everything else,
+   with weatherForDate() honestly falling back to historical averages or "no data". */
 let scheduleId=null, scheduleChoice=null;
-function openSchedule(id){
-  scheduleId=id; scheduleChoice=null;
+function openSchedule(id,presetISO){
+  scheduleId=id;
   const r=records.find(x=>x.id===id);
   const est=estimateJob(r.services);
   const jobMin=est.labourMin;
   const WORKDAY_MIN=8*60;
-  const booked=records.filter(x=>isBooked(x)&&x.scheduledIdx!=null&&x.id!==id);
-  const dayInfo=WEATHER.map((w,i)=>{
-    const jobs=booked.filter(x=>x.scheduledIdx===i);
+  scheduleChoice=presetISO||r.scheduledDateISO||(WEATHER.find(w=>w.iso)||{}).iso||todayISO();
+  const booked=records.filter(x=>isBooked(x)&&x.scheduledDateISO&&x.id!==id);
+  const dayInfo=WEATHER.filter(w=>w.iso).map(w=>{
+    const jobs=booked.filter(x=>x.scheduledDateISO===w.iso);
     const usedMin=jobs.reduce((s,x)=>s+estimateJob(x.services).labourMin,0);
     const sameSuburb=jobs.find(x=>x.suburb&&r.suburb&&x.suburb.toLowerCase()===r.suburb.toLowerCase());
     const fits=(usedMin+jobMin)<=WORKDAY_MIN;
-    return {...w,i,score:Math.round(weatherScore(w)),verdict:weatherVerdict(w),jobs,usedMin,sameSuburb,fits};
+    return {...w,score:Math.round(weatherScore(w)),verdict:weatherVerdict(w),jobs,usedMin,sameSuburb,fits};
   });
-  const ranked=[...dayInfo].sort((a,b)=>{
-    const pa=(a.sameSuburb&&a.fits)?1:0, pb=(b.sameSuburb&&b.fits)?1:0;
-    if(pa!==pb)return pb-pa;
-    if(a.fits!==b.fits)return (b.fits?1:0)-(a.fits?1:0);
-    return b.score-a.score;
-  });
-  scheduleChoice=ranked[0].i;
   const pairDay=dayInfo.find(d=>d.sameSuburb&&d.fits);
   const techOptions=staff.map(u=>`<option value="${u.id}" ${r.assignedStaffId===u.id?'selected':''}>${(u.name||u.email||'Unnamed').replace(/</g,'&lt;')}</option>`).join('');
   document.getElementById('sched-body').innerHTML=`
-    <p style="font-size:13.5px;color:var(--ink-soft);margin-bottom:6px">${r.name} \u00b7 ${r.suburb||'\u2014'} \u00b7 ~${fmtDur(jobMin)} of work.</p>
-    ${pairDay?`<div class="pair-rec">\ud83d\udca1 <b>${pairDay.sameSuburb.name}</b> is already booked in ${r.suburb} on <b>${pairDay.day} ${pairDay.date}</b>. Add this job that day to do two in one trip \u2014 saves ~22 min driving and a second callout.</div>`:''}
+    <p style="font-size:13.5px;color:var(--ink-soft);margin-bottom:6px">${r.name} · ${r.suburb||'—'} · ~${fmtDur(jobMin)} of work.</p>
+    ${pairDay?`<div class="pair-rec">💡 <b>${pairDay.sameSuburb.name}</b> is already booked in ${r.suburb} on <b>${pairDay.day} ${pairDay.date}</b>. Add this job that day to do two in one trip — saves ~22 min driving and a second callout.</div>`:''}
+    <div class="field"><label>Date</label><input type="date" id="sched-date-input" value="${scheduleChoice}" min="${todayISO()}" onchange="onSchedDateInput(this.value)"></div>
+    ${dayInfo.length?`<p style="font-size:12px;color:var(--ink-faint);margin:12px 0 6px">Quick-pick from the live ${dayInfo.length}-day forecast:</p>
     <div class="sched-days">
       ${dayInfo.map(d=>`
-        <button class="sched-day ${d.verdict.tone} ${d.i===scheduleChoice?'sel':''} ${!d.fits?'full':''}" data-day="${d.i}" onclick="pickSchedDay(${d.i})">
+        <button class="sched-day ${d.verdict.tone} ${d.iso===scheduleChoice?'sel':''} ${!d.fits?'full':''}" data-iso="${d.iso}" onclick="pickSchedDay('${d.iso}')">
           ${d.sameSuburb&&d.fits?'<span class="sd-pair">pair</span>':''}
           <div class="sd-dow">${d.day}<span>${d.date}</span></div>
           <div class="sd-ico">${d.icon}</div>
-          <div class="sd-load">${d.jobs.length?`${d.jobs.length} job${d.jobs.length>1?'s':''} \u00b7 ${fmtDur(d.usedMin)}`:'free'}</div>
+          <div class="sd-load">${d.jobs.length?`${d.jobs.length} job${d.jobs.length>1?'s':''} · ${fmtDur(d.usedMin)}`:'free'}</div>
           <div class="sd-verdict ${d.verdict.tone}">${d.verdict.label}</div>
         </button>`).join('')}
-    </div>
+    </div>`:''}
     <div class="field" style="margin-top:18px"><label>Assign crew</label>
       <select id="sched-tech"><option value="">Unassigned</option>${techOptions}</select>
     </div>
@@ -2264,9 +2530,16 @@ function openSchedule(id){
   updateSchedDayDetail();
   openModal('schedule-overlay');
 }
-function pickSchedDay(i){
-  scheduleChoice=i;
-  document.querySelectorAll('.sched-day').forEach(b=>b.classList.toggle('sel',+b.dataset.day===i));
+function onSchedDateInput(iso){
+  scheduleChoice=iso;
+  document.querySelectorAll('.sched-day').forEach(b=>b.classList.toggle('sel',b.dataset.iso===iso));
+  updateSchedWarn();
+  updateSchedDayDetail();
+}
+function pickSchedDay(iso){
+  scheduleChoice=iso;
+  const input=document.getElementById('sched-date-input'); if(input)input.value=iso;
+  document.querySelectorAll('.sched-day').forEach(b=>b.classList.toggle('sel',b.dataset.iso===iso));
   updateSchedWarn();
   updateSchedDayDetail();
 }
@@ -2276,36 +2549,49 @@ function updateSchedDayDetail(){
   const jobMin=estimateJob(r.services).labourMin;
   // build the timeline for this day WITH the new job appended, so it gets a start time too
   const tl=dayTimeline(scheduleChoice, r);
-  const others=tl.filter(s=>s.job.id!==r.id || !s.isExtra ? s.job.id!==r.id : false);
-  const existing=tl.filter(s=>s.job.id!==r.id);
+  const existing=tl.filter(s=>!s.isExtra);
   const mine=tl.find(s=>s.isExtra);
   const pairable=existing.find(s=>s.job.suburb&&r.suburb&&s.job.suburb.toLowerCase()===r.suburb.toLowerCase());
   const dayEnd=tl.length?tl[tl.length-1].end:DAY_START_MIN;
   const over=dayEnd>(17*60); // past 5pm
   if(!existing.length){
     zone.innerHTML=`<div class="day-detail"><div class="dd-h">This day is free</div>
-      <div class="dd-row dd-new"><span><b>${fmtTime(mine.start)}–${fmtTime(mine.end)}</b> \u00b7 ${r.name} (new)</span><span>${fmtDur(jobMin)}</span></div></div>`;
+      <div class="dd-row dd-new"><span><b>${fmtTime(mine.start)}–${fmtTime(mine.end)}</b> · ${r.name} (new)</span><span>${fmtDur(jobMin)}</span></div></div>`;
     return;
   }
   zone.innerHTML=`<div class="day-detail">
-    <div class="dd-h">That day\u2019s schedule</div>
-    ${tl.map(s=>`<div class="dd-row ${s.isExtra?'dd-new':''}"><span><b>${fmtTime(s.start)}–${fmtTime(s.end)}</b> \u00b7 ${s.job.name}${s.isExtra?' (new)':''} \u00b7 ${s.job.suburb||''}${pairable&&!s.isExtra&&s.job.id===pairable.job.id?' <span class="dd-pair">same area</span>':''}</span><span>${fmtDur(estimateJob(s.job.services).labourMin)}</span></div>`).join('')}
-    <div class="dd-row dd-total"><span>Finishes</span><span>${fmtTime(dayEnd)} ${over?'\u26a0\ufe0f past 5pm':'\u2713'}</span></div>
+    <div class="dd-h">That day’s schedule</div>
+    ${tl.map(s=>`<div class="dd-row ${s.isExtra?'dd-new':''}"><span><b>${fmtTime(s.start)}–${fmtTime(s.end)}</b> · ${s.job.name}${s.isExtra?' (new)':''} · ${s.job.suburb||''}${pairable&&!s.isExtra&&s.job.id===pairable.job.id?' <span class="dd-pair">same area</span>':''}</span><span>${fmtDur(estimateJob(s.job.services).labourMin)}</span></div>`).join('')}
+    <div class="dd-row dd-total"><span>Finishes</span><span>${fmtTime(dayEnd)} ${over?'⚠️ past 5pm':'✓'}</span></div>
   </div>`;
 }
 function updateSchedWarn(){
-  const w=WEATHER[scheduleChoice]; const v=weatherVerdict(w);
   const zone=document.getElementById('sched-warn'); if(!zone)return;
-  if(v.tone==='good'){zone.innerHTML='';return;}
-  zone.innerHTML=`<div class="sched-warning ${v.tone}">${w.icon} ${w.day} looks ${v.label.toLowerCase()} \u2014 ${w.rainPct}% rain. ${v.tone==='bad'?'Washing isn\u2019t recommended; consider a better day above.':'Keep an eye on conditions the morning of.'}</div>`;
+  const info=weatherForDate(scheduleChoice);
+  let html='';
+  if(info.type==='forecast'){
+    const v=workingConditionRating(info);
+    if(v.rating!=='good')html+=`<div class="sched-warning ${v.rating==='poor'?'bad':'warn'}">${info.icon||''} ${isoToLabel(scheduleChoice)} looks ${v.label.toLowerCase()} — ${info.rainPct}% rain. ${v.impact.join(' ')}</div>`;
+  }else if(info.type==='historical'){
+    html+=`<div class="sched-warning warn">📊 No live forecast this far out — ${info.note}</div>`;
+  }else{
+    html+=`<div class="sched-warning warn">⚠️ No weather data available for this date — you're offline or this region has no history on file yet.</div>`;
+  }
+  const busy=busyBlocksForDate(scheduleChoice);
+  if(busy.length)html+=`<div class="sched-warning warn">🗓️ Calendar conflict — ${busy.map(b=>b.title||'busy').join(', ')} on your connected calendar this day.</div>`;
+  zone.innerHTML=html;
 }
 function confirmSchedule(){
   const r=records.find(x=>x.id===scheduleId); if(!r)return;
-  const w=WEATHER[scheduleChoice];
-  const booked=records.filter(x=>isBooked(x)&&x.scheduledIdx===scheduleChoice&&x.id!==r.id);
+  const dateEl=document.getElementById('sched-date-input');
+  const iso=dateEl?dateEl.value:scheduleChoice;
+  if(!iso){toast('Pick a date');return;}
+  const wasBooked=isBooked(r);
+  const booked=records.filter(x=>isBooked(x)&&x.scheduledDateISO===iso&&x.id!==r.id);
   const paired=booked.find(x=>x.suburb&&r.suburb&&x.suburb.toLowerCase()===r.suburb.toLowerCase());
-  r.scheduledDate=`${w.day} ${w.date}`;
-  r.scheduledIdx=scheduleChoice;
+  r.scheduledDateISO=iso;
+  r.scheduledDate=isoToLabel(iso);
+  r.scheduledIdx=null; // superseded by scheduledDateISO; kept only so very old unmigrated records don't error
   const techId=document.getElementById('sched-tech').value;
   const techUser=staff.find(u=>u.id===techId);
   r.assignedStaffId=techId||null;
@@ -2314,22 +2600,25 @@ function confirmSchedule(){
   if(!r.follows||!r.follows.length)r.follows=defaultFollows();
   closeModal('schedule-overlay');
   render();renderAll();
-  if(paired)toast(`Booked: ${r.name} on ${r.scheduledDate} \u2014 paired with ${paired.name} in ${r.suburb}`);
+  if(paired)toast(`Booked: ${r.name} on ${r.scheduledDate} — paired with ${paired.name} in ${r.suburb}`);
   else toast(`Booked: ${r.name} on ${r.scheduledDate}`);
-  logActivity(r.customerId,r.jobId,'job_scheduled',r.name+' booked for '+r.scheduledDate+(r.tech!=='Unassigned'?' \u00b7 '+r.tech:''));
+  logActivity(r.customerId,r.jobId,'job_scheduled',r.name+' booked for '+r.scheduledDate+(r.tech!=='Unassigned'?' · '+r.tech:''));
+  if(!wasBooked&&typeof sendLifecycleEmail==='function')sendLifecycleEmail(r,'job_booked');
 }
 
 /* ---------- detail ---------- */
 function openDetail(id){
   if(typeof saveState==='function')saveState();
   const r=records.find(x=>x.id===id);
+  const checklist=ensureSopSized(r);
+  const lastIdx=checklist.steps.length-1;
   const done=r.sop.filter(Boolean).length;
-  const pct=Math.round(done/SOP_STEPS.length*100);
+  const pct=checklist.steps.length?Math.round(done/checklist.steps.length*100):0;
   const stageObj=STAGES.find(s=>s.key===r.stage);
-  const allDone=r.sop.slice(0,5).every(Boolean)&&r.photoBefore&&r.photoAfter;
-  const approved=r.sop[5];
+  const allDone=lastIdx>=0&&r.sop.slice(0,lastIdx).every(Boolean)&&r.photoBefore&&r.photoAfter;
+  const approved=lastIdx>=0&&r.sop[lastIdx];
   const svcRows=r.services.map(s=>{const svc=SERVICES[s.svc];const rt=s.roofType?' · '+ROOF_TYPES[s.roofType].label:'';return `<div class="kv"><span class="k">${svc.label} · ${s.qty}${svc.unit}${rt}</span><span class="v">${money(lineSubtotal(s))}</span></div>`}).join('')||'<div class="kv"><span class="k">No services yet</span><span class="v">—</span></div>';
-  const sopHtml=SOP_STEPS.map((step,i)=>{const checked=r.sop[i];const locked=i===5&&!allDone;return `<div class="sop-step ${checked?'checked':''} ${locked?'locked':''}"><button class="sop-check" onclick="toggleSop(${id},${i})" ${locked?'disabled':''}>${checked?'✓':''}</button><span class="sop-num">${i+1}</span><span class="sop-label">${step.t}<small>${step.s}</small></span></div>`}).join('');
+  const sopHtml=checklist.steps.map((step,i)=>{const checked=r.sop[i];const locked=i===lastIdx&&!allDone;return `<div class="sop-step ${checked?'checked':''} ${locked?'locked':''}"><button class="sop-check" onclick="toggleSop(${id},${i})" ${locked?'disabled':''}>${checked?'✓':''}</button><span class="sop-num">${i+1}</span><span class="sop-label">${step.t}${step.s?`<small>${step.s}</small>`:''}</span></div>`}).join('');
   let approvalHtml;
   if(approved)approvalHtml=`<div class="approval-box approved"><div class="approved-stamp">✓ Customer approved — job closed</div></div>`;
   else if(allDone)approvalHtml=`<div class="approval-box ready"><div class="ttl">Ready for customer approval</div><div class="sub">All steps done and photos captured.</div><button class="btn primary" onclick="approve(${id})">Mark customer approved</button></div>`;
@@ -2393,7 +2682,9 @@ function openDetail(id){
       </div>
       <div>
         ${isJob(r)?`
-        <div class="panel"><h4>Job SOP — ${done}/6 <span class="eng-badge">Operations</span></h4>
+        <div class="panel"><h4>${checklist.name} — ${done}/${checklist.steps.length} <span class="eng-badge">Operations</span></h4>
+          ${r.stage==='scheduled'&&!r.startedAt?`<button class="btn accent block" style="margin-bottom:14px" onclick="startJob(${id})">▶ Start job</button>`:''}
+          ${r.startedAt?`<p style="font-size:12px;color:var(--ink-faint);margin:-6px 0 14px">Started ${timeAgo(r.startedAt)}</p>`:''}
           <div class="progress-wrap"><div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div><div class="progress-txt">${pct}% — every step logs to the record</div></div>
           <div class="sop">${sopHtml}</div>
           <div class="photo-row"><div class="photo-slot ${r.photoBefore?'filled':''}" onclick="pickJobPhoto(${id},'before')"><span style="font-size:18px">${r.photoBefore?'✓':'+'}</span><span>Before</span></div><div class="photo-slot ${r.photoAfter?'filled':''}" onclick="pickJobPhoto(${id},'after')"><span style="font-size:18px">${r.photoAfter?'✓':'+'}</span><span>After</span></div></div>
@@ -2404,14 +2695,18 @@ function openDetail(id){
         </div>`}
         <div class="panel"><h4>Assignment</h4>
           <div class="kv"><span class="k">Crew</span><span class="v">${r.tech}</span></div>
-          ${r.scheduledDate?`<div class="kv"><span class="k">Booked for</span><span class="v">${r.scheduledDate}${(()=>{const tl=dayTimeline(r.scheduledIdx);const me=tl.find(s=>s.job.id===r.id);return me?' · '+fmtTime(me.start):'';})()}</span></div>`:''}
+          ${r.scheduledDate?`<div class="kv"><span class="k">Booked for</span><span class="v">${r.scheduledDate}${(()=>{const tl=dayTimeline(r.scheduledDateISO);const me=tl.find(s=>s.job.id===r.id);return me?' · '+fmtTime(me.start):'';})()}</span></div>`:''}
           <div class="kv"><span class="k">GPS check-in</span><span class="v">${r.gps==='checked'?'On site ✓':r.gps==='enroute'?'En route':'Not started'}</span></div>
         </div>
       </div>
     </div>`;
   switchView('detail');
 }
-function toggleSop(id,i){const r=records.find(x=>x.id===id);r.sop[i]=!r.sop[i];if(r.sop.some(Boolean)&&r.stage==='scheduled')r.stage='completed';openDetail(id)}
+function startJob(id){const r=records.find(x=>x.id===id);r.startedAt=Date.now();logActivity(r.customerId,r.jobId,'status_change',r.name+"'s job started");openDetail(id);toast('Job started ✓')}
+// Only fires the "job completed" lifecycle email on the actual scheduled→completed
+// transition, never on repeat calls once a job is already completed.
+function markJobCompleted(r){if(r.stage==='scheduled'){r.stage='completed';sendLifecycleEmail(r,'job_completed');}}
+function toggleSop(id,i){const r=records.find(x=>x.id===id);r.sop[i]=!r.sop[i];if(r.sop.some(Boolean))markJobCompleted(r);openDetail(id)}
 let pendingPhotoTarget=null;
 function pickJobPhoto(id,slot){pendingPhotoTarget={id,slot,kind:'job_photo'};document.getElementById('photo-upload-input').click();}
 function pickCustomerPhoto(id){pendingPhotoTarget={id,slot:null,kind:'customer_photo'};document.getElementById('photo-upload-input').click();}
@@ -2427,7 +2722,7 @@ async function onPhotoChosen(input){
   if(!row)return;
   if(kind==='job_photo'){
     if(slot==='before')r.photoBefore=true;else r.photoAfter=true;
-    if(r.stage==='scheduled')r.stage='completed';
+    markJobCompleted(r);
   }else if(kind==='customer_photo'){
     r.hasCustomerPhoto=true;r.customerPhotoPath=row.path;
   }
@@ -2439,7 +2734,7 @@ async function viewCustomerPhoto(id){
   const url=await signedUrlFor(r.customerPhotoPath);
   if(url)window.open(url,'_blank');else toast('Could not open photo');
 }
-function approve(id){const r=records.find(x=>x.id===id);r.sop[5]=true;r.stage='completed';r.approvedAt=Date.now();r.gps='checked';openDetail(id);toast('Job approved & closed ✓')}
+function approve(id){const r=records.find(x=>x.id===id);const tpl=ensureSopSized(r);r.sop[tpl.steps.length-1]=true;r.stage='completed';r.approvedAt=Date.now();r.gps='checked';openDetail(id);toast('Job approved & closed ✓')}
 
 /* ---------- PIPELINE + LEADS render ---------- */
 // ===== Smart alerts: surfaced from real record data =====
@@ -2497,6 +2792,7 @@ function autoFollowUp(){
   records.forEach(r=>{
     if(r.stage==='quoted' && !r.clientResponded && r.quoteSentAt && (now-r.quoteSentAt)>FOLLOWUP_DAYS*D){
       r.stage='followup';
+      sendLifecycleEmail(r,'quote_reminder'); // fires exactly once — condition above only matches while stage is still 'quoted'
     }
   });
 }
@@ -2640,7 +2936,7 @@ function renderCustomerProfile(){
   const lifetimeValue=jobs.filter(isPaid).reduce((s,r)=>s+(r.total||0),0);
   const totalQuoted=jobs.reduce((s,r)=>s+(r.total||0),0);
   const wonCount=jobs.filter(isWon).length;
-  const upcoming=jobs.filter(isBooked).sort((a,b)=>(a.scheduledIdx??9)-(b.scheduledIdx??9));
+  const upcoming=jobs.filter(isBooked).sort((a,b)=>(a.scheduledDateISO||'9999').localeCompare(b.scheduledDateISO||'9999'));
   const photos=ctx.attachments.filter(a=>a.kind==='before_photo'||a.kind==='after_photo');
   const files=ctx.attachments.filter(a=>a.kind!=='before_photo'&&a.kind!=='after_photo');
 
@@ -2687,7 +2983,11 @@ function renderCustomerProfile(){
       </div>
       <div>
         <div class="panel" style="margin-bottom:14px"><h4>Invoices</h4>
-          ${jobs.filter(r=>r.invoiceId).length?jobs.filter(r=>r.invoiceId).map(r=>`<div class="kv"><span class="k">${r.name} job${r.scheduledDate?' · '+r.scheduledDate:''}</span><span class="v">${money(r.total||0)} · <span class="pill ${r.stage==='paid'?'paid':''}">${r.stage==='paid'?'Paid':'Unpaid'}</span></span></div>`).join(''):'<div class="empty-state" style="padding:16px"><div class="sm">No invoices yet.</div></div>'}
+          ${jobs.filter(r=>r.invoiceId).length?jobs.filter(r=>r.invoiceId).map(r=>{
+            const ds=invoiceDisplayStatus(r);
+            const pillCls=ds==='paid'?'paid':(ds==='overdue'?'bad':'');
+            return `<div class="kv"><span class="k">${r.name} job${r.scheduledDate?' · '+r.scheduledDate:''}${r.dueDate?' · due '+isoToLabel(r.dueDate):''}${r.paymentLinkUrl?' · <a href="'+r.paymentLinkUrl+'" target="_blank" style="color:var(--teal)">payment link</a>':''}</span><span class="v">${money(r.total||0)} · <span class="pill ${pillCls}">${ds.charAt(0).toUpperCase()+ds.slice(1)}</span>${ds!=='paid'?`<select style="margin-left:6px;font-size:11px" onchange="setPaymentMethod(${r.id},this.value)"><option value="">Method…</option>${['Cash','Bank transfer','Card','Other'].map(m=>`<option ${r.paymentMethod===m?'selected':''}>${m}</option>`).join('')}</select> <button class="btn ghost sm" style="padding:2px 8px;font-size:11px" onclick="sendPaymentLink(${r.id})">${r.paymentLinkUrl?'New link':'Payment link'}</button>`:(r.paymentMethod?` · ${r.paymentMethod}`:'')}</span></div>`;
+          }).join(''):'<div class="empty-state" style="padding:16px"><div class="sm">No invoices yet.</div></div>'}
         </div>
         <div class="panel" style="margin-bottom:14px"><h4>Before / after photos</h4>
           <div id="cp-photo-grid" class="cp-photo-grid">${photos.length?photos.map(p=>`<div class="cp-photo" data-path="${p.path}"><span class="cp-photo-tag">${p.kind==='before_photo'?'Before':'After'}</span></div>`).join(''):'<div class="empty-state" style="padding:16px"><div class="sm">No before/after photos yet — add them from a job.</div></div>'}</div>
@@ -2852,12 +3152,14 @@ function openCustomerProfileByCustomerId(customerId){
 
 /* ---------- C. OPERATIONS ---------- */
 function renderOps(){
-  // "Today" means scheduledIdx 0 in the current 7-day WEATHER window (index 0
-  // is always today — see fetchLiveWeather()). Previously this had no date
-  // filter at all: isBooked() only checks stage, so every scheduled/completed
-  // job ever booked showed up here regardless of date — a real functional
-  // bug, not just a display issue.
-  const today=records.filter(r=>isBooked(r)&&r.scheduledIdx===0);
+  // "Today" is a real calendar-date match against scheduledDateISO — jobs are
+  // no longer confined to a 7-day rolling window (see the Calendar rewrite),
+  // so index-based "today" no longer means anything. Previously this had no
+  // date filter at all: isBooked() only checks stage, so every scheduled/
+  // completed job ever booked showed up here regardless of date — a real
+  // functional bug, not just a display issue.
+  const todayIso=todayISO();
+  const today=records.filter(r=>isBooked(r)&&r.scheduledDateISO===todayIso);
   // Group same-suburb stops together — an honest, lightweight ordering
   // heuristic. This is NOT a real optimized route (no Directions/Distance
   // Matrix call), so it's labelled and described as grouping, not as a
@@ -2865,7 +3167,7 @@ function renderOps(){
   const stops=[...today].sort((a,b)=>(a.suburb||'').localeCompare(b.suburb||'')).map((r,i)=>({r,i}));
   const isTech=currentUserRole==='technician';
   const techs=staff.filter(u=>u.role==='technician').map(u=>u.name||u.email||'Unnamed');
-  const techLoad=techs.map(t=>({t,jobs:records.filter(r=>r.tech===t&&isBooked(r)&&r.scheduledIdx===0).length}));
+  const techLoad=techs.map(t=>({t,jobs:records.filter(r=>r.tech===t&&isBooked(r)&&r.scheduledDateISO===todayIso).length}));
   const mapsKey=turnkeyMapsKey();
   document.getElementById('view-ops').innerHTML=`
     <div class="view-head"><div><h2>Operations</h2><p>Today's run sheet — who's on each job, addresses, and check-ins. The job checklist and photos live inside each job.</p></div><span class="eng-badge">Operations</span></div>
@@ -2957,11 +3259,43 @@ function renderDashboard(){
   const revPerCrewDay=techs.length?Math.round(wonValue/techs.length/5):0;
   // technician efficiency: avg sop completion across active+done
   const allJobs=records.filter(r=>r.stage!=='new');
-  const eff=allJobs.length?Math.round(allJobs.reduce((s,r)=>s+r.sop.filter(Boolean).length/6,0)/allJobs.length*100):0;
+  const eff=allJobs.length?Math.round(allJobs.reduce((s,r)=>{const n=checklistForRecord(r).steps.length;return s+(n?r.sop.filter(Boolean).length/n:0);},0)/allJobs.length*100):0;
   // revenue by tech bar chart
   const byTech=techs.map(t=>({t,v:won.filter(r=>r.tech===t).reduce((s,r)=>s+r.total,0)}));
   const maxV=Math.max(1,...byTech.map(b=>b.v));
   const metric=(label,val,note,pct,color)=>`<div class="metric"><div class="m-label">${label}</div><div class="m-val">${val}</div>${pct!=null?`<div class="m-bar"><div style="width:${pct}%;background:${color}"></div></div>`:''}<div class="m-note">${note}</div></div>`;
+
+  // ===== Revenue: monthly/yearly (paid work only — money actually collected), outstanding invoices =====
+  const paidJobs=records.filter(isPaid);
+  const now=new Date();
+  const monthlyRevenue=paidJobs.filter(r=>r.paidAt&&(()=>{const d=new Date(r.paidAt);return d.getMonth()===now.getMonth()&&d.getFullYear()===now.getFullYear()})()).reduce((s,r)=>s+(r.total||0),0);
+  const yearlyRevenue=paidJobs.filter(r=>r.paidAt&&new Date(r.paidAt).getFullYear()===now.getFullYear()).reduce((s,r)=>s+(r.total||0),0);
+  const outstandingInvoices=records.filter(r=>r.invoiceId&&r.stage!=='paid').reduce((s,r)=>s+(r.total||0),0);
+
+  // ===== Sales: leads received, quotes sent, acceptance rate =====
+  const quotesSentRecords=records.filter(r=>r.quoteSentAt);
+  const quotesAccepted=quotesSentRecords.filter(isWon).length;
+  const acceptanceRate=quotesSentRecords.length?Math.round(quotesAccepted/quotesSentRecords.length*100):0;
+
+  // ===== Operations: jobs completed, average job value =====
+  const jobsCompletedCount=records.filter(r=>r.stage==='completed'||r.stage==='paid').length;
+  const avgJobValue=won.length?Math.round(wonValue/won.length):0;
+
+  // ===== Customers: repeat customers (2+ jobs on file), average lifetime value =====
+  const byCustomer={};
+  records.forEach(r=>{if(r.customerId)(byCustomer[r.customerId]=byCustomer[r.customerId]||[]).push(r)});
+  const customerIds=Object.keys(byCustomer);
+  const repeatCustomerCount=customerIds.filter(id=>byCustomer[id].length>1).length;
+  const clvValues=customerIds.map(id=>byCustomer[id].filter(isPaid).reduce((s,r)=>s+(r.total||0),0)).filter(v=>v>0);
+  const avgCLV=clvValues.length?Math.round(clvValues.reduce((a,b)=>a+b,0)/clvValues.length):0;
+
+  // ===== Marketing: lead source breakdown (real intake data; cost-per-lead needs
+  // ad-spend data we don't have — same honest "no data yet" pattern as CAC) =====
+  const bySource={};
+  records.forEach(r=>{const k=r.source||'Unknown';bySource[k]=(bySource[k]||0)+1});
+  const sourceRows=Object.entries(bySource).sort((a,b)=>b[1]-a[1]).slice(0,6);
+  const maxSource=Math.max(1,...sourceRows.map(s=>s[1]));
+
   document.getElementById('view-dashboard').innerHTML=`
     <div class="view-head"><div><h2>Dashboard</h2><p>The health of the business at a glance — the numbers you normally only find out at tax time, live instead.</p></div><span class="eng-badge">Dashboard</span></div>
     <div class="dash-grid">
@@ -2970,11 +3304,74 @@ function renderDashboard(){
       ${metric('Revenue per crew / day','$'+revPerCrewDay.toLocaleString('en-NZ'),'Won revenue ÷ crews ÷ working days',null)}
       ${metric('Callback rate',callbackRate+'%','Jobs needing a return visit — lower is better',callbackRate,callbackRate>15?'#b5573e':'#0f7d6b')}
       ${metric('Technician efficiency',eff+'%','Avg SOP completion across jobs',eff,'#2f5d82')}
-      ${metric('Repeat customer %',repeatRate+'%','Share of customers returning',repeatRate,'#4a4f7a')}
+      ${metric('Repeat customer %',repeatRate+'%','Share of customers self-reporting as repeat',repeatRate,'#4a4f7a')}
+    </div>
+    <h3 style="margin:22px 0 4px;font-size:15px;color:var(--ink-soft)">Revenue</h3>
+    <div class="dash-grid">
+      ${metric('Revenue this month','$'+monthlyRevenue.toLocaleString('en-NZ'),'Paid jobs, current calendar month',null)}
+      ${metric('Revenue this year','$'+yearlyRevenue.toLocaleString('en-NZ'),'Paid jobs, current calendar year',null)}
+      ${metric('Outstanding invoices','$'+outstandingInvoices.toLocaleString('en-NZ'),'Sent or overdue, not yet paid',null)}
+    </div>
+    <h3 style="margin:22px 0 4px;font-size:15px;color:var(--ink-soft)">Sales</h3>
+    <div class="dash-grid">
+      ${metric('Leads received',String(leadsTotal),'All-time',null)}
+      ${metric('Quotes sent',String(quotesSentRecords.length),'All-time',null)}
+      ${metric('Quote acceptance rate',acceptanceRate+'%','Sent quotes that were won',acceptanceRate,'#0f7d6b')}
+    </div>
+    <h3 style="margin:22px 0 4px;font-size:15px;color:var(--ink-soft)">Operations</h3>
+    <div class="dash-grid">
+      ${metric('Jobs completed',String(jobsCompletedCount),'All-time',null)}
+      ${metric('Average job value','$'+avgJobValue.toLocaleString('en-NZ'),'Across won jobs',null)}
+      ${metric('Revenue per worker','$'+revPerCrewDay.toLocaleString('en-NZ'),'Same calc as revenue per crew / day above',null)}
+    </div>
+    <h3 style="margin:22px 0 4px;font-size:15px;color:var(--ink-soft)">Customers</h3>
+    <div class="dash-grid">
+      ${metric('Repeat customers',String(repeatCustomerCount),'Customers with 2+ jobs on file',null)}
+      ${metric('Average lifetime value','$'+avgCLV.toLocaleString('en-NZ'),'Avg paid revenue per customer with a paid job',null)}
     </div>
     <div class="panel"><h4>Approved revenue by technician</h4>
       ${byTech.length?`<div class="bar-chart">${byTech.map(b=>`<div class="bcol"><div class="bval">${money(b.v)}</div><div class="bar" style="height:${Math.max(6,b.v/maxV*100)}%"></div><div class="blabel">${b.t}</div></div>`).join('')}</div>`:'<div class="empty-state"><div class="sm">No approved jobs yet.</div></div>'}
+    </div>
+    <div class="panel" style="margin-top:16px"><h4>Lead source</h4>
+      ${sourceRows.length?sourceRows.map(([src,n])=>`<div class="kv"><span class="k">${src}</span><span class="v" style="display:flex;align-items:center;gap:8px"><span style="display:inline-block;height:6px;width:${Math.max(6,n/maxSource*80)}px;background:var(--teal);border-radius:3px"></span>${n}</span></div>`).join(''):'<div class="empty-state" style="padding:16px"><div class="sm">No leads yet.</div></div>'}
+      <p style="font-size:12px;color:var(--ink-faint);margin-top:12px">Cost per lead needs ad-spend data — connect a marketing integration to calculate this.</p>
+    </div>
+    <div class="panel" style="margin-top:16px"><h4>Ask TurnKey</h4>
+      <p style="font-size:12px;color:var(--ink-faint);margin:-4px 0 10px">Ask about your own data — "what should I schedule this week", "who owes money", "which customers need follow up". Needs an AI assistant key configured on the backend (Connections).</p>
+      <div class="conn-keyrow"><input id="ai-question" placeholder="Who owes money?" onkeydown="if(event.key==='Enter')askAi()"><button class="btn accent sm" onclick="askAi()">Ask</button></div>
+      <div id="ai-answer" style="margin-top:10px;font-size:13.5px;color:var(--ink);white-space:pre-wrap"></div>
     </div>`;
+}
+// Real-data snapshot the AI assistant answers from — never fabricated, just a
+// compact reshaping of what's already loaded client-side into `records`.
+function buildAiBusinessSummary(){
+  const todayIso=todayISO();
+  return {
+    today:todayIso,
+    totalLeads:records.length,
+    openQuotes:records.filter(r=>r.stage==='quoted'||r.stage==='followup').map(r=>({name:r.name,total:r.total,daysSinceSent:r.quoteSentAt?Math.round((Date.now()-r.quoteSentAt)/86400000):null})),
+    wonNotScheduled:records.filter(r=>r.stage==='won').map(r=>({name:r.name,total:r.total,suburb:r.suburb})),
+    upcomingJobs:records.filter(r=>isBooked(r)&&r.scheduledDateISO&&r.scheduledDateISO>=todayIso).sort((a,b)=>a.scheduledDateISO.localeCompare(b.scheduledDateISO)).slice(0,25).map(r=>({name:r.name,date:r.scheduledDateISO,tech:r.tech,total:r.total,suburb:r.suburb})),
+    overdueInvoices:records.filter(r=>invoiceDisplayStatus(r)==='overdue').map(r=>({name:r.name,total:r.total,dueDate:r.dueDate})),
+    unpaidInvoices:records.filter(r=>r.invoiceId&&r.stage!=='paid').map(r=>({name:r.name,total:r.total,status:invoiceDisplayStatus(r)})),
+    needsFollowUp:records.filter(r=>r.stage==='followup').map(r=>({name:r.name,total:r.total}))
+  };
+}
+async function askAi(){
+  const input=document.getElementById('ai-question');
+  const q=(input?.value||'').trim();
+  if(!q){toast('Ask a question first');return;}
+  const out=document.getElementById('ai-answer');
+  if(out)out.textContent='Thinking…';
+  const url=backendUrl();
+  const {data:{session}}=await sb.auth.getSession();
+  if(!url||!session){if(out)out.textContent='Backend not configured.';return;}
+  try{
+    const res=await fetch(`${url}/api/ai/ask`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.access_token},body:JSON.stringify({question:q,businessSummary:buildAiBusinessSummary()})});
+    const j=await res.json();
+    if(!res.ok){if(out)out.textContent=j.error||'Could not get an answer';return;}
+    if(out)out.textContent=j.answer;
+  }catch(e){console.error('AI ask failed',e);if(out)out.textContent='Could not reach the backend — check console';}
 }
 
 
@@ -2998,19 +3395,30 @@ function flowStepIndex(stage){
   if(stage==='paid')return 4;
   return 0;
 }
+// Technicians see only jobs assigned to them — client-side scoping to match
+// the Worker permission tier ("assigned jobs only"). This is UI-level, same
+// caveat as applyRoleVisibility(): real enforcement is Supabase RLS, which
+// today only isolates by business, not by assignment within it.
+function jobsFlowScope(){
+  if(currentUserRole!=='technician')return records;
+  return records.filter(r=>r.assignedStaffId===currentUserId);
+}
 function renderJobsFlow(){
-  // default to the first job that needs action, else first record
-  if(!jobsFlowActive||!records.find(r=>r.id===jobsFlowActive)){
-    const needy=records.find(r=>cardFlag(r));
-    jobsFlowActive=(needy||records[0]||{}).id;
+  const scope=jobsFlowScope();
+  // default to today's assigned job if any, else the first job that needs action, else first in scope
+  if(!jobsFlowActive||!scope.find(r=>r.id===jobsFlowActive)){
+    const todayIso=todayISO();
+    const today=scope.find(r=>r.scheduledDateISO===todayIso);
+    const needy=scope.find(r=>cardFlag(r));
+    jobsFlowActive=(today||needy||scope[0]||{}).id;
   }
-  const r=records.find(x=>x.id===jobsFlowActive);
-  const picker=`<div class="jf-picker">${records.map(x=>{const st=stageObj(x.stage);return `<button class="jf-pick ${x.id===jobsFlowActive?'sel':''}" onclick="jobsFlowActive=${x.id};renderJobsFlow()"><span class="jfp-dot" style="background:${st.dot}"></span>${x.name}<span class="jfp-stage">${st.short}</span></button>`}).join('')}</div>`;
+  const r=scope.find(x=>x.id===jobsFlowActive);
+  const picker=`<div class="jf-picker">${scope.map(x=>{const st=stageObj(x.stage);return `<button class="jf-pick ${x.id===jobsFlowActive?'sel':''}" onclick="jobsFlowActive=${x.id};renderJobsFlow()"><span class="jfp-dot" style="background:${st.dot}"></span>${x.name}<span class="jfp-stage">${st.short}</span></button>`}).join('')}</div>`;
 
   if(!r){
     document.getElementById('view-jobsflow').innerHTML=`
       <div class="view-head"><div><h2>Jobs Flow</h2><p>Follow one job the way you'd run it: lead → quote → schedule → job → invoice.</p></div></div>
-      <div class="empty-state"><div class="big">No jobs yet</div><div class="sm">Add a lead in Pipeline or Leads, then come back here to walk it through quote → schedule → invoice.</div></div>`;
+      <div class="empty-state"><div class="big">No jobs yet</div><div class="sm">${currentUserRole==='technician'?'No jobs assigned to you yet.':'Add a lead in Pipeline or Leads, then come back here to walk it through quote → schedule → invoice.'}</div></div>`;
     return;
   }
 
@@ -3021,7 +3429,7 @@ function renderJobsFlow(){
     if(i===0)return `Enquiry from ${r.source||'—'}. ${r.notes?('“'+r.notes+'”'):''}`;
     if(i===1)return r.services.length?`${r.services.map(s=>SERVICES[s.svc].label.split(' ')[0]+' '+s.qty+SERVICES[s.svc].unit).join(', ')} · ${money(r.total)}`:'No quote built yet.';
     if(i===2)return r.scheduledDate?`Booked ${r.scheduledDate} · ${r.tech}`:(r.stage==='won'?'Won — needs a date.':'Not booked yet.');
-    if(i===3){const done=r.sop.filter(Boolean).length;return isJob(r)?`Checklist ${done}/6 · ${r.photoBefore?'before ✓':'before ·'} ${r.photoAfter?'after ✓':'after ·'}`:'Starts once booked.';}
+    if(i===3){const done=r.sop.filter(Boolean).length;const total=checklistForRecord(r).steps.length;return isJob(r)?`Checklist ${done}/${total} · ${r.photoBefore?'before ✓':'before ·'} ${r.photoAfter?'after ✓':'after ·'}`:'Starts once booked.';}
     if(i===4)return r.stage==='paid'?`Paid ${r.paidAt?timeAgo(r.paidAt):''}`:(r.stage==='completed'?'Job done — send the invoice.':'After the job is completed.');
     return '';
   };
@@ -3060,12 +3468,38 @@ function renderJobsFlow(){
 }
 // workflow transition helpers
 function markWon(id){const r=records.find(x=>x.id===id);if(!r.services.length){toast('Build a quote first');openQuoteModal(id);return;}r.stage='won';r.clientResponded=true;render();renderAll();openSchedule(id);}
-function markPaid(id){const r=records.find(x=>x.id===id);r.stage='paid';r.paidAt=Date.now();render();renderAll();if(document.getElementById('view-jobsflow').classList.contains('active'))renderJobsFlow();toast(`${r.name} marked paid ✓`);}
+function markPaid(id,method){const r=records.find(x=>x.id===id);r.stage='paid';r.paidAt=Date.now();r.paymentStatus='paid';r.paymentMethod=method||r.paymentMethod||'Not specified';render();renderAll();if(document.getElementById('view-jobsflow').classList.contains('active'))renderJobsFlow();toast(`${r.name} marked paid ✓`);sendLifecycleEmail(r,'review_request');}
+function setPaymentMethod(id,method){const r=records.find(x=>x.id===id);if(!r)return;r.paymentMethod=method;saveState();scheduleSupabaseSync();}
+// Stripe Payment Links — no-op with a clear message until STRIPE_SECRET_KEY
+// is configured on the backend (see /api/payments/create-link).
+async function sendPaymentLink(id){
+  const r=records.find(x=>x.id===id);if(!r)return;
+  const url=backendUrl();
+  const {data:{session}}=await sb.auth.getSession();
+  if(!url||!session){toast('Backend not configured');return;}
+  await ensureRecordSynced(r);
+  toast('Creating payment link…');
+  try{
+    const res=await fetch(`${url}/api/payments/create-link`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.access_token},
+      body:JSON.stringify({amountCents:Math.round((r.total||0)*100),description:'Invoice for '+r.name,invoiceId:r.invoiceId})});
+    const j=await res.json();
+    if(!res.ok){toast(j.error||'Could not create payment link');return;}
+    r.paymentLinkUrl=j.url;renderCustomerProfile();
+    navigator.clipboard?.writeText(j.url).catch(()=>{});
+    toast('Payment link created — copied to clipboard ✓');
+  }catch(e){console.error('Payment link failed',e);toast('Could not reach the backend — check console');}
+}
+// Honest overdue check: only meaningful once an invoice's been sent with a due date.
+function invoiceDisplayStatus(r){
+  if(r.stage==='paid')return 'paid';
+  if(r.paymentStatus==='sent'&&r.dueDate&&r.dueDate<todayISO())return 'overdue';
+  return r.paymentStatus||'draft';
+}
 function timeAgo(ts){const d=Math.round((Date.now()-ts)/(24*60*60*1000));return d<=0?'today':d===1?'yesterday':d+' days ago';}
 
 /* ---------- CALENDAR: weather-aware scheduling + job pairing ---------- */
 function bestWashDays(){
-  return WEATHER.map((w,i)=>({...w,i,score:Math.round(weatherScore(w))}))
+  return WEATHER.filter(w=>w.iso).map(w=>({...w,score:Math.round(weatherScore(w))}))
     .sort((a,b)=>b.score-a.score).slice(0,3);
 }
 // Pair scheduled jobs that are in the same suburb to cut drive time.
@@ -3083,83 +3517,144 @@ function jobPairs(){
   });
   return pairs.sort((a,b)=>b.driveSaved-a.driveSaved);
 }
-function renderCalendar(){
-  const best=bestWashDays();
-  const sched=records.filter(r=>isBooked(r));
-  const pairs=jobPairs();
-  const alerts=[];
-  sched.forEach((r)=>{
-    const idx = (r.scheduledIdx!=null)?r.scheduledIdx:1;
-    const w=WEATHER[idx]; if(!w) return;
-    const v=weatherVerdict(w);
-    if(v.tone!=='good') alerts.push({r,w,v});
+// Every booked job that lands on a marginal/poor working-condition day, however
+// far out — honestly labelled forecast vs historical (see weatherForDate).
+function weatherAlerts(){
+  return records.filter(r=>isBooked(r)&&r.scheduledDateISO).map(r=>{
+    const info=weatherForDate(r.scheduledDateISO);
+    if(info.type==='unavailable')return null;
+    const rating=info.type==='forecast'?workingConditionRating(info):{rating:info.rating,label:info.label,impact:[info.note]};
+    if(rating.rating==='good')return null;
+    return {r,info,rating};
+  }).filter(Boolean);
+}
+
+/* ---------- CALENDAR: real long-range scheduling (FullCalendar, month/week/day/agenda) ----------
+   Rebuilt from a 7-day rolling weather board into a real date-based calendar — any job can
+   now be booked arbitrarily far into the future via scheduledDateISO. The FullCalendar
+   instance is created once and reused (its DOM node must never be wiped by re-running
+   innerHTML on its container, since renderCalendar() can be called more than once per
+   visit — e.g. when live weather finishes loading while the tab is already open). */
+let fcCalendarInstance=null;
+function buildCalendarEvents(){
+  return records.filter(r=>isBooked(r)&&r.scheduledDateISO).map(r=>{
+    const color=r.stage==='completed'?'#138a72':(r.stage==='paid'?'#5b6b78':'#3d6fae');
+    return {
+      id:String(r.id),
+      title:r.name+(r.tech&&r.tech!=='Unassigned'?' · '+r.tech:''),
+      start:r.scheduledDateISO,
+      allDay:true,
+      backgroundColor:color,borderColor:color,
+      extendedProps:{recordId:r.id}
+    };
   });
+}
+function fcHandleEventDrop(info){
+  const r=records.find(x=>x.id===info.event.extendedProps.recordId);
+  if(!r){info.revert();return;}
+  const newIso=info.event.startStr.slice(0,10);
+  r.scheduledDateISO=newIso;
+  r.scheduledDate=isoToLabel(newIso);
+  render();renderAll();
+  renderCalendarSidebar();
+  toast('Moved '+r.name+' to '+r.scheduledDate);
+  logActivity(r.customerId,r.jobId,'status_change',r.name+' rescheduled to '+r.scheduledDate);
+}
+function fcHandleEventClick(info){
+  openDetail(info.event.extendedProps.recordId);
+}
+function fcHandleDateClick(info){
+  openCalPicker(info.dateStr.slice(0,10));
+}
+function openCalPicker(iso){
+  const unscheduled=records.filter(r=>r.stage==='won'||(isWon(r)&&!r.scheduledDateISO));
+  document.getElementById('cp-title').textContent='Schedule a job — '+isoToLabel(iso);
+  document.getElementById('cp-list').innerHTML=unscheduled.length
+    ?unscheduled.map(r=>`<div class="kv" style="cursor:pointer" onclick="closeModal('cal-pick-overlay');openSchedule(${r.id},'${iso}')"><span class="k">${r.name}</span><span class="v">${r.suburb||''} · ${r.total?money(r.total):'no quote'}</span></div>`).join('')
+    :'<div class="empty-state" style="padding:20px"><div class="sm">No won jobs waiting to be scheduled. Mark a quote as won in Pipeline first.</div></div>';
+  openModal('cal-pick-overlay');
+}
+function renderCalendarSidebar(){
+  const best=bestWashDays();
+  const pairs=jobPairs();
+  const alerts=weatherAlerts();
+  const forecastDays=WEATHER.filter(w=>w.iso);
 
   const dayCard=w=>{
     const v=weatherVerdict(w);
     return `<div class="wx-day ${v.tone}">
       <div class="wx-dow">${w.day}<span>${w.date}</span></div>
       <div class="wx-ico">${w.icon}</div>
-      <div class="wx-temp">${w.tempHi}\u00b0</div>
-      <div class="wx-meta">${w.rainPct}% rain \u00b7 ${w.windKmh}km/h</div>
+      <div class="wx-temp">${w.tempHi}°</div>
+      <div class="wx-meta">${w.rainPct}% rain · ${w.windKmh}km/h</div>
       <div class="wx-verdict ${v.tone}">${v.label}</div>
     </div>`;
   };
 
-  document.getElementById('view-calendar').innerHTML=`
-    <div class="view-head"><div><h2>Calendar</h2><p>Book around the weather. Turnkey reads the local forecast, recommends the best wash days, warns you before rain hits a job, and pairs up nearby work.</p></div><span class="eng-badge">Scheduling</span></div>
-    <div class="info-strip">${weatherLive?'<span class="demo-tag" style="background:#dcf0e9;color:#16745f">Live</span> &nbsp;Real 7-day forecast for your area via Open-Meteo, refreshed every 3 hours.':'<span class="demo-tag">Sample</span> &nbsp;Offline — showing sample forecast. Live data loads automatically when connected.'}</div>
+  const strip=document.getElementById('cal-wx-strip');
+  if(strip){
+    strip.innerHTML=forecastDays.length?forecastDays.map(dayCard).join(''):'<div class="empty-state" style="padding:16px"><div class="sm">Live forecast not loaded — sample data only until online.</div></div>';
+  }
+  const info=document.getElementById('cal-info-strip');
+  if(info)info.innerHTML=weatherLive
+    ?`<span class="demo-tag" style="background:#dcf0e9;color:#16745f">Live</span> &nbsp;Real ${forecastDays.length}-day forecast for your area via Open-Meteo, refreshed every 3 hours. Beyond that, scheduling uses 3-year historical averages for your region — never presented as a forecast.`
+    :'<span class="demo-tag">Sample</span> &nbsp;Offline — showing sample forecast. Live data loads automatically when connected.';
 
-    <div class="panel"><h4>7-day forecast${currentBusinessProfile&&currentBusinessProfile.region?' \u2014 '+currentBusinessProfile.region:''}</h4>
-      <div class="wx-row">${WEATHER.map(dayCard).join('')}</div>
-    </div>
+  const rec=document.getElementById('cal-recommended');
+  if(rec)rec.innerHTML=best.length?best.map((w,i)=>`<div class="rec-day">
+      <div class="rec-rank">${i+1}</div>
+      <div class="rec-info"><div class="rec-when">${w.day} ${w.date} · ${w.icon} ${w.cond}</div><div class="rec-sub">${w.rainPct}% rain, wind ${w.windKmh}km/h</div></div>
+      <div class="rec-score">${w.score}<span>/100</span></div>
+    </div>`).join(''):'<div class="empty-state" style="padding:16px"><div class="sm">No live forecast yet.</div></div>';
 
-    <div class="panel"><h4>Scheduled jobs this week</h4>
-      ${(()=>{
-        const cols=WEATHER.map((w,i)=>{
-          const v=weatherVerdict(w);
-          const tl=dayTimeline(i);
-          return `<div class="wk-col">
-            <div class="wk-head ${v.tone}"><span>${w.day}</span><span class="wk-ico">${w.icon}</span></div>
-            <div class="wk-body">
-              ${tl.length?tl.map(s=>{
-                return `<button class="wk-job" onclick="openDetail(${s.job.id})"><div class="wk-job-time">${fmtTime(s.start)}–${fmtTime(s.end)}</div><div class="wk-job-name">${s.job.name}</div><div class="wk-job-meta">${s.job.suburb||''} · ${fmtDur(estimateJob(s.job.services).labourMin)}</div><div class="wk-job-tech">${s.job.tech||'Unassigned'}</div></button>`;
-              }).join(''):'<div class="wk-empty">—</div>'}
-            </div>
-          </div>`;
-        }).join('');
-        return `<div class="wk-board">${cols}</div><p style="font-size:12px;color:var(--ink-faint);margin-top:12px">Every job booked through a quote lands here on its day. Tap a job to open it.</p>`;
-      })()}
-    </div>
+  const alertZone=document.getElementById('cal-alerts');
+  if(alertZone)alertZone.innerHTML=alerts.length?alerts.map(a=>`<div class="wx-alert ${a.rating.rating==='poor'?'bad':'warn'}">
+      <div class="wx-alert-ico">${a.info.icon||'📊'}</div>
+      <div class="wx-alert-body"><div class="wx-alert-ttl">${a.r.name} — ${isoToLabel(a.r.scheduledDateISO)}</div><div class="wx-alert-sub">${(a.rating.impact||[a.rating.label]).join(' ')}</div></div>
+      <button class="btn ghost sm" onclick="openSchedule(${a.r.id})">Reschedule</button>
+    </div>`).join(''):'<div class="empty-state" style="padding:30px 16px"><div class="sm">No weather conflicts on any booked job.</div></div>';
 
-    <div class="cal-grid">
-      <div class="panel" style="margin-bottom:0">
-        <h4>Recommended booking days</h4>
-        ${best.map((w,i)=>`<div class="rec-day">
-          <div class="rec-rank">${i+1}</div>
-          <div class="rec-info"><div class="rec-when">${w.day} ${w.date} \u00b7 ${w.icon} ${w.cond}</div><div class="rec-sub">${w.rainPct}% rain, wind ${w.windKmh}km/h</div></div>
-          <div class="rec-score">${w.score}<span>/100</span></div>
-        </div>`).join('')}
-        <p style="font-size:12px;color:var(--ink-faint);margin-top:12px">Score weighs rain chance and wind \u2014 the days your chemicals stay put and surfaces dry properly.</p>
+  const pairZone=document.getElementById('cal-pairings');
+  if(pairZone)pairZone.innerHTML=pairs.length?pairs.map(p=>`<div class="pair">
+      <div class="pair-head"><span class="pair-sub">📍 ${p.sub}</span><span class="pair-save">saves ~${p.driveSaved} min driving</span></div>
+      <div class="pair-jobs">${p.jobs.map(j=>`<span class="pair-chip">${j.name} · ${fmtDur(estimateJob(j.services).labourMin)}</span>`).join('')}</div>
+      <div class="pair-foot">Run together: ~${fmtDur(p.est)} of work in one trip across ${p.sub}.</div>
+    </div>`).join(''):'<div class="empty-state" style="padding:30px 16px"><div class="sm">No nearby jobs to pair yet. When two jobs share a suburb, Turnkey suggests running them in one trip.</div></div>';
+}
+function renderCalendar(){
+  if(!document.getElementById('fc-calendar')){
+    document.getElementById('view-calendar').innerHTML=`
+      <div class="view-head"><div><h2>Calendar</h2><p>Unlimited future scheduling — drag a job to reschedule, click any date to book, click a job to open it. Weather-aware where data exists.</p></div><span class="eng-badge">Scheduling</span></div>
+      <div class="info-strip" id="cal-info-strip"></div>
+      <div class="fc-wrap"><div id="fc-calendar"></div></div>
+      <div class="panel" style="margin-top:18px"><h4>Live forecast${currentBusinessProfile&&currentBusinessProfile.region?' — '+currentBusinessProfile.region:''}</h4>
+        <div class="wx-row" id="cal-wx-strip"></div>
       </div>
-
-      <div class="panel" style="margin-bottom:0">
-        <h4>Weather alerts</h4>
-        ${alerts.length?alerts.map(a=>`<div class="wx-alert ${a.v.tone}">
-          <div class="wx-alert-ico">${a.w.icon}</div>
-          <div class="wx-alert-body"><div class="wx-alert-ttl">${a.r.name} \u2014 ${a.w.day}</div><div class="wx-alert-sub">${a.w.cond}, ${a.w.rainPct}% rain. ${a.v.tone==='bad'?'Recommend rescheduling.':'Watch conditions on the day.'}</div></div>
-          <button class="btn ghost sm" onclick="toast('Suggested moving to ${best[0].day} ${best[0].date}')">Reschedule</button>
-        </div>`).join(''):'<div class="empty-state" style="padding:30px 16px"><div class="sm">No weather conflicts. Every scheduled job lands on a workable day.</div></div>'}
+      <div class="cal-grid">
+        <div class="panel" style="margin-bottom:0"><h4>Recommended booking days</h4><div id="cal-recommended"></div>
+          <p style="font-size:12px;color:var(--ink-faint);margin-top:12px">Score weighs rain chance and wind — the days your chemicals stay put and surfaces dry properly.</p>
+        </div>
+        <div class="panel" style="margin-bottom:0"><h4>Weather alerts</h4><div id="cal-alerts"></div></div>
       </div>
-    </div>
-
-    <div class="panel" style="margin-top:18px"><h4>Suggested job pairings</h4>
-      ${pairs.length?pairs.map(p=>`<div class="pair">
-        <div class="pair-head"><span class="pair-sub">\ud83d\udccd ${p.sub}</span><span class="pair-save">saves ~${p.driveSaved} min driving</span></div>
-        <div class="pair-jobs">${p.jobs.map(j=>`<span class="pair-chip">${j.name} \u00b7 ${fmtDur(estimateJob(j.services).labourMin)}</span>`).join('')}</div>
-        <div class="pair-foot">Run together: ~${fmtDur(p.est)} of work in one trip across ${p.sub}.</div>
-      </div>`).join(''):'<div class="empty-state" style="padding:30px 16px"><div class="sm">No nearby jobs to pair yet. When two jobs share a suburb, Turnkey suggests running them in one trip.</div></div>'}
-    </div>`;
+      <div class="panel" style="margin-top:18px"><h4>Suggested job pairings</h4><div id="cal-pairings"></div></div>`;
+  }
+  renderCalendarSidebar();
+  if(!fcCalendarInstance){
+    fcCalendarInstance=new FullCalendar.Calendar(document.getElementById('fc-calendar'),{
+      initialView:'dayGridMonth',
+      headerToolbar:{left:'prev,next today',center:'title',right:'dayGridMonth,timeGridWeek,timeGridDay,listMonth'},
+      height:'auto',
+      editable:true,
+      dayMaxEvents:true,
+      events:()=>buildCalendarEvents(),
+      eventDrop:fcHandleEventDrop,
+      eventClick:fcHandleEventClick,
+      dateClick:fcHandleDateClick
+    });
+    fcCalendarInstance.render();
+  }else{
+    fcCalendarInstance.refetchEvents();
+  }
 }
 
 /* ---------- GOALS: targets, rewards & perks ---------- */
@@ -3379,6 +3874,21 @@ function openConnections(){
         `<p><b>Connected as ${emailAccount.email_address}.</b> Emails to/from your customers show up in their profile and the Inbox tab. Each teammate connects their own account — everyone stays isolated to your business.</p><button class="btn ghost sm" onclick="disconnectGmailAccount()">Disconnect</button>`:
         `<p>Connect your own Gmail to send, receive, reply and forward customer emails right inside TurnKey — they're automatically linked to the right customer profile. Each teammate connects separately.</p><button class="btn accent sm" onclick="connectGmailOAuth()">Connect Gmail</button>`}
     </div>
+    <div class="conn-card ${calendarConnections.some(c=>c.provider==='google')?'live':''}">
+      <div class="conn-top"><span class="conn-name">📅 Google Calendar</span><span class="conn-badge ${calendarConnections.some(c=>c.provider==='google')?'on':'off'}">${calendarConnections.some(c=>c.provider==='google')?'● CONNECTED':'not connected'}</span></div>
+      ${!googleCalendarConfigured?
+        `<p>Not configured on this server yet — set <code>GOOGLE_CALENDAR_CLIENT_ID</code>/<code>GOOGLE_CALENDAR_CLIENT_SECRET</code> in the backend environment (or it reuses your Gmail OAuth client if those are already set). Ask whoever manages your TurnKey deployment.</p>`:
+        (()=>{const gc=calendarConnections.find(c=>c.provider==='google');
+          return gc?`<p><b>Connected.</b> Existing events on your primary calendar block scheduling conflicts.${gc.sync_status==='error'?' ⚠️ Last sync failed: '+(gc.sync_error||'unknown error'):''} Last synced: ${gc.last_synced_at?timeAgo(new Date(gc.last_synced_at).getTime()):'never — click Sync now'}.</p><button class="btn ghost sm" onclick="syncGoogleCalendarNow()">Sync now</button> <button class="btn ghost sm" onclick="disconnectGoogleCalendar()">Disconnect</button>`
+            :`<p>Connect your Google Calendar so TurnKey knows your existing commitments when scheduling jobs — busy times block conflicting bookings.</p><button class="btn accent sm" onclick="connectGoogleCalendarOAuth()">Connect Google Calendar</button>`;
+        })()}
+    </div>
+    <div class="conn-card ${calendarConnections.some(c=>c.provider==='ical')?'live':''}">
+      <div class="conn-top"><span class="conn-name">🍎 Apple / iCal calendar feed</span><span class="conn-badge ${calendarConnections.some(c=>c.provider==='ical')?'on':'off'}">${calendarConnections.filter(c=>c.provider==='ical').length?'● '+calendarConnections.filter(c=>c.provider==='ical').length+' CONNECTED':'not connected'}</span></div>
+      <p>Paste a public iCal/ICS feed URL — from iCloud: Calendar app → hover a calendar → Share Calendar → check "Public Calendar" → copy link. Read-only: TurnKey can block time from it, but can't write jobs back to Apple Calendar (Apple has no equivalent open OAuth API) — use Google Calendar above for two-way sync, or subscribe to TurnKey's own feed from Apple Calendar instead (coming soon).</p>
+      <div class="conn-keyrow"><input id="conn-ical-url" placeholder="webcal://... or https://...ics"><button class="btn accent sm" onclick="connectIcalFeed()">Add feed</button></div>
+      ${calendarConnections.filter(c=>c.provider==='ical').map(c=>`<div class="kv"><span class="k">${(c.ical_url||'').slice(0,50)}${(c.ical_url||'').length>50?'…':''}${c.sync_status==='error'?' ⚠️':''}</span><span class="v"><button class="btn ghost sm" onclick="syncIcalFeedNow('${(c.ical_url||'').replace(/'/g,"%27")}')">Sync</button> <button class="btn ghost sm" onclick="disconnectIcalFeed('${(c.ical_url||'').replace(/'/g,"%27")}')">Remove</button></span></div>`).join('')}
+    </div>
     <div class="conn-note">${emailAccount?"You're fully live. Nice.":"Connect Gmail to bring email into TurnKey — everything else here is already live."}</div>`;
   openModal('conn-overlay');
 }
@@ -3429,6 +3939,108 @@ async function disconnectGmailAccount(){
   if(!url||!session)return;
   await fetch(`${url}/api/email/disconnect`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.access_token},body:JSON.stringify({provider:'gmail'})}).catch(()=>{});
   emailAccount=null;openConnections();toast('Gmail disconnected');
+}
+/* ===== Calendar connections: Google Calendar (OAuth, two-way) + Apple/iCal
+   feeds (read-only ICS subscription). Both write busy blocks into
+   calendar_events, read here purely for the Connections status card — actual
+   availability-conflict checking happens in the scheduling modal. */
+let calendarConnections=[]; let googleCalendarConfigured=false;
+// Busy blocks pulled from connected Google/iCal calendars — read directly via
+// the client's own Supabase session (calendar_events has a business-wide read
+// policy, no service role needed), used to flag conflicts when scheduling.
+let calendarBusyBlocks=[];
+async function loadCalendarBusyBlocks(){
+  if(!sb||!currentBusinessId)return;
+  const {data,error}=await sb.from('calendar_events').select('*').eq('business_id',currentBusinessId).gte('end_time',new Date().toISOString());
+  if(!error)calendarBusyBlocks=data||[];
+}
+function busyBlocksForDate(iso){
+  return calendarBusyBlocks.filter(b=>{
+    const s=(b.start_time||'').slice(0,10), e=(b.end_time||'').slice(0,10);
+    return s&&e&&iso>=s&&iso<=e;
+  });
+}
+async function loadCalendarConnections(){
+  const url=backendUrl();
+  const {data:{session}}=await sb.auth.getSession();
+  if(!url||!session)return;
+  try{
+    const res=await fetch(`${url}/api/calendar/connections`,{headers:{Authorization:'Bearer '+session.access_token}});
+    const j=await res.json();
+    if(res.ok){calendarConnections=j.connections||[];googleCalendarConfigured=!!j.googleConfigured;}
+  }catch(e){console.error('Load calendar connections failed',e);}
+}
+async function connectGoogleCalendarOAuth(){
+  const url=backendUrl();
+  if(!url){toast('Backend URL not configured');return;}
+  const {data:{session}}=await sb.auth.getSession();
+  if(!session){toast('Please sign in again');return;}
+  try{
+    const res=await fetch(`${url}/api/calendar/oauth/start?origin=${encodeURIComponent(location.origin)}`,{headers:{Authorization:'Bearer '+session.access_token}});
+    const j=await res.json();
+    if(!res.ok||!j.url){toast(j.error||'Could not start Google Calendar connection');return;}
+    window.location.href=j.url;
+  }catch(e){console.error('Google Calendar connect failed',e);toast('Could not reach the backend — check console');}
+}
+async function disconnectGoogleCalendar(){
+  if(!confirm('Disconnect Google Calendar? You can reconnect anytime.'))return;
+  const url=backendUrl();
+  const {data:{session}}=await sb.auth.getSession();
+  if(!url||!session)return;
+  await fetch(`${url}/api/calendar/disconnect`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.access_token},body:JSON.stringify({provider:'google'})}).catch(()=>{});
+  await loadCalendarConnections();openConnections();toast('Google Calendar disconnected');
+}
+async function syncGoogleCalendarNow(){
+  const url=backendUrl();
+  const {data:{session}}=await sb.auth.getSession();
+  if(!url||!session)return;
+  toast('Syncing Google Calendar…');
+  try{
+    const res=await fetch(`${url}/api/calendar/sync`,{method:'POST',headers:{Authorization:'Bearer '+session.access_token}});
+    const j=await res.json();
+    if(!res.ok){toast(j.error||'Sync failed');return;}
+    toast(`Synced ${j.imported} event${j.imported===1?'':'s'} ✓`);
+    await loadCalendarConnections();openConnections();
+  }catch(e){console.error('Google Calendar sync failed',e);toast('Sync failed — check console');}
+}
+async function connectIcalFeed(){
+  const input=document.getElementById('conn-ical-url');
+  const rawUrl=(input?.value||'').trim();
+  if(!rawUrl){toast('Paste a calendar feed URL first');return;}
+  const url=rawUrl.replace(/^webcal:\/\//i,'https://'); // iCloud "Public Calendar" links use webcal:// — same feed, https just fetches it directly
+  const {data:{session}}=await sb.auth.getSession();
+  const beUrl=backendUrl();
+  if(!beUrl||!session)return;
+  toast('Adding calendar feed…');
+  try{
+    const res=await fetch(`${beUrl}/api/calendar/ical/connect`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.access_token},body:JSON.stringify({url})});
+    const j=await res.json();
+    if(!res.ok){toast(j.error||'Could not add that feed');return;}
+    toast(`Feed connected — ${j.imported} event${j.imported===1?'':'s'} imported ✓`);
+    if(input)input.value='';
+    await loadCalendarConnections();openConnections();
+  }catch(e){console.error('iCal connect failed',e);toast('Could not reach the backend — check console');}
+}
+async function disconnectIcalFeed(icalUrl){
+  if(!confirm('Remove this calendar feed?'))return;
+  const url=backendUrl();
+  const {data:{session}}=await sb.auth.getSession();
+  if(!url||!session)return;
+  await fetch(`${url}/api/calendar/disconnect`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.access_token},body:JSON.stringify({provider:'ical',icalUrl})}).catch(()=>{});
+  await loadCalendarConnections();openConnections();toast('Feed removed');
+}
+async function syncIcalFeedNow(icalUrl){
+  const url=backendUrl();
+  const {data:{session}}=await sb.auth.getSession();
+  if(!url||!session)return;
+  toast('Syncing…');
+  try{
+    const res=await fetch(`${url}/api/calendar/ical/sync`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.access_token},body:JSON.stringify({url:icalUrl})});
+    const j=await res.json();
+    if(!res.ok){toast(j.error||'Sync failed');return;}
+    toast(`Synced ${j.imported} event${j.imported===1?'':'s'} ✓`);
+    await loadCalendarConnections();openConnections();
+  }catch(e){console.error('iCal sync failed',e);toast('Sync failed — check console');}
 }
 async function syncEmail(){
   const url=backendUrl();
@@ -3543,11 +4155,16 @@ async function handleAuthedSession(session){
   seedDocTemplateFromProfile();
   if(currentUserRole==='technician')switchView('jobsflow');
   fetchLiveWeather();
+  fetchClimateNormals();
+  loadChecklistTemplates();
   pullStateRemote();
   pollBackendLeads();
   await loadEmailAccountStatus();
   syncEmail();
   loadEmailTemplates();
+  loadLifecycleEmails();
+  loadCalendarConnections();
+  loadCalendarBusyBlocks();
   retryPendingPhotos();
 }
 
@@ -4162,16 +4779,6 @@ async function iwUndoBatch(batchId){
   if(importWizard){await iwLoadHistory();renderImportWizard();}
 }
 
-function parseScheduledDate(s){
-  if(!s)return null;
-  const d=new Date(s+' '+new Date().getFullYear());
-  if(isNaN(d))return null;
-  // Build from local date parts — toISOString() would shift to UTC first,
-  // which lands on the wrong calendar day for positive-UTC-offset timezones (e.g. NZ).
-  const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),day=String(d.getDate()).padStart(2,'0');
-  return `${y}-${m}-${day}`;
-}
-
 async function loadFromSupabase(){
   if(!sb||!currentBusinessId)return;
   try{
@@ -4191,8 +4798,13 @@ async function loadFromSupabase(){
       });
       return Object.assign(base,j.details||{},{
         stage:j.status||base.stage,
-        scheduledDate:j.scheduled_date||base.scheduledDate,
-        customerId:c.id||null,jobId:j.id,invoiceId:inv?inv.id:null,assignedStaffId:j.assigned_to||null
+        scheduledDateISO:j.scheduled_date||base.scheduledDateISO,
+        scheduledDate:j.scheduled_date?isoToLabel(j.scheduled_date):((j.details&&j.details.scheduledDate)||base.scheduledDate),
+        customerId:c.id||null,jobId:j.id,invoiceId:inv?inv.id:null,assignedStaffId:j.assigned_to||null,
+        paymentStatus:inv?(inv.payment_status||base.paymentStatus):base.paymentStatus,
+        paymentMethod:inv?(inv.payment_method||base.paymentMethod):base.paymentMethod,
+        dueDate:inv?(inv.due_date||base.dueDate):base.dueDate,
+        paymentLinkUrl:inv?(inv.payment_link_url||null):null
       });
     });
     render();renderAll();
@@ -4248,11 +4860,11 @@ async function syncRecordToSupabase(r){
   }
 
   const details=Object.assign({},r);
-  ['id','customerId','jobId','invoiceId','quoteId','assignedStaffId','stage','scheduledDate','name','email','phone','address','suburb','notes','source']
+  ['id','customerId','jobId','invoiceId','quoteId','assignedStaffId','stage','scheduledDate','scheduledDateISO','name','email','phone','address','suburb','notes','source','paymentStatus','paymentMethod','dueDate']
     .forEach(k=>delete details[k]);
   const jobPayload={
     business_id:currentBusinessId,customer_id:r.customerId,quote_id:r.quoteId||null,assigned_to:r.assignedStaffId||null,
-    status:r.stage,scheduled_date:parseScheduledDate(r.scheduledDate),details
+    status:r.stage,scheduled_date:r.scheduledDateISO||null,details
   };
   if(r.jobId){
     const {error}=await sb.from('jobs').update(jobPayload).eq('id',r.jobId);
@@ -4264,7 +4876,9 @@ async function syncRecordToSupabase(r){
   }
 
   if(r.stage==='completed'||r.stage==='paid'){
-    const invoicePayload={business_id:currentBusinessId,job_id:r.jobId,amount:r.total||0,paid:r.stage==='paid'};
+    const invoicePayload={business_id:currentBusinessId,job_id:r.jobId,amount:r.total||0,paid:r.stage==='paid',
+      payment_status:invoiceDisplayStatus(r),payment_date:r.stage==='paid'&&r.paidAt?new Date(r.paidAt).toISOString():null,
+      payment_method:r.paymentMethod||null,due_date:r.dueDate||null};
     if(r.invoiceId){
       const {error}=await sb.from('invoices').update(invoicePayload).eq('id',r.invoiceId);
       if(error)throw error;
@@ -4415,6 +5029,7 @@ function ingestQuoteRequest(payload){
   const fb=document.getElementById('intake-flash');
   if(fb){fb.textContent='✓ New lead from '+rec.name+' ('+services.length+' areas · '+money(total)+' — ready to review & send)';fb.classList.add('show');setTimeout(()=>fb.classList.remove('show'),5000);}
   if(rec.pendingPhotos.length)flushPendingPhotos(rec); // fire-and-forget — don't block ingest on uploads
+  sendLifecycleEmail(rec,'new_lead');
 }
 
 /* ===== Upload photos that arrived with a lead (public booking page can't

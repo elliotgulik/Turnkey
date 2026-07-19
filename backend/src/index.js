@@ -9,6 +9,8 @@ import { createFileStorage } from './storage/file.js'
 import { createSupabaseStorage } from './storage/supabase.js'
 import { encryptToken, decryptToken } from './crypto.js'
 import * as gmail from './providers/gmail.js'
+import * as googleCalendar from './providers/googleCalendar.js'
+import { fetchIcs } from './ical.js'
 
 const PORT = Number(process.env.PORT || 3001)
 const SYNC_KEY = process.env.SYNC_KEY || ''
@@ -437,6 +439,325 @@ app.post('/api/email/sync', requireBusiness, async (req, res) => {
   }
 })
 
+/* =====================================================================
+   CALENDAR — Google Calendar (OAuth, same signState()/encryptToken()
+   machinery as email above) and Apple/iCal (read-only ICS feed subscription,
+   no OAuth available for a generic public feed URL). Both write into the
+   same calendar_connections/calendar_events tables so the scheduling UI
+   doesn't need to know which provider a busy block came from.
+
+   NOT LIVE without credentials: Google Calendar needs
+   GOOGLE_CALENDAR_CLIENT_ID/SECRET (or reuses GMAIL_CLIENT_ID/SECRET, see
+   providers/googleCalendar.js) set in the backend environment — every route
+   below checks isConfigured() first and returns 503 until then. The iCal
+   routes need no credentials and work as soon as the schema migration
+   (schema-calendar-and-checklists.sql) has been run.
+   ===================================================================== */
+app.get('/api/calendar/connections', requireBusiness, async (req, res) => {
+  const { data, error } = await authClient.from('calendar_connections_status').select('*')
+    .eq('business_id', req.businessId).eq('user_id', req.userId)
+  if (error) return res.status(500).json({ error: 'Failed to load calendar connections' })
+  res.json({ connections: data || [], googleConfigured: googleCalendar.isConfigured() })
+})
+
+app.get('/api/calendar/oauth/start', requireBusiness, (req, res) => {
+  if (!googleCalendar.isConfigured()) return res.status(503).json({ error: 'Google Calendar is not configured on this server yet' })
+  const origin = String(req.query.origin || '').slice(0, 200)
+  if (!/^https?:\/\/[a-zA-Z0-9.-]+(:\d+)?$/.test(origin)) return res.status(400).json({ error: 'Missing or invalid origin' })
+  const redirectUri = `https://${req.get('host')}/api/calendar/oauth/callback/google`
+  const state = signState({ businessId: req.businessId, userId: req.userId, provider: 'google', origin, nonce: crypto.randomUUID() })
+  res.json({ url: googleCalendar.getAuthUrl(redirectUri, state) })
+})
+
+app.get('/api/calendar/oauth/callback/google', async (req, res) => {
+  const claims = verifyState(req.query.state)
+  const bounce = (status, msg) => res.redirect((claims?.origin || '/') + `/index.html?calendar_connect=${status}` + (msg ? `&msg=${encodeURIComponent(msg)}` : ''))
+  if (req.query.error) return bounce('error', String(req.query.error))
+  if (!claims) return bounce('error', 'That connection request expired or was invalid — please try again')
+  if (!googleCalendar.isConfigured()) return bounce('error', 'Google Calendar is not configured')
+  try {
+    const redirectUri = `https://${req.get('host')}/api/calendar/oauth/callback/google`
+    const tok = await googleCalendar.exchangeCode(req.query.code, redirectUri)
+    const { error } = await authClient.from('calendar_connections').upsert({
+      business_id: claims.businessId, user_id: claims.userId, provider: 'google', ical_url: '',
+      encrypted_tokens: encryptToken(JSON.stringify({ access_token: tok.access_token, refresh_token: tok.refresh_token, expiry: Date.now() + (tok.expires_in || 3600) * 1000 })),
+      sync_status: 'pending', sync_error: null
+    }, { onConflict: 'business_id,user_id,provider,ical_url' })
+    if (error) throw error
+    bounce('success')
+  } catch (err) {
+    console.error('Calendar OAuth callback failed', err)
+    bounce('error', 'Could not finish connecting — check server logs')
+  }
+})
+
+app.post('/api/calendar/disconnect', requireBusiness, async (req, res) => {
+  const provider = req.body?.provider === 'ical' ? 'ical' : 'google'
+  const q = authClient.from('calendar_connections').delete().eq('business_id', req.businessId).eq('user_id', req.userId).eq('provider', provider)
+  const { error } = provider === 'ical' && req.body?.icalUrl ? await q.eq('ical_url', req.body.icalUrl) : await q
+  if (error) return res.status(500).json({ error: 'Failed to disconnect' })
+  res.json({ ok: true })
+})
+
+async function getGoogleCalendarToken(businessId, userId) {
+  const { data: conn } = await authClient.from('calendar_connections').select('*')
+    .eq('business_id', businessId).eq('user_id', userId).eq('provider', 'google').maybeSingle()
+  if (!conn || !conn.encrypted_tokens) return null
+  const tok = JSON.parse(decryptToken(conn.encrypted_tokens))
+  if (Date.now() > tok.expiry - 60000) {
+    const refreshed = await googleCalendar.refreshAccessToken(tok.refresh_token)
+    tok.access_token = refreshed.access_token
+    tok.expiry = Date.now() + (refreshed.expires_in || 3600) * 1000
+    await authClient.from('calendar_connections').update({
+      encrypted_tokens: encryptToken(JSON.stringify(tok))
+    }).eq('id', conn.id)
+  }
+  return { accessToken: tok.access_token, connection: conn }
+}
+
+app.post('/api/calendar/sync', requireBusiness, async (req, res) => {
+  if (!googleCalendar.isConfigured()) return res.status(503).json({ error: 'Google Calendar is not configured on this server yet' })
+  try {
+    const auth = await getGoogleCalendarToken(req.businessId, req.userId)
+    if (!auth) return res.status(400).json({ error: 'Connect Google Calendar first' })
+    const timeMinIso = new Date().toISOString()
+    const timeMaxIso = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString()
+    const events = await googleCalendar.listEvents(auth.accessToken, { timeMinIso, timeMaxIso })
+    for (const ev of events) {
+      await authClient.from('calendar_events').upsert({
+        business_id: req.businessId, user_id: req.userId, connection_id: auth.connection.id,
+        external_id: ev.externalId, title: ev.title, start_time: ev.start, end_time: ev.end, busy_status: ev.busyStatus
+      }, { onConflict: 'connection_id,external_id' })
+    }
+    await authClient.from('calendar_connections').update({ sync_status: 'ok', sync_error: null, last_synced_at: new Date().toISOString() }).eq('id', auth.connection.id)
+    res.json({ ok: true, imported: events.length })
+  } catch (err) {
+    console.error('POST /api/calendar/sync', err)
+    const msg = err.code === 'AUTH_EXPIRED' ? 'Google Calendar connection expired — please reconnect' : 'Sync failed'
+    try {
+      const { data: conn } = await authClient.from('calendar_connections').select('id').eq('business_id', req.businessId).eq('user_id', req.userId).eq('provider', 'google').maybeSingle()
+      if (conn) await authClient.from('calendar_connections').update({ sync_status: 'error', sync_error: msg }).eq('id', conn.id)
+    } catch { /* best-effort status update — sync failure itself is already being reported below */ }
+    res.status(err.code === 'AUTH_EXPIRED' ? 401 : 500).json({ error: msg })
+  }
+})
+
+app.post('/api/calendar/ical/connect', requireBusiness, async (req, res) => {
+  const url = String(req.body?.url || '').trim()
+  if (!/^https?:\/\//.test(url)) return res.status(400).json({ error: 'A valid https:// feed URL is required' })
+  try {
+    const events = await fetchIcs(url) // validate the feed actually parses before saving it
+    const { data: conn, error } = await authClient.from('calendar_connections').upsert({
+      business_id: req.businessId, user_id: req.userId, provider: 'ical', ical_url: url,
+      sync_status: 'ok', sync_error: null, last_synced_at: new Date().toISOString()
+    }, { onConflict: 'business_id,user_id,provider,ical_url' }).select('*').maybeSingle()
+    if (error) throw error
+    for (const ev of events) {
+      await authClient.from('calendar_events').upsert({
+        business_id: req.businessId, user_id: req.userId, connection_id: conn.id,
+        external_id: ev.externalId, title: ev.title, start_time: ev.start, end_time: ev.end, busy_status: 'busy'
+      }, { onConflict: 'connection_id,external_id' })
+    }
+    res.json({ ok: true, imported: events.length })
+  } catch (err) {
+    console.error('POST /api/calendar/ical/connect', err)
+    res.status(400).json({ error: 'Could not read that calendar feed — check the URL and that it\'s a public iCal/ICS link' })
+  }
+})
+
+app.post('/api/calendar/ical/sync', requireBusiness, async (req, res) => {
+  const url = String(req.body?.url || '').trim()
+  try {
+    const { data: conn } = await authClient.from('calendar_connections').select('*')
+      .eq('business_id', req.businessId).eq('user_id', req.userId).eq('provider', 'ical').eq('ical_url', url).maybeSingle()
+    if (!conn) return res.status(404).json({ error: 'That calendar feed is not connected' })
+    const events = await fetchIcs(url)
+    for (const ev of events) {
+      await authClient.from('calendar_events').upsert({
+        business_id: req.businessId, user_id: req.userId, connection_id: conn.id,
+        external_id: ev.externalId, title: ev.title, start_time: ev.start, end_time: ev.end, busy_status: 'busy'
+      }, { onConflict: 'connection_id,external_id' })
+    }
+    await authClient.from('calendar_connections').update({ sync_status: 'ok', sync_error: null, last_synced_at: new Date().toISOString() }).eq('id', conn.id)
+    res.json({ ok: true, imported: events.length })
+  } catch (err) {
+    console.error('POST /api/calendar/ical/sync', err)
+    res.status(500).json({ error: 'Sync failed — the feed may be temporarily unreachable' })
+  }
+})
+
+/* ===== Time-based lifecycle emails (day-before job reminders, overdue invoice
+   nags) — these can't fire from a client state transition like the rest of the
+   lifecycle emails do, so they're swept here instead. Not triggered by anything
+   in this app: point an external scheduler (Render Cron Job, GitHub Actions
+   scheduled workflow, cron-job.org, etc.) at this route once a day, e.g.:
+     curl -X POST https://<this-backend>/api/automations/run-due -H "X-Automation-Key: <AUTOMATION_CRON_KEY>"
+   Protected by a shared secret (not a business session) since it's meant to be
+   called by infrastructure, not a signed-in user, and must sweep every
+   business in one pass. */
+const AUTOMATION_LIFECYCLE_DEFAULTS = {
+  day_before_reminder: { subject: 'Reminder: {{business_name}} is coming tomorrow', body: "Hi {{customer_name}}, just a reminder we'll be at {{job_address}} tomorrow ({{scheduled_date}}). Let us know if anything's changed." },
+  invoice_overdue: { subject: 'Reminder: invoice from {{business_name}} is overdue', body: "Hi {{customer_name}}, just a friendly reminder that your invoice for {{invoice_total}} is now overdue. Reply if you'd like to sort out payment or have any questions." }
+}
+function fillAutomationTemplate(str, vars) {
+  return (str || '').replace(/\{\{\s*([a-z_]+)\s*\}\}/gi, (m, k) => (vars[k] != null ? vars[k] : m))
+}
+async function sendAutomationEmail(businessId, job, key, invoice) {
+  const { data: already } = await authClient.from('lifecycle_email_log').select('id')
+    .eq('business_id', businessId).eq('job_id', job.id).eq('key', key).maybeSingle()
+  if (already) return false // already sent for this job+key — never double-send
+  const { data: tplRow } = await authClient.from('lifecycle_emails').select('*')
+    .eq('business_id', businessId).eq('key', key).maybeSingle()
+  if (tplRow && tplRow.enabled === false) return false
+  const { data: customer } = await authClient.from('customers').select('*').eq('id', job.customer_id).maybeSingle()
+  if (!customer || !customer.email) return false
+  const { data: accounts } = await authClient.from('email_accounts').select('*')
+    .eq('business_id', businessId).eq('provider', 'gmail').limit(1)
+  const acct = accounts && accounts[0]
+  if (!acct) return false // no Gmail connected for this business — silent skip, same as the client-side sender
+  const auth = await getValidAccessToken(businessId, acct.user_id, 'gmail')
+  if (!auth) return false
+  const { data: biz } = await authClient.from('businesses').select('*').eq('id', businessId).maybeSingle()
+  const vars = {
+    customer_name: (customer.name || '').split(' ')[0] || customer.name || 'there',
+    business_name: (biz && biz.name) || 'Your Business',
+    quote_total: '',
+    invoice_total: invoice ? ('$' + Math.round(invoice.amount || 0).toLocaleString('en-NZ')) : '',
+    job_address: [customer.address, customer.suburb].filter(Boolean).join(', ') || '—',
+    scheduled_date: job.scheduled_date || 'to be confirmed'
+  }
+  const defaults = AUTOMATION_LIFECYCLE_DEFAULTS[key] || {}
+  const subject = fillAutomationTemplate((tplRow && tplRow.subject) || defaults.subject || key, vars)
+  const bodyText = fillAutomationTemplate((tplRow && tplRow.body) || defaults.body || '', vars)
+  const bodyHtml = `<div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;max-width:520px;margin:0 auto;color:#1a1a1a;line-height:1.6"><p>${bodyText.replace(/\n/g, '<br>')}</p></div>`
+  const sent = await gmail.sendMessage(auth.accessToken, { from: auth.account.email_address, to: customer.email, subject, bodyText, bodyHtml })
+  await authClient.from('emails').insert({
+    business_id: businessId, account_id: auth.account.id, customer_id: customer.id,
+    provider_message_id: sent.id, thread_id: sent.threadId, direction: 'sent',
+    from_address: auth.account.email_address, to_addresses: customer.email, subject,
+    body_text: bodyText, body_html: bodyHtml, snippet: bodyText.slice(0, 140), sent_at: new Date().toISOString()
+  })
+  await authClient.from('lifecycle_email_log').insert({ business_id: businessId, job_id: job.id, key })
+  await authClient.from('activity_log').insert({ business_id: businessId, customer_id: customer.id, job_id: job.id, type: 'email_sent', summary: subject })
+  return true
+}
+app.post('/api/automations/run-due', async (req, res) => {
+  const cronKey = process.env.AUTOMATION_CRON_KEY || ''
+  if (!cronKey) return res.status(501).json({ error: 'AUTOMATION_CRON_KEY not configured — set it in the backend environment to enable this sweep' })
+  const provided = req.get('X-Automation-Key') || req.query.key
+  if (provided !== cronKey) return res.status(401).json({ error: 'Invalid automation key' })
+  try {
+    const results = { day_before_reminder: 0, invoice_overdue: 0, errors: 0 }
+    const today = new Date(); today.setUTCHours(0, 0, 0, 0)
+    const tomorrow = new Date(today); tomorrow.setUTCDate(tomorrow.getUTCDate() + 1)
+    const tomorrowISO = tomorrow.toISOString().slice(0, 10)
+    const todayISO = today.toISOString().slice(0, 10)
+
+    const { data: jobs } = await authClient.from('jobs').select('*').eq('scheduled_date', tomorrowISO).eq('status', 'scheduled')
+    for (const job of jobs || []) {
+      try { if (await sendAutomationEmail(job.business_id, job, 'day_before_reminder')) results.day_before_reminder++ }
+      catch (e) { console.error('day_before_reminder failed for job', job.id, e); results.errors++ }
+    }
+
+    const { data: invoices } = await authClient.from('invoices').select('*').eq('paid', false).lt('due_date', todayISO)
+    for (const inv of invoices || []) {
+      try {
+        const { data: job } = await authClient.from('jobs').select('*').eq('id', inv.job_id).maybeSingle()
+        if (!job) continue
+        if (await sendAutomationEmail(job.business_id, job, 'invoice_overdue', inv)) results.invoice_overdue++
+      } catch (e) { console.error('invoice_overdue failed for invoice', inv.id, e); results.errors++ }
+    }
+    res.json({ ok: true, results })
+  } catch (err) {
+    console.error('POST /api/automations/run-due', err)
+    res.status(500).json({ error: 'Automation sweep failed' })
+  }
+})
+
+/* =====================================================================
+   PAYMENTS — Stripe Payment Links, via plain REST (Basic Auth with the
+   secret key as username), matching this backend's no-heavy-SDK style. NOT
+   LIVE until STRIPE_SECRET_KEY is set in the backend environment — gated by
+   isStripeConfigured() so every route below returns a clear 501 until then,
+   same pattern as Gmail/Google Calendar. Get a key at dashboard.stripe.com
+   (test mode first — sk_test_... — before switching to a live key).
+   ===================================================================== */
+const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || ''
+const isStripeConfigured = () => !!STRIPE_SECRET_KEY
+
+app.post('/api/payments/create-link', requireBusiness, async (req, res) => {
+  if (!isStripeConfigured()) return res.status(501).json({ error: 'Stripe is not configured on this server yet — ask whoever manages your TurnKey deployment to add STRIPE_SECRET_KEY' })
+  try {
+    const { amountCents, description, invoiceId } = req.body || {}
+    if (!amountCents || amountCents < 50) return res.status(400).json({ error: 'A valid amount (in cents, minimum 50) is required' })
+    const authHeader = 'Basic ' + Buffer.from(STRIPE_SECRET_KEY + ':').toString('base64')
+
+    // Stripe Payment Links need a Price object first (one-off, inline price).
+    const priceRes = await fetch('https://api.stripe.com/v1/prices', {
+      method: 'POST',
+      headers: { Authorization: authHeader, 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        unit_amount: String(Math.round(amountCents)), currency: 'nzd',
+        'product_data[name]': description || 'TurnKey invoice'
+      })
+    })
+    if (!priceRes.ok) throw new Error('Stripe price creation failed: ' + await priceRes.text())
+    const price = await priceRes.json()
+
+    const linkRes = await fetch('https://api.stripe.com/v1/payment_links', {
+      method: 'POST',
+      headers: { Authorization: authHeader, 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ 'line_items[0][price]': price.id, 'line_items[0][quantity]': '1' })
+    })
+    if (!linkRes.ok) throw new Error('Stripe payment link creation failed: ' + await linkRes.text())
+    const link = await linkRes.json()
+
+    if (invoiceId) await authClient.from('invoices').update({ payment_link_url: link.url }).eq('id', invoiceId)
+    res.json({ ok: true, url: link.url })
+  } catch (err) {
+    console.error('POST /api/payments/create-link', err)
+    res.status(500).json({ error: 'Could not create a payment link' })
+  }
+})
+
+/* =====================================================================
+   AI ASSISTANT — answers questions about the business ("what should I
+   schedule this week", "who owes money") using Claude, given a compact
+   real-data summary the frontend computes from its own already-loaded
+   records (see index.html buildAiBusinessSummary()) — nothing is fabricated
+   or invented server-side, the model only ever sees numbers TurnKey already
+   has. NOT LIVE until ANTHROPIC_API_KEY is set in the backend environment.
+   ===================================================================== */
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || ''
+const isAiConfigured = () => !!ANTHROPIC_API_KEY
+
+app.post('/api/ai/ask', requireBusiness, async (req, res) => {
+  if (!isAiConfigured()) return res.status(501).json({ error: 'AI assistant is not configured on this server yet — ask whoever manages your TurnKey deployment to add ANTHROPIC_API_KEY' })
+  try {
+    const { question, businessSummary } = req.body || {}
+    if (!question || !String(question).trim()) return res.status(400).json({ error: 'A question is required' })
+    const system = 'You are the TurnKey CRM assistant for a service business (exterior cleaning, roofing, etc). ' +
+      'Answer only using the JSON business data snapshot provided — it is the complete, current, real state of ' +
+      'their jobs/quotes/invoices. Never invent customers, amounts, or dates not present in the data. If the data ' +
+      'doesn\'t contain enough to answer, say so plainly. Keep answers short and actionable — this is read on a ' +
+      'phone between jobs.'
+    const aiRes = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-5', max_tokens: 512, system,
+        messages: [{ role: 'user', content: `Business data:\n${JSON.stringify(businessSummary || {}).slice(0, 12000)}\n\nQuestion: ${question}` }]
+      })
+    })
+    if (!aiRes.ok) throw new Error('Anthropic API call failed: ' + await aiRes.text())
+    const data = await aiRes.json()
+    const answer = (data.content || []).map(b => b.text || '').join('').trim() || 'No answer returned.'
+    res.json({ ok: true, answer })
+  } catch (err) {
+    console.error('POST /api/ai/ask', err)
+    res.status(500).json({ error: 'Could not reach the AI assistant' })
+  }
+})
 
 app.listen(PORT, () => {
   console.log(`🚀 TurnKey backend running on port ${PORT}`)
