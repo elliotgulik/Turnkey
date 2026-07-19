@@ -339,6 +339,46 @@
   .iw-err-row{font-size:12.5px;color:var(--ink-soft);padding:6px 0;border-bottom:1px solid var(--line-soft)}
   @media(max-width:640px){.iw-src-grid{grid-template-columns:repeat(2,1fr)}.iw-upload-label{min-width:100%}.iw-foot{flex-wrap:wrap}}
 
+  /* customer profile */
+  .cp-head{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:18px}
+  .cp-name{font-size:21px;font-weight:700;letter-spacing:-.01em}
+  .cp-sub{font-size:13px;color:var(--ink-soft);margin-top:2px}
+  .cp-actions{display:flex;gap:8px;flex-wrap:wrap}
+  .cp-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px}
+  .cp-stat{background:var(--surface-2);border-radius:var(--radius-sm);padding:14px;text-align:center}
+  .cp-stat-v{font-size:17px;font-weight:700}
+  .cp-stat-l{font-size:10.5px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.03em;margin-top:3px}
+  .cp-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}
+  .cp-photo-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:8px}
+  .cp-photo{aspect-ratio:1;border-radius:var(--radius-sm);background:var(--surface-2) center/cover;position:relative;overflow:hidden}
+  .cp-photo-tag{position:absolute;left:5px;bottom:5px;font-size:9px;font-weight:700;text-transform:uppercase;background:rgba(10,28,43,.65);color:#fff;padding:2px 6px;border-radius:980px}
+  .cp-timeline-row{display:flex;gap:10px;padding:9px 0;border-bottom:1px solid var(--line-soft)}
+  .cp-timeline-ico{font-size:15px;flex-shrink:0}
+  .cp-timeline-sum{font-size:13px}
+  .cp-timeline-when{font-size:11px;color:var(--ink-faint);margin-top:1px}
+  @media(max-width:720px){.cp-grid{grid-template-columns:1fr}.cp-stats{grid-template-columns:repeat(2,1fr)}}
+
+  /* inbox */
+  .ib-layout{display:grid;grid-template-columns:320px 1fr;gap:16px;align-items:start}
+  .ib-list{display:flex;flex-direction:column;gap:6px;max-height:70vh;overflow-y:auto}
+  .ib-row{text-align:left;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-sm);padding:11px 13px;cursor:pointer}
+  .ib-row.sel{border-color:var(--teal);background:var(--teal-wash)}
+  .ib-row-top{display:flex;justify-content:space-between;font-size:12px;color:var(--ink-faint);margin-bottom:2px}
+  .ib-who{font-weight:600;color:var(--ink)}
+  .ib-subj{font-size:13.5px;font-weight:600;margin-bottom:2px}
+  .ib-snip{font-size:12px;color:var(--ink-soft);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ib-thread{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:18px;min-height:300px}
+  .ib-thread-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding-bottom:12px;border-bottom:1px solid var(--line-soft);margin-bottom:14px;flex-wrap:wrap}
+  .ib-thread-subj{font-size:16px;font-weight:700}
+  .ib-thread-cust{font-size:12.5px;color:var(--ink-soft);margin-top:3px}
+  .ib-msgs{max-height:340px;overflow-y:auto;margin-bottom:14px}
+  .ib-msg{padding:12px 0;border-bottom:1px solid var(--line-soft)}
+  .ib-msg.sent{background:var(--teal-wash);border-radius:var(--radius-sm);padding:12px;margin-bottom:8px;border-bottom:none}
+  .ib-msg-head{display:flex;justify-content:space-between;font-size:12px;color:var(--ink-faint);margin-bottom:6px}
+  .ib-msg-body{font-size:13.5px;line-height:1.6}
+  .ib-reply textarea{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:var(--radius-sm);font-family:inherit;font-size:13.5px}
+  @media(max-width:860px){.ib-layout{grid-template-columns:1fr}.ib-list{max-height:220px}}
+
   /* pricing */
   .rate-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:20px 22px;margin-bottom:14px}
   .rate-card .rc-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
@@ -800,6 +840,7 @@
     <button data-view="jobsflow">Jobs Flow</button>
     <button data-view="leads">Leads <span class="count" id="cnt-leads">0</span></button>
     <button data-view="calendar">Calendar</button>
+    <button data-view="inbox">Inbox <span class="count" id="cnt-inbox">0</span></button>
     <button data-view="ops">Operations</button>
     <button data-view="pricing">Pricing</button>
     <button data-view="dashboard">Dashboard</button>
@@ -810,6 +851,7 @@
     <section class="view" id="view-jobsflow"></section>
     <section class="view" id="view-leads"></section>
     <section class="view" id="view-calendar"></section>
+    <section class="view" id="view-inbox"></section>
     <section class="view" id="view-ops"></section>
     <section class="view" id="view-pricing"></section>
     <section class="view" id="view-dashboard"></section>
@@ -819,7 +861,7 @@
 </div>
 
 <div class="overlay" id="lead-overlay"><div class="modal">
-  <div class="modal-head"><div><h3>New lead</h3><p>Capture the enquiry — quote comes next.</p></div><button class="x" aria-label="Close" onclick="closeModal('lead-overlay')">×</button></div>
+  <div class="modal-head"><div><h3 id="lead-modal-title">New lead</h3><p id="lead-modal-sub">Capture the enquiry — quote comes next.</p></div><button class="x" aria-label="Close" onclick="closeModal('lead-overlay')">×</button></div>
   <div class="modal-body">
     <div class="field"><label>Customer name</label><input id="l-name" placeholder="e.g. Sarah Thompson" autocomplete="off"></div>
     <div class="field-row"><div class="field"><label>Phone</label><input id="l-phone" placeholder="021 555 0123" autocomplete="off"></div><div class="field"><label>Email</label><input id="l-email" placeholder="sarah@email.com" autocomplete="off"></div></div>
@@ -894,6 +936,22 @@
 <div class="overlay" id="import-overlay"><div class="modal wide">
   <div class="modal-head"><div><h3>Import from another CRM</h3><p>Bring your customers, jobs, quotes and invoices over from ServiceM8, Jobber, Housecall Pro, Tradify, Fergus or any CSV.</p></div><button class="x" aria-label="Close" onclick="closeImportWizard()">×</button></div>
   <div class="modal-body" id="import-body"></div>
+</div></div>
+
+<div class="overlay" id="customer-overlay"><div class="modal wide">
+  <div class="modal-head"><div><h3>Customer profile</h3><p>Everything about this customer in one place.</p></div><button class="x" aria-label="Close" onclick="closeModal('customer-overlay')">×</button></div>
+  <div class="modal-body" id="customer-body"></div>
+</div></div>
+
+<div class="overlay" id="compose-overlay"><div class="modal">
+  <div class="modal-head"><div><h3>New email</h3><p>Sends from your connected Gmail.</p></div><button class="x" aria-label="Close" onclick="closeModal('compose-overlay')">×</button></div>
+  <div class="modal-body">
+    <input type="hidden" id="cmp-customer-id">
+    <div class="field"><label>To</label><input id="cmp-to" type="email" placeholder="customer@example.com"></div>
+    <div class="field"><label>Subject</label><input id="cmp-subject"></div>
+    <div class="field"><label>Message</label><textarea id="cmp-body" rows="8"></textarea></div>
+  </div>
+  <div class="modal-foot"><button class="btn ghost" onclick="closeModal('compose-overlay')">Cancel</button><button class="btn primary" onclick="sendComposeModal()">Send</button></div>
 </div></div>
 
 <div class="overlay" id="tpl-overlay"><div class="modal">
@@ -1210,6 +1268,7 @@ function sendFollowNow(id,fid){
   f.state='sent';f.enabled=true;
   openDetail(id);
   toast(`Opened your ${f.channel==='email'?'email':'messages'} app to ${r.name}`);
+  logActivity(r.customerId,r.jobId,'follow_up_sent',f.label+' sent to '+r.name+' via '+f.channel);
 }
 function buildFollowBody(r,f){
   const first=(r.name||'').split(' ')[0]||'there';
@@ -1229,6 +1288,7 @@ function switchView(v){
   document.getElementById('view-'+v).classList.add('active');
   setAccent(v);
   if(v==='calendar')renderCalendar();
+  if(v==='inbox')renderInbox();
   if(v==='jobsflow')renderJobsFlow();
   if(v==='ops')renderOps();
   if(v==='pricing')renderPricing();
@@ -1240,6 +1300,7 @@ const MODULE_ACCENT={
   pipeline:['--m-sales','--m-sales-wash'], leads:['--m-sales','--m-sales-wash'],
   jobsflow:['--m-sales','--m-sales-wash'],
   calendar:['--m-cal','--m-cal-wash'],
+  inbox:['--m-money','--m-money-wash'],
   ops:['--m-ops','--m-ops-wash'],
   pricing:['--m-pricing','--m-pricing-wash'],
   dashboard:['--m-dash','--m-dash-wash'], goals:['--m-goal','--m-goal-wash'],
@@ -1255,24 +1316,54 @@ function setAccent(v){
 }
 
 /* ---------- A. SALES: lead capture ---------- */
+let pendingNewJobCustomerId=null; // set by openNewJobModal() — reuses the same form to add a job to an EXISTING customer instead of creating a new one
 function openLeadModal(){
+  pendingNewJobCustomerId=null;
+  document.getElementById('lead-modal-title').textContent='New lead';
+  document.getElementById('lead-modal-sub').textContent='Capture the enquiry — quote comes next.';
   ['l-name','l-phone','l-email','l-suburb','l-address','l-notes'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('l-source').selectedIndex=0;document.getElementById('l-repeat').selectedIndex=0;
   openModal('lead-overlay');setTimeout(()=>document.getElementById('l-name').focus(),100);
 }
+// Adds a NEW job for an EXISTING customer — the app's records are job-centric
+// (one row per job), so this is how a repeat customer gets a second job
+// instead of a duplicate customer. Reuses the lead form, pre-filled and with
+// the name locked (editing it here wouldn't rename the existing customer).
+function openNewJobModal(customerId){
+  const existing=records.find(r=>r.customerId===customerId);
+  if(!existing){toast('Could not find that customer');return;}
+  closeModal('customer-overlay'); // avoid stacking two overlays — this is usually opened from inside the profile
+  pendingNewJobCustomerId=customerId;
+  document.getElementById('lead-modal-title').textContent='New job for '+existing.name;
+  document.getElementById('lead-modal-sub').textContent='Contact details carry over from their profile.';
+  document.getElementById('l-name').value=existing.name;
+  document.getElementById('l-phone').value=existing.phone||'';
+  document.getElementById('l-email').value=existing.email||'';
+  document.getElementById('l-suburb').value=existing.suburb||'';
+  document.getElementById('l-address').value=existing.address||'';
+  document.getElementById('l-notes').value='';
+  document.getElementById('l-source').selectedIndex=0;document.getElementById('l-repeat').value='yes';
+  openModal('lead-overlay');
+}
 function saveLead(){
   const name=document.getElementById('l-name').value.trim();
   if(!name){toast('Add a customer name');return}
-  records.push(newRecord({
+  const customerId=pendingNewJobCustomerId;
+  const rec=newRecord({
     name,phone:document.getElementById('l-phone').value.trim(),
     email:document.getElementById('l-email').value.trim(),
     suburb:document.getElementById('l-suburb').value.trim(),
     address:document.getElementById('l-address').value.trim(),
     source:document.getElementById('l-source').value,
     repeat:document.getElementById('l-repeat').value,
-    notes:document.getElementById('l-notes').value.trim()
-  }));
-  closeModal('lead-overlay');render();renderAll();toast('Lead captured — follow-up sequence armed');
+    notes:document.getElementById('l-notes').value.trim(),
+    customerId:customerId||null // pre-set → syncs against the existing customer row instead of creating a new one
+  });
+  records.push(rec);
+  pendingNewJobCustomerId=null;
+  closeModal('lead-overlay');render();renderAll();
+  toast(customerId?'New job added for '+name:'Lead captured — follow-up sequence armed');
+  if(customerId){logActivity(customerId,null,'note','New job added: '+name);openCustomerProfile(rec.id);}
 }
 
 /* ---------- QUOTE BUILDER ---------- */
@@ -1655,6 +1746,17 @@ function sendInvoiceDoc(){
   generateAndSendDoc('invoice',r);
 }
 
+/* ===== Communication timeline: fire-and-forget log of customer-facing events.
+   Feeds the Customer Profile's timeline; the email system writes into this
+   same table so emails show up alongside everything else automatically. */
+function logActivity(customerId,jobId,type,summary,detail){
+  if(!sb||!currentBusinessId||!customerId)return;
+  sb.from('activity_log').insert({
+    business_id:currentBusinessId,customer_id:customerId,job_id:jobId||null,
+    type,summary,detail:detail||null,created_by:currentUserId
+  }).then(({error})=>{if(error)console.error('Activity log failed',error);});
+}
+
 function generateAndSendDoc(mode,r){
   const num=docNumber(mode,r);
   const filename=(mode==='quote'?'Quote':'Invoice')+'-'+num+'.pdf';
@@ -1677,12 +1779,14 @@ function generateAndSendDoc(mode,r){
       }else{
         toast('PDF saved as '+filename+'. No email on file for '+r.name+'.');
       }
+      logActivity(r.customerId,r.jobId,mode==='quote'?'quote_sent':'invoice_sent',(mode==='quote'?'Quote ':'Invoice ')+num+' sent to '+r.name);
       return;
     }catch(e){console.warn('PDF generation failed, falling back:',e);}
   }
   if(r.email){
     window.location.href='mailto:'+encodeURIComponent(r.email)+'?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(buildDocEmailBody(mode,r));
     toast('Email opened for '+r.name);
+    logActivity(r.customerId,r.jobId,mode==='quote'?'quote_sent':'invoice_sent',(mode==='quote'?'Quote ':'Invoice ')+num+' sent to '+r.name);
   }else{
     toast((mode==='quote'?'Quote':'Invoice')+' saved. No email on file for '+r.name+'.');
   }
@@ -2041,6 +2145,7 @@ function confirmSchedule(){
   render();renderAll();
   if(paired)toast(`Booked: ${r.name} on ${r.scheduledDate} \u2014 paired with ${paired.name} in ${r.suburb}`);
   else toast(`Booked: ${r.name} on ${r.scheduledDate}`);
+  logActivity(r.customerId,r.jobId,'job_scheduled',r.name+' booked for '+r.scheduledDate+(r.tech!=='Unassigned'?' \u00b7 '+r.tech:''));
 }
 
 /* ---------- detail ---------- */
@@ -2085,7 +2190,7 @@ function openDetail(id){
 
   document.getElementById('view-detail').innerHTML=`
     <a class="back-link" onclick="render();switchView('pipeline')">← Back to pipeline</a>
-    <div class="view-head"><div><h2>${r.name}</h2><p>${r.address||'—'}${r.suburb?', '+r.suburb:''} · ${r.phone||'no phone'}</p></div><span class="pill ${stageObj.cls}">${stageObj.label}</span></div>
+    <div class="view-head"><div><h2>${r.name}</h2><p>${r.address||'—'}${r.suburb?', '+r.suburb:''} · ${r.phone||'no phone'}</p></div><div style="display:flex;align-items:center;gap:10px"><button class="btn ghost sm" onclick="openCustomerProfile(${id})">👤 Full profile</button><span class="pill ${stageObj.cls}">${stageObj.label}</span></div></div>
     <div class="detail-grid">
       <div>
         <div class="panel"><h4>Contact <span class="eng-badge">Client</span></h4>
@@ -2282,18 +2387,29 @@ function render(){
     <div class="info-strip"><b>Instant lead capture:</b> a website enquiry lands here in seconds, the source is recorded for cost-per-lead tracking, and a 3-step follow-up sequence arms automatically.</div>
     <div class="pipe-bar"><div class="pipe-primary"><button class="btn primary" onclick="openLeadModal()">+ New lead</button></div></div>
     ${leads.length?`<div class="board" style="grid-template-columns:repeat(auto-fill,minmax(220px,1fr))">${leads.map(cardHtml).join('')}</div>`:`<div class="empty-state"><div class="big">No open leads yet</div><div class="sm">Click <b>+ New lead</b> above, or share your booking link (Connections) so website enquiries land here automatically.</div></div>`}
-    <div class="panel" style="margin-top:22px"><h4>Client contacts <span class="demo-tag">all ${records.length}</span></h4>
-      ${records.length?`<table class="contact-table">
-        <thead><tr><th>Client</th><th>Phone</th><th>Email</th><th>Suburb</th><th class="r">Status</th></tr></thead>
-        <tbody>${records.map(r=>{const st=stageObj(r.stage);return `<tr onclick="openDetail(${r.id})">
-          <td><div class="ct-name">${r.name}</div><div class="ct-sub">${r.address||''}</div></td>
-          <td>${r.phone?`<a href="tel:${r.phone.replace(/\s/g,'')}" onclick="event.stopPropagation()">${r.phone}</a>`:'—'}</td>
-          <td>${r.email?`<a href="mailto:${r.email}" onclick="event.stopPropagation()">${r.email}</a>`:'—'}</td>
-          <td>${r.suburb||'—'}</td>
-          <td class="r"><span class="pill ${st.cls}">${st.label}</span></td>
+    ${(()=>{
+      // One row per CUSTOMER, not per job — a repeat customer with two jobs
+      // shows once here with a job count, and opens their full profile.
+      const groups={};
+      records.forEach(r=>{
+        const key=r.customerId||('local'+r.id);
+        if(!groups[key])groups[key]={firstId:r.id,customerId:r.customerId,name:r.name,phone:r.phone,email:r.email,address:r.address,suburb:r.suburb,stage:r.stage,jobs:[]};
+        groups[key].jobs.push(r);
+      });
+      const list=Object.values(groups);
+      return `<div class="panel" style="margin-top:22px"><h4>Customers <span class="demo-tag">${list.length}</span></h4>
+      ${list.length?`<table class="contact-table">
+        <thead><tr><th>Client</th><th>Phone</th><th>Email</th><th>Suburb</th><th class="r">Jobs</th></tr></thead>
+        <tbody>${list.map(g=>{const st=stageObj(g.stage);return `<tr onclick="openCustomerProfile(${g.firstId})">
+          <td><div class="ct-name">${g.name}</div><div class="ct-sub">${g.address||''}</div></td>
+          <td>${g.phone?`<a href="tel:${g.phone.replace(/\s/g,'')}" onclick="event.stopPropagation()">${g.phone}</a>`:'—'}</td>
+          <td>${g.email?`<a href="mailto:${g.email}" onclick="event.stopPropagation()">${g.email}</a>`:'—'}</td>
+          <td>${g.suburb||'—'}</td>
+          <td class="r">${g.jobs.length>1?`<span class="pill">${g.jobs.length} jobs</span>`:`<span class="pill ${st.cls}">${st.label}</span>`}</td>
         </tr>`}).join('')}</tbody>
       </table>`:'<div class="empty-state" style="padding:30px"><div class="sm">No clients yet — they\'ll appear here as soon as you add a lead or one comes in from your booking page.</div></div>'}
     </div>`;
+    })()}`;
 }
 function cardHtml(r){
   const tags=r.services.map(s=>`<span class="tag">${SERVICES[s.svc].label.split(' ')[0]}</span>`).join('');
@@ -2305,6 +2421,262 @@ function cardHtml(r){
     ${tags?`<div class="svc-tags">${tags}</div>`:''}
     <div class="foot"><span class="price">${r.total?money(r.total):'No quote'}</span><span class="meta">${r.source||''}</span></div>
   </button>`;
+}
+
+/* =====================================================================
+   CUSTOMER PROFILE — the central hub for everything about one customer:
+   contact/property info, service history, quotes, jobs, invoices,
+   attachments, before/after photos, notes, communication timeline,
+   revenue summary and upcoming work. Records are job-centric (one row per
+   job), so this view aggregates every record sharing the same customerId.
+   ===================================================================== */
+const ACTIVITY_META={
+  note:{icon:'📝',label:'Note'},quote_sent:{icon:'📄',label:'Quote sent'},
+  quote_viewed:{icon:'👀',label:'Quote viewed'},job_scheduled:{icon:'📅',label:'Job scheduled'},
+  job_completed:{icon:'✅',label:'Job completed'},invoice_sent:{icon:'🧾',label:'Invoice sent'},
+  invoice_paid:{icon:'💰',label:'Invoice paid'},follow_up_sent:{icon:'📣',label:'Follow-up sent'},
+  email_sent:{icon:'📤',label:'Email sent'},email_received:{icon:'📥',label:'Email received'},
+  status_change:{icon:'🔄',label:'Status change'}
+};
+let customerProfileCtx=null;
+async function openCustomerProfile(recordId){
+  const r=records.find(x=>x.id===recordId);
+  if(!r){toast('Could not find that customer');return;}
+  openModal('customer-overlay');
+  document.getElementById('customer-body').innerHTML='<div class="iw-running"><div class="iw-spinner"></div><p>Loading customer profile…</p></div>';
+  await ensureRecordSynced(r);
+  const customerId=r.customerId;
+  customerProfileCtx={customerId,quotes:[],attachments:[],activity:[]};
+  if(sb&&customerId){
+    const [{data:quotes},{data:atts},{data:acts}]=await Promise.all([
+      sb.from('quotes').select('*').eq('lead_id',customerId).order('created_at',{ascending:false}),
+      sb.from('attachments').select('*').eq('customer_id',customerId).order('created_at',{ascending:false}),
+      sb.from('activity_log').select('*').eq('customer_id',customerId).order('created_at',{ascending:false}).limit(100)
+    ]);
+    customerProfileCtx.quotes=quotes||[];
+    customerProfileCtx.attachments=atts||[];
+    customerProfileCtx.activity=acts||[];
+  }
+  renderCustomerProfile();
+  iwLoadCustomerPhotos();
+}
+function closeCustomerProfile(){closeModal('customer-overlay');customerProfileCtx=null;}
+function renderCustomerProfile(){
+  const ctx=customerProfileCtx;if(!ctx)return;
+  const jobs=records.filter(r=>r.customerId===ctx.customerId);
+  if(!jobs.length){document.getElementById('customer-body').innerHTML='<div class="empty-state"><div class="sm">This customer could not be loaded.</div></div>';return;}
+  const c=jobs[0];
+  const lifetimeValue=jobs.filter(isPaid).reduce((s,r)=>s+(r.total||0),0);
+  const totalQuoted=jobs.reduce((s,r)=>s+(r.total||0),0);
+  const wonCount=jobs.filter(isWon).length;
+  const upcoming=jobs.filter(isBooked).sort((a,b)=>(a.scheduledIdx??9)-(b.scheduledIdx??9));
+  const photos=ctx.attachments.filter(a=>a.kind==='before_photo'||a.kind==='after_photo');
+  const files=ctx.attachments.filter(a=>a.kind!=='before_photo'&&a.kind!=='after_photo');
+
+  document.getElementById('customer-body').innerHTML=`
+    <div class="cp-head">
+      <div><div class="cp-name">${c.name}</div><div class="cp-sub">${c.suburb||c.address||'No address on file'}</div></div>
+      <div class="cp-actions">
+        <button class="btn ghost sm" onclick="openNewJobModal('${ctx.customerId}')">+ New job</button>
+        ${c.phone?`<a class="btn ghost sm" href="tel:${c.phone.replace(/\s/g,'')}">Call</a>`:''}
+        ${c.email?`<a class="btn ghost sm" href="mailto:${c.email}">Email</a>`:''}
+      </div>
+    </div>
+
+    <div class="cp-stats">
+      <div class="cp-stat"><div class="cp-stat-v">${money(lifetimeValue)}</div><div class="cp-stat-l">Lifetime value (paid)</div></div>
+      <div class="cp-stat"><div class="cp-stat-v">${money(totalQuoted)}</div><div class="cp-stat-l">Total quoted</div></div>
+      <div class="cp-stat"><div class="cp-stat-v">${jobs.length}</div><div class="cp-stat-l">Job${jobs.length!==1?'s':''}</div></div>
+      <div class="cp-stat"><div class="cp-stat-v">${wonCount}</div><div class="cp-stat-l">Won</div></div>
+    </div>
+
+    ${upcoming.length?`<div class="panel" style="margin-bottom:14px"><h4>Upcoming work</h4>
+      ${upcoming.map(r=>`<div class="kv"><span class="k">${r.name} — ${r.scheduledDate||'Date TBC'}</span><span class="v"><span class="pill ${stageObj(r.stage).cls}">${stageObj(r.stage).label}</span></span></div>`).join('')}
+    </div>`:''}
+
+    <div class="cp-grid">
+      <div>
+        <div class="panel" style="margin-bottom:14px"><h4>Contact &amp; property</h4>
+          <div class="field"><label>Name</label><input id="cp-name" value="${c.name.replace(/"/g,'&quot;')}"></div>
+          <div class="field-row"><div class="field"><label>Phone</label><input id="cp-phone" value="${(c.phone||'').replace(/"/g,'&quot;')}"></div><div class="field"><label>Email</label><input id="cp-email" value="${(c.email||'').replace(/"/g,'&quot;')}"></div></div>
+          <div class="field"><label>Address</label><input id="cp-address" value="${(c.address||'').replace(/"/g,'&quot;')}"></div>
+          <div class="field"><label>Suburb</label><input id="cp-suburb" value="${(c.suburb||'').replace(/"/g,'&quot;')}"></div>
+          <button class="btn accent sm" onclick="saveCustomerContact()">Save</button>
+        </div>
+        <div class="panel" style="margin-bottom:14px"><h4>Notes</h4>
+          <textarea id="cp-notes" rows="4" placeholder="Access instructions, gate codes, dog on site, preferences…">${(c.notes||'').replace(/</g,'&lt;')}</textarea>
+          <button class="btn accent sm" style="margin-top:8px" onclick="saveCustomerNotes()">Save notes</button>
+        </div>
+        <div class="panel" style="margin-bottom:14px"><h4>Service history <span class="demo-tag">${jobs.length}</span></h4>
+          ${jobs.map(r=>`<div class="kv" style="cursor:pointer" onclick="closeCustomerProfile();openDetail(${r.id})"><span class="k">${r.scheduledDate||'Not scheduled'}${r.tech&&r.tech!=='Unassigned'?' · '+r.tech:''}</span><span class="v"><span class="pill ${stageObj(r.stage).cls}">${stageObj(r.stage).label}</span> ${r.total?money(r.total):''}</span></div>`).join('')}
+        </div>
+        <div class="panel"><h4>Quotes <span class="demo-tag">${ctx.quotes.length}</span></h4>
+          ${ctx.quotes.length?ctx.quotes.map(q=>`<div class="kv"><span class="k">${new Date(q.created_at).toLocaleDateString('en-NZ',{day:'numeric',month:'short',year:'numeric'})}</span><span class="v">${money(q.amount||0)} · <span class="pill">${q.status||'sent'}</span></span></div>`).join(''):'<div class="empty-state" style="padding:16px"><div class="sm">No quotes recorded yet.</div></div>'}
+        </div>
+      </div>
+      <div>
+        <div class="panel" style="margin-bottom:14px"><h4>Invoices</h4>
+          ${jobs.filter(r=>r.invoiceId).length?jobs.filter(r=>r.invoiceId).map(r=>`<div class="kv"><span class="k">${r.name} job${r.scheduledDate?' · '+r.scheduledDate:''}</span><span class="v">${money(r.total||0)} · <span class="pill ${r.stage==='paid'?'paid':''}">${r.stage==='paid'?'Paid':'Unpaid'}</span></span></div>`).join(''):'<div class="empty-state" style="padding:16px"><div class="sm">No invoices yet.</div></div>'}
+        </div>
+        <div class="panel" style="margin-bottom:14px"><h4>Before / after photos</h4>
+          <div id="cp-photo-grid" class="cp-photo-grid">${photos.length?photos.map(p=>`<div class="cp-photo" data-path="${p.path}"><span class="cp-photo-tag">${p.kind==='before_photo'?'Before':'After'}</span></div>`).join(''):'<div class="empty-state" style="padding:16px"><div class="sm">No before/after photos yet — add them from a job.</div></div>'}</div>
+        </div>
+        <div class="panel" style="margin-bottom:14px"><h4>Attachments <span class="demo-tag">${files.length}</span></h4>
+          ${files.length?files.map(f=>`<div class="kv"><span class="k">${f.filename||f.path.split('/').pop()}</span><span class="v">${new Date(f.created_at).toLocaleDateString('en-NZ',{day:'numeric',month:'short'})}</span></div>`).join(''):'<div class="empty-state" style="padding:16px"><div class="sm">No files attached yet.</div></div>'}
+        </div>
+        <div class="panel"><h4>Communication timeline <span class="demo-tag">${ctx.activity.length}</span></h4>
+          <div style="max-height:340px;overflow-y:auto">
+          ${ctx.activity.length?ctx.activity.map(a=>{const m=ACTIVITY_META[a.type]||{icon:'•',label:a.type};return `<div class="cp-timeline-row"><span class="cp-timeline-ico">${m.icon}</span><div><div class="cp-timeline-sum">${a.summary}</div><div class="cp-timeline-when">${new Date(a.created_at).toLocaleString('en-NZ',{day:'numeric',month:'short',hour:'numeric',minute:'2-digit'})}</div></div></div>`}).join(''):'<div class="empty-state" style="padding:16px"><div class="sm">Nothing logged yet — sending a quote, booking a job or connecting email will show up here.</div></div>'}
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+async function saveCustomerContact(){
+  const ctx=customerProfileCtx;if(!ctx||!sb)return;
+  const payload={
+    name:document.getElementById('cp-name').value.trim(),
+    phone:document.getElementById('cp-phone').value.trim(),
+    email:document.getElementById('cp-email').value.trim(),
+    address:document.getElementById('cp-address').value.trim(),
+    suburb:document.getElementById('cp-suburb').value.trim()
+  };
+  if(!payload.name){toast('Name is required');return;}
+  const {error}=await sb.from('customers').update(payload).eq('id',ctx.customerId);
+  if(error){console.error('Save customer failed',error);toast('Could not save — check console');return;}
+  records.filter(r=>r.customerId===ctx.customerId).forEach(r=>Object.assign(r,payload));
+  saveState();render();renderAll();renderCustomerProfile();
+  toast('Contact details saved');
+}
+async function saveCustomerNotes(){
+  const ctx=customerProfileCtx;if(!ctx||!sb)return;
+  const notes=document.getElementById('cp-notes').value;
+  const {error}=await sb.from('customers').update({notes}).eq('id',ctx.customerId);
+  if(error){console.error('Save notes failed',error);toast('Could not save — check console');return;}
+  records.filter(r=>r.customerId===ctx.customerId).forEach(r=>r.notes=notes);
+  saveState();
+  logActivity(ctx.customerId,null,'note','Note updated');
+  toast('Notes saved');
+}
+async function iwLoadCustomerPhotos(){
+  const ctx=customerProfileCtx;if(!ctx||!sb)return;
+  const grid=document.getElementById('cp-photo-grid');if(!grid)return;
+  const cells=grid.querySelectorAll('.cp-photo[data-path]');
+  for(const cell of cells){
+    const url=await signedUrlFor(cell.dataset.path);
+    if(url)cell.style.backgroundImage=`url("${url}")`;
+  }
+}
+
+/* =====================================================================
+   INBOX — connected mailbox(es) merged into one view. Reading/composing is
+   all client-side against the `emails` table (no secrets, safe to read
+   directly); sending/syncing goes through the backend, which is the only
+   thing holding the actual OAuth tokens.
+   ===================================================================== */
+let inboxThreads=[];let inboxOpenThread=null;
+async function renderInbox(){
+  const zone=document.getElementById('view-inbox');
+  if(!sb||!currentBusinessId){zone.innerHTML='<div class="empty-state"><div class="sm">Sign in to view your inbox.</div></div>';return;}
+  if(!emailAccount){
+    zone.innerHTML=`<div class="view-head"><div><h2>Inbox</h2><p>Send and receive customer emails without leaving TurnKey.</p></div></div>
+      <div class="empty-state"><div class="big">No email connected yet</div><div class="sm">Connect your Gmail in <b>Connections</b> to start sending, receiving and linking emails to customer profiles.</div>
+      <button class="btn primary" style="margin-top:14px" onclick="openConnections()">Open Connections</button></div>`;
+    return;
+  }
+  zone.innerHTML=`<div class="view-head"><div><h2>Inbox</h2><p>Connected as ${emailAccount.email_address}</p></div><button class="btn accent sm" onclick="openComposeModal()">✎ Compose</button></div>
+    <div id="inbox-body"><div class="empty-state"><div class="sm">Loading…</div></div></div>`;
+  const {data,error}=await sb.from('emails').select('*').order('sent_at',{ascending:false}).limit(200);
+  if(error){document.getElementById('inbox-body').innerHTML='<div class="empty-state"><div class="sm">Could not load emails — check console.</div></div>';console.error('Load emails failed',error);return;}
+  const byThread={};
+  (data||[]).forEach(e=>{const key=e.thread_id||e.id;if(!byThread[key])byThread[key]=[];byThread[key].push(e);});
+  inboxThreads=Object.values(byThread).map(msgs=>msgs.sort((a,b)=>new Date(a.sent_at)-new Date(b.sent_at)))
+    .sort((a,b)=>new Date(b[b.length-1].sent_at)-new Date(a[a.length-1].sent_at));
+  document.getElementById('cnt-inbox').textContent=inboxThreads.length;
+  renderInboxBody();
+}
+function renderInboxBody(){
+  const body=document.getElementById('inbox-body');if(!body)return;
+  if(!inboxThreads.length){body.innerHTML='<div class="empty-state"><div class="sm">No emails yet. Once customers reply — or you send one — it\'ll show up here.</div></div>';return;}
+  const list=inboxThreads.map((thread,i)=>{
+    const last=thread[thread.length-1];
+    const custName=last.customer_id?(records.find(r=>r.customerId===last.customer_id)?.name):null;
+    const who=custName||(last.direction==='sent'?last.to_addresses:last.from_address)||'(unknown)';
+    return `<button class="ib-row ${inboxOpenThread===i?'sel':''}" onclick="openThread(${i})">
+      <div class="ib-row-top"><span class="ib-who">${who}</span><span class="ib-when">${new Date(last.sent_at).toLocaleDateString('en-NZ',{day:'numeric',month:'short'})}</span></div>
+      <div class="ib-subj">${last.subject||'(no subject)'}</div>
+      <div class="ib-snip">${last.snippet||''}</div>
+    </button>`;
+  }).join('');
+  const threadHtml=inboxOpenThread!=null?renderThreadPane(inboxThreads[inboxOpenThread]):'<div class="empty-state" style="margin-top:40px"><div class="sm">Select a conversation to read it.</div></div>';
+  body.innerHTML=`<div class="ib-layout"><div class="ib-list">${list}</div><div class="ib-thread">${threadHtml}</div></div>`;
+}
+function openThread(i){inboxOpenThread=i;renderInboxBody();}
+function renderThreadPane(thread){
+  const last=thread[thread.length-1];
+  const custRecord=last.customer_id?records.find(r=>r.customerId===last.customer_id):null;
+  const msgs=thread.map(e=>`
+    <div class="ib-msg ${e.direction}">
+      <div class="ib-msg-head"><b>${e.direction==='sent'?'You':(e.from_address||'Them')}</b><span>${new Date(e.sent_at).toLocaleString('en-NZ',{day:'numeric',month:'short',hour:'numeric',minute:'2-digit'})}</span></div>
+      <div class="ib-msg-body">${e.body_html?e.body_html:`<p>${(e.body_text||e.snippet||'').replace(/\n/g,'<br>')}</p>`}</div>
+    </div>`).join('');
+  return `
+    <div class="ib-thread-head">
+      <div><div class="ib-thread-subj">${last.subject||'(no subject)'}</div>${custRecord?`<div class="ib-thread-cust">👤 ${custRecord.name}</div>`:'<div class="ib-thread-cust">Not linked to a customer</div>'}</div>
+      ${custRecord?`<div class="cp-actions"><button class="btn ghost sm" onclick="openCustomerProfile(${custRecord.id})">Full profile</button><button class="btn ghost sm" onclick="openQuoteModal(${custRecord.id})">Build quote</button><button class="btn ghost sm" onclick="openNewJobModal('${custRecord.customerId}')">+ New job</button></div>`:''}
+    </div>
+    <div class="ib-msgs">${msgs}</div>
+    <div class="ib-reply">
+      <textarea id="ib-reply-text" rows="4" placeholder="Write a reply…"></textarea>
+      <div class="iw-foot" style="margin-top:8px"><button class="btn ghost sm" onclick="openComposeModal({forward:true,thread})">Forward</button><div style="flex:1"></div><button class="btn primary sm" onclick="sendReply()">Send reply</button></div>
+    </div>`;
+}
+async function sendReply(){
+  const thread=inboxThreads[inboxOpenThread];if(!thread)return;
+  const bodyText=document.getElementById('ib-reply-text').value.trim();
+  if(!bodyText){toast('Write something first');return;}
+  const last=thread[thread.length-1];
+  const to=last.direction==='sent'?last.to_addresses:last.from_address;
+  const addrMatch=(to||'').match(/<([^>]+)>/);
+  const toAddr=addrMatch?addrMatch[1]:to;
+  await sendEmailViaBackend({to:toAddr,subject:(last.subject||'').startsWith('Re:')?last.subject:'Re: '+(last.subject||''),bodyText,threadId:last.thread_id,customerId:last.customer_id});
+  document.getElementById('ib-reply-text').value='';
+  renderInbox();
+}
+async function sendEmailViaBackend({to,subject,bodyText,threadId,customerId}){
+  const url=backendUrl();
+  const {data:{session}}=await sb.auth.getSession();
+  if(!url||!session||!emailAccount){toast('Connect Gmail first');return false;}
+  try{
+    const res=await fetch(`${url}/api/email/send`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.access_token},body:JSON.stringify({to,subject,bodyText,threadId,customerId})});
+    const j=await res.json();
+    if(!res.ok){toast(j.error||'Could not send email');return false;}
+    toast('Email sent ✓');
+    return true;
+  }catch(e){console.error('Send failed',e);toast('Could not send — check console');return false;}
+}
+function openComposeModal(ctx){
+  ctx=ctx||{};
+  document.getElementById('cmp-to').value=ctx.to||'';
+  document.getElementById('cmp-subject').value=ctx.forward&&ctx.thread?'Fwd: '+(ctx.thread[ctx.thread.length-1].subject||''):(ctx.subject||'');
+  document.getElementById('cmp-body').value=ctx.forward&&ctx.thread?`\n\n---------- Forwarded message ----------\n${ctx.thread.map(m=>(m.body_text||m.snippet||'')).join('\n\n')}`:'';
+  document.getElementById('cmp-customer-id').value=ctx.customerId||'';
+  openModal('compose-overlay');
+}
+async function sendComposeModal(){
+  const to=document.getElementById('cmp-to').value.trim();
+  const subject=document.getElementById('cmp-subject').value.trim();
+  const bodyText=document.getElementById('cmp-body').value;
+  const customerId=document.getElementById('cmp-customer-id').value||null;
+  if(!to||!subject){toast('Add a recipient and subject');return;}
+  const ok=await sendEmailViaBackend({to,subject,bodyText,customerId});
+  if(ok){closeModal('compose-overlay');renderInbox();}
+}
+// Open a customer's full profile from anywhere that only has a Supabase customer_id (not a local record id)
+function openCustomerProfileByCustomerId(customerId){
+  const r=records.find(x=>x.customerId===customerId);
+  if(!r){toast('That customer has no jobs yet');return;}
+  openCustomerProfile(r.id);
 }
 
 /* ---------- C. OPERATIONS ---------- */
@@ -2729,13 +3101,16 @@ function connectBackend(){
     if(!j.ok)throw 0;
     backendOnline=true;
     toast('Backend connected \u2713');
-    pullStateRemote();pushStateRemote();refreshGmailStatus();
+    pullStateRemote();pushStateRemote();
     openConnections();
   }).catch(()=>{backendOnline=false;toast('Could not reach that URL \u2014 check it and try again');openConnections();});
 }
 // poll for website leads every 30s + when the app regains focus
 setInterval(pollBackendLeads,30000);
 try{window.addEventListener('focus',pollBackendLeads);}catch(e){}
+// poll connected email every 90s + on focus — less time-critical than leads, and gentler on API quotas
+setInterval(syncEmail,90000);
+try{window.addEventListener('focus',syncEmail);}catch(e){}
 
 /* ===== CONNECTIONS: live status of each integration ===== */
 function openConnections(){
@@ -2798,15 +3173,13 @@ function openConnections(){
         <button class="btn accent sm" onclick="saveMapsKey()">${mapsKey?'Update':'Activate'}</button>
       </div>
     </div>
-    <div class="conn-card ${gmailStatus.connected?'live':(gmailStatus.ready?'':'locked')}">
-      <div class="conn-top"><span class="conn-name">✉️ Gmail — real sending</span><span class="conn-badge ${gmailStatus.connected?'on':'off'}">${gmailStatus.connected?'● CONNECTED':(gmailStatus.ready?'ready to connect':'using mailto: fallback')}</span></div>
-      ${gmailStatus.connected?
-        `<p><b>Live.</b> Follow-ups, quotes and invoices send from your real Gmail inbox automatically.</p><button class="btn ghost sm" onclick="disconnectGmail()">Disconnect</button>`:
-      gmailStatus.ready?
-        `<p><b>Ready.</b> Server is configured — tap Connect and sign in with the Gmail you send from.</p><button class="btn accent sm" onclick="connectGmail()">Connect Gmail</button>`:
-        `<p><b>Working now:</b> "Send" opens your phone/desktop email app with the message pre-filled — one tap to send from your real inbox, no setup. <b>Later, for auto-sending:</b> Google requires OAuth verification (1–4 week review). The backend code is prepared — when it's approved, this switches to fully automatic.</p>`}
+    <div class="conn-card ${emailAccount?'live':''}">
+      <div class="conn-top"><span class="conn-name">✉️ Gmail — inbox &amp; sending</span><span class="conn-badge ${emailAccount?'on':'off'}">${emailAccount?'● CONNECTED':'not connected'}</span></div>
+      ${emailAccount?
+        `<p><b>Connected as ${emailAccount.email_address}.</b> Emails to/from your customers show up in their profile and the Inbox tab. Each teammate connects their own account — everyone stays isolated to your business.</p><button class="btn ghost sm" onclick="disconnectGmailAccount()">Disconnect</button>`:
+        `<p>Connect your own Gmail to send, receive, reply and forward customer emails right inside TurnKey — they're automatically linked to the right customer profile. Each teammate connects separately.</p><button class="btn accent sm" onclick="connectGmailOAuth()">Connect Gmail</button>`}
     </div>
-    <div class="conn-note">${gmailStatus.connected?"You're fully live. Nice.":"Connect Gmail for fully automatic sending — everything else here is already live."}</div>`;
+    <div class="conn-note">${emailAccount?"You're fully live. Nice.":"Connect Gmail to bring email into TurnKey — everything else here is already live."}</div>`;
   openModal('conn-overlay');
 }
 function copyBookingLink(){
@@ -2826,28 +3199,62 @@ function onBizLogoChosen(el){
   if(file)uploadBusinessLogo(file);
   el.value='';
 }
-function connectGmail(){
-  const url=backendUrl(),key=backendKey();
-  if(!url||!key){toast('Connect a backend first');return;}
-  window.open(`${url}/api/gmail/connect?key=${encodeURIComponent(key)}`,'_blank');
-  toast('Sign in with Google in the new tab — come back when done');
-  setTimeout(refreshGmailStatus,5000);
+/* ===== Email (Gmail now, Microsoft 365 later — same engine): OAuth lives on
+   the backend (needs a client secret, never exposed to the browser). The
+   frontend only ever calls requireBusiness-gated /api/email/* routes with
+   its own Supabase session token — never the shared SYNC_KEY, since email
+   is per-staff-member and must stay strictly isolated per business. ===== */
+let emailAccount=null; // this signed-in user's own connected Gmail account, or null
+async function loadEmailAccountStatus(){
+  if(!sb||!currentUserId)return;
+  const {data,error}=await sb.from('email_accounts_status').select('*').eq('user_id',currentUserId).eq('provider','gmail').maybeSingle();
+  if(!error)emailAccount=data||null;
 }
-function disconnectGmail(){
-  const url=backendUrl(),key=backendKey();
-  if(!url||!key)return;
-  fetch(url+'/api/gmail/disconnect',{method:'POST',headers:{'X-Turnkey-Key':key}}).catch(()=>{});
-  gmailStatus={ready:gmailStatus.ready,connected:false};openConnections();
+async function connectGmailOAuth(){
+  const url=backendUrl();
+  if(!url){toast('Backend URL not configured');return;}
+  const {data:{session}}=await sb.auth.getSession();
+  if(!session){toast('Please sign in again');return;}
+  try{
+    const res=await fetch(`${url}/api/email/oauth/start?provider=gmail&origin=${encodeURIComponent(location.origin)}`,{headers:{Authorization:'Bearer '+session.access_token}});
+    const j=await res.json();
+    if(!res.ok||!j.url){toast(j.error||'Could not start Gmail connection');return;}
+    window.location.href=j.url; // full-page redirect through Google's consent screen, then back here
+  }catch(e){console.error('Gmail connect failed',e);toast('Could not reach the backend — check console');}
 }
-let gmailStatus={ready:false,connected:false};
-function refreshGmailStatus(){
-  const url=backendUrl(),key=backendKey();
-  if(!url||!key||typeof fetch!=='function')return;
-  fetch(url+'/api/gmail/status',{headers:{'X-Turnkey-Key':key}}).then(r=>r.json()).then(j=>{
-    gmailStatus={ready:!!j.ready,connected:!!j.connected};
-    if(document.getElementById('conn-overlay').classList.contains('open'))openConnections();
-  }).catch(()=>{});
+async function disconnectGmailAccount(){
+  if(!confirm('Disconnect Gmail? You can reconnect anytime — nothing already synced is deleted.'))return;
+  const url=backendUrl();
+  const {data:{session}}=await sb.auth.getSession();
+  if(!url||!session)return;
+  await fetch(`${url}/api/email/disconnect`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.access_token},body:JSON.stringify({provider:'gmail'})}).catch(()=>{});
+  emailAccount=null;openConnections();toast('Gmail disconnected');
 }
+async function syncEmail(){
+  const url=backendUrl();
+  if(!url||!emailAccount)return;
+  const {data:{session}}=await sb.auth.getSession();
+  if(!session)return;
+  try{
+    const res=await fetch(`${url}/api/email/sync`,{method:'POST',headers:{Authorization:'Bearer '+session.access_token}});
+    const j=await res.json();
+    if(res.ok&&j.imported)toast(j.imported+' new email'+(j.imported!==1?'s':'')+' synced');
+    if(res.ok&&document.getElementById('view-inbox')?.classList.contains('active'))renderInbox();
+  }catch(e){console.error('Email sync failed',e);}
+}
+// Landed back here from Google's OAuth consent screen (via the backend's callback redirect)
+(function(){
+  try{
+    const u=new URL(location.href);
+    const status=u.searchParams.get('email_connect');
+    if(status){
+      if(status==='success')toast('Gmail connected ✓');
+      else toast('Could not connect Gmail'+(u.searchParams.get('msg')?': '+u.searchParams.get('msg'):''));
+      u.searchParams.delete('email_connect');u.searchParams.delete('msg');
+      history.replaceState({},'',u.pathname+u.search);
+    }
+  }catch(e){}
+})();
 function saveMapsKey(){
   const v=document.getElementById('conn-maps-key').value.trim();
   if(v)localStorage.setItem('turnkey-maps-key',v);else localStorage.removeItem('turnkey-maps-key');
@@ -2938,7 +3345,8 @@ async function handleAuthedSession(session){
   fetchLiveWeather();
   pullStateRemote();
   pollBackendLeads();
-  refreshGmailStatus();
+  await loadEmailAccountStatus();
+  syncEmail();
   retryPendingPhotos();
 }
 
