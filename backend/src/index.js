@@ -351,13 +351,13 @@ app.post('/api/email/disconnect', requireBusiness, async (req, res) => {
 
 app.post('/api/email/send', requireBusiness, async (req, res) => {
   try {
-    const { to, subject, bodyText, customerId, threadId, inReplyTo, references } = req.body || {}
+    const { to, subject, bodyText, bodyHtml, customerId, threadId, inReplyTo, references } = req.body || {}
     if (!to || !subject) return res.status(400).json({ error: 'Missing to/subject' })
     const auth = await getValidAccessToken(req.businessId, req.userId, 'gmail')
     if (!auth) return res.status(400).json({ error: 'Connect your Gmail account first (Connections)' })
 
     const sent = await gmail.sendMessage(auth.accessToken, {
-      from: auth.account.email_address, to, subject, bodyText, threadId, inReplyTo, references
+      from: auth.account.email_address, to, subject, bodyText, bodyHtml, threadId, inReplyTo, references
     })
 
     let custId = customerId || null
@@ -369,8 +369,8 @@ app.post('/api/email/send', requireBusiness, async (req, res) => {
     await authClient.from('emails').insert({
       business_id: req.businessId, account_id: auth.account.id, customer_id: custId,
       provider_message_id: sent.id, thread_id: sent.threadId, direction: 'sent',
-      from_address: auth.account.email_address, to_addresses: to, subject, body_text: bodyText,
-      snippet: (bodyText || '').slice(0, 140), sent_at: new Date().toISOString()
+      from_address: auth.account.email_address, to_addresses: to, subject, body_text: bodyText, body_html: bodyHtml || null,
+      snippet: (bodyText || (bodyHtml || '').replace(/<[^>]+>/g, ' ')).slice(0, 140), sent_at: new Date().toISOString()
     })
     if (custId) {
       await authClient.from('activity_log').insert({

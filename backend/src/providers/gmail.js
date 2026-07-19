@@ -107,19 +107,41 @@ export async function getMessage(accessToken, id) {
   }
 }
 
-function buildRawMessage({ from, to, subject, bodyText, inReplyTo, references }) {
-  const lines = [
-    `From: ${from}`, `To: ${to}`, `Subject: ${subject}`,
-    'MIME-Version: 1.0', 'Content-Type: text/plain; charset="UTF-8"'
-  ]
-  if (inReplyTo) lines.push(`In-Reply-To: ${inReplyTo}`)
-  if (references) lines.push(`References: ${references}`)
-  lines.push('', bodyText || '')
-  return Buffer.from(lines.join('\r\n'), 'utf8').toString('base64url')
+// RFC 2047 "encoded word" — Subject (and other structured headers) must be
+// pure ASCII on the wire; this is what lets a subject contain — or emoji.
+function encodeHeaderValue(v) {
+  if (/^[\x20-\x7e]*$/.test(v)) return v // already plain ASCII, nothing to do
+  return '=?UTF-8?B?' + Buffer.from(v, 'utf8').toString('base64') + '?='
 }
 
-export async function sendMessage(accessToken, { from, to, subject, bodyText, threadId, inReplyTo, references }) {
-  const raw = buildRawMessage({ from, to, subject, bodyText, inReplyTo, references })
+function buildRawMessage({ from, to, subject, bodyText, bodyHtml, inReplyTo, references }) {
+  const headers = [
+    `From: ${from}`, `To: ${to}`, `Subject: ${encodeHeaderValue(subject || '')}`, 'MIME-Version: 1.0'
+  ]
+  if (inReplyTo) headers.push(`In-Reply-To: ${inReplyTo}`)
+  if (references) headers.push(`References: ${references}`)
+
+  if (bodyHtml) {
+    // multipart/alternative: plain-text fallback first, HTML second — the
+    // standard shape for a "professional" HTML email that still degrades
+    // gracefully in text-only clients.
+    const boundary = 'turnkey_' + Math.random().toString(36).slice(2)
+    headers.push(`Content-Type: multipart/alternative; boundary="${boundary}"`)
+    const parts = [
+      '', `--${boundary}`, 'Content-Type: text/plain; charset="UTF-8"', '',
+      bodyText || bodyHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(),
+      `--${boundary}`, 'Content-Type: text/html; charset="UTF-8"', '',
+      bodyHtml, `--${boundary}--`
+    ]
+    return Buffer.from(headers.join('\r\n') + parts.join('\r\n'), 'utf8').toString('base64url')
+  }
+
+  headers.push('Content-Type: text/plain; charset="UTF-8"')
+  return Buffer.from(headers.join('\r\n') + '\r\n\r\n' + (bodyText || ''), 'utf8').toString('base64url')
+}
+
+export async function sendMessage(accessToken, { from, to, subject, bodyText, bodyHtml, threadId, inReplyTo, references }) {
+  const raw = buildRawMessage({ from, to, subject, bodyText, bodyHtml, inReplyTo, references })
   const body = { raw }
   if (threadId) body.threadId = threadId
   const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {

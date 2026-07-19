@@ -197,7 +197,6 @@ function initPlacesAutocomplete(){
   var input=document.getElementById('addr');
   if(!input||!window.google)return;
   var ac=new google.maps.places.Autocomplete(input,{
-    componentRestrictions:{country:'nz'},
     fields:['formatted_address','geometry']
   });
   ac.addListener('place_changed',function(){
@@ -346,6 +345,7 @@ function initPlacesAutocomplete(){
     </div>
     <button class="btn primary" onclick="submitRequest()">Send my quote request</button>
     <button class="btn ghost" style="margin-top:9px" onclick="backToMap()">← Back to map</button>
+    <div id="submit-status" style="font-size:13px;color:#b3413a;margin-top:10px"></div>
   </div>
 
   <!-- SUCCESS -->
@@ -418,6 +418,7 @@ window.addEventListener('message',function(e){
 // Which business this link belongs to — every business shares its own booking.html?biz=<id> link.
 let TURNKEY_BUSINESS_ID='';
 try{const u=new URL(location.href);TURNKEY_BUSINESS_ID=u.searchParams.get('biz')||'';}catch(e){}
+let BIZ_REGION=''; // set once the business profile fetch below resolves; used as the geocode suffix instead of a hardcoded region
 // ?embed=1 is set by the iframe code the CRM generates (Connections → Embed on
 // your website) — switches to a tighter layout with no redundant header bar.
 let EMBED_MODE=false;
@@ -449,6 +450,7 @@ try{const u=new URL(location.href);EMBED_MODE=u.searchParams.get('embed')==='1';
       if(contactEl&&biz.phone)contactEl.textContent='📞 '+biz.phone;
       const regionEl=document.getElementById('biz-region-trust');
       if(regionEl&&biz.region)regionEl.textContent='📍 '+biz.region;
+      if(biz.region)BIZ_REGION=biz.region;
     }).catch(()=>{}); // network/RLS failure → keep the generic fallback copy already in the HTML
 })();
 
@@ -500,7 +502,7 @@ function enableSatellite(address){
   const hint=document.getElementById('hint');
   hint.textContent='\u23f3 Locating address\u2026';
   const geocodeUrl='https://maps.googleapis.com/maps/api/geocode/json?address='+
-    encodeURIComponent(address+', Auckland, NZ')+'&key='+encodeURIComponent(MAPS_KEY);
+    encodeURIComponent(address+', '+(BIZ_REGION||'New Zealand'))+'&key='+encodeURIComponent(MAPS_KEY);
   if(typeof fetch==='function'){
     fetch(geocodeUrl).then(r=>r.json()).then(j=>{
       if(j.status==='OK'&&j.results&&j.results[0]){
@@ -508,7 +510,9 @@ function enableSatellite(address){
         enableSatelliteLatLng(res.geometry.location.lat,res.geometry.location.lng,
           res.formatted_address||address, res.geometry.viewport);
       }else{
-        hint.textContent='\u26a0\ufe0f Address not found \u2014 try the full street address';
+        hint.textContent=j.status==='REQUEST_DENIED'
+          ?'\u26a0\ufe0f Maps key rejected \u2014 ask the business to check their Google Maps key'
+          :'\u26a0\ufe0f Address not found \u2014 try the full street address';
       }
     }).catch(()=>{hint.textContent='\u26a0\ufe0f Geocode failed \u2014 check your connection';});
   }
@@ -536,7 +540,13 @@ function loadSatelliteUrl(url,cacheKey,label){
     // show zoom control
     const zc=document.getElementById('zoom-ctrl');
     if(zc){zc.style.display='flex';document.getElementById('zoom-val').textContent=SAT_ZOOM;}
-    // redraw any existing areas with the corrected scale
+    // Re-derive existing areas' on-screen shape AND size from their stable
+    // lat/lng anchors at the new scale (see reprojectAreas' header comment) —
+    // this is the actual fix for zoom breaking a previously-drawn area.
+    // Previously this only called renderAreas(), which just re-drew the same
+    // stale pixel points — the polygon would visually drift off whatever it
+    // was traced on, and its price stayed frozen at the old scale.
+    if(typeof reprojectAreas==='function')reprojectAreas();
     if(typeof renderAreas==='function')renderAreas();
   };
   probe.onerror=function(){
@@ -596,8 +606,9 @@ function showStoreyRow(){
   document.getElementById('storey-row').style.display=hasHw?'flex':'none';
 }
 
-let drawing = [];      // current polygon points being drawn
-let areas = [];        // committed areas {svc, pts, m2 or metres}
+let drawing = [];      // current polygon points being drawn (SVG pixel space, current zoom)
+let drawingGeoPts = []; // parallel lat/lng anchors for `drawing`, survives zoom mid-trace
+let areas = [];        // committed areas {svc, pts, geoPts, m2 or metres}
 let areaSeq = 1;
 
 /* ===== build the map background (stylised aerial: lots, roads, roofs) ===== */
@@ -662,6 +673,47 @@ function effectiveRate(area){
   return rate;
 }
 
+/* ===== zoom-independent anchoring =====
+   ROOT CAUSE of "zoom breaks a selected area": area.pts were plain SVG pixel
+   coordinates, valid only for the exact zoom/center the image was fetched
+   at. area.size was computed once at draw time (pixelArea × SCALE²) and
+   never recalculated. Zooming refetches the satellite image at a new
+   real-world scale, but the frozen pixel points keep rendering at their old
+   screen position — so the polygon visually drifts off whatever it was
+   traced on, while its price stays stuck at a now-meaningless number.
+   Fix: every point also gets a real {lat,lng} the moment it's drawn (a
+   local flat-earth projection off the current center — accurate at
+   residential-property scale, no need for full Web Mercator tile math).
+   Pixel coordinates and size are then DERIVED from that stable lat/lng
+   every time scale/center changes, instead of being frozen state. */
+function svgToLatLng(p){
+  if(!_lastLat||!_lastLng)return null; // demo grid mode — nothing georeferenced yet
+  const dxM=(p.x-400)*SCALE, dyM=(p.y-300)*SCALE;
+  return {lat:_lastLat-(dyM/111320), lng:_lastLng+(dxM/(111320*Math.cos(_lastLat*Math.PI/180)))};
+}
+function latLngToSvg(ll){
+  const dLat=ll.lat-_lastLat, dLng=ll.lng-_lastLng;
+  const dyM=-dLat*111320, dxM=dLng*111320*Math.cos(_lastLat*Math.PI/180);
+  return {x:400+dxM/SCALE, y:300+dyM/SCALE};
+}
+// Re-derives every area's on-screen shape AND size from its stable lat/lng
+// anchors, using whatever SCALE/center is current. Called whenever the
+// satellite image is reloaded at a new zoom (or a new address/center).
+function reprojectAreas(){
+  if(!_lastLat||!_lastLng)return;
+  let changed=false;
+  areas.forEach(a=>{
+    if(!a.geoPts)return; // drawn before any georeference existed — nothing stable to re-derive from
+    a.pts=a.geoPts.map(latLngToSvg);
+    a.size=sizeOf(a);
+    changed=true;
+  });
+  if(drawing.length&&drawingGeoPts.length===drawing.length){
+    drawing=drawingGeoPts.map(latLngToSvg);
+  }
+  if(changed){renderList();updateEstimate();}
+}
+
 /* ===== drawing on the map ===== */
 function stageToSvg(clientX,clientY){
   const svg=document.getElementById('map-svg');
@@ -679,6 +731,7 @@ function onStageClick(e){
     if(d<18){commitArea();return;}
   }
   drawing.push(p);
+  drawingGeoPts.push(svgToLatLng(p));
   renderDraw();
   updateHint();
 }
@@ -694,11 +747,11 @@ function renderDraw(){
 }
 function commitArea(){
   if(drawing.length<3){return;}
-  const area={id:areaSeq++,svc:activeSvc,pts:drawing.slice()};
+  const area={id:areaSeq++,svc:activeSvc,pts:drawing.slice(),geoPts:drawingGeoPts.every(Boolean)?drawingGeoPts.slice():null};
   if(activeSvc==='housewash')area.storeys=houseStoreys;
   area.size=sizeOf(area);
   areas.push(area);
-  drawing=[];
+  drawing=[];drawingGeoPts=[];
   renderDraw();renderAreas();renderList();updateEstimate();updateHint();showStoreyRow();
 }
 function renderAreas(){
@@ -713,8 +766,8 @@ function renderAreas(){
       <g><rect x="${cx-30}" y="${cy-13}" width="60" height="26" rx="13" fill="#fff" opacity=".92"/><text x="${cx}" y="${cy+5}" text-anchor="middle" font-size="14" font-weight="700" fill="${hex}">${a.size}${unit}</text></g>`;
   }).join('');
 }
-function undoPoint(){if(drawing.length){drawing.pop();renderDraw();updateHint();}}
-function clearAll(){drawing=[];areas=[];renderDraw();renderAreas();renderList();updateEstimate();updateHint();}
+function undoPoint(){if(drawing.length){drawing.pop();drawingGeoPts.pop();renderDraw();updateHint();}}
+function clearAll(){drawing=[];drawingGeoPts=[];areas=[];renderDraw();renderAreas();renderList();updateEstimate();updateHint();}
 
 /* ===== side list + estimate ===== */
 function renderList(){
@@ -861,23 +914,38 @@ function buildPayload(){
     submittedAt:new Date().toISOString()
   };
 }
-function submitRequest(){
+async function submitRequest(){
   const name=document.getElementById('c-name').value.trim();
   const contact=document.getElementById('c-phone').value.trim()||document.getElementById('c-email').value.trim();
   if(!name){alert('Please add your name');return;}
   if(!contact){alert('Please add a phone or email so we can send your quote');return;}
   if(window.TURNKEY_WEBHOOK&&!TURNKEY_BUSINESS_ID){alert('This booking link is missing its business ID — ask the business for their booking.html?biz=... link.');return;}
   const payload=buildPayload();
+  const status=document.getElementById('submit-status');
+  const btn=document.querySelector('#details .btn.primary');
+  if(status)status.textContent='';
 
-  // 1) Real integration hooks (no-ops in standalone preview, live when configured):
-  //    a) If embedded, post to the parent site (Wix/Squarespace can catch this).
+  // If embedded, also post to the parent site (Wix/Squarespace can catch
+  // this) — best-effort only, its failure shouldn't block the real send below.
   try{ if(window.parent && window.parent!==window){ window.parent.postMessage({type:'turnkey:quote-request',payload},'*'); } }catch(e){}
-  //    b) If a webhook URL is configured, POST the lead to the Turnkey CRM / Zapier / Make.
-  if(window.TURNKEY_WEBHOOK){
-    fetch(window.TURNKEY_WEBHOOK,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).catch(()=>{});
-  }
   console.log('Turnkey quote request payload:',payload); // visible proof of the data shape
 
+  // The real delivery path: POST straight to this business's TurnKey backend,
+  // now awaited and checked. Previously this was fire-and-forget, so a down
+  // backend or bad business ID still showed the customer "Success!" while the
+  // business never received the lead, with no way for either side to know.
+  if(window.TURNKEY_WEBHOOK){
+    if(btn){btn.disabled=true;btn.textContent='Sending…';}
+    try{
+      const res=await fetch(window.TURNKEY_WEBHOOK,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+      if(!res.ok)throw new Error('HTTP '+res.status);
+      showSuccess(payload);
+    }catch(e){
+      if(btn){btn.disabled=false;btn.textContent='Send my quote request';}
+      if(status)status.textContent='⚠️ Could not send your request — check your connection and try again, or call us directly.';
+    }
+    return;
+  }
   showSuccess(payload);
 }
 function showSuccess(p){

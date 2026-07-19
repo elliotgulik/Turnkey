@@ -294,6 +294,7 @@
   .ops-grid{display:grid;grid-template-columns:1.3fr 1fr;gap:26px}
   @media(max-width:720px){.ops-grid{grid-template-columns:1fr}}
   .route-stop{display:flex;align-items:center;gap:13px;padding:15px 16px;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-sm);margin-bottom:10px}
+  .route-stop.mine{border-color:var(--teal);background:var(--teal-wash)}
   .route-num{width:28px;height:28px;border-radius:50%;background:var(--surface-2);color:var(--ink);font-weight:600;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
   .route-info{flex:1}
   .route-info .rn{font-size:14px;font-weight:600}
@@ -954,6 +955,16 @@
   <div class="modal-foot"><button class="btn ghost" onclick="closeModal('compose-overlay')">Cancel</button><button class="btn primary" onclick="sendComposeModal()">Send</button></div>
 </div></div>
 
+<div class="overlay" id="send-doc-overlay"><div class="modal wide">
+  <div class="modal-head"><div><h3 id="sd-title">Send</h3><p>Sends from your connected Gmail — no download needed.</p></div><button class="x" aria-label="Close" onclick="closeModal('send-doc-overlay')">×</button></div>
+  <div class="modal-body">
+    <div class="field-row"><div class="field"><label>To</label><input id="sd-to" type="email"></div><div class="field"><label>Subject</label><input id="sd-subject"></div></div>
+    <p style="font-size:12px;color:var(--ink-faint);margin:2px 0 8px">Preview of the email your customer will receive — <a href="#" onclick="closeModal('send-doc-overlay');openTemplateEditor();return false" style="color:var(--teal)">edit the template</a> to change the wording.</p>
+    <div id="sd-preview" style="border:1px solid var(--line);border-radius:var(--radius-sm);padding:18px;max-height:360px;overflow-y:auto;background:var(--surface-2)"></div>
+  </div>
+  <div class="modal-foot"><button class="btn ghost" onclick="closeModal('send-doc-overlay')">Cancel</button><button class="btn primary" id="sd-send-btn" onclick="confirmSendDocEmail()">Send email</button></div>
+</div></div>
+
 <div class="overlay" id="tpl-overlay"><div class="modal">
   <div class="modal-head"><div><h3>Edit template</h3><p>Your header, contact details, colours and terms — applied to every quote and invoice.</p></div><button class="x" aria-label="Close" onclick="closeModal('tpl-overlay')">×</button></div>
   <div class="modal-body" id="tpl-body"></div>
@@ -1208,10 +1219,67 @@ let docTemplate={
   footer:'Thanks for supporting a local operator.'
 };
 let docPreview={mode:'quote',recordId:null}; // current preview context
+let sendDocCtx={mode:'quote',recordId:null}; // current in-app send-email modal context
 // Single source of truth for "business name to show on outgoing documents" —
 // falls back to a visible placeholder rather than blank/undefined anywhere
 // docTemplate.business is read directly (emails, PDF, follow-ups).
 function docBizName(){return (docTemplate.business||'').trim()||'Your Business';}
+
+/* =====================================================================
+   EMAIL TEMPLATES — separate from docTemplate (which only styles the PDF).
+   These govern the actual email subject/body sent through Gmail when
+   clicking "Send Quote"/"Send Invoice". Stored per business in Supabase
+   (email_templates) so every teammate sends the same professional wording,
+   not a per-device localStorage copy. Self-heals like the business profile:
+   if a business has no row yet, sensible defaults are upserted on first load.
+   ===================================================================== */
+const EMAIL_TEMPLATE_DEFAULTS={
+  quote:{
+    subject:'Your quote from {{business_name}} — {{quote_total}}',
+    greeting:'Hi {{customer_name}},',
+    body:'Thanks for the chance to quote your exterior clean. Here\'s what we\'d propose:',
+    cta:'Reply to this email or give us a call to lock in your date — quotes are valid for 30 days.',
+    payment_instructions:'',
+    signature:'Cheers,\n{{business_name}}'
+  },
+  invoice:{
+    subject:'Invoice from {{business_name}} — {{invoice_total}} due',
+    greeting:'Hi {{customer_name}},',
+    body:'Thanks for having us out — here\'s the invoice for the completed work.',
+    cta:'',
+    payment_instructions:'Payment is due within 7 days. Reply to this email if you have any questions about the invoice.',
+    signature:'Cheers,\n{{business_name}}'
+  }
+};
+let emailTemplates={quote:null,invoice:null};
+async function loadEmailTemplates(){
+  if(!sb||!currentBusinessId)return;
+  const {data,error}=await sb.from('email_templates').select('*').eq('business_id',currentBusinessId);
+  if(error){console.error('Load email templates failed',error);return;}
+  for(const type of ['quote','invoice']){
+    const found=(data||[]).find(t=>t.type===type);
+    if(found)emailTemplates[type]=found;
+    else{
+      const seed=Object.assign({business_id:currentBusinessId,type},EMAIL_TEMPLATE_DEFAULTS[type]);
+      const {data:created,error:seedErr}=await sb.from('email_templates').upsert(seed,{onConflict:'business_id,type'}).select('*').maybeSingle();
+      if(!seedErr)emailTemplates[type]=created;
+    }
+  }
+}
+// {{customer_name}}, {{business_name}}, {{quote_total}}, {{invoice_total}}, {{job_address}}, {{scheduled_date}}
+function emailTemplateVars(r,mode){
+  return {
+    customer_name:(r.name||'').split(' ')[0]||r.name||'there',
+    business_name:docBizName(),
+    quote_total:mode==='quote'?money(r.total||0):'',
+    invoice_total:mode==='invoice'?money(r.total||0):'',
+    job_address:[r.address,r.suburb].filter(Boolean).join(', ')||'—',
+    scheduled_date:r.scheduledDate||'to be confirmed'
+  };
+}
+function fillTemplate(str,vars){
+  return (str||'').replace(/\{\{\s*([a-z_]+)\s*\}\}/gi,(m,key)=>vars[key]!=null?vars[key]:m);
+}
 
 function money(n){return '$'+Math.round(n).toLocaleString('en-NZ')}
 function segOf(t){return t>=1200?'Large':t>=500?'Mid':'Small'}
@@ -1758,6 +1826,11 @@ function logActivity(customerId,jobId,type,summary,detail){
 }
 
 function generateAndSendDoc(mode,r){
+  // Preferred path: Gmail connected → compose + send inside TurnKey, no
+  // download required. Falls back to the PDF-download+mailto flow below
+  // when Gmail isn't connected or the customer has no email on file —
+  // existing behaviour is untouched for anyone not using email integration.
+  if(emailAccount&&r.email){openSendDocModal(mode,r);return;}
   const num=docNumber(mode,r);
   const filename=(mode==='quote'?'Quote':'Invoice')+'-'+num+'.pdf';
   const bizName=docBizName();
@@ -1790,6 +1863,74 @@ function generateAndSendDoc(mode,r){
   }else{
     toast((mode==='quote'?'Quote':'Invoice')+' saved. No email on file for '+r.name+'.');
   }
+}
+
+// Builds the actual HTML the customer receives: the business's editable
+// email_templates row (greeting/body/cta-or-payment/signature), with
+// {{variables}} filled in, plus an embedded quote/invoice details table —
+// this is the "attaches or embeds the quote" requirement, done as an embed
+// so nothing needs downloading first.
+function renderEmailBodyHtml(mode,r){
+  const tpl=emailTemplates[mode]||EMAIL_TEMPLATE_DEFAULTS[mode];
+  const vars=emailTemplateVars(r,mode);
+  const greeting=fillTemplate(tpl.greeting,vars);
+  const body=fillTemplate(tpl.body,vars);
+  const ctaOrPayment=fillTemplate(mode==='quote'?(tpl.cta||''):(tpl.payment_instructions||''),vars);
+  const signature=fillTemplate(tpl.signature,vars).replace(/\n/g,'<br>');
+  const allSvcs=r.services.slice();
+  if(r.windows&&r.windows.panes>0)allSvcs.push({svc:'windows',qty:r.windows.panes,_price:r.windows.price});
+  const rows=allSvcs.map(s=>{
+    const v=SERVICES[s.svc];
+    const rate=s.customRate!=null?parseFloat(s.customRate):(s.svc==='roof'&&s.roofType&&ROOF_TYPES[s.roofType]?v.rate*ROOF_TYPES[s.roofType].mult:(s.svc==='housewash'&&s.storeys&&STOREY_TYPES[s.storeys]?v.rate*STOREY_TYPES[s.storeys].mult:v.rate));
+    const amt=s._price!=null?s._price:(s.fixedPrice!=null?Math.round(parseFloat(s.fixedPrice)||0):Math.round((parseFloat(s.qty)||0)*rate));
+    const desc=s._price!=null?v.label+' ('+s.qty+' panes)':s.fixedPrice!=null?v.label+' (fixed price)':v.label+' · '+s.qty+' '+v.unit;
+    return `<tr><td style="padding:6px 0;color:#1a1a1a;font-size:14px">${desc}</td><td style="padding:6px 0;text-align:right;color:#1a1a1a;font-size:14px;white-space:nowrap">${money(amt)}</td></tr>`;
+  }).join('');
+  const total=r.total||0;
+  const gst=Math.round(total-total/1.15);
+  const dueRow=mode==='invoice'?`<tr><td style="padding:10px 0 0;color:#666;font-size:13px">Due date</td><td style="padding:10px 0 0;text-align:right;color:#666;font-size:13px">${vars.scheduled_date}</td></tr>`:'';
+  return `<div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;max-width:560px;margin:0 auto;color:#1a1a1a;line-height:1.5">
+    <p>${greeting}</p>
+    <p>${body}</p>
+    <table style="width:100%;border-collapse:collapse;margin:16px 0;border-top:1px solid #e2e2e2;border-bottom:1px solid #e2e2e2">
+      <tbody>${rows}</tbody>
+      <tfoot>
+        <tr><td style="padding:10px 0 0;color:#666;font-size:13px">Subtotal (excl. GST)</td><td style="padding:10px 0 0;text-align:right;color:#666;font-size:13px">${money(total-gst)}</td></tr>
+        <tr><td style="padding:2px 0;color:#666;font-size:13px">GST 15%</td><td style="padding:2px 0;text-align:right;color:#666;font-size:13px">${money(gst)}</td></tr>
+        <tr><td style="padding:8px 0 0;font-weight:700">${mode==='quote'?'Quote total':'Amount due'}</td><td style="padding:8px 0 0;text-align:right;font-weight:700">${money(total)}</td></tr>
+        ${dueRow}
+      </tfoot>
+    </table>
+    ${ctaOrPayment?`<p>${ctaOrPayment}</p>`:''}
+    <p>${signature}</p>
+  </div>`;
+}
+function openSendDocModal(mode,r){
+  sendDocCtx={mode,recordId:r.id};
+  const tpl=emailTemplates[mode]||EMAIL_TEMPLATE_DEFAULTS[mode];
+  const vars=emailTemplateVars(r,mode);
+  document.getElementById('sd-title').textContent=(mode==='quote'?'Send quote to ':'Send invoice to ')+(r.name||'');
+  document.getElementById('sd-to').value=r.email||'';
+  document.getElementById('sd-subject').value=fillTemplate(tpl.subject,vars);
+  document.getElementById('sd-preview').innerHTML=renderEmailBodyHtml(mode,r);
+  openModal('send-doc-overlay');
+}
+async function confirmSendDocEmail(){
+  const r=records.find(x=>x.id===sendDocCtx.recordId);
+  if(!r){toast('Could not find that record');return;}
+  const mode=sendDocCtx.mode;
+  const to=document.getElementById('sd-to').value.trim();
+  const subject=document.getElementById('sd-subject').value.trim();
+  if(!to||!subject){toast('Add a recipient and subject');return;}
+  const btn=document.getElementById('sd-send-btn');
+  btn.disabled=true;btn.textContent='Sending…';
+  const bodyHtml=renderEmailBodyHtml(mode,r);
+  const ok=await sendEmailViaBackend({to,subject,bodyHtml,customerId:r.customerId});
+  btn.disabled=false;btn.textContent='Send email';
+  if(!ok)return;
+  closeModal('send-doc-overlay');
+  const num=docNumber(mode,r);
+  logActivity(r.customerId,r.jobId,mode==='quote'?'quote_sent':'invoice_sent',(mode==='quote'?'Quote ':'Invoice ')+num+' sent to '+r.name);
 }
 
 function downloadBlob(blob,filename){
@@ -2017,33 +2158,63 @@ function closeDocPreview(){closeModal('doc-preview-overlay');}
 function previewInvoice(id){openDocPreview('invoice',id);}
 
 /* ===== Template editor ===== */
+function tplEmailSection(type){
+  const t=emailTemplates[type]||EMAIL_TEMPLATE_DEFAULTS[type];
+  const isQuote=type==='quote';
+  return `<div class="panel" style="margin-top:16px">
+    <h4>${isQuote?'Quote':'Invoice'} email</h4>
+    <div class="field"><label>Subject</label><input id="tpl-${type}-subject" value="${(t.subject||'').replace(/"/g,'&quot;')}"></div>
+    <div class="field"><label>Greeting</label><input id="tpl-${type}-greeting" value="${(t.greeting||'').replace(/"/g,'&quot;')}"></div>
+    <div class="field"><label>Body</label><textarea id="tpl-${type}-body" rows="3">${t.body||''}</textarea></div>
+    ${isQuote?`<div class="field"><label>Call to action</label><textarea id="tpl-quote-cta" rows="2">${t.cta||''}</textarea></div>`
+      :`<div class="field"><label>Payment instructions</label><textarea id="tpl-invoice-payment" rows="2">${t.payment_instructions||''}</textarea></div>`}
+    <div class="field"><label>Signature</label><textarea id="tpl-${type}-signature" rows="2">${t.signature||''}</textarea></div>
+  </div>`;
+}
 function openTemplateEditor(){
   const t=docTemplate;
   document.getElementById('tpl-body').innerHTML=`
-    <p style="font-size:12px;color:var(--ink-faint);margin:-4px 0 14px">These appear on every quote/invoice PDF and email. Name/phone/email start filled in from your <b>Business profile</b> (Connections) — edit here to use something different just for documents.</p>
+    <p style="font-size:12px;color:var(--ink-faint);margin:-4px 0 14px">These style the attached/embedded PDF. Name/phone/email start filled in from your <b>Business profile</b> (Connections) — edit here to use something different just for documents.</p>
     <div class="field-row"><div class="field"><label>Business name</label><input id="tpl-business" placeholder="Your Business Name" value="${(t.business||'').replace(/"/g,'&quot;')}"></div><div class="field"><label>Accent colour</label><input id="tpl-accent" type="color" value="${t.accent}" style="height:44px;padding:4px"></div></div>
     <div class="field"><label>Tagline</label><input id="tpl-tagline" placeholder="e.g. Exterior cleaning · Auckland" value="${(t.tagline||'').replace(/"/g,'&quot;')}"></div>
     <div class="field-row"><div class="field"><label>Phone</label><input id="tpl-phone" placeholder="021 000 0000" value="${t.phone||''}"></div><div class="field"><label>Email</label><input id="tpl-email" placeholder="hello@yourbusiness.co.nz" value="${t.email||''}"></div></div>
     <div class="field"><label>GST number <span style="color:var(--ink-faint);font-weight:400">(optional — leave blank if not GST-registered)</span></label><input id="tpl-gst" placeholder="123-456-789" value="${t.gstNo||''}"></div>
     <div class="field"><label>Quote terms</label><textarea id="tpl-qterms" rows="3">${t.quoteTerms||''}</textarea></div>
     <div class="field"><label>Invoice / payment terms</label><textarea id="tpl-iterms" rows="3">${t.invoiceTerms||''}</textarea></div>
-    <div class="field"><label>Footer line</label><input id="tpl-footer" value="${(t.footer||'').replace(/"/g,'&quot;')}"></div>`;
+    <div class="field"><label>Footer line</label><input id="tpl-footer" value="${(t.footer||'').replace(/"/g,'&quot;')}"></div>
+    <p style="font-size:12px;color:var(--ink-faint);margin:18px 0 -4px">Below is the actual <b>email</b> sent when you click Send Quote / Send Invoice (separate from the PDF style above). Use <code>{{customer_name}}</code>, <code>{{business_name}}</code>, <code>{{quote_total}}</code>, <code>{{invoice_total}}</code>, <code>{{job_address}}</code>, <code>{{scheduled_date}}</code> anywhere in these fields.</p>
+    ${tplEmailSection('quote')}
+    ${tplEmailSection('invoice')}`;
   openModal('tpl-overlay');
 }
-function saveTemplate(){
+async function saveTemplate(){
   const g=id=>document.getElementById(id).value;
   docTemplate.business=g('tpl-business');docTemplate.tagline=g('tpl-tagline');
   docTemplate.phone=g('tpl-phone');docTemplate.email=g('tpl-email');docTemplate.gstNo=g('tpl-gst');
   docTemplate.accent=g('tpl-accent');docTemplate.quoteTerms=g('tpl-qterms');
   docTemplate.invoiceTerms=g('tpl-iterms');docTemplate.footer=g('tpl-footer');
+  saveState();
+  if(sb&&currentBusinessId){
+    for(const type of ['quote','invoice']){
+      const payload={
+        business_id:currentBusinessId,type,
+        subject:g(`tpl-${type}-subject`),greeting:g(`tpl-${type}-greeting`),body:g(`tpl-${type}-body`),
+        signature:g(`tpl-${type}-signature`),
+        cta:type==='quote'?g('tpl-quote-cta'):null,
+        payment_instructions:type==='invoice'?g('tpl-invoice-payment'):null
+      };
+      const {data,error}=await sb.from('email_templates').upsert(payload,{onConflict:'business_id,type'}).select('*').maybeSingle();
+      if(error)console.error('Save '+type+' email template failed',error);
+      else emailTemplates[type]=data;
+    }
+  }
   closeModal('tpl-overlay');
   // re-render the open preview with the new template
   if(document.getElementById('doc-preview-overlay').classList.contains('open')){
     const r=records.find(x=>x.id===docPreview.recordId);
     if(r)document.getElementById('doc-preview-body').innerHTML=renderDocHTML(docPreview.mode,r);
   }
-  saveState();
-  toast('Template saved');
+  toast('Templates saved');
 }
 
 /* ---------- SCHEDULING: pick a weather-aware date after quoting ---------- */
@@ -2643,12 +2814,12 @@ async function sendReply(){
   document.getElementById('ib-reply-text').value='';
   renderInbox();
 }
-async function sendEmailViaBackend({to,subject,bodyText,threadId,customerId}){
+async function sendEmailViaBackend({to,subject,bodyText,bodyHtml,threadId,customerId}){
   const url=backendUrl();
   const {data:{session}}=await sb.auth.getSession();
   if(!url||!session||!emailAccount){toast('Connect Gmail first');return false;}
   try{
-    const res=await fetch(`${url}/api/email/send`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.access_token},body:JSON.stringify({to,subject,bodyText,threadId,customerId})});
+    const res=await fetch(`${url}/api/email/send`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.access_token},body:JSON.stringify({to,subject,bodyText,bodyHtml,threadId,customerId})});
     const j=await res.json();
     if(!res.ok){toast(j.error||'Could not send email');return false;}
     toast('Email sent ✓');
@@ -2681,30 +2852,59 @@ function openCustomerProfileByCustomerId(customerId){
 
 /* ---------- C. OPERATIONS ---------- */
 function renderOps(){
-  const today=records.filter(r=>isBooked(r));
-  const stops=today.map((r,i)=>({r,i}));
-  const pinsSVG=stops.map((s,i)=>{
-    const x=18+((i*37+20)%64); const y=15+((i*29+10)%64);
-    return {x,y,color:PIN_COLORS[i%PIN_COLORS.length],num:i+1};
-  });
-  let mapLines='';
-  for(let i=0;i<pinsSVG.length-1;i++){mapLines+=`<line x1="${pinsSVG[i].x}%" y1="${pinsSVG[i].y}%" x2="${pinsSVG[i+1].x}%" y2="${pinsSVG[i+1].y}%" stroke="#0f7d6b" stroke-width="2" stroke-dasharray="4 4" opacity=".5"/>`}
-  const pinsHTML=pinsSVG.map(p=>`<div class="map-pin" style="left:${p.x}%;top:${p.y}%;background:${p.color}"><span>${p.num}</span></div>`).join('');
+  // "Today" means scheduledIdx 0 in the current 7-day WEATHER window (index 0
+  // is always today — see fetchLiveWeather()). Previously this had no date
+  // filter at all: isBooked() only checks stage, so every scheduled/completed
+  // job ever booked showed up here regardless of date — a real functional
+  // bug, not just a display issue.
+  const today=records.filter(r=>isBooked(r)&&r.scheduledIdx===0);
+  // Group same-suburb stops together — an honest, lightweight ordering
+  // heuristic. This is NOT a real optimized route (no Directions/Distance
+  // Matrix call), so it's labelled and described as grouping, not as a
+  // drive-time-saving claim we can't actually back up.
+  const stops=[...today].sort((a,b)=>(a.suburb||'').localeCompare(b.suburb||'')).map((r,i)=>({r,i}));
+  const isTech=currentUserRole==='technician';
   const techs=staff.filter(u=>u.role==='technician').map(u=>u.name||u.email||'Unnamed');
-  const techLoad=techs.map(t=>({t,jobs:records.filter(r=>r.tech===t&&(isBooked(r))).length}));
+  const techLoad=techs.map(t=>({t,jobs:records.filter(r=>r.tech===t&&isBooked(r)&&r.scheduledIdx===0).length}));
+  const mapsKey=turnkeyMapsKey();
   document.getElementById('view-ops').innerHTML=`
-    <div class="view-head"><div><h2>Operations</h2><p>Today's run sheet — route order, who's on each job, and check-ins. The job checklist and photos live inside each job.</p></div><span class="eng-badge">Operations</span></div>
+    <div class="view-head"><div><h2>Operations</h2><p>Today's run sheet — who's on each job, addresses, and check-ins. The job checklist and photos live inside each job.</p></div><span class="eng-badge">Operations</span></div>
     <div class="ops-grid">
       <div>
-        <div class="panel" style="margin-bottom:0"><h4>Today's route — ${stops.length} stops</h4>
-          ${stops.length?stops.map((s,i)=>`<div class="route-stop"><div class="route-num" style="background:${PIN_COLORS[i%5]}22;color:${PIN_COLORS[i%5]}">${i+1}</div><div class="route-info"><div class="rn">${s.r.name}</div><div class="ra">${s.r.address||''}, ${s.r.suburb||''} · ${s.r.tech}</div></div><span class="gps ${s.r.gps}">${s.r.gps==='checked'?'On site ✓':s.r.gps==='enroute'?'En route':'Pending'}</span></div>`).join(''):'<div class="empty-state"><div class="sm">No jobs scheduled. Quote a lead to add one.</div></div>'}
+        <div class="panel" style="margin-bottom:0"><h4>Today's jobs — ${stops.length} stop${stops.length!==1?'s':''}</h4>
+          ${stops.length?stops.map((s,i)=>`<div class="route-stop ${isTech&&s.r.assignedStaffId===currentUserId?'mine':''}" style="cursor:pointer" onclick="openCustomerProfile(${s.r.id})"><div class="route-num" style="background:${PIN_COLORS[i%5]}22;color:${PIN_COLORS[i%5]}">${i+1}</div><div class="route-info"><div class="rn">${s.r.name}</div><div class="ra">${s.r.address||''}${s.r.suburb?', '+s.r.suburb:''} · ${s.r.tech}</div></div><span class="gps ${s.r.gps}">${s.r.gps==='checked'?'On site ✓':s.r.gps==='enroute'?'En route':'Pending'}</span></div>`).join(''):'<div class="empty-state"><div class="sm">No jobs scheduled for today. Book one from Pipeline to see it here.</div></div>'}
         </div>
       </div>
       <div>
-        <div class="panel" style="margin-bottom:16px"><h4>Route${stops.length>1?` — saves ${(stops.length-1)*11+10} mins today`:''}</h4><div class="map-box"><svg width="100%" height="100%" style="position:absolute;inset:0">${mapLines}</svg>${pinsHTML}</div><p style="font-size:12px;color:var(--ink-faint);margin-top:8px">Stops ordered to cut drive time across your area${stops.length>1?` — about ${(stops.length-1)*11+10} minutes saved versus booking order.`:'.'}</p></div>
-        <div class="panel"><h4>Technician dispatch</h4>${techLoad.map(tl=>`<div class="kv"><span class="k">${tl.t}</span><span class="v">${tl.jobs} job${tl.jobs!==1?'s':''} today</span></div>`).join('')}</div>
+        <div class="panel" style="margin-bottom:16px"><h4>Map</h4><div class="map-box" id="ops-map-box"><div class="empty-state" style="padding:20px"><div class="sm">Loading…</div></div></div><p style="font-size:12px;color:var(--ink-faint);margin-top:8px">Grouped by suburb${stops.length>1?' to cut back-and-forth driving':''} — not a live-traffic optimized route.</p></div>
+        <div class="panel"><h4>Technician dispatch</h4>${techLoad.length?techLoad.map(tl=>`<div class="kv"><span class="k">${tl.t}</span><span class="v">${tl.jobs} job${tl.jobs!==1?'s':''} today</span></div>`).join(''):'<div class="empty-state" style="padding:16px"><div class="sm">No technicians on the team yet — add one in Team.</div></div>'}</div>
       </div>
     </div>`;
+  renderOpsMap(stops,mapsKey);
+}
+function renderOpsMap(stops,mapsKey){
+  const box=document.getElementById('ops-map-box');if(!box)return;
+  const withAddr=stops.filter(s=>s.r.address);
+  if(!withAddr.length){
+    box.innerHTML=`<div class="empty-state" style="padding:20px"><div class="sm">${stops.length?'No addresses on today\'s jobs yet.':'Nothing scheduled today.'}</div></div>`;
+    return;
+  }
+  if(!mapsKey){
+    box.innerHTML=`<div class="empty-state" style="padding:20px"><div class="sm">Add a Google Maps key in Connections to see today's stops on a real map.</div></div>`;
+    return;
+  }
+  // Google Static Maps geocodes each address server-side — no separate
+  // geocode round-trips needed for a handful of markers.
+  const markers=withAddr.map((s,i)=>{
+    const loc=encodeURIComponent(`${s.r.address}, ${s.r.suburb||''}`.trim());
+    const hex=PIN_COLORS[i%5].replace('#','0x');
+    return `markers=color:${hex}%7Clabel:${i+1}%7C${loc}`;
+  }).join('&');
+  const url=`https://maps.googleapis.com/maps/api/staticmap?size=640x480&scale=2&maptype=roadmap&${markers}&key=${encodeURIComponent(mapsKey)}`;
+  const img=new Image();
+  img.onload=()=>{box.style.cssText='background-image:url("'+url+'");background-size:cover;background-position:center';box.innerHTML='';};
+  img.onerror=()=>{box.innerHTML='<div class="empty-state" style="padding:20px"><div class="sm">Map unavailable — check your Maps API key in Connections.</div></div>';};
+  img.src=url;
 }
 
 /* ---------- B. PRICING ENGINE ---------- */
@@ -3347,6 +3547,7 @@ async function handleAuthedSession(session){
   pollBackendLeads();
   await loadEmailAccountStatus();
   syncEmail();
+  loadEmailTemplates();
   retryPendingPhotos();
 }
 
@@ -4008,10 +4209,15 @@ function scheduleSupabaseSync(){
   supabaseSyncTimer=setTimeout(syncAllToSupabase,900);
 }
 async function syncAllToSupabase(){
+  const failed=[];
   for(const r of records){
     try{await syncRecordToSupabase(r);}
-    catch(e){console.error('Supabase sync failed for record',r.id,e);}
+    catch(e){console.error('Supabase sync failed for record',r.id,e);failed.push(r.name||'a record');}
   }
+  // Saves are fire-and-forget by design (debounced, so typing stays snappy),
+  // but a silent failure means a quote/invoice edit looks saved and isn't —
+  // surface it so the user knows to retry rather than trusting a stale screen.
+  if(failed.length)toast('Could not save '+(failed.length===1?failed[0]:failed.length+' records')+' — check your connection and try again');
 }
 async function syncRecordToSupabase(r){
   const customerPayload={
