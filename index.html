@@ -759,7 +759,7 @@
       <input type="file" id="import-file" accept=".json,application/json" style="display:none" onchange="importData(this)">
       <input type="file" id="photo-upload-input" accept="image/*" style="display:none" onchange="onPhotoChosen(this)">
       <input type="file" id="quote-attach-input" accept="image/*,application/pdf" style="display:none" onchange="onQuoteAttachChosen(this)">
-      <button onclick="resetAll()">Reset</button>
+      <button onclick="resetAll()" title="Clear this device's local view (your saved data isn't affected)">Reset view</button>
       <button onclick="handleLogout()">Log out</button>
     </div>
   </header>
@@ -787,7 +787,7 @@
 </div>
 
 <div class="overlay" id="lead-overlay"><div class="modal">
-  <div class="modal-head"><div><h3>New lead</h3><p>Capture the enquiry — quote comes next.</p></div><button class="x" onclick="closeModal('lead-overlay')">×</button></div>
+  <div class="modal-head"><div><h3>New lead</h3><p>Capture the enquiry — quote comes next.</p></div><button class="x" aria-label="Close" onclick="closeModal('lead-overlay')">×</button></div>
   <div class="modal-body">
     <div class="field"><label>Customer name</label><input id="l-name" placeholder="e.g. Sarah Thompson" autocomplete="off"></div>
     <div class="field-row"><div class="field"><label>Phone</label><input id="l-phone" placeholder="021 555 0123" autocomplete="off"></div><div class="field"><label>Email</label><input id="l-email" placeholder="sarah@email.com" autocomplete="off"></div></div>
@@ -802,7 +802,7 @@
 </div></div>
 
 <div class="overlay" id="quote-overlay"><div class="modal">
-  <div class="modal-head"><div><h3>Build quote</h3><p id="q-for">—</p></div><button class="x" onclick="closeModal('quote-overlay')">×</button></div>
+  <div class="modal-head"><div><h3>Build quote</h3><p id="q-for">—</p></div><button class="x" aria-label="Close" onclick="closeModal('quote-overlay')">×</button></div>
   <div class="modal-body">
     <div id="quote-map-zone"></div>
     <div class="svc-builder" id="svc-builder"></div>
@@ -836,43 +836,43 @@
 </div></div>
 
 <div class="overlay" id="review-overlay"><div class="modal">
-  <div class="modal-head"><div><h3>Review before sending</h3><p>A quick sanity check on price and margin.</p></div><button class="x" onclick="closeModal('review-overlay')">×</button></div>
+  <div class="modal-head"><div><h3>Review before sending</h3><p>A quick sanity check on price and margin.</p></div><button class="x" aria-label="Close" onclick="closeModal('review-overlay')">×</button></div>
   <div class="modal-body"><div class="review-card" id="review-body"></div></div>
   <div class="modal-foot"><button class="btn ghost" onclick="closeModal('review-overlay');openModal('quote-overlay')">← Back to edit</button><button class="btn primary" onclick="confirmQuoteSend()">Preview quote →</button></div>
 </div></div>
 
 <div class="overlay" id="doc-preview-overlay"><div class="modal modal-doc">
-  <div class="modal-head"><div><h3>Preview</h3><p>This is exactly what the customer receives.</p></div><button class="x" onclick="closeDocPreview()">×</button></div>
+  <div class="modal-head"><div><h3>Preview</h3><p>This is exactly what the customer receives.</p></div><button class="x" aria-label="Close" onclick="closeDocPreview()">×</button></div>
   <div class="modal-body doc-scroll" id="doc-preview-body"></div>
   <div class="modal-foot" id="doc-preview-foot"></div>
 </div></div>
 
 <div class="overlay" id="team-overlay"><div class="modal">
-  <div class="modal-head"><div><h3>Team</h3><p>Staff, roles and invites for your business.</p></div><button class="x" onclick="closeModal('team-overlay')">×</button></div>
+  <div class="modal-head"><div><h3>Team</h3><p>Staff, roles and invites for your business.</p></div><button class="x" aria-label="Close" onclick="closeModal('team-overlay')">×</button></div>
   <div class="modal-body" id="team-body"></div>
   <div class="modal-foot"><button class="btn primary" onclick="closeModal('team-overlay')">Done</button></div>
 </div></div>
 
 <div class="overlay" id="conn-overlay"><div class="modal">
-  <div class="modal-head"><div><h3>Connections</h3><p>What's live, what needs a key, and what needs a backend.</p></div><button class="x" onclick="closeModal('conn-overlay')">×</button></div>
+  <div class="modal-head"><div><h3>Connections</h3><p>What's live, what needs a key, and what needs a backend.</p></div><button class="x" aria-label="Close" onclick="closeModal('conn-overlay')">×</button></div>
   <div class="modal-body" id="conn-body"></div>
   <div class="modal-foot"><button class="btn primary" onclick="closeModal('conn-overlay')">Done</button></div>
 </div></div>
 
 <div class="overlay" id="tpl-overlay"><div class="modal">
-  <div class="modal-head"><div><h3>Edit template</h3><p>Your header, contact details, colours and terms — applied to every quote and invoice.</p></div><button class="x" onclick="closeModal('tpl-overlay')">×</button></div>
+  <div class="modal-head"><div><h3>Edit template</h3><p>Your header, contact details, colours and terms — applied to every quote and invoice.</p></div><button class="x" aria-label="Close" onclick="closeModal('tpl-overlay')">×</button></div>
   <div class="modal-body" id="tpl-body"></div>
   <div class="modal-foot"><button class="btn ghost" onclick="closeModal('tpl-overlay')">Cancel</button><button class="btn primary" onclick="saveTemplate()">Save template</button></div>
 </div></div>
 
 <div class="overlay" id="schedule-overlay"><div class="modal">
-  <div class="modal-head"><div><h3>Book the job</h3><p>Pick a date with the right weather, assign a crew.</p></div><button class="x" onclick="closeModal('schedule-overlay')">×</button></div>
+  <div class="modal-head"><div><h3>Book the job</h3><p>Pick a date with the right weather, assign a crew.</p></div><button class="x" aria-label="Close" onclick="closeModal('schedule-overlay')">×</button></div>
   <div class="modal-body" id="sched-body"></div>
   <div class="modal-foot"><button class="btn ghost" onclick="closeModal('schedule-overlay')">Later</button><button class="btn accent" onclick="confirmSchedule()">Confirm booking</button></div>
 </div></div>
 
 <div class="overlay" id="goal-overlay"><div class="modal">
-  <div class="modal-head"><div><h3>New goal</h3><p>Set a target and the reward you'll claim when you hit it.</p></div><button class="x" onclick="closeModal('goal-overlay')">×</button></div>
+  <div class="modal-head"><div><h3>New goal</h3><p>Set a target and the reward you'll claim when you hit it.</p></div><button class="x" aria-label="Close" onclick="closeModal('goal-overlay')">×</button></div>
   <div class="modal-body">
     <div class="field"><label>Goal</label><input id="g-label" placeholder="e.g. Hit $100k revenue"></div>
     <div class="field-row">
@@ -921,7 +921,6 @@ const STAGES = [
   {key:'paid',     label:'Paid',        short:'Paid',      cls:'paid',      dot:'#0f7d6b', tone:'#0f7d6b', wash:'#eaf6f3'}
 ];
 function stageObj(key){return STAGES.find(s=>s.key===key)||STAGES[0]}
-function stageIndex(key){return STAGES.findIndex(s=>s.key===key)}
 // Semantic groupings for the 7-stage flow
 function isWon(r){return ['won','scheduled','completed','paid'].includes(r.stage)}      // deal closed
 function isPaid(r){return r.stage==='paid'}                                              // cash in
@@ -955,7 +954,7 @@ const COST_INPUTS = {
   crew:2,         // people on a typical job
   setupMin:25,    // setup/pack-down per job (minutes)
   fuelPerKm:0.28, // running cost $/km
-  avgKm:14,       // avg round-trip drive to a North Shore job
+  avgKm:14,       // avg round-trip drive to a job (tune this to your area)
   targetMargin:0.55 // owner's target gross margin → drives recommended price
 };
 // Estimate labour hours, costs and a recommended price for a set of services.
@@ -1010,7 +1009,7 @@ const WEATHER = [
   {day:'Sun',date:'7 Jul',icon:'🌧️',cond:'Heavy rain',tempHi:12,rainPct:90,windKmh:30}
 ];
 let weatherLive=false, weatherFetchedAt=null;
-const WX_LAT=-36.79, WX_LON=174.75; // North Shore, Auckland
+const WX_LAT=-36.79, WX_LON=174.75; // fallback default (Auckland) — overridden by the business's own region once set in Connections
 function wxFromCode(code){
   if(code===0)return{icon:'☀️',cond:'Sunny'};
   if(code<=2)return{icon:'🌤️',cond:'Mostly fine'};
@@ -1095,19 +1094,29 @@ function goalProgress(g){
 
 let records=[], seq=1, draftLines=[], activeLeadId=null;
 
-/* ===== Editable quote/invoice template (header, terms, colours) ===== */
+/* ===== Editable quote/invoice template (header, terms, colours) =====
+   business/tagline/phone/email start blank and are auto-seeded from the
+   Business profile (Connections) the first time it loads — see
+   seedDocTemplateFromProfile(). Never ships a fake business identity on a
+   real customer's quote/invoice PDF. gstNo/bank details are deliberately
+   left blank too, rather than a fake number a business could forget to
+   replace. */
 let docTemplate={
-  business:'North Shore Pressure Wash',
-  tagline:'Exterior cleaning · North Shore, Auckland',
-  phone:'021 555 0100',
-  email:'hello@nspw.co.nz',
-  gstNo:'123-456-789',
+  business:'',
+  tagline:'',
+  phone:'',
+  email:'',
+  gstNo:'',
   accent:'#138a72',
   quoteTerms:'Quote valid 30 days. Price assumes reasonable access and mains water on site. GST inclusive. A firm date is confirmed on acceptance.',
-  invoiceTerms:'Payment due within 7 days by bank transfer to 12-3456-7890123-00. Please use the invoice number as the reference. GST inclusive.',
+  invoiceTerms:'Payment due within 7 days by bank transfer to [add your bank account in Templates]. Please use the invoice number as the reference. GST inclusive.',
   footer:'Thanks for supporting a local operator.'
 };
 let docPreview={mode:'quote',recordId:null}; // current preview context
+// Single source of truth for "business name to show on outgoing documents" —
+// falls back to a visible placeholder rather than blank/undefined anywhere
+// docTemplate.business is read directly (emails, PDF, follow-ups).
+function docBizName(){return (docTemplate.business||'').trim()||'Your Business';}
 
 function money(n){return '$'+Math.round(n).toLocaleString('en-NZ')}
 function segOf(t){return t>=1200?'Large':t>=500?'Mid':'Small'}
@@ -1128,7 +1137,6 @@ function defaultFollows(){
     {id:followSeq++,label:'Final nudge + 5% this-week offer',channel:'email',dayOffset:5,state:'pending',enabled:true}
   ];
 }
-function whenLabel(f){return f.dayOffset===0?'Day 0 (on send)':'Day '+f.dayOffset;}
 function editFollow(id,fid,field,val){
   const r=records.find(x=>x.id===id);const f=r.follows.find(x=>x.id===fid);if(!f)return;
   if(field==='dayOffset')f.dayOffset=Math.max(0,parseInt(val)||0);
@@ -1155,7 +1163,7 @@ function sendFollowNow(id,fid){
   const to=f.channel==='email'?r.email:r.phone;
   if(!to){toast(`No ${f.channel==='email'?'email':'phone'} on file for ${r.name}`);return;}
   if(f.channel==='email'){
-    const subject='Following up on your quote — '+docTemplate.business;
+    const subject='Following up on your quote — '+docBizName();
     window.location.href=`mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(bodyText)}`;
   }else{
     const cleanPhone=to.replace(/\s/g,'');
@@ -1169,10 +1177,13 @@ function sendFollowNow(id,fid){
 function buildFollowBody(r,f){
   const first=(r.name||'').split(' ')[0]||'there';
   const svcs=r.services.map(s=>SERVICES[s.svc].label.split(' ')[0].toLowerCase()).join(' and ');
-  return `Hi ${first},\n\n${f.label}${svcs?`\n\n(Re: your ${svcs} quote for ${r.total?money(r.total):''})`:''}\n\nCheers,\n${docTemplate.business}\n${docTemplate.phone}`;
+  return `Hi ${first},\n\n${f.label}${svcs?`\n\n(Re: your ${svcs} quote for ${r.total?money(r.total):''})`:''}\n\nCheers,\n${docBizName()}${docTemplate.phone?'\n'+docTemplate.phone:''}`;
 }
 
-function resetAll(){records=[];seq=1;goals=[];try{localStorage.removeItem(STORE_KEY)}catch(e){};render();renderAll();toast('Cleared — storage wiped')}
+function resetAll(){
+  if(!confirm("Clear this device's local view? Your customers, jobs, quotes and invoices already saved to your account are not affected — signing back in reloads them. This only clears what's cached on this browser."))return;
+  records=[];seq=1;goals=[];try{localStorage.removeItem(STORE_KEY)}catch(e){};render();renderAll();toast('Local view cleared — sign in again to reload your data');
+}
 
 document.getElementById('tabs').addEventListener('click',e=>{const b=e.target.closest('button[data-view]');if(b)switchView(b.dataset.view)});
 function switchView(v){
@@ -1452,7 +1463,7 @@ function renderSvcLines(){
     el.innerHTML=svcSelect+qtyField+
       `<div class="sl-price">${priceField}<button class="sl-mode ${isFixed?'active':''}" onclick="toggleFixedPrice(${i})">${isFixed?'fixed':'per\u00a0'+svc.unit}</button></div>`+
       `<span class="sub" data-sub="${i}">${money(sub)}</span>`+
-      `<button class="rm" onclick="rmSvcLine(${i})">\u00d7</button>${extraRow}`;
+      `<button class="rm" onclick="rmSvcLine(${i})" aria-label="Remove ${svc.label} line">\u00d7</button>${extraRow}`;
     wrap.appendChild(el);
   });
   updateQuoteTotal();
@@ -1579,7 +1590,6 @@ function renderEstimate(){
       ${quote>0?`<div class="est-margin ${quote>=e.recommended?'good':'warn'}">Current quote ${money(quote)} \u00b7 ${margin}% margin \u00b7 ${recDiff}</div>`:''}
     </div>`;
 }
-function saveQuote(){ reviewQuote(); } // build step routes through Review checkpoint
 function confirmQuoteSend(){
   const lines=draftLines.filter(l=>(parseFloat(l.qty)||0)>0);
   if(!lines.length){toast('Add at least one service with a quantity');return}
@@ -1611,11 +1621,12 @@ function sendInvoiceDoc(){
 function generateAndSendDoc(mode,r){
   const num=docNumber(mode,r);
   const filename=(mode==='quote'?'Quote':'Invoice')+'-'+num+'.pdf';
+  const bizName=docBizName();
   const subject=mode==='quote'
-    ?('Your quote from '+docTemplate.business+' \u2014 '+num)
-    :('Invoice '+num+' from '+docTemplate.business);
+    ?('Your quote from '+bizName+' \u2014 '+num)
+    :('Invoice '+num+' from '+bizName);
   const first=(r.name||'').split(' ')[0]||'there';
-  const shortBody='Hi '+first+',\n\nPlease find your '+(mode==='quote'?'quote':'invoice')+' '+num+' attached.\n\nAny questions, just reply to this email.\n\nCheers,\n'+docTemplate.business+'\n'+docTemplate.phone;
+  const shortBody='Hi '+first+',\n\nPlease find your '+(mode==='quote'?'quote':'invoice')+' '+num+' attached.\n\nAny questions, just reply to this email.\n\nCheers,\n'+bizName+(docTemplate.phone?'\n'+docTemplate.phone:'');
 
   if(typeof window!=='undefined'&&window.jspdf&&window.jspdf.jsPDF){
     try{
@@ -1661,6 +1672,7 @@ function buildDocPDF(mode,r){
   const today=new Date().toLocaleDateString('en-NZ',{day:'numeric',month:'long',year:'numeric'});
   const num=docNumber(mode,r);
   const gst=Math.round(r.total-r.total/1.15);
+  const bizName=docBizName();
 
   // header bar
   doc.setFillColor(ac.r,ac.g,ac.b);
@@ -1668,14 +1680,14 @@ function buildDocPDF(mode,r){
   // logo initials box
   doc.setFillColor(255,255,255);
   doc.roundedRect(ML,4,14,14,2,2,'F');
-  const initials=t.business.split(' ').map(function(w){return w[0]||'';}).slice(0,2).join('').toUpperCase();
+  const initials=(t.business||'').trim()?t.business.trim().split(/\s+/).map(function(w){return w[0]||'';}).slice(0,2).join('').toUpperCase():'TK';
   doc.setFont('helvetica','bold');doc.setFontSize(9);
   doc.setTextColor(ac.r,ac.g,ac.b);
   doc.text(initials,ML+7,13,{align:'center'});
   // business name + tagline
   doc.setTextColor(255,255,255);
   doc.setFont('helvetica','bold');doc.setFontSize(11);
-  doc.text(t.business,ML+17,11);
+  doc.text(bizName,ML+17,11);
   doc.setFont('helvetica','normal');doc.setFontSize(8);
   doc.text(t.tagline||'',ML+17,16);
   // doc type + number
@@ -1693,12 +1705,12 @@ function buildDocPDF(mode,r){
   y+=4;
   doc.setTextColor(30,40,50);
   doc.setFont('helvetica','bold');doc.setFontSize(10);
-  doc.text(t.business,ML,y);
+  doc.text(bizName,ML,y);
   doc.text(r.name||'',ML+TW/2,y);
   y+=5;
   doc.setFont('helvetica','normal');doc.setFontSize(8.5);
   doc.setTextColor(80,90,100);
-  var fromLines=[t.phone,t.email,'GST '+t.gstNo].filter(Boolean);
+  var fromLines=[t.phone,t.email,t.gstNo?'GST '+t.gstNo:null].filter(Boolean);
   var addr=[r.address,r.suburb].filter(Boolean).join(', ');
   var contact=[r.phone,r.email].filter(Boolean).join('  \u00b7  ');
   var toLines=[addr,contact].filter(Boolean);
@@ -1789,7 +1801,9 @@ function buildDocEmailBody(mode,r){
   var gst=Math.round(r.total-r.total/1.15);
   var terms=mode==='quote'?t.quoteTerms:t.invoiceTerms;
   var heading=mode==='quote'?"Here's your quote:":"Here's your invoice for the work completed:";
-  return 'Hi '+first+',\n\n'+heading+'\n\n'+docNumber(mode,r)+'    \u00b7    '+new Date().toLocaleDateString('en-NZ',{day:'numeric',month:'long',year:'numeric'})+'\n\n'+lines+'\n\nSubtotal (excl. GST):  '+money(r.total-gst)+'\nGST 15%:               '+money(gst)+'\n'+(mode==='quote'?'Quote total':'Amount due')+':            '+money(r.total)+'\n\n'+terms+'\n\nAny questions, just reply to this email.\n\nCheers,\n'+t.business+'\n'+t.phone+' \u00b7 '+t.email;
+  var bizName=docBizName();
+  var signOffContact=[t.phone,t.email].filter(Boolean).join(' \u00b7 ');
+  return 'Hi '+first+',\n\n'+heading+'\n\n'+docNumber(mode,r)+'    \u00b7    '+new Date().toLocaleDateString('en-NZ',{day:'numeric',month:'long',year:'numeric'})+'\n\n'+lines+'\n\nSubtotal (excl. GST):  '+money(r.total-gst)+'\nGST 15%:               '+money(gst)+'\n'+(mode==='quote'?'Quote total':'Amount due')+':            '+money(r.total)+'\n\n'+terms+'\n\nAny questions, just reply to this email.\n\nCheers,\n'+bizName+(signOffContact?'\n'+signOffContact:'');
 }
 
 /* ===== ServiceM8-style quote/invoice document ===== */
@@ -1810,11 +1824,18 @@ function renderDocHTML(mode,r){
   const gst=Math.round(subtotal-subtotal/1.15);
   const terms=mode==='quote'?t.quoteTerms:t.invoiceTerms;
   const title=mode==='quote'?'QUOTE':'TAX INVOICE';
+  // Graceful fallbacks — a business that hasn't set up its profile/template
+  // yet still gets a clean-looking document, never a literal "undefined" or
+  // a stray " · " with nothing on either side.
+  const bizName=docBizName();
+  const initials=(t.business||'').trim()?t.business.trim().split(/\s+/).map(w=>w[0]).slice(0,2).join('').toUpperCase():'TK';
+  const fromContact=[t.phone,t.email].filter(Boolean).join(' · ');
+  const toContact=[r.phone,r.email].filter(Boolean).join(' · ');
   return `<div class="doc" style="--doc-accent:${t.accent}">
     <div class="doc-top">
       <div class="doc-brand">
-        <div class="doc-logo" style="background:${t.accent}">${t.business.split(' ').map(w=>w[0]).slice(0,2).join('')}</div>
-        <div><div class="doc-biz">${t.business}</div><div class="doc-tag">${t.tagline}</div></div>
+        <div class="doc-logo" style="background:${t.accent}">${initials}</div>
+        <div><div class="doc-biz">${bizName}</div>${t.tagline?`<div class="doc-tag">${t.tagline}</div>`:''}</div>
       </div>
       <div class="doc-meta">
         <div class="doc-title">${title}</div>
@@ -1823,8 +1844,8 @@ function renderDocHTML(mode,r){
       </div>
     </div>
     <div class="doc-parties">
-      <div><div class="dp-label">From</div><div class="dp-name">${t.business}</div><div class="dp-line">${t.phone} · ${t.email}</div><div class="dp-line">GST ${t.gstNo}</div></div>
-      <div><div class="dp-label">${mode==='quote'?'Prepared for':'Billed to'}</div><div class="dp-name">${r.name}</div><div class="dp-line">${r.address||''}${r.suburb?', '+r.suburb:''}</div><div class="dp-line">${r.phone||''}${r.email?' · '+r.email:''}</div></div>
+      <div><div class="dp-label">From</div><div class="dp-name">${bizName}</div>${fromContact?`<div class="dp-line">${fromContact}</div>`:''}${t.gstNo?`<div class="dp-line">GST ${t.gstNo}</div>`:''}</div>
+      <div><div class="dp-label">${mode==='quote'?'Prepared for':'Billed to'}</div><div class="dp-name">${r.name}</div><div class="dp-line">${r.address||''}${r.suburb?', '+r.suburb:''}</div>${toContact?`<div class="dp-line">${toContact}</div>`:''}</div>
     </div>
     <table class="doc-table"><thead><tr><th>Service</th><th class="r">Amount</th></tr></thead><tbody>${rows}</tbody></table>
     <div class="doc-totals">
@@ -1858,10 +1879,11 @@ function previewInvoice(id){openDocPreview('invoice',id);}
 function openTemplateEditor(){
   const t=docTemplate;
   document.getElementById('tpl-body').innerHTML=`
-    <div class="field-row"><div class="field"><label>Business name</label><input id="tpl-business" value="${(t.business||'').replace(/"/g,'&quot;')}"></div><div class="field"><label>Accent colour</label><input id="tpl-accent" type="color" value="${t.accent}" style="height:44px;padding:4px"></div></div>
-    <div class="field"><label>Tagline</label><input id="tpl-tagline" value="${(t.tagline||'').replace(/"/g,'&quot;')}"></div>
-    <div class="field-row"><div class="field"><label>Phone</label><input id="tpl-phone" value="${t.phone||''}"></div><div class="field"><label>Email</label><input id="tpl-email" value="${t.email||''}"></div></div>
-    <div class="field"><label>GST number</label><input id="tpl-gst" value="${t.gstNo||''}"></div>
+    <p style="font-size:12px;color:var(--ink-faint);margin:-4px 0 14px">These appear on every quote/invoice PDF and email. Name/phone/email start filled in from your <b>Business profile</b> (Connections) — edit here to use something different just for documents.</p>
+    <div class="field-row"><div class="field"><label>Business name</label><input id="tpl-business" placeholder="Your Business Name" value="${(t.business||'').replace(/"/g,'&quot;')}"></div><div class="field"><label>Accent colour</label><input id="tpl-accent" type="color" value="${t.accent}" style="height:44px;padding:4px"></div></div>
+    <div class="field"><label>Tagline</label><input id="tpl-tagline" placeholder="e.g. Exterior cleaning · Auckland" value="${(t.tagline||'').replace(/"/g,'&quot;')}"></div>
+    <div class="field-row"><div class="field"><label>Phone</label><input id="tpl-phone" placeholder="021 000 0000" value="${t.phone||''}"></div><div class="field"><label>Email</label><input id="tpl-email" placeholder="hello@yourbusiness.co.nz" value="${t.email||''}"></div></div>
+    <div class="field"><label>GST number <span style="color:var(--ink-faint);font-weight:400">(optional — leave blank if not GST-registered)</span></label><input id="tpl-gst" placeholder="123-456-789" value="${t.gstNo||''}"></div>
     <div class="field"><label>Quote terms</label><textarea id="tpl-qterms" rows="3">${t.quoteTerms||''}</textarea></div>
     <div class="field"><label>Invoice / payment terms</label><textarea id="tpl-iterms" rows="3">${t.invoiceTerms||''}</textarea></div>
     <div class="field"><label>Footer line</label><input id="tpl-footer" value="${(t.footer||'').replace(/"/g,'&quot;')}"></div>`;
@@ -2019,7 +2041,7 @@ function openDetail(id){
       <div class="fe-actions">
         ${f.state!=='sent'?`<button class="fe-send" onclick="sendFollowNow(${id},${f.id})">Send now</button>`:''}
         <button class="fe-toggle ${f.enabled?'on':''}" title="${f.enabled?'Enabled':'Disabled'}" onclick="toggleFollow(${id},${f.id})"><span class="fe-toggle-dot"></span></button>
-        <button class="fe-rm" onclick="removeFollow(${id},${f.id})" title="Remove">×</button>
+        <button class="fe-rm" onclick="removeFollow(${id},${f.id})" title="Remove" aria-label="Remove follow-up">×</button>
       </div>
     </div>`).join('')+`<button class="fe-add" onclick="addFollow(${id})">+ Add follow-up step</button>`
     :'<p style="font-size:13px;color:var(--ink-faint)">Follow-up sequence starts once a quote is sent.</p>';
@@ -2222,7 +2244,7 @@ function render(){
     <div class="view-head"><div><h2>Leads</h2><p>Enquiries waiting for a quote. In production they arrive straight from your website — no copy-paste.</p></div></div>
     <div class="info-strip"><b>Instant lead capture:</b> a website enquiry lands here in seconds, the source is recorded for cost-per-lead tracking, and a 3-step follow-up sequence arms automatically.</div>
     <div class="pipe-bar"><div class="pipe-primary"><button class="btn primary" onclick="openLeadModal()">+ New lead</button></div></div>
-    ${leads.length?`<div class="board" style="grid-template-columns:repeat(auto-fill,minmax(220px,1fr))">${leads.map(cardHtml).join('')}</div>`:`<div class="empty-state"><div class="big">No open leads</div><div class="sm">Add one, or load demo data.</div></div>`}
+    ${leads.length?`<div class="board" style="grid-template-columns:repeat(auto-fill,minmax(220px,1fr))">${leads.map(cardHtml).join('')}</div>`:`<div class="empty-state"><div class="big">No open leads yet</div><div class="sm">Click <b>+ New lead</b> above, or share your booking link (Connections) so website enquiries land here automatically.</div></div>`}
     <div class="panel" style="margin-top:22px"><h4>Client contacts <span class="demo-tag">all ${records.length}</span></h4>
       ${records.length?`<table class="contact-table">
         <thead><tr><th>Client</th><th>Phone</th><th>Email</th><th>Suburb</th><th class="r">Status</th></tr></thead>
@@ -2233,7 +2255,7 @@ function render(){
           <td>${r.suburb||'—'}</td>
           <td class="r"><span class="pill ${st.cls}">${st.label}</span></td>
         </tr>`}).join('')}</tbody>
-      </table>`:'<div class="empty-state" style="padding:30px"><div class="sm">No clients yet — load demo data or add a lead.</div></div>'}
+      </table>`:'<div class="empty-state" style="padding:30px"><div class="sm">No clients yet — they\'ll appear here as soon as you add a lead or one comes in from your booking page.</div></div>'}
     </div>`;
 }
 function cardHtml(r){
@@ -2270,7 +2292,7 @@ function renderOps(){
         </div>
       </div>
       <div>
-        <div class="panel" style="margin-bottom:16px"><h4>Route${stops.length>1?` — saves ${(stops.length-1)*11+10} mins today`:''}</h4><div class="map-box"><svg width="100%" height="100%" style="position:absolute;inset:0">${mapLines}</svg>${pinsHTML}</div><p style="font-size:12px;color:var(--ink-faint);margin-top:8px">Stops ordered to cut drive time across the North Shore${stops.length>1?` — about ${(stops.length-1)*11+10} minutes saved versus booking order.`:'.'}</p></div>
+        <div class="panel" style="margin-bottom:16px"><h4>Route${stops.length>1?` — saves ${(stops.length-1)*11+10} mins today`:''}</h4><div class="map-box"><svg width="100%" height="100%" style="position:absolute;inset:0">${mapLines}</svg>${pinsHTML}</div><p style="font-size:12px;color:var(--ink-faint);margin-top:8px">Stops ordered to cut drive time across your area${stops.length>1?` — about ${(stops.length-1)*11+10} minutes saved versus booking order.`:'.'}</p></div>
         <div class="panel"><h4>Technician dispatch</h4>${techLoad.map(tl=>`<div class="kv"><span class="k">${tl.t}</span><span class="v">${tl.jobs} job${tl.jobs!==1?'s':''} today</span></div>`).join('')}</div>
       </div>
     </div>`;
@@ -2379,7 +2401,7 @@ function renderJobsFlow(){
   if(!r){
     document.getElementById('view-jobsflow').innerHTML=`
       <div class="view-head"><div><h2>Jobs Flow</h2><p>Follow one job the way you'd run it: lead → quote → schedule → job → invoice.</p></div></div>
-      <div class="empty-state"><div class="big">No jobs yet</div><div class="sm">Add a lead or load demo data to walk a job through the flow.</div></div>`;
+      <div class="empty-state"><div class="big">No jobs yet</div><div class="sm">Add a lead in Pipeline or Leads, then come back here to walk it through quote → schedule → invoice.</div></div>`;
     return;
   }
 
@@ -2479,7 +2501,7 @@ function renderCalendar(){
     <div class="view-head"><div><h2>Calendar</h2><p>Book around the weather. Turnkey reads the local forecast, recommends the best wash days, warns you before rain hits a job, and pairs up nearby work.</p></div><span class="eng-badge">Scheduling</span></div>
     <div class="info-strip">${weatherLive?'<span class="demo-tag" style="background:#dcf0e9;color:#16745f">Live</span> &nbsp;Real 7-day forecast for your area via Open-Meteo, refreshed every 3 hours.':'<span class="demo-tag">Sample</span> &nbsp;Offline — showing sample forecast. Live data loads automatically when connected.'}</div>
 
-    <div class="panel"><h4>7-day forecast \u2014 North Shore</h4>
+    <div class="panel"><h4>7-day forecast${currentBusinessProfile&&currentBusinessProfile.region?' \u2014 '+currentBusinessProfile.region:''}</h4>
       <div class="wx-row">${WEATHER.map(dayCard).join('')}</div>
     </div>
 
@@ -2693,7 +2715,7 @@ function openConnections(){
       <p>Shown to your customers on your public booking page — replaces the generic placeholder with your real name, logo and contact details.</p>
       <div style="display:flex;gap:14px;align-items:center;margin-bottom:10px">
         <div style="width:56px;height:56px;border-radius:12px;overflow:hidden;background:var(--surface-2);display:flex;align-items:center;justify-content:center;flex-shrink:0">
-          ${biz.logo_url?`<img src="${biz.logo_url}" style="width:100%;height:100%;object-fit:cover">`:`<span style="font-size:22px">🏢</span>`}
+          ${biz.logo_url?`<img src="${biz.logo_url}" alt="Your business logo" style="width:100%;height:100%;object-fit:cover">`:`<span style="font-size:22px">🏢</span>`}
         </div>
         ${canEditBusiness?`<div><input type="file" id="biz-logo-input" accept="image/*" style="display:none" onchange="onBizLogoChosen(this)"><button class="btn ghost sm" onclick="document.getElementById('biz-logo-input').click()">${biz.logo_url?'Change logo':'Upload logo'}</button></div>`:''}
       </div>
@@ -2874,6 +2896,7 @@ async function handleAuthedSession(session){
   await loadFromSupabase();
   await loadStaffAndInvites();
   await loadBusinessProfile();
+  seedDocTemplateFromProfile();
   if(currentUserRole==='technician')switchView('jobsflow');
   fetchLiveWeather();
   pullStateRemote();
@@ -2982,6 +3005,18 @@ async function loadBusinessProfile(){
   const {data:created,error:cErr}=await sb.from('businesses').upsert({id:currentBusinessId}).select('*').maybeSingle();
   if(cErr){console.error('Backfill business profile failed',cErr);return;} // e.g. schema not migrated yet
   currentBusinessProfile=created;
+}
+// One-way seed, not a sync: only fills in docTemplate fields that are still
+// blank, so it never overwrites a template a business has already customised
+// (including deliberately customising it to differ from their profile name).
+function seedDocTemplateFromProfile(){
+  if(!currentBusinessProfile)return;
+  let changed=false;
+  if(!docTemplate.business&&currentBusinessProfile.name){docTemplate.business=currentBusinessProfile.name;changed=true;}
+  if(!docTemplate.phone&&currentBusinessProfile.phone){docTemplate.phone=currentBusinessProfile.phone;changed=true;}
+  if(!docTemplate.email&&currentBusinessProfile.email){docTemplate.email=currentBusinessProfile.email;changed=true;}
+  if(!docTemplate.tagline&&currentBusinessProfile.region){docTemplate.tagline='Exterior cleaning · '+currentBusinessProfile.region;changed=true;}
+  if(changed)saveState();
 }
 async function geocodeRegion(region){
   if(!region)return null;

@@ -270,9 +270,9 @@ function initPlacesAutocomplete(){
         <span class="map-note" id="scale-note">Scale: ~1.3 m per grid square (demo)</span>
         <div class="map-zoom" id="zoom-ctrl" style="display:none">
           <span class="zoom-label">Zoom</span>
-          <button class="zoom-btn" onclick="adjustZoom(-1)" title="Zoom out">−</button>
+          <button class="zoom-btn" onclick="adjustZoom(-1)" title="Zoom out" aria-label="Zoom out">−</button>
           <span class="zoom-val" id="zoom-val">19</span>
-          <button class="zoom-btn" onclick="adjustZoom(1)" title="Zoom in">+</button>
+          <button class="zoom-btn" onclick="adjustZoom(1)" title="Zoom in" aria-label="Zoom in">+</button>
         </div>
         <div class="map-btns">
           <button class="mini-btn" onclick="undoPoint()">Undo point</button>
@@ -300,12 +300,12 @@ function initPlacesAutocomplete(){
         <div class="win-row" id="win-row">
           <span class="win-label">🪟 Window clean</span>
           <div class="win-ctrl">
-            <button class="win-btn" onclick="addWindows(-1)">−</button>
+            <button class="win-btn" onclick="addWindows(-1)" aria-label="Remove a window pane">−</button>
             <input class="win-input" id="win-count" type="number" min="0" step="1" value="0"
               oninput="setWindows(+this.value||0)"
               onfocus="if(this.value==='0')this.value=''"
               onblur="if(this.value==='')this.value='0'">
-            <button class="win-btn" onclick="addWindows(1)">+</button>
+            <button class="win-btn" onclick="addWindows(1)" aria-label="Add a window pane">+</button>
           </div>
           <span class="win-hint">panes &nbsp;·&nbsp; $<span id="win-price">0</span></span>
         </div>
