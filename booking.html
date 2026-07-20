@@ -288,6 +288,7 @@ function initPlacesAutocomplete(){
           <button class="zoom-btn" onclick="adjustZoom(1)" title="Zoom in" aria-label="Zoom in">+</button>
         </div>
         <div class="map-btns">
+          <button class="mini-btn" id="finish-line-btn" style="display:none;background:var(--teal);color:#fff" onclick="commitArea()">✓ Finish (<span id="finish-line-len">0</span>m)</button>
           <button class="mini-btn" onclick="undoPoint()">Undo point</button>
           <button class="mini-btn warn" onclick="clearAll()">Clear all</button>
         </div>
@@ -392,13 +393,18 @@ function initPlacesAutocomplete(){
 
 <script>
 /* ===== pricing mirrored from the Turnkey CRM (operator rates) ===== */
+// kind: 'area' (closed polygon, m²) · 'perimeter' (closed loop traced around
+// something, e.g. all 4 walls of a house — measured as a closed perimeter,
+// min 3 points, must be closed) · 'length' (an open line — a fence run,
+// a gutter run — measured point-to-point with NO closing segment, min 2
+// points, never forced closed) · 'count' (not drawn on the map at all).
 const SERVICES = {
-  driveway: {label:'Driveway / concrete',   unit:'m²', rate:4,   kind:'area',   color:'var(--c-driveway)', hex:'#c2683a'},
-  housewash:{label:'House wash (perimeter)', unit:'m', rate:5, kind:'length', color:'var(--c-housewash)', hex:'#2f7d8f'},
-  roof:     {label:'Roof treatment',         unit:'m²', rate:9,   kind:'area',   color:'var(--c-roof)',      hex:'#7a5bbf'},
-  patio:    {label:'Patio / deck',            unit:'m²', rate:6,   kind:'area',   color:'var(--c-patio)',     hex:'#0f7d6b'},
-  gutter:   {label:'Gutter clean',            unit:'m',  rate:3.5, kind:'length', color:'var(--c-gutter)',    hex:'#b08a1e'},
-  fence:    {label:'Fence / wall wash',       unit:'m',  rate:4,   kind:'length', color:'var(--c-fence)',     hex:'#6b7a3a'},
+  driveway: {label:'Driveway / concrete',   unit:'m²', rate:4,   kind:'area',      color:'var(--c-driveway)', hex:'#c2683a'},
+  housewash:{label:'House wash (perimeter)', unit:'m', rate:5, kind:'perimeter', color:'var(--c-housewash)', hex:'#2f7d8f'},
+  roof:     {label:'Roof treatment',         unit:'m²', rate:9,   kind:'area',      color:'var(--c-roof)',      hex:'#7a5bbf'},
+  patio:    {label:'Patio / deck',            unit:'m²', rate:6,   kind:'area',      color:'var(--c-patio)',     hex:'#0f7d6b'},
+  gutter:   {label:'Gutter clean',            unit:'m',  rate:3.5, kind:'length',    color:'var(--c-gutter)',    hex:'#b08a1e'},
+  fence:    {label:'Fence / wall wash',       unit:'m',  rate:4,   kind:'length',    color:'var(--c-fence)',     hex:'#6b7a3a'},
   windows:  {label:'Window clean',             unit:'panes', rate:4, kind:'count',  color:'var(--c-windows)',  hex:'#4a6b8a'}
 };
 // metres per SVG pixel — the map "scale". Demo value; with real satellite imagery this comes from the map zoom level.
@@ -777,6 +783,11 @@ function buildSvcPicker(){
 }
 function pickSvc(k){
   if(k==='windows')return; // safety: never make windows the active draw service
+  // Switching service mid-trace would otherwise carry the in-progress points
+  // over as if they belonged to the new service — harmless for two area
+  // kinds, but confusing between an open line and a closed shape (min point
+  // count and finish behaviour differ). Starting fresh avoids that entirely.
+  if(drawing.length){drawing=[];drawingGeoPts=[];renderDraw();}
   activeSvc=k;buildSvcPicker();updateHint();
 }
 
@@ -786,14 +797,21 @@ function polyArea(pts){ // shoelace, in px²
   for(let i=0;i<pts.length;i++){const j=(i+1)%pts.length;a+=pts[i].x*pts[j].y-pts[j].x*pts[i].y;}
   return Math.abs(a/2);
 }
-function polyPerim(pts){
+function polyPerim(pts){ // closed loop — wraps last point back to first (housewash)
   let p=0;
   for(let i=0;i<pts.length;i++){const j=(i+1)%pts.length;p+=Math.hypot(pts[j].x-pts[i].x,pts[j].y-pts[i].y);}
   return p;
 }
+function polyLineLength(pts){ // open line — no wrap (fence, gutter)
+  let p=0;
+  for(let i=1;i<pts.length;i++)p+=Math.hypot(pts[i].x-pts[i-1].x,pts[i].y-pts[i-1].y);
+  return p;
+}
 function sizeOf(area){
-  if(SERVICES[area.svc].kind==='count')return area.qty||0; // windows: count directly
-  if(SERVICES[area.svc].kind==='length')return Math.round(polyPerim(area.pts)*SCALE);
+  const kind=SERVICES[area.svc].kind;
+  if(kind==='count')return area.qty||0; // windows: count directly
+  if(kind==='length')return Math.round(polyLineLength(area.pts)*SCALE);
+  if(kind==='perimeter')return Math.round(polyPerim(area.pts)*SCALE);
   return Math.round(polyArea(area.pts)*SCALE*SCALE); // m²
 }
 function effectiveRate(area){
@@ -856,8 +874,10 @@ let suppressNextStageClick=false;
 function onStageClick(e){
   if(suppressNextStageClick){suppressNextStageClick=false;return;} // just finished dragging a point — don't also add a new one
   const p=stageToSvg(e.clientX,e.clientY);
-  // close polygon if near first point and have >=3 pts
-  if(drawing.length>=3){
+  // close polygon if near first point and have >=3 pts — only for closed
+  // shapes (area/perimeter). Line-kind services (fence, gutter) are never
+  // force-closed; they finish via the Finish button or a double-tap instead.
+  if(SERVICES[activeSvc].kind!=='length'&&drawing.length>=3){
     const d=Math.hypot(p.x-drawing[0].x,p.y-drawing[0].y);
     if(d<18){commitArea();return;}
   }
@@ -914,6 +934,44 @@ function initPointDragHandlers(){
     suppressNextStageClick=true;
     updateHint();
   });
+}
+/* ===== Desktop mouse-wheel / trackpad zoom — the touch pinch/pan above
+   covers mobile, but a desktop customer has no touch surface at all, so
+   without this the +/- buttons were the only way to zoom on a laptop.
+   Same debounced-preview approach as the CRM's own map (qeHandleWheel):
+   each wheel tick only nudges a live CSS scale (instant, no network); the
+   real reload — a fresh, correctly-scaled image — fires once, ~160ms after
+   the gesture settles, so a trackpad's flurry of small-delta events doesn't
+   queue up a burst of overlapping image reloads. */
+let wheelZoomTimer=null, wheelZoomAccum=0, wheelZoomAnchor=null;
+function initWheelZoom(){
+  const stageEl=document.getElementById('stage');
+  const visual=document.getElementById('map-visual');
+  stageEl.addEventListener('wheel',e=>{
+    if(!_lastLat)return; // demo grid mode — nothing to zoom
+    e.preventDefault();
+    if(!wheelZoomAnchor){
+      const p=stageToSvg(e.clientX,e.clientY);
+      wheelZoomAnchor=svgToLatLng(p);
+      const r=stageEl.getBoundingClientRect();
+      visual.classList.add('gesturing');
+      visual.style.transformOrigin=(e.clientX-r.left)+'px '+(e.clientY-r.top)+'px';
+    }
+    wheelZoomAccum+=(e.deltaY<0?1:-1)*Math.min(1,Math.abs(e.deltaY)/60);
+    visual.style.transform='scale('+Math.pow(2,wheelZoomAccum)+')';
+    clearTimeout(wheelZoomTimer);
+    wheelZoomTimer=setTimeout(()=>{
+      const delta=Math.round(wheelZoomAccum);
+      const anchor=wheelZoomAnchor;
+      wheelZoomAccum=0;wheelZoomAnchor=null;
+      const maxZ=MAPS_KEY?21:OSM_ZOOM_MAX, minZ=MAPS_KEY?17:OSM_ZOOM_MIN;
+      const newZoom=Math.max(minZ,Math.min(maxZ,SAT_ZOOM+delta));
+      if(newZoom===SAT_ZOOM){visual.classList.remove('gesturing');visual.style.transform='none';return;}
+      const center=anchor||{lat:_lastLat,lng:_lastLng};
+      document.getElementById('zoom-val').textContent=newZoom;
+      reloadMapAt(center.lat,center.lng,newZoom,_lastLabel);
+    },160);
+  },{passive:false});
 }
 /* ===== Pan + pinch-zoom on the satellite photo, Google-Maps style =====
    Only meaningful once real satellite imagery is loaded (_lastLat set) — in
@@ -1010,7 +1068,8 @@ function initMapGestures(){
   stageEl.addEventListener('touchcancel',()=>{visual.style.transform='none';visual.classList.remove('gesturing');mode=null;});
 }
 function commitArea(){
-  if(drawing.length<3){return;}
+  const minPts=SERVICES[activeSvc].kind==='length'?2:3;
+  if(drawing.length<minPts){return;}
   const area={id:areaSeq++,svc:activeSvc,pts:drawing.slice(),geoPts:drawingGeoPts.every(Boolean)?drawingGeoPts.slice():null};
   if(activeSvc==='housewash')area.storeys=houseStoreys;
   area.size=sizeOf(area);
@@ -1026,7 +1085,12 @@ function renderAreas(){
     const cx=a.pts.reduce((s,p)=>s+p.x,0)/a.pts.length;
     const cy=a.pts.reduce((s,p)=>s+p.y,0)/a.pts.length;
     const unit=SERVICES[a.svc].unit;
-    return `<polygon points="${pts}" fill="${hex}33" stroke="${hex}" stroke-width="3" stroke-linejoin="round"/>
+    // Open lines (fence, gutter) render as a polyline — no fill, no closing
+    // segment back to the first point, unlike area/perimeter shapes.
+    const shape=SERVICES[a.svc].kind==='length'
+      ?`<polyline points="${pts}" fill="none" stroke="${hex}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>`
+      :`<polygon points="${pts}" fill="${hex}33" stroke="${hex}" stroke-width="3" stroke-linejoin="round"/>`;
+    return `${shape}
       <g><rect x="${cx-30}" y="${cy-13}" width="60" height="26" rx="13" fill="#fff" opacity=".92"/><text x="${cx}" y="${cy+5}" text-anchor="middle" font-size="14" font-weight="700" fill="${hex}">${a.size}${unit}</text></g>`;
   }).join('');
 }
@@ -1075,19 +1139,34 @@ function updateEstimate(){
 function updateHint(){
   const hint=document.getElementById('hint');
   const v=SERVICES[activeSvc];
-  const isLen=v.kind==='length';
+  const finishBtn=document.getElementById('finish-line-btn');
+  const finishLen=document.getElementById('finish-line-len');
+  if(finishBtn)finishBtn.style.display='none';
+  if(v.kind==='length'){
+    // Open line (fence, gutter) — never forced closed. Tap to add points,
+    // then either the Finish button or a double-tap ends the section.
+    if(drawing.length===0){
+      hint.textContent=`Tracing: ${v.label} — tap the two ends of the ${activeSvc==='fence'?'fence line':'gutter run'} (or add more points for corners)`;
+    }else if(drawing.length===1){
+      hint.textContent='Tap the other end to complete this section';
+    }else{
+      const m=Math.round(polyLineLength(drawing)*SCALE);
+      hint.textContent=`${m}m so far — keep tapping for corners, or tap ✓ Finish`;
+      if(finishBtn){finishBtn.style.display='inline-flex';if(finishLen)finishLen.textContent=m;}
+    }
+    return;
+  }
+  const isPerim=v.kind==='perimeter';
   if(drawing.length===0){
-    hint.textContent=isLen
-      ?`Tracing: ${v.label} — tap along the ${activeSvc==='housewash'?'walls of the house':'line'} to measure the run`
+    hint.textContent=isPerim
+      ?`Tracing: ${v.label} — tap along the walls of the house to measure the perimeter`
       :`Tracing: ${v.label} — tap to drop points around the area`;
   }else if(drawing.length<3){
-    hint.textContent=isLen
-      ?`Keep tapping along the ${activeSvc==='housewash'?'house walls':activeSvc==='fence'?'fence line':'gutter run'} (${3-drawing.length} more min)`
+    hint.textContent=isPerim
+      ?`Keep tapping along the house walls (${3-drawing.length} more min)`
       :`Keep tapping to outline the ${v.label.toLowerCase()} (${3-drawing.length} more min)`;
   }else{
-    hint.textContent=isLen
-      ?'Tap the first point to close the trace'
-      :'Tap the first point (or any point) to finish this area';
+    hint.textContent=isPerim?'Tap the first point to close the trace':'Tap the first point (or any point) to finish this area';
   }
 }
 
@@ -1275,10 +1354,10 @@ if(EMBED_MODE)document.documentElement.classList.add('embedded');
 const stage=document.getElementById('stage');
 stage.addEventListener('click',onStageClick);
 // double-tap / double-click finishes
-stage.addEventListener('dblclick',e=>{e.preventDefault();if(drawing.length>=3)commitArea();});
+stage.addEventListener('dblclick',e=>{e.preventDefault();const minPts=SERVICES[activeSvc].kind==='length'?2:3;if(drawing.length>=minPts)commitArea();});
 
 // init
-buildMap();buildSvcPicker();updateHint();initPointDragHandlers();initMapGestures();
+buildMap();buildSvcPicker();updateHint();initPointDragHandlers();initMapGestures();initWheelZoom();
 // On load: if we already have a key and an address, drop satellite immediately.
 setTimeout(tryAutoSatellite,60);
 </script>

@@ -2335,10 +2335,12 @@ function qeReprojectAreas(){
 
 /* ---------- geometry ---------- */
 function qePolyArea(pts){let a=0;for(let i=0;i<pts.length;i++){const j=(i+1)%pts.length;a+=pts[i].x*pts[j].y-pts[j].x*pts[i].y;}return Math.abs(a/2);}
-function qePolyPerim(pts){let p=0;for(let i=0;i<pts.length;i++){const j=(i+1)%pts.length;p+=Math.hypot(pts[j].x-pts[i].x,pts[j].y-pts[i].y);}return p;}
+function qePolyPerim(pts){let p=0;for(let i=0;i<pts.length;i++){const j=(i+1)%pts.length;p+=Math.hypot(pts[j].x-pts[i].x,pts[j].y-pts[i].y);}return p;} // closed loop (housewash)
+function qePolyLineLength(pts){let p=0;for(let i=1;i<pts.length;i++)p+=Math.hypot(pts[i].x-pts[i-1].x,pts[i].y-pts[i-1].y);return p;} // open line, no wrap (fence, gutter)
 function qeSizeOf(area){
   const basis=SERVICES[area.service].basis;
-  if(basis==='length'||basis==='perimeter')return Math.round(qePolyPerim(area.points)*qe.scale);
+  if(basis==='length')return Math.round(qePolyLineLength(area.points)*qe.scale);
+  if(basis==='perimeter')return Math.round(qePolyPerim(area.points)*qe.scale);
   return Math.round(qePolyArea(area.points)*qe.scale*qe.scale);
 }
 function qeStageToSvg(clientX,clientY){
@@ -2356,20 +2358,29 @@ function qeRenderAreas(){
   qe.areas.forEach(a=>{
     const hex=QE_SVC_HEX[a.service]||'#0f7d6b';
     const sel=a.id===qe.selectedId;
+    const isLine=SERVICES[a.service].basis==='length';
     const pts=a.points.map(p=>`${p.x},${p.y}`).join(' ');
     const cx=a.points.reduce((s,p)=>s+p.x,0)/a.points.length;
     const cy=a.points.reduce((s,p)=>s+p.y,0)/a.points.length;
-    out+=`<polygon class="qe-area" data-id="${a.id}" points="${pts}" fill="${hex}${sel?'55':'33'}" stroke="${hex}" stroke-width="${sel?4:3}" stroke-dasharray="${sel?'6 3':'none'}" stroke-linejoin="round" style="cursor:${qe.mode==='select'?'move':'crosshair'}"/>`;
+    // Open lines (fence, gutter) render as a polyline — no fill, no closing
+    // segment back to the first point, unlike area/perimeter shapes.
+    out+=isLine
+      ?`<polyline class="qe-area" data-id="${a.id}" points="${pts}" fill="none" stroke="${hex}" stroke-width="${sel?5:4}" stroke-dasharray="${sel?'6 3':'none'}" stroke-linecap="round" stroke-linejoin="round" style="cursor:${qe.mode==='select'?'move':'crosshair'}"/>`
+      :`<polygon class="qe-area" data-id="${a.id}" points="${pts}" fill="${hex}${sel?'55':'33'}" stroke="${hex}" stroke-width="${sel?4:3}" stroke-dasharray="${sel?'6 3':'none'}" stroke-linejoin="round" style="cursor:${qe.mode==='select'?'move':'crosshair'}"/>`;
     out+=`<g data-label="${a.id}" style="pointer-events:none"><rect x="${cx-32}" y="${cy-13}" width="64" height="26" rx="13" fill="#fff" opacity=".92"/><text x="${cx}" y="${cy+5}" text-anchor="middle" font-size="12" font-weight="700" fill="${hex}">${a.size}${a.unit}</text></g>`;
     if(sel){
       a.points.forEach((p,i)=>{
         out+=`<circle class="qe-pt-handle" data-area="${a.id}" data-idx="${i}" cx="${p.x}" cy="${p.y}" r="8" fill="#fff" stroke="${hex}" stroke-width="3"/>`;
       });
-      a.points.forEach((p,i)=>{
-        const q=a.points[(i+1)%a.points.length];
+      // Midpoint "add a point here" handles — for an open line, skip the
+      // segment that would otherwise wrap from the last point back to the
+      // first, since that segment doesn't exist for a line.
+      const segCount=isLine?a.points.length-1:a.points.length;
+      for(let i=0;i<segCount;i++){
+        const p=a.points[i], q=a.points[(i+1)%a.points.length];
         const mx=(p.x+q.x)/2, my=(p.y+q.y)/2;
         out+=`<circle class="qe-mid-handle" data-area="${a.id}" data-idx="${i}" cx="${mx}" cy="${my}" r="5" fill="${hex}" opacity=".6"/>`;
-      });
+      }
     }
   });
   if(qe.drawing.length){
@@ -2453,8 +2464,26 @@ function qeRenderSvcPicker(){
 const QE_IS_TOUCH=('ontouchstart' in window)||navigator.maxTouchPoints>0;
 function qeUpdateHint(){
   const hint=document.getElementById('qe-hint'); if(!hint)return;
-  if(qe.mode==='draw'){hint.textContent='Tap to place points for '+SERVICES[qe.drawSvc].label+' — tap the first point to finish';return;}
-  if(!qe.lat){hint.textContent=qe.addr?'Loading map…':'No address on file — drawing on a plain grid';return;}
+  if(qe.mode==='draw'){
+    if(SERVICES[qe.drawSvc].basis==='length'){
+      if(qe.drawing.length<2){
+        hint.textContent='Tap to place points for '+SERVICES[qe.drawSvc].label+' — tap the other end (add more points for corners)';
+      }else{
+        const m=Math.round(qePolyLineLength(qe.drawing)*qe.scale);
+        hint.textContent=m+'m so far — keep tapping for corners, or double-click / tap Finish below to end this section';
+      }
+    }else{
+      hint.textContent='Tap to place points for '+SERVICES[qe.drawSvc].label+' — tap the first point to finish';
+    }
+    return;
+  }
+  // qe.provider==='grid' means geocoding already gave up (no key/address
+  // match anywhere) and fell back to a plain drawing grid — that's a
+  // terminal state, not still-loading. Previously this fell through to the
+  // qe.addr check below and got stuck reading "Loading map…" forever,
+  // which is exactly what looked like satellite imagery hanging indefinitely.
+  if(qe.provider==='grid'){hint.textContent=qe.addr?'⚠️ Could not locate that address — drawing on a plain grid (not to scale)':'No address on file — drawing on a plain grid';return;}
+  if(!qe.lat){hint.textContent='Loading map…';return;}
   if(qe.selectedId){hint.textContent='Drag points to adjust, or drag the shape to move it';return;}
   if(!qe.areas.length){hint.textContent='Select a service, then draw the area';return;}
   hint.textContent=QE_IS_TOUCH?'Tap a shape to select it — use two fingers to move the map':'Tap a shape to select it, or pick a service above to draw a new one';
@@ -2462,7 +2491,14 @@ function qeUpdateHint(){
 function qeRenderPanel(){
   const el=document.getElementById('qe-panel'); if(!el)return;
   if(qe.mode==='draw'){
-    el.innerHTML=`<div class="qe-panel"><div class="qe-panel-title">Drawing: ${SERVICES[qe.drawSvc].label} — tap to place points, tap the first point (or double-click) to finish</div></div>`;
+    if(SERVICES[qe.drawSvc].basis==='length'){
+      const m=qe.drawing.length>1?Math.round(qePolyLineLength(qe.drawing)*qe.scale):0;
+      el.innerHTML=`<div class="qe-panel"><div class="qe-panel-title">Drawing: ${SERVICES[qe.drawSvc].label} — tap points along the line, no need to close it</div>
+        ${qe.drawing.length>=2?`<button type="button" class="btn accent sm" style="margin-top:8px" onclick="qeCommitDrawing()">✓ Finish (${m}m)</button>`:''}
+      </div>`;
+    }else{
+      el.innerHTML=`<div class="qe-panel"><div class="qe-panel-title">Drawing: ${SERVICES[qe.drawSvc].label} — tap to place points, tap the first point (or double-click) to finish</div></div>`;
+    }
     return;
   }
   const area=qe.areas.find(a=>a.id===qe.selectedId);
@@ -2524,7 +2560,8 @@ function qeStartDraw(svc){
   qeRenderToolbar();qeRenderSvcPicker();qeRenderPanel();qeRenderAreas();qeUpdateHint();
 }
 function qeCommitDrawing(){
-  if(qe.drawing.length<3)return;
+  const minPts=SERVICES[qe.drawSvc].basis==='length'?2:3;
+  if(qe.drawing.length<minPts)return;
   qePushHistory();
   const area={id:'a'+Date.now()+'_'+Math.round(Math.random()*9999),service:qe.drawSvc,points:qe.drawing.slice(),geoPts:qe.drawingGeoPts.every(Boolean)?qe.drawingGeoPts.slice():null,notes:'',photoPaths:[]};
   area.unit=SERVICES[area.service].unit;
@@ -2718,7 +2755,10 @@ function qeInitStageEvents(){
   stage.addEventListener('click',qeHandleClick);
   stage.addEventListener('dblclick',e=>{
     e.preventDefault();
-    if(qe.mode==='draw'&&qe.drawing.length>=3){qeCommitDrawing();return;}
+    if(qe.mode==='draw'){
+      const minPts=SERVICES[qe.drawSvc].basis==='length'?2:3;
+      if(qe.drawing.length>=minPts){qeCommitDrawing();return;}
+    }
     if(qe.mode==='select'&&!e.target.closest('.qe-area')&&!e.target.closest('.qe-pt-handle')){qeAdjustZoom(1);}
   });
   stage.addEventListener('pointerdown',qeHandlePointerDown);
@@ -2745,13 +2785,16 @@ function qeHandleClick(e){
   }
   if(qe.mode==='draw'){
     const p=qeStageToSvg(e.clientX,e.clientY);
-    if(qe.drawing.length>=3){
+    // Close-on-proximity-to-first-point only applies to closed shapes
+    // (area/perimeter) — an open line (fence, gutter) is never force-closed;
+    // it finishes via the Finish button or a double-click instead.
+    if(SERVICES[qe.drawSvc].basis!=='length'&&qe.drawing.length>=3){
       const d=Math.hypot(p.x-qe.drawing[0].x,p.y-qe.drawing[0].y);
       if(d<18){qeCommitDrawing();return;}
     }
     qe.drawing.push(p);
     qe.drawingGeoPts.push(qeSvgToLatLng(p));
-    qeRenderAreas();qeUpdateHint();
+    qeRenderAreas();qeUpdateHint();qeRenderPanel();
     return;
   }
   const areaEl=e.target.closest('.qe-area');
@@ -6538,6 +6581,225 @@ function cleanPaid(v){
   return /^(y|yes|true|paid|1)$/i.test(String(v).trim());
 }
 
+/* =====================================================================
+   SERVICEM8 PROVIDER — a dedicated importer built around ServiceM8's real
+   CSV export shape, not a generic mapped importer. No column mapping step:
+   file type is detected from headers, customers/jobs/invoices are built
+   straight from ServiceM8's own field names. Produces the exact {ref,...}
+   row shapes run_import() expects (schema-import-servicem8.sql), so it
+   still goes through the same atomic RPC as every other source.
+   ===================================================================== */
+function rowsToObjects(headers,rows){
+  return rows.map(r=>{const o={};headers.forEach((h,i)=>{if(h)o[h]=r[i];});return o;});
+}
+
+// "Job Number, Job Status, Job Address" -> jobs. "Company Address" plus a
+// contact/name column -> clients. Order matters: check jobs first since a
+// jobs export can also carry a "Company" column.
+function sm8DetectFileType(headers){
+  const set=new Set((headers||[]).map(h=>h.trim()));
+  const hasAll=(...names)=>names.every(n=>set.has(n));
+  if(hasAll('Job Number','Job Status'))return 'jobs';
+  if(hasAll('Company Address')&&(set.has('Contact First')||set.has('Name')))return 'clients';
+  return null;
+}
+
+// ServiceM8 exports unset dates as the MySQL null-date sentinel
+// "0000-00-00 00:00:00" — cleanDate()'s digit-shape regex would otherwise
+// treat that as a real date, so it's checked and rejected explicitly here.
+function sm8CleanDate(v){
+  if(!v)return null;
+  v=String(v).trim();
+  if(!v||v.startsWith('0000-00-00'))return null;
+  const m=v.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m?`${m[1]}-${m[2]}-${m[3]}`:null;
+}
+
+// ServiceM8 addresses are multi-line: "street\nSuburb, City Postcode".
+function sm8ParseAddress(v){
+  if(!v)return {address:null,suburb:null};
+  const lines=String(v).split('\n').map(s=>s.trim()).filter(Boolean);
+  if(!lines.length)return {address:null,suburb:null};
+  const address=lines[0];
+  let suburb=null;
+  if(lines.length>1){
+    const rest=lines.slice(1).join(', ');
+    const commaIdx=rest.indexOf(',');
+    suburb=(commaIdx!==-1?rest.slice(0,commaIdx):rest.replace(/\s*\d{4}\s*$/,'')).trim()||null;
+  }
+  return {address,suburb};
+}
+
+function sm8MapStatus(jobStatus,paymentReceived){
+  const s=(jobStatus||'').trim().toLowerCase();
+  if(s==='quote')return 'quoted';
+  if(s==='work order')return 'scheduled';
+  if(s==='completed')return paymentReceived?'paid':'completed';
+  if(s==='unsuccessful'||s==='cancelled')return 'cancelled';
+  return 'quoted'; // never silently drop a job over an unrecognised status
+}
+
+function sm8NormName(s){return (s||'').trim().toLowerCase().replace(/\s+/g,' ');}
+function sm8LooksLikeEmail(s){return /@/.test(s||'');}
+function sm8ParseBadges(v){
+  if(!v)return null;
+  const tags=String(v).split(/[,;|]/).map(s=>s.trim()).filter(Boolean);
+  return tags.length?tags:null;
+}
+
+// Groups client rows by normalized name and merges same-name rows into one
+// customer, preferring the most complete/valid value per field across the
+// group — this catches real ServiceM8 duplicates (e.g. the same person
+// entered twice with one row's address field glitched to contain an email).
+function sm8BuildCustomers(clientObjs){
+  const groups=new Map();
+  clientObjs.forEach(row=>{
+    const name=(row['Name']||'').trim();
+    if(!name)return;
+    const key=sm8NormName(name);
+    if(!groups.has(key))groups.set(key,[]);
+    groups.get(key).push(row);
+  });
+  const customers=[];
+  const mergeLog=[];
+  for(const [,rows] of groups){
+    const pick=(field,validator)=>{
+      for(const r of rows){
+        const v=(r[field]||'').trim();
+        if(v&&(!validator||validator(v)))return v;
+      }
+      return '';
+    };
+    const email=pick('Email Address')||pick('Billing Email Address');
+    const phone=pick('Telephone Number')||pick('Mobile Number')||pick('Billing Telephone Number')||pick('Billing Mobile Number');
+    const addrRaw=pick('Company Address',v=>!sm8LooksLikeEmail(v))||pick('Billing Address',v=>!sm8LooksLikeEmail(v));
+    const {address,suburb}=sm8ParseAddress(addrRaw);
+    const billingAddr=pick('Billing Address',v=>!sm8LooksLikeEmail(v));
+    customers.push({
+      ref:null,
+      name:rows[0]['Name'].trim(),
+      email:email||null,
+      phone:phone||null,
+      address,suburb,
+      notes:null,
+      source:'Imported — ServiceM8',
+      billing_address:billingAddr||null,
+      payment_terms:pick('Payment Terms')||null,
+      tax_rate:pick('Tax Rate')||null,
+      tags:sm8ParseBadges(pick('Badges'))
+    });
+    if(rows.length>1)mergeLog.push({name:rows[0]['Name'].trim(),mergedCount:rows.length});
+  }
+  return {customers,mergeLog};
+}
+
+function sm8BuildJobs(jobObjs){
+  const jobs=[],invoices=[],skipped=[];
+  let noCompanyCount=0;
+  jobObjs.forEach((row,i)=>{
+    const jobNumber=(row['Job Number']||'').trim();
+    if(!jobNumber){skipped.push({row:i,reason:'missing Job Number'});return;}
+    let company=(row['Company']||'').trim();
+    if(!company){
+      noCompanyCount++;
+      company=`Unknown customer (Job #${jobNumber})`; // synthesize rather than drop real financial history
+    }
+    const paymentReceived=row['Payment Received']==='1';
+    const status=sm8MapStatus(row['Job Status'],paymentReceived);
+    const {address,suburb}=sm8ParseAddress(row['Job Address']||row['Billing Address']);
+    const completionDate=sm8CleanDate(row['Completion Date']);
+    const workOrderDate=sm8CleanDate(row['Work Order Date']);
+    const quoteDate=sm8CleanDate(row['Quote Date']);
+    let scheduledDate=null;
+    if(status==='completed'||status==='paid')scheduledDate=completionDate||workOrderDate;
+    else if(status==='scheduled')scheduledDate=workOrderDate;
+    else if(status==='cancelled'&&workOrderDate)scheduledDate=workOrderDate;
+
+    const total=parseFloat(row['Total Invoice Amount']||'0')||0;
+    // ServiceM8's "Payment Amount" is a separate column from the invoice
+    // total and doesn't always match it in this export (partial/duplicate
+    // payments, or just messy source data) — kept as a preserved reference
+    // field rather than trusted as the invoice amount, which stays the
+    // actual "Total Invoice Amount" (what was owed, not what was recorded paid).
+    const paymentAmountRecorded=parseFloat(row['Payment Amount']||'0')||0;
+    const paymentDate=sm8CleanDate(row['Payment Received Date']);
+
+    jobs.push({
+      ref:jobNumber,customer_ref:company,customer_name:company,
+      status,raw_status:(row['Job Status']||'').trim(),
+      scheduled_date:scheduledDate,total,
+      notes:(row['Description of work']||'').trim()||null,
+      address,suburb,
+      category:(row['Job Category']||'').trim()||null,
+      work_completed:(row['Work Completed']||'').trim()||null,
+      tags:sm8ParseBadges(row['Badges']),
+      quote_date:quoteDate,work_order_date:workOrderDate,completion_date:completionDate,
+      po_number:(row['PO Number']||'').trim()||null,
+      invoice_no:(row['Invoice No']||'').trim()||null,
+      payment_date:paymentDate,
+      payment_amount_recorded:paymentAmountRecorded||null
+    });
+
+    // ServiceM8's export has no separate invoices file — invoice/payment
+    // fields live on the job row, so an invoice is synthesized whenever
+    // there's a real invoice amount, linked via the job's own Job Number.
+    if(total>0){
+      invoices.push({
+        ref:jobNumber,job_ref:jobNumber,amount:total,paid:paymentReceived,
+        payment_status:paymentReceived?'paid':((row['Invoice Sent']==='1')?'sent':'draft'),
+        payment_date:paymentDate,
+        payment_method:(row['Payment Method']||'').trim()||null,
+        due_date:null
+      });
+    }
+  });
+  return {jobs,invoices,skipped,noCompanyCount};
+}
+
+// Every job must link to a customer. A job whose Company doesn't match any
+// row from the Clients CSV (test data, or a blank-Company row given a
+// placeholder name) gets a minimal customer auto-created for it, so linking
+// never fails and no job/invoice/payment history is silently orphaned.
+function sm8Reconcile(customers,jobs){
+  const nameSet=new Set(customers.map(c=>sm8NormName(c.name)));
+  const autoCreated=[];
+  jobs.forEach(j=>{
+    const key=sm8NormName(j.customer_ref);
+    if(!nameSet.has(key)){
+      customers.push({
+        ref:null,name:j.customer_ref,email:null,phone:null,address:null,suburb:null,
+        notes:null,source:'Imported — ServiceM8 (auto-created, no client record)',
+        billing_address:null,payment_terms:null,tax_rate:null,tags:null
+      });
+      nameSet.add(key);
+      autoCreated.push(j.customer_ref);
+    }
+  });
+  return autoCreated;
+}
+
+// End-to-end: raw {headers,rows} for each uploaded file -> validated,
+// deduped, linked {customers,jobs,invoices} ready for run_import().
+function sm8Process(customersFile,jobsFile){
+  const clientObjs=customersFile?rowsToObjects(customersFile.headers,customersFile.rows):[];
+  const jobObjs=jobsFile?rowsToObjects(jobsFile.headers,jobsFile.rows):[];
+  const {customers,mergeLog}=sm8BuildCustomers(clientObjs);
+  const {jobs,invoices,skipped,noCompanyCount}=sm8BuildJobs(jobObjs);
+  const autoCreated=sm8Reconcile(customers,jobs);
+  const missingEmail=customers.filter(c=>!c.email).length;
+  const missingPhone=customers.filter(c=>!c.phone).length;
+  const missingAddress=customers.filter(c=>!c.address).length;
+  return {
+    customers,jobs,invoices,
+    validation:{
+      customersFound:customers.length,jobsFound:jobs.length,invoicesFound:invoices.length,
+      duplicatesMerged:mergeLog.length,mergeLog,
+      missingEmail,missingPhone,missingAddress,
+      autoCreatedCustomers:autoCreated,skippedJobRows:skipped,noCompanyCount
+    }
+  };
+}
+
 /* ---------- Wizard state ---------- */
 const IMPORT_SOURCES=[
   {key:'servicem8',label:'ServiceM8',icon:'🔧'},
@@ -6550,7 +6812,8 @@ const IMPORT_SOURCES=[
 let importWizard=null;
 function iwFresh(){
   return {step:1,source:null,files:{customers:null,jobs:null,quotes:null,invoices:null},
-    mapping:{customers:{},jobs:{},quotes:{},invoices:{}},running:false,result:null,history:[]};
+    mapping:{customers:{},jobs:{},quotes:{},invoices:{}},running:false,result:null,history:[],
+    sm8:null,sm8UploadWarnings:[]};
 }
 async function openImportWizard(){
   importWizard=iwFresh();
@@ -6566,7 +6829,14 @@ async function iwLoadHistory(){
 }
 function iwGoStep(n){importWizard.step=n;renderImportWizard();}
 
+// ServiceM8 skips manual column mapping entirely (auto-detected file type,
+// dedicated field mapping) — 5 steps instead of the generic importer's 7:
+// Choose CRM -> Instructions -> Upload -> Validate & Preview -> Import.
+function iwIsSm8(){return importWizard&&importWizard.source==='servicem8';}
 function iwStepMeta(){
+  if(iwIsSm8()){
+    return [null,{label:'Choose CRM'},{label:'Instructions'},{label:'Upload'},{label:'Validate & Preview'},{label:'Import'}];
+  }
   return [
     null,
     {label:'Choose CRM'},{label:'Instructions'},{label:'Upload'},
@@ -6575,7 +6845,8 @@ function iwStepMeta(){
 }
 function iwStepIndicator(){
   const meta=iwStepMeta();
-  return `<div class="iw-steps">${[1,2,3,4,5,6,7].map(n=>`
+  const steps=iwIsSm8()?[1,2,3,4,5]:[1,2,3,4,5,6,7];
+  return `<div class="iw-steps">${steps.map(n=>`
     <div class="iw-step ${n===importWizard.step?'sel':''} ${n<importWizard.step?'done':''}"><span class="iw-dot">${n<importWizard.step?'✓':n}</span><span class="iw-lbl">${meta[n].label}</span></div>`).join('')}</div>`;
 }
 
@@ -6584,13 +6855,21 @@ function renderImportWizard(){
   if(!body)return;
   const w=importWizard;
   let content='';
-  if(w.step===1)content=iwRenderSource();
-  else if(w.step===2)content=iwRenderInstructions();
-  else if(w.step===3)content=iwRenderUpload();
-  else if(w.step===4)content=iwRenderDetect();
-  else if(w.step===5)content=iwRenderMapping();
-  else if(w.step===6)content=iwRenderPreview();
-  else if(w.step===7)content=iwRenderRun();
+  if(iwIsSm8()){
+    if(w.step===1)content=iwRenderSource();
+    else if(w.step===2)content=iwRenderInstructions();
+    else if(w.step===3)content=sm8RenderUpload();
+    else if(w.step===4)content=sm8RenderValidatePreview();
+    else if(w.step===5)content=iwRenderRun();
+  }else{
+    if(w.step===1)content=iwRenderSource();
+    else if(w.step===2)content=iwRenderInstructions();
+    else if(w.step===3)content=iwRenderUpload();
+    else if(w.step===4)content=iwRenderDetect();
+    else if(w.step===5)content=iwRenderMapping();
+    else if(w.step===6)content=iwRenderPreview();
+    else if(w.step===7)content=iwRenderRun();
+  }
   body.innerHTML=`${iwStepIndicator()}<div class="iw-body">${content}</div>`;
 }
 
@@ -6670,6 +6949,89 @@ function iwFileChosen(key,el){
     }catch(e){console.error('CSV parse failed',e);toast('Could not read that CSV — check the file and try again');}
   };
   reader.readAsText(file);
+}
+
+/* ===== ServiceM8 Step 3: upload — files are auto-recognised by header
+   shape and slotted in, no "which file is this" picking required. ===== */
+function sm8RenderUpload(){
+  const c=importWizard.files.customers,j=importWizard.files.jobs;
+  const warnings=importWizard.sm8UploadWarnings||[];
+  return `<p style="font-size:13.5px;color:var(--ink-soft);margin-bottom:16px">Choose your ServiceM8 export CSVs — Clients and Jobs, in one go or separately. TurnKey recognises which is which from the column headers, so there's nothing to map.</p>
+    <input type="file" accept=".csv,text/csv" id="iw-sm8-files" multiple style="display:none" onchange="sm8FilesChosen(this)">
+    <button class="btn ghost sm" onclick="document.getElementById('iw-sm8-files').click()">Choose CSV file(s)</button>
+    <div class="panel" style="margin-top:14px">
+      <div class="kv"><span class="k">Clients <span style="color:var(--coral)">*</span></span><span class="v">${c?`✓ ${c.name} — ${c.rows.length} row${c.rows.length!==1?'s':''}`:'Not uploaded yet'}</span></div>
+      <div class="kv"><span class="k">Jobs</span><span class="v">${j?`✓ ${j.name} — ${j.rows.length} row${j.rows.length!==1?'s':''}`:'Not uploaded yet (optional)'}</span></div>
+    </div>
+    ${warnings.length?`<p style="font-size:12.5px;color:var(--coral);margin-top:10px">${warnings.join('<br>')}</p>`:''}
+    <div class="iw-foot"><button class="btn ghost" onclick="iwGoStep(2)">← Back</button><button class="btn primary" ${c?'':'disabled'} onclick="sm8Validate();iwGoStep(4)">Continue →</button></div>`;
+}
+function sm8FilesChosen(el){
+  const files=Array.from(el.files||[]);
+  if(!files.length)return;
+  importWizard.sm8UploadWarnings=[];
+  let pending=files.length;
+  files.forEach(file=>{
+    const reader=new FileReader();
+    reader.onload=()=>{
+      try{
+        const {headers,rows}=parseCSV(String(reader.result));
+        if(!headers.length){importWizard.sm8UploadWarnings.push(`Could not read "${file.name}" — is it a CSV?`);}
+        else{
+          const type=sm8DetectFileType(headers);
+          if(type==='jobs')importWizard.files.jobs={name:file.name,headers,rows};
+          else if(type==='clients')importWizard.files.customers={name:file.name,headers,rows};
+          else importWizard.sm8UploadWarnings.push(`Could not recognise "${file.name}" as a ServiceM8 Clients or Jobs export — skipped.`);
+        }
+      }catch(e){console.error('CSV parse failed',e);importWizard.sm8UploadWarnings.push(`Could not read "${file.name}".`);}
+      pending--;
+      if(pending===0)renderImportWizard();
+    };
+    reader.readAsText(file);
+  });
+}
+function sm8Validate(){
+  importWizard.sm8=sm8Process(importWizard.files.customers,importWizard.files.jobs);
+}
+
+/* ===== ServiceM8 Step 4: validation summary + preview (combined — no
+   separate mapping-review step exists for this source) ===== */
+function sm8RenderValidatePreview(){
+  const s=importWizard.sm8;
+  if(!s)return '<div class="empty-state"><div class="sm">Upload a file first.</div></div>';
+  const v=s.validation;
+  const stat=(label,n,warn)=>`<div class="cp-stat"><div class="cp-stat-v"${warn&&n?' style="color:var(--coral)"':''}>${n}</div><div class="cp-stat-l">${label}</div></div>`;
+  const stats=`<div class="cp-stats">
+    ${stat('Customers found',v.customersFound)}
+    ${stat('Jobs found',v.jobsFound)}
+    ${stat('Invoices found',v.invoicesFound)}
+    ${stat('Duplicates merged',v.duplicatesMerged)}
+    ${stat('Missing emails',v.missingEmail,true)}
+    ${stat('Missing phones',v.missingPhone,true)}
+    ${stat('Invalid/missing addresses',v.missingAddress,true)}
+  </div>`;
+  const notes=[];
+  if(v.duplicatesMerged)notes.push(`${v.duplicatesMerged} customer name${v.duplicatesMerged!==1?'s appear':' appears'} more than once in the Clients file — merged into one customer each, keeping the most complete details from every occurrence.`);
+  if(v.autoCreatedCustomers.length)notes.push(`${v.autoCreatedCustomers.length} job(s) reference a customer not present in the Clients file — a placeholder customer will be created so no job history is lost: ${v.autoCreatedCustomers.slice(0,5).map(n=>`"${n}"`).join(', ')}${v.autoCreatedCustomers.length>5?', …':''}.`);
+  if(v.skippedJobRows.length)notes.push(`${v.skippedJobRows.length} job row(s) had no Job Number and will be skipped — they can't be tracked or de-duplicated without one.`);
+  if(v.noCompanyCount)notes.push(`${v.noCompanyCount} job(s) had a blank Company field — filed under an auto-generated placeholder customer name.`);
+  const noteHtml=notes.length?`<div class="info-strip" style="margin-top:14px">${notes.map(n=>`<div>${n}</div>`).join('')}</div>`:'';
+
+  const custSample=s.customers.slice(0,5);
+  const jobSample=s.jobs.slice(0,5);
+  const custTable=`<div class="panel" style="margin-top:14px"><h4>Customers <span class="demo-tag">${s.customers.length}</span></h4>
+    <div style="overflow-x:auto"><table class="contact-table" style="min-width:520px">
+      <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Address</th></tr></thead>
+      <tbody>${custSample.map(c=>`<tr><td>${c.name}</td><td>${c.email||'—'}</td><td>${c.phone||'—'}</td><td>${c.address||'—'}</td></tr>`).join('')}</tbody>
+    </table></div>${s.customers.length>5?`<p style="font-size:11px;color:var(--ink-faint);margin-top:6px">+ ${s.customers.length-5} more not shown</p>`:''}</div>`;
+  const jobTable=s.jobs.length?`<div class="panel" style="margin-top:14px"><h4>Jobs <span class="demo-tag">${s.jobs.length}</span></h4>
+    <div style="overflow-x:auto"><table class="contact-table" style="min-width:520px">
+      <thead><tr><th>Job #</th><th>Customer</th><th>Status</th><th>Date</th><th>Total</th></tr></thead>
+      <tbody>${jobSample.map(j=>`<tr><td>${j.ref}</td><td>${j.customer_name}</td><td>${j.raw_status} → ${j.status}</td><td>${j.scheduled_date||'—'}</td><td>${j.total?money(j.total):'—'}</td></tr>`).join('')}</tbody>
+    </table></div>${s.jobs.length>5?`<p style="font-size:11px;color:var(--ink-faint);margin-top:6px">+ ${s.jobs.length-5} more not shown</p>`:''}</div>`:'';
+
+  return `${stats}${noteHtml}${custTable}${jobTable}
+    <div class="iw-foot"><button class="btn ghost" onclick="iwGoStep(3)">← Back</button><button class="btn primary" onclick="iwGoStep(5)">Start import →</button></div>`;
 }
 
 /* ===== Step 4: auto-detect summary ===== */
@@ -6763,7 +7125,13 @@ function iwRenderPreview(){
 async function iwRunImport(){
   importWizard.running=true;renderImportWizard();
   try{
-    const payload={
+    const payload=iwIsSm8()?{
+      p_source: 'servicem8',
+      p_customers: importWizard.sm8.customers,
+      p_jobs: importWizard.sm8.jobs,
+      p_quotes: [],
+      p_invoices: importWizard.sm8.invoices
+    }:{
       p_source: importWizard.source,
       p_customers: iwBuildRows('customers'),
       p_jobs: importWizard.files.jobs?iwBuildRows('jobs'):[],
@@ -6804,8 +7172,17 @@ function iwRenderRun(){
   }).join('');
   const errList=(r.errors||[]).length?`<div class="panel" style="margin-top:14px"><h4>Error report <span class="demo-tag">${r.errors.length}</span></h4>
     <div style="max-height:220px;overflow-y:auto">${r.errors.map(e=>`<div class="iw-err-row"><b>${e.entity}</b>${e.ref?' ('+e.ref+')':''} — ${e.message}</div>`).join('')}</div></div>`:'';
+  const sm8Extra=iwIsSm8()&&importWizard.sm8?(()=>{
+    const v=importWizard.sm8.validation;
+    const items=[];
+    if(v.duplicatesMerged)items.push(`<span class="k">Merged (same-file duplicates)</span><span class="v">${v.duplicatesMerged}</span>`);
+    if(v.autoCreatedCustomers.length)items.push(`<span class="k">Auto-created placeholder customers</span><span class="v">${v.autoCreatedCustomers.length}</span>`);
+    if(v.skippedJobRows.length)items.push(`<span class="k">Job rows skipped (no Job Number)</span><span class="v">${v.skippedJobRows.length}</span>`);
+    return items.length?`<div class="panel" style="margin-top:14px"><h4>ServiceM8-specific handling</h4>${items.map(i=>`<div class="kv">${i}</div>`).join('')}</div>`:'';
+  })():'';
   return `<div class="empty-state" style="padding:20px 0"><div class="big">✓ Import complete</div></div>
     <div class="panel">${rows}</div>
+    ${sm8Extra}
     ${errList}
     <div class="iw-foot" style="flex-wrap:wrap;gap:10px">
       <button class="btn ghost" onclick="iwUndoBatch('${r.batch_id}')">Undo this import</button>
