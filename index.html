@@ -134,6 +134,12 @@
   .pill.paid{background:var(--teal-wash);color:var(--teal)}
   .pill.bad{background:var(--coral-wash);color:var(--coral)}
   .pill.cancelled{background:#f0f0f0;color:#6b6b6b}
+  .pill.travelling{background:var(--m-money-wash);color:var(--m-money)}
+  .pill.on_site{background:var(--m-cal-wash);color:var(--m-cal)}
+  .pill.in_progress{background:var(--m-ops-wash);color:var(--m-ops)}
+  .pill.paused{background:var(--amber-wash);color:var(--amber)}
+  .pill.invoiced{background:var(--m-insight-wash);color:var(--m-insight)}
+  .pill.overdue{background:var(--coral-wash);color:var(--coral)}
 
   /* buttons — pill, restrained */
   .btn{display:inline-flex;align-items:center;gap:7px;justify-content:center;font-size:14px;font-weight:500;padding:11px 20px;border-radius:980px;transition:background .15s,border-color .15s,opacity .15s,transform .1s;letter-spacing:-.01em}
@@ -436,6 +442,26 @@
   body.tech-mode .sop-check{width:34px;height:34px}
   body.tech-mode .photo-slot{min-height:64px}
   body.tech-mode nav.tabs button{padding:12px 16px;font-size:14.5px}
+
+  /* ===== floating job toolbar — shown on the job detail view while a job is
+     travelling/on site/in progress/paused. Sits above .bottom-nav (z-index 40)
+     and below .overlay modals (z-index 100). ===== */
+  .job-toolbar{
+    position:fixed;left:0;right:0;bottom:0;z-index:50;
+    background:var(--ink);color:#fff;
+    padding:10px max(14px,env(safe-area-inset-left)) max(10px,env(safe-area-inset-bottom)) max(14px,env(safe-area-inset-right));
+    box-shadow:0 -4px 16px rgba(10,28,43,.18);
+    display:flex;gap:8px;flex-wrap:wrap;align-items:center;
+  }
+  .job-toolbar .jt-status{font-size:12px;font-weight:600;color:rgba(255,255,255,.7);margin-right:auto;white-space:nowrap}
+  .job-toolbar button{
+    background:rgba(255,255,255,.12);color:#fff;border:1px solid rgba(255,255,255,.18);
+    padding:9px 13px;border-radius:980px;font-size:12.5px;font-weight:600;white-space:nowrap;
+  }
+  .job-toolbar button:hover{background:rgba(255,255,255,.2)}
+  .job-toolbar button.jt-primary{background:var(--teal-bright);border-color:var(--teal-bright)}
+  .job-toolbar button.jt-danger{background:var(--coral);border-color:var(--coral)}
+  @media(max-width:720px){.job-toolbar{bottom:78px}} /* clear .bottom-nav on mobile */
 
   /* ===== v5 additions: colour, logo ===== */
   /* logo lockup in header */
@@ -1057,6 +1083,43 @@
   <div class="modal-foot"><button class="btn ghost" onclick="closeModal('cal-pick-overlay')">Close</button></div>
 </div></div>
 
+<div class="overlay" id="pause-overlay"><div class="modal">
+  <div class="modal-head"><div><h3>Pause job</h3><p>Why's it pausing? This gets logged on the job.</p></div><button class="x" aria-label="Close" onclick="closeModal('pause-overlay')">×</button></div>
+  <div class="modal-body">
+    <div id="pause-reasons" style="display:flex;flex-direction:column;gap:8px">
+      <button class="btn ghost block" onclick="confirmPause('Weather')">🌧️ Weather</button>
+      <button class="btn ghost block" onclick="confirmPause('Customer unavailable')">🚪 Customer unavailable</button>
+      <button class="btn ghost block" onclick="confirmPause('Equipment issue')">🔧 Equipment issue</button>
+    </div>
+    <div class="field" style="margin-top:14px"><label>Other reason</label><input id="pause-other" placeholder="Type a reason and press Pause"></div>
+  </div>
+  <div class="modal-foot"><button class="btn ghost" onclick="closeModal('pause-overlay')">Cancel</button><button class="btn primary" onclick="confirmPause(document.getElementById('pause-other').value)">Pause</button></div>
+</div></div>
+
+<div class="overlay" id="cancel-job-overlay"><div class="modal">
+  <div class="modal-head"><div><h3>Cancel job</h3><p>A reason is required — this is kept on the job's history.</p></div><button class="x" aria-label="Close" onclick="closeModal('cancel-job-overlay')">×</button></div>
+  <div class="modal-body">
+    <div class="field"><label>Reason</label><textarea id="cancel-reason" rows="3" placeholder="e.g. customer rescheduled indefinitely, access denied, weather written off..."></textarea></div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-top:10px"><input type="checkbox" id="cancel-notify" checked> Email the customer to let them know</label>
+  </div>
+  <div class="modal-foot"><button class="btn ghost" onclick="closeModal('cancel-job-overlay')">Never mind</button><button class="btn primary" style="background:var(--coral);border-color:var(--coral)" onclick="confirmCancelJob()">Cancel job</button></div>
+</div></div>
+
+<div class="overlay" id="signature-overlay"><div class="modal">
+  <div class="modal-head"><div><h3>Customer sign-off</h3><p>Optional — have the customer sign on this device.</p></div><button class="x" aria-label="Close" onclick="closeModal('signature-overlay')">×</button></div>
+  <div class="modal-body">
+    <canvas id="signature-pad" width="460" height="180" style="width:100%;height:180px;border:1px solid var(--line);border-radius:var(--radius-sm);touch-action:none;background:#fff"></canvas>
+    <button class="btn ghost sm" style="margin-top:8px" onclick="clearSignaturePad()">Clear</button>
+  </div>
+  <div class="modal-foot"><button class="btn ghost" onclick="skipSignature()">Skip</button><button class="btn primary" onclick="saveSignature()">Save signature</button></div>
+</div></div>
+
+<div class="overlay" id="job-note-overlay"><div class="modal">
+  <div class="modal-head"><div><h3>Add a note</h3><p>Logged on this job's timeline.</p></div><button class="x" aria-label="Close" onclick="closeModal('job-note-overlay')">×</button></div>
+  <div class="modal-body"><textarea id="job-note-text" rows="4" placeholder="e.g. gate code is 4471, dog is friendly but loud"></textarea></div>
+  <div class="modal-foot"><button class="btn ghost" onclick="closeModal('job-note-overlay')">Cancel</button><button class="btn primary" onclick="saveJobNote()">Save note</button></div>
+</div></div>
+
 <div class="overlay" id="tpl-overlay"><div class="modal">
   <div class="modal-head"><div><h3>Edit template</h3><p>Your header, contact details, colours and terms — applied to every quote and invoice.</p></div><button class="x" aria-label="Close" onclick="closeModal('tpl-overlay')">×</button></div>
   <div class="modal-body" id="tpl-body"></div>
@@ -1181,6 +1244,61 @@ function isBooked(r){return r.stage==='scheduled'||r.stage==='completed'}       
 function isJob(r){return r.stage!=='new'&&r.stage!=='quoted'&&r.stage!=='followup'&&r.stage!=='cancelled'}      // past the sales stages, still an active job
 function isCancelled(r){return r.stage==='cancelled'}
 function isOpenSale(r){return r.stage==='new'||r.stage==='quoted'||r.stage==='followup'} // still selling
+
+/* ===== Job status: the full customer-facing lifecycle badge, richer than
+   the 7-column Pipeline stage. `r.stage` still drives the kanban board
+   (unchanged, still exactly 7 columns) and the sales-side helpers above —
+   `r.jobStatus` is a separate, finer-grained field for the day-of
+   operational lifecycle (travelling/on site/in progress/paused) that sits
+   ON TOP of stage='scheduled' without disturbing it, so nothing that
+   already filters on stage (calendar, Ops "today", isBooked, etc) needed
+   to change. jobStatusOf() is the single source of truth for "what badge
+   does this job show right now" — every render site below uses it instead
+   of reading r.stage/r.paymentStatus directly. */
+const JOB_STATUS_META = {
+  lead:           {label:'Lead',           icon:'⚪', cls:'new'},
+  quoted:         {label:'Quoted',         icon:'🟡', cls:'quoted'},
+  quote_sent:     {label:'Quote Sent',     icon:'🟠', cls:'quoted'},
+  quote_accepted: {label:'Quote Accepted', icon:'🟢', cls:'won'},
+  scheduled:      {label:'Scheduled',      icon:'🔵', cls:'scheduled'},
+  travelling:     {label:'Travelling',     icon:'🚗', cls:'travelling'},
+  on_site:        {label:'On Site',        icon:'📍', cls:'on_site'},
+  in_progress:    {label:'In Progress',    icon:'🟠', cls:'in_progress'},
+  paused:         {label:'Paused',         icon:'⏸️', cls:'paused'},
+  completed:      {label:'Completed',      icon:'🟢', cls:'completed'},
+  cancelled:      {label:'Cancelled',      icon:'🔴', cls:'cancelled'},
+  invoiced:       {label:'Invoiced',       icon:'🟣', cls:'invoiced'},
+  paid:           {label:'Paid',           icon:'🟢', cls:'paid'},
+  overdue:        {label:'Overdue',        icon:'🔴', cls:'overdue'}
+};
+function jobStatusKeyOf(r){
+  if(r.stage==='cancelled')return 'cancelled';
+  if(invoiceDisplayStatus(r)==='overdue')return 'overdue';
+  if(r.stage==='paid')return 'paid';
+  if(r.paymentStatus==='sent')return 'invoiced';
+  if(r.stage==='completed')return 'completed';
+  if(r.jobStatus==='paused')return 'paused';
+  if(r.jobStatus==='in_progress')return 'in_progress';
+  if(r.jobStatus==='on_site')return 'on_site';
+  if(r.jobStatus==='travelling')return 'travelling';
+  if(r.stage==='scheduled')return 'scheduled';
+  if(r.stage==='won')return 'quote_accepted';
+  if(r.stage==='quoted'||r.stage==='followup')return 'quote_sent';
+  if(r.stage==='new'&&r.total>0)return 'quoted';
+  return 'lead';
+}
+function jobStatusOf(r){return Object.assign({key:jobStatusKeyOf(r)},JOB_STATUS_META[jobStatusKeyOf(r)])}
+function jobStatusBadge(r){const s=jobStatusOf(r);return `<span class="pill ${s.cls}">${s.icon} ${s.label}</span>`}
+// Every status change appends here (job-detail timeline) and to activity_log
+// (the cross-job Customer Profile timeline) — both fed by the same call so
+// they can never drift out of sync with each other.
+function logStatusChange(r,statusKey,note,extra){
+  if(!Array.isArray(r.statusHistory))r.statusHistory=[];
+  const who=(staff.find(u=>u.id===currentUserId)||{}).name||(staff.find(u=>u.id===currentUserId)||{}).email||'';
+  r.statusHistory.push({status:statusKey,at:Date.now(),by:currentUserId||null,byName:who,note:note||null});
+  const meta=JOB_STATUS_META[statusKey];
+  logActivity(r.customerId,r.jobId,'status_change',r.name+' — '+(meta?meta.label:statusKey)+(note?' ('+note+')':''),Object.assign({status:statusKey,note:note||null},extra||null));
+}
 // Days a quote can sit before Follow-Up auto-triggers (only if the client hasn't responded)
 const FOLLOWUP_DAYS = 3;
 const PIN_COLORS = ['#c2683a','#2f5d82','#0f7d6b','#9a7a32','#4a4f7a'];
@@ -1641,7 +1759,8 @@ function newRecord(d){return Object.assign({
   tech:'Unassigned',gps:'pending',scheduledDate:null,scheduledIdx:null,scheduledDateISO:null,createdAt:Date.now(),follows:[],
   quoteSentAt:null,clientResponded:false,paidAt:null,approvedAt:null,lastServiceDaysAgo:null,assumptions:null,areaPolys:null,selfPriced:false,
   hasCustomerPhoto:false,customerPhotoPath:null,quoteAttachments:[],assignedStaffId:null,
-  paymentStatus:'draft',paymentMethod:null,dueDate:null
+  paymentStatus:'draft',paymentMethod:null,dueDate:null,
+  jobStatus:null,statusHistory:[]
 },d)}
 
 let followSeq=1;
@@ -2810,7 +2929,6 @@ function openDetail(id){
   const lastIdx=checklist.steps.length-1;
   const done=r.sop.filter(Boolean).length;
   const pct=checklist.steps.length?Math.round(done/checklist.steps.length*100):0;
-  const stageObj=STAGES.find(s=>s.key===r.stage)||EXTRA_STAGES.find(s=>s.key===r.stage);
   const allDone=r.skipChecklist?(r.photoBefore&&r.photoAfter):(lastIdx>=0&&r.sop.slice(0,lastIdx).every(Boolean)&&r.photoBefore&&r.photoAfter);
   const approved=lastIdx>=0&&r.sop[lastIdx];
   const svcRows=r.services.map(s=>{const svc=SERVICES[s.svc];const rt=s.roofType?' · '+ROOF_TYPES[s.roofType].label:'';return `<div class="kv"><span class="k">${svc.label} · ${s.qty}${svc.unit}${rt}</span><span class="v">${money(lineSubtotal(s))}</span></div>`}).join('')||'<div class="kv"><span class="k">No services yet</span><span class="v">—</span></div>';
@@ -2819,6 +2937,7 @@ function openDetail(id){
   if(approved)approvalHtml=`<div class="approval-box approved"><div class="approved-stamp">✓ Customer approved — job closed</div></div>`;
   else if(allDone)approvalHtml=`<div class="approval-box ready"><div class="ttl">Ready for customer approval</div><div class="sub">All steps done and photos captured.</div><button class="btn primary" onclick="approve(${id})">Mark customer approved</button></div>`;
   else approvalHtml=`<div class="approval-box"><div class="ttl">Approval locked</div><div class="sub">Finish steps 1–5 and capture both photos first.</div></div>`;
+  const jobToolbarHtml=renderJobToolbar(r);
   const followHtml=(r.follows&&r.follows.length)?r.follows.map((f,i)=>`
     <div class="follow-edit ${f.state} ${f.enabled?'':'off'}">
       <div class="fe-reorder">
@@ -2846,7 +2965,12 @@ function openDetail(id){
 
   document.getElementById('view-detail').innerHTML=`
     <a class="back-link" onclick="render();switchView('pipeline')">← Back to pipeline</a>
-    <div class="view-head"><div><h2>${r.name}</h2><p>${r.address||'—'}${r.suburb?', '+r.suburb:''} · ${r.phone||'no phone'}</p></div><div style="display:flex;align-items:center;gap:10px"><button class="btn ghost sm" onclick="openCustomerProfile(${id})">👤 Full profile</button><span class="pill ${stageObj.cls}">${stageObj.label}</span>${r.stage!=='cancelled'&&r.stage!=='paid'?`<button class="btn ghost sm" onclick="cancelJob(${id})" title="Mark this job as cancelled">Cancel</button>`:''}</div></div>
+    <div class="view-head"><div><h2>${r.name}</h2><p>${r.address||'—'}${r.suburb?', '+r.suburb:''} · ${r.phone||'no phone'}</p></div><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <button class="btn ghost sm" onclick="openCustomerProfile(${id})">👤 Full profile</button>
+      ${jobStatusBadge(r)}
+      ${canEditJobStatus(r)?`<select style="font-size:12px;padding:4px 8px;border-radius:980px" onchange="setManualStatus(${id},this.value)"><option value="">Change status…</option>${manualStatusOptions(r)}</select>`:''}
+      ${r.stage!=='cancelled'&&r.stage!=='paid'?`<button class="btn ghost sm" onclick="cancelJob(${id})" title="Mark this job as cancelled">Cancel</button>`:''}
+    </div></div>
     <div class="detail-grid">
       <div>
         <div class="panel"><h4>Contact <span class="eng-badge">Client</span></h4>
@@ -2879,8 +3003,13 @@ function openDetail(id){
       <div>
         ${isJob(r)?`
         <div class="panel"><h4>${r.skipChecklist?'Job progress':checklist.name+' — '+done+'/'+checklist.steps.length} <span class="eng-badge">Operations</span></h4>
-          ${r.stage==='scheduled'&&!r.startedAt?`<button class="btn accent block" style="margin-bottom:14px" onclick="startJob(${id})">▶ Start job</button>`:''}
-          ${r.startedAt?`<p style="font-size:12px;color:var(--ink-faint);margin:-6px 0 14px">Started ${timeAgo(r.startedAt)}</p>`:''}
+          ${r.stage==='scheduled'&&!r.startedAt?`
+          <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+            ${!r.jobStatus||r.jobStatus==='travelling'?`<button class="btn ghost sm" onclick="markTravelling(${id})">🚗 On my way</button>`:''}
+            ${r.jobStatus==='travelling'||r.jobStatus==='on_site'?`<button class="btn ghost sm" onclick="markOnSite(${id})">📍 Arrived</button>`:''}
+            <button class="btn accent sm" onclick="startJob(${id})">▶ Start job</button>
+          </div>`:''}
+          ${r.startedAt&&r.stage==='scheduled'?`<p style="font-size:12px;color:var(--ink-faint);margin:-6px 0 14px">${jobStatusOf(r).icon} ${jobStatusOf(r).label} — started ${timeAgo(r.startedAt)}${r.jobStatus==='paused'&&r.pauseReason?' · paused: '+r.pauseReason:''}</p>`:''}
           ${r.skipChecklist?`<p style="font-size:12px;color:var(--ink-faint);margin:-6px 0 14px">Checklist turned off for this job — just photos and sign-off. <a href="#" onclick="toggleSkipChecklist(${id});return false" style="color:var(--teal)">Turn it back on</a></p>`:`
           <div class="progress-wrap"><div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div><div class="progress-txt">${pct}% — every step logs to the record</div></div>
           <div class="sop">${sopHtml}</div>
@@ -2895,21 +3024,97 @@ function openDetail(id){
           <div class="kv"><span class="k">Crew</span><span class="v">${r.tech}</span></div>
           ${r.scheduledDate?`<div class="kv"><span class="k">Booked for</span><span class="v">${r.scheduledDate}${(()=>{const tl=dayTimeline(r.scheduledDateISO);const me=tl.find(s=>s.job.id===r.id);return me?' · '+fmtTime(me.start):'';})()}</span></div>`:''}
           <div class="kv"><span class="k">GPS check-in</span><span class="v">${r.gps==='checked'?'On site ✓':r.gps==='enroute'?'En route':'Not started'}</span></div>
+          ${r.finishedAt&&r.durationMin!=null?`<div class="kv"><span class="k">Job duration</span><span class="v">${fmtDur(r.durationMin)}</span></div>`:''}
+          ${r.cancelReason?`<div class="kv"><span class="k">Cancel reason</span><span class="v">${r.cancelReason}</span></div>`:''}
+          ${r.signatureDataUrl?`<div style="margin-top:10px"><div class="k" style="font-size:12px;color:var(--ink-faint);margin-bottom:4px">Customer signature</div><img src="${r.signatureDataUrl}" alt="Customer signature" style="max-width:200px;border:1px solid var(--line);border-radius:var(--radius-sm);background:#fff"></div>`:''}
         </div>
+        <div class="panel"><h4>Timeline</h4>${renderJobTimeline(r)}</div>
       </div>
-    </div>`;
+    </div>
+    ${jobToolbarHtml?'<div style="height:64px"></div>'+jobToolbarHtml:''}`;
   switchView('detail');
 }
-function startJob(id){const r=records.find(x=>x.id===id);r.startedAt=Date.now();logActivity(r.customerId,r.jobId,'status_change',r.name+"'s job started");openDetail(id);toast('Job started ✓')}
+/* ===== Job lifecycle: Start → (Travelling → On Site, optional) → In
+   Progress → Pause/Resume any number of times → Complete or Cancel.
+   Every transition goes through logStatusChange() so the job-detail
+   timeline and the Customer Profile timeline can never drift apart, and
+   every mutation calls render()/renderAll() so the Pipeline, Calendar,
+   Ops, Dashboard and Customer Profile all pick it up immediately — none
+   of them poll r.stage/r.jobStatus on a timer, they just re-read
+   `records` on every render() call already wired up app-wide. ===== */
+function startJob(id){
+  const r=records.find(x=>x.id===id);if(!r)return;
+  r.startedAt=Date.now();
+  r.jobStatus='in_progress';
+  r.gps='checked';
+  if(navigator.geolocation){
+    navigator.geolocation.getCurrentPosition(pos=>{r.startLocation={lat:pos.coords.latitude,lng:pos.coords.longitude};},()=>{},{timeout:5000,maximumAge:60000});
+  }
+  logStatusChange(r,'in_progress');
+  render();renderAll();
+  openDetail(id);
+  toast('Job started ✓');
+}
+function markTravelling(id){
+  const r=records.find(x=>x.id===id);if(!r)return;
+  r.jobStatus='travelling';r.gps='enroute';
+  logStatusChange(r,'travelling');
+  render();renderAll();openDetail(id);toast('Marked as travelling');
+}
+function markOnSite(id){
+  const r=records.find(x=>x.id===id);if(!r)return;
+  r.jobStatus='on_site';r.gps='checked';
+  logStatusChange(r,'on_site');
+  render();renderAll();openDetail(id);toast('Marked as on site');
+}
+let pendingPauseId=null;
+function pauseJob(id){pendingPauseId=id;const el=document.getElementById('pause-other');if(el)el.value='';openModal('pause-overlay');}
+function confirmPause(reason){
+  reason=(reason||'').trim();
+  if(!reason){toast('Pick or type a reason');return;}
+  const r=records.find(x=>x.id===pendingPauseId);if(!r)return;
+  r.jobStatus='paused';r.pauseReason=reason;r.pausedAt=Date.now();
+  logStatusChange(r,'paused',reason);
+  closeModal('pause-overlay');
+  render();renderAll();openDetail(r.id);toast('Job paused');
+}
+function resumeJob(id){
+  const r=records.find(x=>x.id===id);if(!r)return;
+  r.jobStatus='in_progress';r.pauseReason=null;
+  logStatusChange(r,'in_progress','resumed after pause');
+  render();renderAll();openDetail(id);toast('Job resumed ✓');
+}
+// The one place a job actually finishes — the toolbar's Complete button and
+// the checklist's "Mark customer approved" button (via approve(), see
+// below) both route through here so there's only one completion code path,
+// not two that could drift apart.
+async function completeJob(id,skipConfirm){
+  const r=records.find(x=>x.id===id);if(!r)return;
+  if(!skipConfirm&&!confirm('Mark this job as completed for '+r.name+'?'))return;
+  const finishedAt=Date.now();
+  r.finishedAt=finishedAt;
+  r.durationMin=r.startedAt?Math.round((finishedAt-r.startedAt)/60000):null;
+  if(!r.skipChecklist){ensureSopSized(r);r.sop=r.sop.map(()=>true);} // "mark checklist complete (if enabled)"
+  r.stage='completed';r.jobStatus='completed';r.gps='checked';
+  logStatusChange(r,'completed',null,{durationMin:r.durationMin});
+  render();renderAll();
+  openDetail(id);
+  toast('Job completed ✓'+(r.durationMin?' — '+fmtDur(r.durationMin)+' on site':''));
+  if(!r.photoAfter&&confirm('Add an after photo now?'))pickJobPhoto(id,'after');
+  if(confirm("Get the customer's signature now? (optional)"))openSignaturePad(id);
+  if(emailAccount&&r.email&&confirm('Send the completion email to '+r.name+' now?'))sendLifecycleEmail(r,'job_completed');
+  if(confirm('Create the invoice now?'))previewInvoice(id);
+}
 // SOPs are useful but not every business/job needs them — this just hides
 // the step list for this one job (before/after photos and sign-off still
 // apply); the underlying steps aren't lost, so turning it back on picks up
 // wherever they left off.
 function toggleSkipChecklist(id){const r=records.find(x=>x.id===id);r.skipChecklist=!r.skipChecklist;openDetail(id);}
-// Only fires the "job completed" lifecycle email on the actual scheduled→completed
-// transition, never on repeat calls once a job is already completed.
-function markJobCompleted(r){if(r.stage==='scheduled'){r.stage='completed';sendLifecycleEmail(r,'job_completed');}}
-function toggleSop(id,i){const r=records.find(x=>x.id===id);r.sop[i]=!r.sop[i];if(r.sop.some(Boolean))markJobCompleted(r);openDetail(id)}
+// Just toggles the box — checking a step no longer silently completes the
+// job (that was the old, confusing behaviour: ticking step 1 of 5 would
+// flip the whole job to Completed). Completion is only ever explicit now,
+// via the toolbar's Complete Job button or the approval step below.
+function toggleSop(id,i){const r=records.find(x=>x.id===id);r.sop[i]=!r.sop[i];openDetail(id)}
 let pendingPhotoTarget=null;
 function pickJobPhoto(id,slot){pendingPhotoTarget={id,slot,kind:'job_photo'};document.getElementById('photo-upload-input').click();}
 function pickCustomerPhoto(id){pendingPhotoTarget={id,slot:null,kind:'customer_photo'};document.getElementById('photo-upload-input').click();}
@@ -2925,7 +3130,6 @@ async function onPhotoChosen(input){
   if(!row)return;
   if(kind==='job_photo'){
     if(slot==='before')r.photoBefore=true;else r.photoAfter=true;
-    markJobCompleted(r);
   }else if(kind==='customer_photo'){
     r.hasCustomerPhoto=true;r.customerPhotoPath=row.path;
   }
@@ -2937,7 +3141,13 @@ async function viewCustomerPhoto(id){
   const url=await signedUrlFor(r.customerPhotoPath);
   if(url)window.open(url,'_blank');else toast('Could not open photo');
 }
-function approve(id){const r=records.find(x=>x.id===id);const tpl=ensureSopSized(r);r.sop[tpl.steps.length-1]=true;r.stage='completed';r.approvedAt=Date.now();r.gps='checked';openDetail(id);toast('Job approved & closed ✓')}
+function approve(id){
+  const r=records.find(x=>x.id===id);if(!r)return;
+  const tpl=ensureSopSized(r);
+  r.sop[tpl.steps.length-1]=true;
+  r.approvedAt=Date.now();
+  completeJob(id,true); // already an explicit "approve & close" click — don't ask "are you sure" twice
+}
 
 /* ---------- PIPELINE + LEADS render ---------- */
 // ===== Smart alerts: surfaced from real record data =====
@@ -3088,9 +3298,14 @@ function cardHtml(r){
   // its own payment status (draft/sent/viewed/approved/paid/overdue)
   // independent of the job's own stage, shown alongside it here.
   const invoiceBadge=(r.stage!=='paid'&&r.paymentStatus==='sent')?`<span class="pill" style="margin-left:6px">Invoiced</span>`:'';
+  // On the board, the column already says "Scheduled" — only show a badge
+  // here for the finer day-of states that aren't otherwise visible (a card
+  // sitting in Scheduled gives no clue whether the tech has actually
+  // started/paused it without this).
+  const jobStatusChip=(r.jobStatus&&r.stage==='scheduled')?` ${jobStatusBadge(r)}`:'';
   return `<button class="card${flag?' has-flag flag-'+flag.tone:''}" onclick="openDetail(${r.id})">
     ${flag?`<div class="card-flag ${flag.tone}">${flag.label}</div>`:''}
-    <div class="name">${r.name}${invoiceBadge}</div>
+    <div class="name">${r.name}${invoiceBadge}${jobStatusChip}</div>
     <div class="meta">${r.suburb||r.address||'—'}</div>
     ${tags?`<div class="svc-tags">${tags}</div>`:''}
     <div class="foot"><span class="price">${r.total?money(r.total):'No quote'}</span><span class="meta">${r.source||''}</span></div>
@@ -3165,7 +3380,7 @@ function renderCustomerProfile(){
     </div>
 
     ${upcoming.length?`<div class="panel" style="margin-bottom:14px"><h4>Upcoming work</h4>
-      ${upcoming.map(r=>`<div class="kv"><span class="k">${r.name} — ${r.scheduledDate||'Date TBC'}</span><span class="v"><span class="pill ${stageObj(r.stage).cls}">${stageObj(r.stage).label}</span></span></div>`).join('')}
+      ${upcoming.map(r=>`<div class="kv"><span class="k">${r.name} — ${r.scheduledDate||'Date TBC'}</span><span class="v">${jobStatusBadge(r)}</span></div>`).join('')}
     </div>`:''}
 
     <div class="cp-grid">
@@ -3182,7 +3397,7 @@ function renderCustomerProfile(){
           <button class="btn accent sm" style="margin-top:8px" onclick="saveCustomerNotes()">Save notes</button>
         </div>
         <div class="panel" style="margin-bottom:14px"><h4>Service history <span class="demo-tag">${jobs.length}</span></h4>
-          ${jobs.map(r=>`<div class="kv" style="cursor:pointer" onclick="closeCustomerProfile();openDetail(${r.id})"><span class="k">${r.scheduledDate||'Not scheduled'}${r.tech&&r.tech!=='Unassigned'?' · '+r.tech:''}</span><span class="v"><span class="pill ${stageObj(r.stage).cls}">${stageObj(r.stage).label}</span> ${r.total?money(r.total):''}</span></div>`).join('')}
+          ${jobs.map(r=>`<div class="kv" style="cursor:pointer" onclick="closeCustomerProfile();openDetail(${r.id})"><span class="k">${r.scheduledDate||'Not scheduled'}${r.tech&&r.tech!=='Unassigned'?' · '+r.tech:''}</span><span class="v">${jobStatusBadge(r)} ${r.total?money(r.total):''}</span></div>`).join('')}
         </div>
         <div class="panel"><h4>Quotes <span class="demo-tag">${ctx.quotes.length}</span></h4>
           ${ctx.quotes.length?ctx.quotes.map(q=>`<div class="kv"><span class="k">${new Date(q.created_at).toLocaleDateString('en-NZ',{day:'numeric',month:'short',year:'numeric'})}</span><span class="v">${money(q.amount||0)} · <span class="pill">${q.status||'sent'}</span></span></div>`).join(''):'<div class="empty-state" style="padding:16px"><div class="sm">No quotes recorded yet.</div></div>'}
@@ -3525,6 +3740,16 @@ function dashboardAlerts(){
   if(todayCount)alerts.push({icon:'✅',tone:'good',text:`${todayCount} job${todayCount!==1?'s':''} scheduled today.`,onclick:"switchView('ops')"});
   const dueRepeats=records.filter(r=>r.nextDueDate&&r.nextDueDate<=todayIso).length;
   if(dueRepeats)alerts.push({icon:'🔁',tone:'warn',text:`${dueRepeats} customer${dueRepeats!==1?'s are':' is'} due for their repeat clean.`,onclick:"openDueRepeats()"});
+  // Nothing should sit In Progress/Paused indefinitely — flag anything
+  // that's been active for more than a normal working day so it gets
+  // manually closed out rather than quietly rotting.
+  const stuckMs=10*60*60*1000;
+  const stuck=records.filter(r=>r.jobStatus&&(r.jobStatus==='in_progress'||r.jobStatus==='paused')&&r.startedAt&&(Date.now()-r.startedAt)>stuckMs);
+  if(stuck.length){
+    const one=stuck.length===1;
+    const word=one?(stuck[0].jobStatus==='paused'?'paused':'in progress'):'active';
+    alerts.push({icon:'⏱️',tone:'bad',text:`${stuck.length} job${one?'':'s'} ${one?'has':'have'} been ${word} for over 10 hours — check ${one?'it':'them'}.`,onclick:"openDetail("+stuck[0].id+")"});
+  }
   const tone=(a)=>({bad:0,warn:1,good:2})[a.tone];
   return alerts.sort((a,b)=>tone(a)-tone(b));
 }
@@ -3783,7 +4008,7 @@ function renderJobsFlow(){
     <div class="jf-card">
       <div class="jf-cardhead">
         <div><div class="jf-name">${r.name}</div><div class="jf-sub">${r.suburb||r.address||''} · ${r.total?money(r.total):'no quote'}</div></div>
-        <span class="pill ${stageObj(r.stage).cls}">${stageObj(r.stage).label}</span>
+        ${jobStatusBadge(r)}
       </div>
       <div class="jf-track">
         ${FLOW_STEPS.map((s,i)=>`
@@ -3804,13 +4029,172 @@ function markPaid(id,method){const r=records.find(x=>x.id===id);r.stage='paid';r
 // Cancelled jobs leave the active Pipeline board (it isn't one of STAGES'
 // board columns) but keep their full history — reachable from the customer
 // profile and dashboard the same as any other job, just visually distinct.
+let pendingCancelId=null;
 function cancelJob(id){
-  const r=records.find(x=>x.id===id);if(!r)return;
-  if(!confirm('Mark '+r.name+"'s job as cancelled? It'll come off the active pipeline but stay in their history."))return;
-  r.stage='cancelled';r.cancelledAt=Date.now();
+  pendingCancelId=id;
+  const reasonEl=document.getElementById('cancel-reason'),notifyEl=document.getElementById('cancel-notify');
+  if(reasonEl)reasonEl.value='';
+  if(notifyEl)notifyEl.checked=true;
+  openModal('cancel-job-overlay');
+}
+async function confirmCancelJob(){
+  const reason=(document.getElementById('cancel-reason').value||'').trim();
+  if(!reason){toast('A reason is required');return;}
+  const notify=document.getElementById('cancel-notify').checked;
+  const r=records.find(x=>x.id===pendingCancelId);if(!r)return;
+  r.stage='cancelled';r.jobStatus=null;r.cancelledAt=Date.now();r.cancelReason=reason;
+  logStatusChange(r,'cancelled',reason);
+  closeModal('cancel-job-overlay');
   render();renderAll();
   toast(r.name+' marked cancelled');
-  logActivity(r.customerId,r.jobId,'status_change',r.name+"'s job was cancelled");
+  if(notify&&emailAccount&&r.email){
+    const first=(r.name||'').split(' ')[0]||'there';
+    const bizName=docBizName();
+    const subject='Update on your booking with '+bizName;
+    const bodyText='Hi '+first+',\n\nWe need to cancel your upcoming job'+(r.scheduledDate?' on '+r.scheduledDate:'')+'.\n\n'+reason+'\n\nWe\'ll be in touch to sort out a new time — sorry for the inconvenience.\n\n'+bizName;
+    const bodyHtml=renderEmailBodyHtml(bodyText);
+    await sendEmailViaBackend({to:r.email,subject,bodyText,bodyHtml,customerId:r.customerId});
+  }
+}
+
+/* ===== Customer sign-off — drawn signature captured on whatever device the
+   job is being closed out on. Stored as a small PNG data URL directly on
+   the record (rides through the existing jobs.details jsonb column, same
+   as everything else here — no attachment/storage round trip needed for
+   something this small). Optional: skipping it doesn't block completion,
+   completeJob() has already finished the job by the time this opens. ===== */
+let pendingSignatureJobId=null, sigCtx=null, sigDrawing=false;
+function openSignaturePad(id){
+  pendingSignatureJobId=id;
+  openModal('signature-overlay');
+  requestAnimationFrame(initSignaturePad);
+}
+function initSignaturePad(){
+  const canvas=document.getElementById('signature-pad');
+  if(!canvas)return;
+  const rect=canvas.getBoundingClientRect();
+  canvas.width=Math.max(1,rect.width)*2;canvas.height=Math.max(1,rect.height)*2;
+  sigCtx=canvas.getContext('2d');
+  sigCtx.scale(2,2);
+  sigCtx.strokeStyle='#0a1c2b';sigCtx.lineWidth=2;sigCtx.lineCap='round';sigCtx.lineJoin='round';
+  sigCtx.fillStyle='#fff';sigCtx.fillRect(0,0,canvas.width,canvas.height);
+  sigDrawing=false;
+  const point=e=>{const r=canvas.getBoundingClientRect();return {x:e.clientX-r.left,y:e.clientY-r.top};};
+  canvas.onpointerdown=e=>{sigDrawing=true;const p=point(e);sigCtx.beginPath();sigCtx.moveTo(p.x,p.y);canvas.setPointerCapture(e.pointerId);};
+  canvas.onpointermove=e=>{if(!sigDrawing)return;const p=point(e);sigCtx.lineTo(p.x,p.y);sigCtx.stroke();};
+  canvas.onpointerup=()=>{sigDrawing=false;};
+}
+function clearSignaturePad(){
+  const canvas=document.getElementById('signature-pad');if(!canvas||!sigCtx)return;
+  sigCtx.fillStyle='#fff';sigCtx.fillRect(0,0,canvas.width,canvas.height);
+}
+function saveSignature(){
+  const canvas=document.getElementById('signature-pad');
+  const r=records.find(x=>x.id===pendingSignatureJobId);
+  if(canvas&&r){
+    r.signatureDataUrl=canvas.toDataURL('image/png');
+    if(!Array.isArray(r.statusHistory))r.statusHistory=[];
+    r.statusHistory.push({status:null,at:Date.now(),by:currentUserId||null,byName:'',note:'Customer signed off'});
+    logActivity(r.customerId,r.jobId,'status_change',r.name+' — customer signed off');
+    render();renderAll();openDetail(r.id);
+  }
+  closeModal('signature-overlay');
+  toast('Signature saved ✓');
+}
+function skipSignature(){closeModal('signature-overlay');}
+
+/* ===== Job notes — a free-text entry on the job timeline, distinct from the
+   Customer Profile's notes field (that's the customer/property; this is a
+   specific moment on this specific job — "gate code is 4471"). ===== */
+let pendingNoteJobId=null;
+function promptJobNote(id){
+  pendingNoteJobId=id;
+  const el=document.getElementById('job-note-text');if(el)el.value='';
+  openModal('job-note-overlay');
+}
+function saveJobNote(){
+  const text=(document.getElementById('job-note-text').value||'').trim();
+  if(!text){toast('Write something first');return;}
+  const r=records.find(x=>x.id===pendingNoteJobId);if(!r)return;
+  if(!Array.isArray(r.statusHistory))r.statusHistory=[];
+  r.statusHistory.push({status:null,at:Date.now(),by:currentUserId||null,byName:(staff.find(u=>u.id===currentUserId)||{}).name||'',note:text});
+  logActivity(r.customerId,r.jobId,'note',text);
+  closeModal('job-note-overlay');
+  render();renderAll();openDetail(r.id);
+  toast('Note added');
+}
+
+/* ===== Floating job toolbar — shown on the job detail view only while a
+   job is actively being worked (travelling/on site/in progress/paused).
+   Complete/Pause/Resume/Cancel/Photos/Notes/Call/Navigate, all one tap
+   away instead of scrolling through the full detail panel. ===== */
+function renderJobToolbar(r){
+  if(!r.jobStatus||r.stage!=='scheduled')return '';
+  const status=jobStatusOf(r);
+  const pauseResume=r.jobStatus==='paused'
+    ?`<button class="jt-primary" onclick="resumeJob(${r.id})">▶ Resume</button>`
+    :`<button onclick="pauseJob(${r.id})">⏸ Pause</button>`;
+  const nextPhotoSlot=!r.photoBefore?'before':'after';
+  const addr=[r.address,r.suburb].filter(Boolean).join(', ');
+  return `<div class="job-toolbar">
+    <span class="jt-status">${status.icon} ${status.label}${r.startedAt?' · started '+timeAgo(r.startedAt):''}</span>
+    <button class="jt-primary" onclick="completeJob(${r.id})">✓ Complete</button>
+    ${pauseResume}
+    <button class="jt-danger" onclick="cancelJob(${r.id})">✕ Cancel</button>
+    <button onclick="pickJobPhoto(${r.id},'${nextPhotoSlot}')">📷 Photos</button>
+    <button onclick="promptJobNote(${r.id})">📝 Note</button>
+    ${r.phone?`<button onclick="window.location.href='tel:${r.phone.replace(/\s/g,'')}'">📞 Call</button>`:''}
+    ${addr?`<button onclick="window.open('https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}','_blank')">🧭 Navigate</button>`:''}
+  </div>`;
+}
+
+/* ===== Job timeline — every entry from r.statusHistory (status changes,
+   notes, signature) in one chronological list. Complements, not
+   duplicates, the Customer Profile's cross-job communication timeline
+   (activity_log) — this one is scoped to a single job. ===== */
+function renderJobTimeline(r){
+  const entries=(r.statusHistory||[]).slice().sort((a,b)=>a.at-b.at);
+  if(!entries.length)return '<div class="empty-state" style="padding:16px"><div class="sm">Nothing logged yet.</div></div>';
+  return entries.map(e=>{
+    const meta=e.status?JOB_STATUS_META[e.status]:null;
+    const icon=meta?meta.icon:'📝';
+    const label=meta?meta.label:(e.note?'Note':'Update');
+    const when=new Date(e.at).toLocaleString('en-NZ',{hour:'numeric',minute:'2-digit',day:'numeric',month:'short'});
+    return `<div class="dd-row"><span><b>${when}</b> · ${icon} ${label}${e.byName?' · '+e.byName:''}${e.note&&meta?' — '+e.note:e.note?': '+e.note:''}</span></div>`;
+  }).join('');
+}
+
+/* ===== Manual status override — owners/managers can always jump a job to
+   any status directly; technicians only for jobs assigned to them. This
+   writes through the exact same r.stage/r.jobStatus fields the guided
+   flow uses, so nothing downstream (Dashboard/Calendar/Ops/Customer
+   Profile/Pipeline) needs to treat a manual change any differently. ===== */
+function canEditJobStatus(r){
+  if(currentUserRole==='owner'||currentUserRole==='manager')return true;
+  if(currentUserRole==='technician')return r.assignedStaffId===currentUserId;
+  return false;
+}
+const MANUAL_STATUS_MAP={
+  lead:{stage:'new',jobStatus:null}, quoted:{stage:'new',jobStatus:null},
+  quote_sent:{stage:'quoted',jobStatus:null}, quote_accepted:{stage:'won',jobStatus:null},
+  scheduled:{stage:'scheduled',jobStatus:null}, travelling:{stage:'scheduled',jobStatus:'travelling'},
+  on_site:{stage:'scheduled',jobStatus:'on_site'}, in_progress:{stage:'scheduled',jobStatus:'in_progress'},
+  paused:{stage:'scheduled',jobStatus:'paused'}, completed:{stage:'completed',jobStatus:'completed'},
+  cancelled:{stage:'cancelled',jobStatus:null}, paid:{stage:'paid',jobStatus:null}
+};
+function manualStatusOptions(r){
+  const current=jobStatusKeyOf(r);
+  return Object.keys(MANUAL_STATUS_MAP).map(k=>`<option value="${k}" ${current===k?'selected':''}>${JOB_STATUS_META[k].icon} ${JOB_STATUS_META[k].label}</option>`).join('');
+}
+function setManualStatus(id,key){
+  const r=records.find(x=>x.id===id);if(!r)return;
+  if(!canEditJobStatus(r)){toast('You can only change the status of your own assigned jobs');return;}
+  const target=MANUAL_STATUS_MAP[key];
+  if(!target){toast('That status follows automatically — nothing to set manually');return;}
+  r.stage=target.stage;r.jobStatus=target.jobStatus;
+  logStatusChange(r,key,'manually changed');
+  render();renderAll();openDetail(id);
+  toast('Status updated');
 }
 function setPaymentMethod(id,method){const r=records.find(x=>x.id===id);if(!r)return;r.paymentMethod=method;saveState();scheduleSupabaseSync();}
 // Stripe Payment Links — no-op with a clear message until STRIPE_SECRET_KEY
@@ -3879,12 +4263,18 @@ function weatherAlerts(){
    innerHTML on its container, since renderCalendar() can be called more than once per
    visit — e.g. when live weather finishes loading while the tab is already open). */
 let fcCalendarInstance=null;
+const JOB_STATUS_CAL_COLOR={
+  in_progress:'#c2683a', paused:'#9a7a32', travelling:'#2f7d8f', on_site:'#2c7a6b',
+  completed:'#138a72', paid:'#5b6b78'
+};
 function buildCalendarEvents(){
   return records.filter(r=>isBooked(r)&&r.scheduledDateISO).map(r=>{
-    const color=r.stage==='completed'?'#138a72':(r.stage==='paid'?'#5b6b78':'#3d6fae');
+    const key=r.stage==='paid'?'paid':(r.stage==='completed'?'completed':r.jobStatus);
+    const color=JOB_STATUS_CAL_COLOR[key]||'#3d6fae';
+    const status=jobStatusOf(r);
     return {
       id:String(r.id),
-      title:r.name+(r.tech&&r.tech!=='Unassigned'?' · '+r.tech:''),
+      title:status.icon+' '+r.name+(r.tech&&r.tech!=='Unassigned'?' · '+r.tech:''),
       start:r.scheduledDateISO,
       allDay:true,
       backgroundColor:color,borderColor:color,
