@@ -421,6 +421,18 @@
   .cp-timeline-when{font-size:11px;color:var(--ink-faint);margin-top:1px}
   @media(max-width:720px){.cp-grid{grid-template-columns:1fr}.cp-stats{grid-template-columns:repeat(2,1fr)}}
 
+  /* ===== Shared "booked" hero — reused on Customer Profile and Job Detail
+     so booking info reads the same way everywhere instead of being a
+     different one-off layout per page. Sits first in its column so it's
+     one of the first things visible, per the brief. ===== */
+  .booked-hero{background:var(--teal-wash);border:1px solid var(--teal);border-radius:var(--radius-sm);padding:16px;margin-bottom:18px}
+  .booked-tag{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--teal);margin-bottom:10px}
+  .booked-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:12px;margin-bottom:14px}
+  .booked-item .l{display:block;font-size:10.5px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.03em;margin-bottom:2px}
+  .booked-item .v{display:block;font-size:14px;font-weight:600;color:var(--ink)}
+  .booked-actions{display:flex;gap:8px;flex-wrap:wrap}
+  @media(max-width:720px){.booked-actions .btn{flex:1;min-width:120px}}
+
   /* inbox */
   .ib-layout{display:grid;grid-template-columns:320px 1fr;gap:16px;align-items:start}
   .ib-list{display:flex;flex-direction:column;gap:6px;max-height:70vh;overflow-y:auto}
@@ -550,8 +562,13 @@
      solid rounded pill with real weight so a booked day reads at a glance. */
   .fc-wrap .fc-event{cursor:pointer;font-size:11.5px;font-weight:600;padding:3px 7px;border:none;border-radius:6px;margin-top:2px}
   .fc-wrap .fc-daygrid-event-dot{display:none} /* redundant once the whole chip is solid-coloured */
-  .fc-wrap .fc-daygrid-day-frame{min-height:92px}
+  .fc-wrap .fc-daygrid-day-frame{min-height:106px}
   .fc-wrap .fc-daygrid-more-link{font-size:11px;font-weight:600;color:var(--ink-soft)}
+  /* The primary "this day is busy" signal — deliberately bigger and bolder
+     than the weather badge / job-count-revenue-tech chips below it, so it's
+     the one thing that jumps out scanning a full month at a glance. */
+  .fc-booked-badge{display:inline-flex;align-items:center;gap:4px;font-size:12.5px;font-weight:700;color:#fff;background:var(--teal);padding:4px 10px;border-radius:980px;margin:3px 4px 0}
+  @media(max-width:640px){.fc-booked-badge{font-size:11px;padding:3px 8px}}
   .fc-wx-badge{font-size:9.5px;font-weight:700;letter-spacing:.02em;text-transform:uppercase;padding:1px 5px;border-radius:980px;display:inline-block;margin:2px 4px 0 auto}
   .fc-wx-badge.fc-wx-good{background:var(--teal-wash);color:var(--teal)}
   .fc-wx-badge.fc-wx-warn{background:#fbf6ec;color:#9a7a32}
@@ -3046,6 +3063,7 @@ function openDetail(id){
   else if(allDone)approvalHtml=`<div class="approval-box ready"><div class="ttl">Ready for customer approval</div><div class="sub">All steps done and photos captured.</div><button class="btn primary" onclick="approve(${id})">Mark customer approved</button></div>`;
   else approvalHtml=`<div class="approval-box"><div class="ttl">Approval locked</div><div class="sub">Finish steps 1–5 and capture both photos first.</div></div>`;
   const jobToolbarHtml=renderJobToolbar(r);
+  const jobScheduleCardHtml=renderJobScheduleCard(r);
   const followHtml=(r.follows&&r.follows.length)?r.follows.map((f,i)=>`
     <div class="follow-edit ${f.state} ${f.enabled?'':'off'}">
       <div class="fe-reorder">
@@ -3081,18 +3099,17 @@ function openDetail(id){
     </div></div>
     <div class="detail-grid">
       <div>
+        ${jobScheduleCardHtml}
         <div class="panel"><h4>Contact <span class="eng-badge">Client</span></h4>
           <div class="contact-rows">
             <a class="contact-row" href="tel:${(r.phone||'').replace(/\s/g,'')}"><span class="ci">📞</span><div><div class="cl">Phone</div><div class="cv">${r.phone||'—'}</div></div></a>
             <a class="contact-row" href="mailto:${r.email||''}"><span class="ci">✉️</span><div><div class="cl">Email</div><div class="cv">${r.email||'—'}</div></div></a>
             <div class="contact-row"><span class="ci">📍</span><div><div class="cl">Address</div><div class="cv">${r.address||'—'}${r.suburb?', '+r.suburb:''}</div></div></div>
-            ${r.scheduledDate?`<div class="contact-row"><span class="ci">📅</span><div><div class="cl">Booked for</div><div class="cv">${r.scheduledDate} · ${r.tech||'Unassigned'}</div></div></div>`:''}
           </div>
           <div style="display:flex;gap:8px;margin-top:12px">
             <button class="btn ghost sm" onclick="pickCustomerPhoto(${id})">${r.hasCustomerPhoto?'✓ Photo attached — replace':'📷 Add customer photo'}</button>
             ${r.hasCustomerPhoto?`<button class="btn ghost sm" onclick="viewCustomerPhoto(${id})">View</button>`:''}
           </div>
-          ${isOpenSale(r)&&r.services.length?`<button class="btn accent block" style="margin-top:12px" onclick="openSchedule(${id})">📅 Book this job</button>`:r.scheduledDate?`<button class="btn ghost block" style="margin-top:12px" onclick="openSchedule(${id})">Reschedule</button>`:''}
         </div>
         <div class="panel"><h4>Quote <span class="eng-badge">Pricing</span></h4>${svcRows}
           <div class="kv" style="border-top:1px solid var(--line);margin-top:6px;padding-top:10px"><span class="k" style="font-weight:600;color:var(--ink)">Total <span class="seg">${segOf(r.total)} job</span></span><span class="v" style="font-size:18px;color:var(--teal)">${money(r.total)}</span></div>
@@ -3130,7 +3147,6 @@ function openDetail(id){
         </div>`}
         <div class="panel"><h4>Assignment</h4>
           <div class="kv"><span class="k">Crew</span><span class="v">${r.tech}</span></div>
-          ${r.scheduledDate?`<div class="kv"><span class="k">Booked for</span><span class="v">${r.scheduledDate}${(()=>{const tl=dayTimeline(r.scheduledDateISO);const me=tl.find(s=>s.job.id===r.id);return me?' · '+fmtTime(me.start):'';})()}</span></div>`:''}
           <div class="kv"><span class="k">GPS check-in</span><span class="v">${r.gps==='checked'?'On site ✓':r.gps==='enroute'?'En route':'Not started'}</span></div>
           ${r.finishedAt&&r.durationMin!=null?`<div class="kv"><span class="k">Job duration</span><span class="v">${fmtDur(r.durationMin)}</span></div>`:''}
           ${r.cancelReason?`<div class="kv"><span class="k">Cancel reason</span><span class="v">${r.cancelReason}</span></div>`:''}
@@ -3508,6 +3524,34 @@ function renderCustomerProfile(){
   const files=ctx.attachments.filter(a=>a.kind!=='before_photo'&&a.kind!=='after_photo');
 
   const latestJob=jobs.reduce((a,b)=>(b.createdAt||0)>(a.createdAt||0)?b:a,jobs[0]);
+  // The single nearest booked (not yet completed) job, shown as a prominent
+  // hero right under the header — "one of the first things visible", per
+  // the brief. The full "Upcoming work" list further down still covers a
+  // customer with more than one booking.
+  const nextBooked=jobs.filter(r=>r.stage==='scheduled'&&r.scheduledDateISO).sort((a,b)=>a.scheduledDateISO.localeCompare(b.scheduledDateISO))[0];
+  let bookedHeroHtml='';
+  if(nextBooked){
+    const tl=dayTimeline(nextBooked.scheduledDateISO);
+    const me=tl.find(s=>s.job.id===nextBooked.id);
+    const wx=weatherForDate(nextBooked.scheduledDateISO);
+    const addr=[nextBooked.address,nextBooked.suburb].filter(Boolean).join(', ');
+    bookedHeroHtml=`<div class="booked-hero">
+      <div class="booked-tag">Booked</div>
+      <div class="booked-grid">
+        <div class="booked-item"><span class="l">Date</span><span class="v">${nextBooked.scheduledDate}</span></div>
+        ${me?`<div class="booked-item"><span class="l">Time</span><span class="v">${fmtTime(me.start)} (est.)</span></div>`:''}
+        <div class="booked-item"><span class="l">Technician</span><span class="v">${nextBooked.tech||'Unassigned'}</span></div>
+        ${wx.type!=='unavailable'?`<div class="booked-item"><span class="l">Weather</span><span class="v">${wx.label}</span></div>`:''}
+        <div class="booked-item"><span class="l">Status</span><span class="v">${jobStatusBadge(nextBooked)}</span></div>
+      </div>
+      <div class="booked-actions">
+        <button class="btn ghost sm" onclick="openSchedule(${nextBooked.id})">↻ Reschedule</button>
+        ${addr?`<button class="btn ghost sm" onclick="window.open('https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}','_blank')">🧭 Navigate</button>`:''}
+        ${c.phone?`<button class="btn ghost sm" onclick="window.location.href='tel:${c.phone.replace(/\s/g,'')}'">📞 Call</button>`:''}
+        <button class="btn ghost sm" onclick="closeCustomerProfile();openDetail(${nextBooked.id})">Open job</button>
+      </div>
+    </div>`;
+  }
   document.getElementById('customer-body').innerHTML=`
     <div class="cp-head">
       <div><div class="cp-name">${c.name} ${jobStatusBadge(latestJob)}</div><div class="cp-sub">${c.suburb||c.address||'No address on file'}</div></div>
@@ -3517,6 +3561,8 @@ function renderCustomerProfile(){
         ${c.email?`<a class="btn ghost sm" href="mailto:${c.email}">Email</a>`:''}
       </div>
     </div>
+
+    ${bookedHeroHtml}
 
     <div class="cp-stats">
       <div class="cp-stat"><div class="cp-stat-v">${money(lifetimeValue)}</div><div class="cp-stat-l">Lifetime value (paid)</div></div>
@@ -4324,6 +4370,49 @@ function saveJobNote(){
   toast('Note added');
 }
 
+/* ===== Job Detail's scheduling card — the first thing in the left column so
+   booking info is one of the first things visible, not buried after Contact/
+   Quote. Unbooked jobs get a clear "Not Scheduled" state instead of nothing.
+   Reschedule/Navigate/Call/Start are always shown together here (never
+   hidden behind the floating job-toolbar below, which only appears once the
+   job is actually started) — Complete Job stays owned by that toolbar since
+   it's meaningless before a job has started. ===== */
+function renderJobScheduleCard(r){
+  const booked=!!r.scheduledDateISO&&(r.stage==='scheduled'||r.stage==='completed'||r.stage==='paid');
+  if(!booked){
+    return `<div class="panel">
+      <h4>Schedule</h4>
+      <div class="sop-locked">
+        <div class="sl-ico">📅</div>
+        <div class="sl-ttl">Not Scheduled</div>
+        <div class="sl-sub">This job hasn't been booked in yet.</div>
+        ${r.services.length?`<button class="btn accent block" style="margin-top:14px" onclick="openSchedule(${r.id})">📅 Schedule Job</button>`:`<button class="btn ghost block" style="margin-top:14px" onclick="openQuoteModal(${r.id})">Build a quote first</button>`}
+      </div>
+    </div>`;
+  }
+  const tl=dayTimeline(r.scheduledDateISO);
+  const me=tl.find(s=>s.job.id===r.id);
+  const wx=weatherForDate(r.scheduledDateISO);
+  const addr=[r.address,r.suburb].filter(Boolean).join(', ');
+  const notStarted=r.stage==='scheduled'&&!r.startedAt;
+  return `<div class="panel booked-hero">
+    <div class="booked-tag">Booked</div>
+    <div class="booked-grid">
+      <div class="booked-item"><span class="l">Date</span><span class="v">${r.scheduledDate}</span></div>
+      ${me?`<div class="booked-item"><span class="l">Start time</span><span class="v">${fmtTime(me.start)} (est.)</span></div>`:''}
+      ${me?`<div class="booked-item"><span class="l">Est. finish</span><span class="v">${fmtTime(me.end)}</span></div>`:''}
+      <div class="booked-item"><span class="l">Assigned staff</span><span class="v">${r.tech||'Unassigned'}</span></div>
+      <div class="booked-item"><span class="l">Status</span><span class="v">${jobStatusBadge(r)}</span></div>
+      ${wx.type!=='unavailable'?`<div class="booked-item"><span class="l">Weather</span><span class="v">${wx.label}</span></div>`:''}
+    </div>
+    <div class="booked-actions">
+      <button class="btn ghost sm" onclick="openSchedule(${r.id})">↻ Reschedule</button>
+      ${addr?`<button class="btn ghost sm" onclick="window.open('https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}','_blank')">🧭 Navigate</button>`:''}
+      ${r.phone?`<button class="btn ghost sm" onclick="window.location.href='tel:${r.phone.replace(/\s/g,'')}'">📞 Call customer</button>`:''}
+      ${notStarted?`<button class="btn accent sm" onclick="startJob(${r.id})">▶ Start job</button>`:''}
+    </div>
+  </div>`;
+}
 /* ===== Floating job toolbar — shown on the job detail view only while a
    job is actively being worked (travelling/on site/in progress/paused).
    Complete/Pause/Resume/Cancel/Photos/Notes/Call/Navigate, all one tap
@@ -4568,6 +4657,13 @@ function fcDayCellDidMount(arg){
     const techCount=new Set(dayJobs.map(r=>r.assignedStaffId).filter(Boolean)).size;
     const frame=arg.el.querySelector('.fc-daygrid-day-frame');
     if(frame){
+      // The big, obvious "this day is busy" signal — solid colour pill,
+      // sized well above the weather/revenue/tech chips below it, so a
+      // glance at the month grid is enough to see which days have work.
+      const big=document.createElement('div');
+      big.className='fc-booked-badge';
+      big.innerHTML=`🟢 ${dayJobs.length} Booked`;
+      frame.appendChild(big);
       const summary=document.createElement('div');
       summary.className='fc-day-summary';
       summary.innerHTML=`<span>📋 ${dayJobs.length}</span>${revenue?`<span class="fc-ds-rev">${money(revenue)}</span>`:''}${techCount?`<span>👷 ${techCount}</span>`:''}`;
