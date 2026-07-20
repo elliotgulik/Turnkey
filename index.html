@@ -911,7 +911,19 @@
   .qe-photo-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
   .qe-photo-thumb{width:46px;height:46px;border-radius:6px;background:var(--surface-2) center/cover;position:relative;flex-shrink:0}
   .qe-photo-rm{position:absolute;top:-5px;right:-5px;width:16px;height:16px;border-radius:50%;background:var(--coral);color:#fff;font-size:10px;line-height:16px;text-align:center}
-  @media(max-width:720px){.qe-toolbar .btn.sm{min-height:36px}.qe-zoom button{width:36px;height:36px}}
+  @media(max-width:720px){
+    .qe-toolbar .btn.sm{min-height:44px;padding:8px 13px}
+    .qe-zoom button{width:44px;height:44px;font-size:18px}
+    .qe-svc-btn{min-height:40px;padding:8px 13px;font-size:12.5px}
+    .qe-photo-thumb{width:52px;height:52px}
+    .qe-photo-rm{width:20px;height:20px;line-height:20px;font-size:12px}
+    /* Vertex/midpoint handles are SVG shapes, not HTML buttons — CSS `r`
+       (supported in all current browsers) enlarges both the visible dot
+       and its actual tappable hit-area, which a finger genuinely needs
+       more of than a mouse pointer does. */
+    .qe-pt-handle{r:13px}
+    .qe-mid-handle{r:8px}
+  }
 
   /* adjust-assumptions panel */
   .assume-box{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:15px 16px;margin:16px 0}
@@ -2133,7 +2145,8 @@ function renderQuoteMap(r){
     mode:'select', drawSvc:'driveway', drawing:[], drawingGeoPts:[],
     lat:null,lng:null,zoom:QE_ZOOM_DEFAULT,scale:0.06,provider:null,
     mapsKey:turnkeyMapsKey(), addr, geoRegion,
-    draggingVertex:null, draggingAreaId:null, dragStart:null, panStart:null
+    draggingVertex:null, draggingAreaId:null, dragStart:null, panStart:null, dragCache:null,
+    originLat:null, originLng:null, originZoom:null, mapType:'satellite', loadToken:0
   };
   zone.innerHTML=`<div class="qmap">
     <div class="qmap-h">📍 ${addr||'Property map'} <span class="demo-tag">editable</span></div>
@@ -2192,19 +2205,26 @@ function qeLoadOsm(){
 function qeReloadAt(lat,lng,zoom){
   qe.lat=lat;qe.lng=lng;
   const visual=document.getElementById('qe-visual'); if(!visual)return;
+  visual.classList.remove('gesturing');
   visual.style.transform='none';
+  // A generation token so a slow, now-stale image load (e.g. from rapidly
+  // clicking +/- a few times) can never land after a newer one and visually
+  // snap the map back to the wrong zoom — only the most recent request is
+  // allowed to apply its result.
+  const token=++qe.loadToken;
   if(qe.provider==='google'){
     zoom=Math.max(QE_ZOOM_MIN,Math.min(QE_ZOOM_MAX,zoom));
     qe.zoom=zoom;
-    const url='https://maps.googleapis.com/maps/api/staticmap?center='+lat+','+lng+'&zoom='+zoom+'&size=640x480&scale=2&maptype=satellite&key='+encodeURIComponent(qe.mapsKey);
+    const url='https://maps.googleapis.com/maps/api/staticmap?center='+lat+','+lng+'&zoom='+zoom+'&size=640x480&scale=2&maptype='+qe.mapType+'&key='+encodeURIComponent(qe.mapsKey);
     const probe=new Image();
     probe.onload=()=>{
+      if(token!==qe.loadToken)return; // superseded by a newer request — drop this result
       const tiles=document.getElementById('qe-tiles'); if(tiles)tiles.innerHTML='';
       visual.style.backgroundImage='url("'+url+'")';
       qe.scale=156543.03392*Math.cos(lat*Math.PI/180)/Math.pow(2,zoom)*(640/800);
       qeAfterMapLoad();
     };
-    probe.onerror=()=>{qe.provider='osm';qeReloadAt(lat,lng,QE_OSM_ZOOM_MAX);};
+    probe.onerror=()=>{if(token!==qe.loadToken)return;qe.provider='osm';qeReloadAt(lat,lng,QE_OSM_ZOOM_MAX);};
     probe.src=url;
   }else{
     zoom=Math.max(QE_OSM_ZOOM_MIN,Math.min(QE_OSM_ZOOM_MAX,zoom));
@@ -2224,9 +2244,11 @@ function qeReloadAt(lat,lng,zoom){
   }
 }
 function qeAfterMapLoad(){
+  if(qe.originLat==null){qe.originLat=qe.lat;qe.originLng=qe.lng;qe.originZoom=qe.zoom;}
   qeReprojectAreas();
   qeRenderAreas();
   qeUpdateHint();
+  qeRenderToolbar();
 }
 function qeShowGridFallback(){
   qe.provider='grid';
@@ -2299,7 +2321,7 @@ function qeRenderAreas(){
     const cx=a.points.reduce((s,p)=>s+p.x,0)/a.points.length;
     const cy=a.points.reduce((s,p)=>s+p.y,0)/a.points.length;
     out+=`<polygon class="qe-area" data-id="${a.id}" points="${pts}" fill="${hex}${sel?'55':'33'}" stroke="${hex}" stroke-width="${sel?4:3}" stroke-dasharray="${sel?'6 3':'none'}" stroke-linejoin="round" style="cursor:${qe.mode==='select'?'move':'crosshair'}"/>`;
-    out+=`<g style="pointer-events:none"><rect x="${cx-32}" y="${cy-13}" width="64" height="26" rx="13" fill="#fff" opacity=".92"/><text x="${cx}" y="${cy+5}" text-anchor="middle" font-size="12" font-weight="700" fill="${hex}">${a.size}${a.unit}</text></g>`;
+    out+=`<g data-label="${a.id}" style="pointer-events:none"><rect x="${cx-32}" y="${cy-13}" width="64" height="26" rx="13" fill="#fff" opacity=".92"/><text x="${cx}" y="${cy+5}" text-anchor="middle" font-size="12" font-weight="700" fill="${hex}">${a.size}${a.unit}</text></g>`;
     if(sel){
       a.points.forEach((p,i)=>{
         out+=`<circle class="qe-pt-handle" data-area="${a.id}" data-idx="${i}" cx="${p.x}" cy="${p.y}" r="8" fill="#fff" stroke="${hex}" stroke-width="3"/>`;
@@ -2314,21 +2336,71 @@ function qeRenderAreas(){
   if(qe.drawing.length){
     const hex=QE_SVC_HEX[qe.drawSvc]||'#0f7d6b';
     const pts=qe.drawing.map(p=>`${p.x},${p.y}`).join(' ');
-    if(qe.drawing.length>1)out+=`<polyline points="${pts}" fill="${hex}22" stroke="${hex}" stroke-width="3" stroke-linejoin="round" style="pointer-events:none"/>`;
+    if(qe.drawing.length>1)out+=`<polyline class="qe-draw-line" points="${pts}" fill="${hex}22" stroke="${hex}" stroke-width="3" stroke-linejoin="round" style="pointer-events:none"/>`;
     qe.drawing.forEach((p,i)=>{out+=`<circle class="qe-pt-handle qe-draw-handle" data-idx="${i}" cx="${p.x}" cy="${p.y}" r="${i===0?10:8}" fill="#fff" stroke="${hex}" stroke-width="3"/>`;});
   }
   svg.innerHTML=out;
 }
+/* ===== Targeted per-frame drag updates — a live drag used to call the full
+   qeRenderAreas() (a complete svg.innerHTML rebuild of every polygon, label
+   and handle) on every single pointermove. Two real problems with that:
+   it's real work done N times more than needed on every mouse-move for
+   properties with several areas, and — worse — replacing innerHTML mid-drag
+   destroys and recreates the exact DOM element that has setPointerCapture(),
+   which is what made dragging feel unreliable. Element references are now
+   cached once at drag-start and patched directly (setAttribute only) on
+   every move; qeRenderAreas() still runs once at drag-END for full
+   consistency (midpoint positions, z-order), just not on every frame. */
+function qeBuildDragCache(areaId){
+  const svg=document.getElementById('qe-svg'); if(!svg)return null;
+  if(!areaId){
+    return {
+      line:svg.querySelector('.qe-draw-line'),
+      handles:qe.drawing.map((p,i)=>svg.querySelector('.qe-draw-handle[data-idx="'+i+'"]'))
+    };
+  }
+  const area=qe.areas.find(a=>a.id===areaId); if(!area)return null;
+  return {
+    poly:svg.querySelector('polygon.qe-area[data-id="'+areaId+'"]'),
+    labelRect:svg.querySelector('g[data-label="'+areaId+'"] rect'),
+    labelText:svg.querySelector('g[data-label="'+areaId+'"] text'),
+    handles:area.points.map((p,i)=>svg.querySelector('.qe-pt-handle[data-area="'+areaId+'"][data-idx="'+i+'"]')),
+    mids:area.points.map((p,i)=>svg.querySelector('.qe-mid-handle[data-area="'+areaId+'"][data-idx="'+i+'"]'))
+  };
+}
+function qeLiveUpdateArea(area,cache){
+  if(!cache)return;
+  if(cache.poly)cache.poly.setAttribute('points',area.points.map(p=>`${p.x},${p.y}`).join(' '));
+  const cx=area.points.reduce((s,p)=>s+p.x,0)/area.points.length;
+  const cy=area.points.reduce((s,p)=>s+p.y,0)/area.points.length;
+  if(cache.labelRect){cache.labelRect.setAttribute('x',cx-32);cache.labelRect.setAttribute('y',cy-13);}
+  if(cache.labelText){cache.labelText.setAttribute('x',cx);cache.labelText.setAttribute('y',cy+5);cache.labelText.textContent=area.size+area.unit;}
+  if(cache.handles)area.points.forEach((p,i)=>{const h=cache.handles[i];if(h){h.setAttribute('cx',p.x);h.setAttribute('cy',p.y);}});
+  if(cache.mids)area.points.forEach((p,i)=>{
+    const q=area.points[(i+1)%area.points.length];
+    const m=cache.mids[i];
+    if(m){m.setAttribute('cx',(p.x+q.x)/2);m.setAttribute('cy',(p.y+q.y)/2);}
+  });
+}
+function qeLiveUpdateDrawing(cache){
+  if(!cache)return;
+  if(cache.line)cache.line.setAttribute('points',qe.drawing.map(p=>`${p.x},${p.y}`).join(' '));
+  if(cache.handles)qe.drawing.forEach((p,i)=>{const h=cache.handles[i];if(h){h.setAttribute('cx',p.x);h.setAttribute('cy',p.y);}});
+}
 function qeRenderToolbar(){
   const el=document.getElementById('qe-toolbar'); if(!el)return;
   const sel=qe.selectedId;
+  const satLabel=qe.provider==='google'?(qe.mapType==='satellite'?'🛰️ Satellite':'🗺️ Roadmap'):'🛰️ Satellite';
   el.innerHTML=`
     <button type="button" class="btn ghost sm ${qe.mode==='select'?'active':''}" onclick="qeSetMode('select')">↖ Select</button>
     <button type="button" class="btn ghost sm" onclick="qeUndo()" ${qe.history.length?'':'disabled'}>↺ Undo</button>
     <button type="button" class="btn ghost sm" onclick="qeRedo()" ${qe.future.length?'':'disabled'}>↻ Redo</button>
     <button type="button" class="btn ghost sm" onclick="qeDeleteArea('${sel||''}')" ${sel?'':'disabled'}>🗑 Delete</button>
     <button type="button" class="btn ghost sm" onclick="qeDuplicateArea('${sel||''}')" ${sel?'':'disabled'}>⧉ Duplicate</button>
-    <button type="button" class="btn ghost sm" onclick="qeFitAll()">⤢ Fit all</button>
+    <button type="button" class="btn ghost sm" onclick="qeFitAll()" ${qe.lat?'':'disabled'}>⤢ Fit all</button>
+    <button type="button" class="btn ghost sm" onclick="qeResetView()" ${qe.originLat!=null?'':'disabled'}>↻ Reset view</button>
+    <button type="button" class="btn ghost sm" onclick="qeLocateProperty()" ${qe.addr?'':'disabled'}>📍 Locate</button>
+    <button type="button" class="btn ghost sm" onclick="qeToggleSatellite()" ${qe.provider==='google'?'':'disabled'} title="${qe.provider==='google'?'':'Needs a Google Maps key'}">${satLabel}</button>
   `;
 }
 function qeRenderSvcPicker(){
@@ -2339,11 +2411,14 @@ function qeRenderSvcPicker(){
     return `<button type="button" class="qe-svc-btn ${active?'sel':''}" style="color:${hex}" onclick="qeStartDraw('${k}')"><span class="sw" style="background:${hex}"></span>+ ${v.label.split(' ')[0]}</button>`;
   }).join('');
 }
+const QE_IS_TOUCH=('ontouchstart' in window)||navigator.maxTouchPoints>0;
 function qeUpdateHint(){
   const hint=document.getElementById('qe-hint'); if(!hint)return;
   if(qe.mode==='draw'){hint.textContent='Tap to place points for '+SERVICES[qe.drawSvc].label+' — tap the first point to finish';return;}
   if(!qe.lat){hint.textContent=qe.addr?'Loading map…':'No address on file — drawing on a plain grid';return;}
-  hint.textContent=qe.selectedId?'Drag the shape to move it, drag a dot to reshape':'Tap a shape to select it, or pick a service above to draw a new one';
+  if(qe.selectedId){hint.textContent='Drag points to adjust, or drag the shape to move it';return;}
+  if(!qe.areas.length){hint.textContent='Select a service, then draw the area';return;}
+  hint.textContent=QE_IS_TOUCH?'Tap a shape to select it — use two fingers to move the map':'Tap a shape to select it, or pick a service above to draw a new one';
 }
 function qeRenderPanel(){
   const el=document.getElementById('qe-panel'); if(!el)return;
@@ -2356,7 +2431,7 @@ function qeRenderPanel(){
   const svc=SERVICES[area.service];
   el.innerHTML=`<div class="qe-panel">
     <div class="qe-panel-head">
-      <div class="qe-panel-title">${svc.label} · ${area.size}${area.unit}</div>
+      <div class="qe-panel-title">${svc.label} · ${area.size}${area.unit} · ${money(qeAreaPrice(area))}</div>
       <select onchange="qeChangeAreaService('${area.id}',this.value)" style="font-size:12px">
         ${Object.entries(SERVICES).filter(([k])=>k!=='windows').map(([k,v])=>`<option value="${k}" ${k===area.service?'selected':''}>${v.label}</option>`).join('')}
       </select>
@@ -2366,6 +2441,23 @@ function qeRenderPanel(){
     <div style="margin-top:8px"><input type="file" accept="image/*" id="qe-photo-input" style="display:none" onchange="qeUploadAreaPhoto('${area.id}',this)"><button type="button" class="btn ghost sm" onclick="document.getElementById('qe-photo-input').click()">📷 Add photo</button></div>
   </div>`;
   qeLoadAreaPhotoThumbs();
+}
+// Estimated price for a single area — uses the matching draftLine's actual
+// current rate (including any roof type/storeys/custom rate the operator
+// has already set there) when one exists, so this stays consistent with
+// the real total shown in the line-item list below the map, not a second,
+// possibly-diverging estimate. Falls back to the plain business rate only
+// if this service has no line yet (e.g. area was just drawn this instant).
+function qeAreaPrice(area){
+  const svc=SERVICES[area.service];
+  const line=typeof draftLines!=='undefined'?draftLines.find(l=>l.svc===area.service):null;
+  let rate=svc.rate;
+  if(line){
+    if(line.customRate!=null)rate=parseFloat(line.customRate);
+    else if(area.service==='roof'&&line.roofType)rate=svc.rate*ROOF_TYPES[line.roofType].mult;
+    else if(area.service==='housewash'&&line.storeys)rate=svc.rate*STOREY_TYPES[line.storeys].mult;
+  }
+  return Math.round((area.size||0)*rate);
 }
 function qeRenderAreaPhotos(area){
   return (area.photoPaths||[]).map((p)=>`<div class="qe-photo-thumb" data-path="${p}" onclick="qeOpenAreaPhoto('${p}')"><span class="qe-photo-rm" onclick="event.stopPropagation();qeRemoveAreaPhoto('${area.id}','${p}')">×</span></div>`).join('');
@@ -2534,12 +2626,45 @@ function qeFitAll(){
   const lng=allPts.reduce((s,p)=>s+p.lng,0)/allPts.length;
   qeReloadAt(lat,lng,qe.zoom);
 }
+// Re-geocodes from scratch — useful after panning away, or if the first
+// geocode landed on the wrong spot for an ambiguous address.
+function qeLocateProperty(){
+  if(!qe.addr){toast('No address on file to locate');return;}
+  qeLoadMap();
+}
+// Returns to exactly where the map first loaded, without re-geocoding —
+// cheaper and more predictable than Locate when you just want to undo some
+// panning/zooming, not re-resolve the address.
+function qeResetView(){
+  if(qe.originLat==null)return;
+  qeReloadAt(qe.originLat,qe.originLng,qe.originZoom);
+}
+// Only meaningful with a Google key — Google Static Maps supports both
+// satellite and roadmap tiles from the same key; OSM's free fallback has
+// no satellite imagery to switch to at all, so this is disabled rather
+// than pretending to offer something that isn't there.
+function qeToggleSatellite(){
+  if(qe.provider!=='google'){toast('Satellite imagery needs a Google Maps key — currently showing the free map');return;}
+  qe.mapType=qe.mapType==='satellite'?'roadmap':'satellite';
+  qeReloadAt(qe.lat,qe.lng,qe.zoom);
+}
 function qeAdjustZoom(delta,anchorLatLng){
   if(!qe.lat)return;
   const maxZ=qe.provider==='google'?QE_ZOOM_MAX:QE_OSM_ZOOM_MAX;
   const minZ=qe.provider==='google'?QE_ZOOM_MIN:QE_OSM_ZOOM_MIN;
   const newZoom=Math.max(minZ,Math.min(maxZ,qe.zoom+delta));
-  if(newZoom===qe.zoom)return;
+  const visual=document.getElementById('qe-visual');
+  if(newZoom===qe.zoom){
+    // Resolve any live pinch/wheel preview transform even when the gesture
+    // didn't cross a full zoom level (or hit min/max) — previously this
+    // returned without ever resetting it, leaving the map (and every
+    // polygon on top of it) visually scaled while the underlying geometry
+    // math still assumed no transform at all. That mismatch is what made
+    // areas look like they'd "jumped" or become unstable after a moderate
+    // pinch or a short trackpad scroll.
+    if(visual){visual.classList.remove('gesturing');visual.style.transform='none';}
+    return;
+  }
   const center=anchorLatLng||{lat:qe.lat,lng:qe.lng};
   qeReloadAt(center.lat,center.lng,newZoom);
 }
@@ -2609,6 +2734,7 @@ function qeHandlePointerDown(e){
     if(isDraft&&idx===0&&qe.drawing.length>=3)return;
     if(!isDraft)qePushHistory();
     qe.draggingVertex={areaId:isDraft?null:vertexHandle.dataset.area,idx};
+    qe.dragCache=qeBuildDragCache(isDraft?null:vertexHandle.dataset.area);
     vertexHandle.setPointerCapture(e.pointerId);
     e.stopPropagation();
     return;
@@ -2618,6 +2744,7 @@ function qeHandlePointerDown(e){
     qePushHistory();
     qe.draggingAreaId=areaEl.dataset.id;
     qe.dragStart=qeStageToSvg(e.clientX,e.clientY);
+    qe.dragCache=qeBuildDragCache(areaEl.dataset.id);
     e.stopPropagation();
     return;
   }
@@ -2633,11 +2760,12 @@ function qeHandlePointerMove(e){
       area.points[qe.draggingVertex.idx]=p;
       if(area.geoPts)area.geoPts[qe.draggingVertex.idx]=qeSvgToLatLng(p);
       area.size=qeSizeOf(area);
+      qeLiveUpdateArea(area,qe.dragCache);
     }else{
       qe.drawing[qe.draggingVertex.idx]=p;
       qe.drawingGeoPts[qe.draggingVertex.idx]=qeSvgToLatLng(p);
+      qeLiveUpdateDrawing(qe.dragCache);
     }
-    qeRenderAreas();
     return;
   }
   if(qe.draggingAreaId){
@@ -2648,7 +2776,7 @@ function qeHandlePointerMove(e){
     area.points=area.points.map(pt=>({x:pt.x+dx,y:pt.y+dy}));
     if(area.geoPts)area.geoPts=area.points.map(qeSvgToLatLng);
     qe.dragStart=p;
-    qeRenderAreas();
+    qeLiveUpdateArea(area,qe.dragCache);
     return;
   }
   if(qe.panStart){
@@ -2661,12 +2789,12 @@ function qeHandlePointerMove(e){
 function qeHandlePointerUp(e){
   if(qe.draggingVertex){
     const area=qe.draggingVertex.areaId?qe.areas.find(a=>a.id===qe.draggingVertex.areaId):null;
-    qe.draggingVertex=null;qeSuppressClick=true;
+    qe.draggingVertex=null;qe.dragCache=null;qeSuppressClick=true;
     if(area)qeCommit();else{qeRenderAreas();}
     return;
   }
   if(qe.draggingAreaId){
-    qe.draggingAreaId=null;qeSuppressClick=true;
+    qe.draggingAreaId=null;qe.dragCache=null;qeSuppressClick=true;
     qeCommit();
     return;
   }
@@ -2688,12 +2816,39 @@ function qeHandlePointerUp(e){
     if(visual){visual.classList.remove('gesturing');visual.style.transform='none';}
   }
 }
+// Mouse wheel AND trackpad zoom both land here as 'wheel' events, but a
+// trackpad emits dozens of small-delta events per gesture where a mouse
+// wheel emits a few large-delta ones. Previously every single event fired
+// an immediate full map reload (a real network request) — a trackpad
+// scroll could queue up a dozen overlapping requests, each repainting the
+// map as it landed, which is exactly what "laggy"/"jumpy" zoom looks like.
+// Now each event only nudges a live CSS scale preview (instant, no
+// network); the real reload fires once, ~160ms after the gesture settles.
+let qeWheelTimer=null, qeWheelAccum=0, qeWheelAnchor=null;
 function qeHandleWheel(e){
   if(!qe.lat)return;
   e.preventDefault();
-  const p=qeStageToSvg(e.clientX,e.clientY);
-  const anchor=qeSvgToLatLng(p);
-  qeAdjustZoom(e.deltaY<0?1:-1,anchor);
+  const visual=document.getElementById('qe-visual'); if(!visual)return;
+  if(!qeWheelAnchor){
+    const p=qeStageToSvg(e.clientX,e.clientY);
+    qeWheelAnchor=qeSvgToLatLng(p);
+    const stage=document.getElementById('qe-stage');
+    const r=stage.getBoundingClientRect();
+    visual.classList.add('gesturing');
+    visual.style.transformOrigin=(e.clientX-r.left)+'px '+(e.clientY-r.top)+'px';
+  }
+  // Normalize: a mouse wheel's deltaY is typically ~100+ per notch, a
+  // trackpad's is often single digits per event — without this a trackpad
+  // scroll would need dozens of events to register as one zoom level.
+  qeWheelAccum+=(e.deltaY<0?1:-1)*Math.min(1,Math.abs(e.deltaY)/60);
+  visual.style.transform='scale('+Math.pow(2,qeWheelAccum)+')';
+  clearTimeout(qeWheelTimer);
+  qeWheelTimer=setTimeout(()=>{
+    const delta=Math.round(qeWheelAccum);
+    const anchor=qeWheelAnchor;
+    qeWheelAccum=0;qeWheelAnchor=null;
+    qeAdjustZoom(delta,anchor); // resets/clears the preview transform either way, see qeAdjustZoom
+  },160);
 }
 function qeInitPinch(stageEl){
   let active=false,startDist=0;
