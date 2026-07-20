@@ -598,6 +598,17 @@
     .fc-wrap .fc-toolbar-chunk{display:flex;justify-content:center}
     .fc-wrap .fc-toolbar-title{font-size:15px}
     .fc-wrap .fc-button{padding:5px 8px;font-size:12px}
+    /* A month-grid day cell is only ~45-55px wide on a phone (viewport ÷ 7
+       columns) — the weather badge's full uppercase word ("EXCELLENT",
+       "RAIN RISK") physically cannot fit next to the day number at any
+       cell-appropriate font size, which is what was actually overlapping.
+       Same story for the job-count/revenue/tech chips underneath. Both
+       collapse to their essential signal here; full detail is still one
+       tap away via the existing day-detail view (openCalPicker). */
+    .fc-wrap .fc-daygrid-day-frame{min-height:78px}
+    .fc-wx-badge{font-size:0;width:9px;height:9px;min-width:9px;padding:0;border-radius:50%;flex-shrink:0}
+    .fc-day-summary{display:none}
+    .fc-booked-badge{width:100%;justify-content:center;text-align:center}
   }
   .cal-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:18px}
   @media(max-width:720px){.cal-grid{grid-template-columns:1fr}}
@@ -2185,9 +2196,23 @@ function qeFallbackOrGrid(){
     qeShowGridFallback();
   }
 }
+// A plain fetch().catch() only reacts to a real network error — a request
+// that just hangs (flaky wifi, a corporate proxy silently swallowing the
+// response) never resolves OR rejects, so nothing downstream ever runs and
+// "Loading map…" sits there forever with no recovery. Racing every geocode
+// call against a timeout closes that gap: past `ms`, we give up on this
+// step and fall through to the next fallback exactly as if it had failed.
+function qeFetchWithTimeout(url,ms){
+  return new Promise((resolve,reject)=>{
+    let settled=false;
+    const timer=setTimeout(()=>{if(!settled){settled=true;reject(new Error('timeout'));}},ms);
+    fetch(url).then(r=>r.json()).then(j=>{if(!settled){settled=true;clearTimeout(timer);resolve(j);}})
+      .catch(e=>{if(!settled){settled=true;clearTimeout(timer);reject(e);}});
+  });
+}
 function qeGeocodeGoogle(){
-  fetch('https://maps.googleapis.com/maps/api/geocode/json?address='+encodeURIComponent(qe.addr+', '+qe.geoRegion)+'&key='+encodeURIComponent(qe.mapsKey))
-    .then(res=>res.json()).then(j=>{
+  qeFetchWithTimeout('https://maps.googleapis.com/maps/api/geocode/json?address='+encodeURIComponent(qe.addr+', '+qe.geoRegion)+'&key='+encodeURIComponent(qe.mapsKey),8000)
+    .then(j=>{
       if(j.status!=='OK'||!j.results||!j.results[0]){qeLoadOsm();return;}
       const loc=j.results[0].geometry.location;
       qe.provider='google';
@@ -2195,8 +2220,8 @@ function qeGeocodeGoogle(){
     }).catch(()=>qeLoadOsm());
 }
 function qeLoadOsm(){
-  fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(qe.addr+', '+qe.geoRegion))
-    .then(res=>res.json()).then(results=>{
+  qeFetchWithTimeout('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(qe.addr+', '+qe.geoRegion),8000)
+    .then(results=>{
       if(!results||!results.length){qeFallbackOrGrid();return;}
       qe.provider='osm';
       qeReloadAt(parseFloat(results[0].lat),parseFloat(results[0].lon),QE_OSM_ZOOM_MAX);
@@ -2217,14 +2242,28 @@ function qeReloadAt(lat,lng,zoom){
     qe.zoom=zoom;
     const url='https://maps.googleapis.com/maps/api/staticmap?center='+lat+','+lng+'&zoom='+zoom+'&size=640x480&scale=2&maptype='+qe.mapType+'&key='+encodeURIComponent(qe.mapsKey);
     const probe=new Image();
+    let settled=false;
+    // Image() only ever fires onload or onerror — if the request just hangs
+    // (no response at all, not even a failure), neither ever fires and the
+    // map stays on "Loading map…" indefinitely. This timeout gives it 8s to
+    // do one or the other before we give up and fall back to OSM ourselves.
+    const imgTimer=setTimeout(()=>{
+      if(settled||token!==qe.loadToken)return;
+      settled=true;qe.provider='osm';qeReloadAt(lat,lng,QE_OSM_ZOOM_MAX);
+    },8000);
     probe.onload=()=>{
-      if(token!==qe.loadToken)return; // superseded by a newer request — drop this result
+      if(settled||token!==qe.loadToken)return; // superseded by a newer request — drop this result
+      settled=true;clearTimeout(imgTimer);
       const tiles=document.getElementById('qe-tiles'); if(tiles)tiles.innerHTML='';
       visual.style.backgroundImage='url("'+url+'")';
       qe.scale=156543.03392*Math.cos(lat*Math.PI/180)/Math.pow(2,zoom)*(640/800);
       qeAfterMapLoad();
     };
-    probe.onerror=()=>{if(token!==qe.loadToken)return;qe.provider='osm';qeReloadAt(lat,lng,QE_OSM_ZOOM_MAX);};
+    probe.onerror=()=>{
+      if(settled||token!==qe.loadToken)return;
+      settled=true;clearTimeout(imgTimer);
+      qe.provider='osm';qeReloadAt(lat,lng,QE_OSM_ZOOM_MAX);
+    };
     probe.src=url;
   }else{
     zoom=Math.max(QE_OSM_ZOOM_MIN,Math.min(QE_OSM_ZOOM_MAX,zoom));
@@ -2748,7 +2787,14 @@ function qeHandlePointerDown(e){
     e.stopPropagation();
     return;
   }
-  if(qe.mode==='select'&&e.pointerType!=='touch'){
+  // Single-finger pan (mouse drag OR touch drag — Pointer Events unify both,
+  // so no touch-specific code is needed here). This used to explicitly
+  // exclude touch (`e.pointerType!=='touch'`), which combined with
+  // touch-action:none on the stage meant a one-finger drag on the map did
+  // nothing at all on a phone. Two-finger pinch-zoom is handled separately
+  // by qeInitPinch's native touch listeners, which only ever activate for
+  // 2+ simultaneous touches, so there's no conflict with single-finger pan.
+  if(qe.mode==='select'){
     qe.panStart={x:e.clientX,y:e.clientY};
   }
 }
@@ -5625,6 +5671,12 @@ try{window.addEventListener('focus',pollBackendLeads);}catch(e){}
 // poll connected email every 90s + on focus — less time-critical than leads, and gentler on API quotas
 setInterval(syncEmail,90000);
 try{window.addEventListener('focus',syncEmail);}catch(e){}
+// poll connected Google Calendar every 5min + on focus — was manual "Sync
+// now" only, so busy-block conflict checking could run on stale data
+// indefinitely until someone happened to click it. Less frequent than email
+// since calendar changes are rarely time-sensitive to the minute.
+setInterval(syncGoogleCalendarBackground,300000);
+try{window.addEventListener('focus',syncGoogleCalendarBackground);}catch(e){}
 
 /* ===== SETTINGS: one home for everything about how the business runs —
    business profile, booking page, connections, team, templates, imports,
@@ -5719,7 +5771,7 @@ function openSettings(){
     ${settingsRow('📅','Calendar sync',calConnected?'Connected — avoids double-booking':'Connect Google Calendar or iCloud',"closeModal('settings-overlay');openConnections()")}`)}
     ${settingsGroup('Email',settingsRow('📧','Gmail — inbox &amp; sending',emailAccount?`Connected as ${emailAccount.email_address}`:'Not connected',"closeModal('settings-overlay');openConnections()"))}
     ${settingsGroup('Integrations',`
-    ${settingsRow('💳','Card payments (Stripe)','Coming soon',"toast('Card payments are coming soon')")}
+    ${settingsRow('💳','Card payments (Stripe)',stripeStatus.configured?'Connected — customers can pay invoices by card':'Not set up yet',"closeModal('settings-overlay');openConnections()")}
     <div class="conn-card" style="margin-top:8px">
       <div class="conn-top"><span class="conn-name">🛰️ Satellite maps on quotes</span><span class="conn-badge ${mapsKey?'on':'off'}">${mapsKey?'● ON':'basic map'}</span></div>
       <p>${mapsKey?'Property photos and satellite scale are turned on for your account.':'On the free basic map for now — satellite photos with accurate scale are available for your account, just ask whoever set up your TurnKey.'}</p>
@@ -5771,9 +5823,11 @@ function openConnections(){
       <div class="conn-keyrow"><input id="conn-ical-url" placeholder="Paste your calendar link"><button class="btn ghost sm" onclick="connectIcalFeed()">Add</button></div>
       ${icalConns.map(c=>`<div class="kv"><span class="k">${(c.ical_url||'').slice(0,40)}${(c.ical_url||'').length>40?'…':''}${c.sync_status==='error'?' ⚠️':''}</span><span class="v"><button class="btn ghost sm" onclick="syncIcalFeedNow('${(c.ical_url||'').replace(/'/g,"%27")}')">Sync</button> <button class="btn ghost sm" onclick="disconnectIcalFeed('${(c.ical_url||'').replace(/'/g,"%27")}')">Remove</button></span></div>`).join('')}
     </div>
-    <div class="conn-card">
-      <div class="conn-top"><span class="conn-name">💳 Stripe — accept card payments</span><span class="conn-badge">coming soon</span></div>
-      <p>Let customers pay their invoice online by card. Not available yet — invoices can still be marked paid manually today.</p>
+    <div class="conn-card ${stripeStatus.configured?'live':''}">
+      <div class="conn-top"><span class="conn-name">💳 Stripe — accept card payments</span><span class="conn-badge ${stripeStatus.configured?'on':'off'}">${stripeStatus.configured?'● CONNECTED':'not set up'}</span></div>
+      ${stripeStatus.configured
+        ?`<p><b>Ready.</b> Every invoice can generate a payment link — customers pay by card, and the invoice ${stripeStatus.webhookConfigured?'marks itself paid automatically':'still needs marking paid manually once you see the payment come through'}.</p>`
+        :`<p>Let customers pay their invoice online by card. This is a one-time setup on the server your TurnKey runs on, not something to configure per business — ask whoever manages your deployment to add a Stripe key. Invoices can still be marked paid manually until then.</p>`}
     </div>
     <div class="conn-note">${emailAccount?"You're fully connected. Nice.":"Connect Gmail to send quotes and invoices straight from Turnkey."}</div>`;
   openModal('conn-overlay');
@@ -5846,6 +5900,20 @@ function busyBlocksForDate(iso){
     return s&&e&&iso>=s&&iso<=e;
   });
 }
+// Real Stripe status instead of a hardcoded "coming soon" — payment-link
+// creation has actually worked all along whenever a deployment operator set
+// STRIPE_SECRET_KEY, the Settings/Connections UI just never reflected that.
+let stripeStatus={configured:false,webhookConfigured:false};
+async function loadStripeStatus(){
+  const url=backendUrl();
+  const {data:{session}}=await sb.auth.getSession();
+  if(!url||!session)return;
+  try{
+    const res=await fetch(`${url}/api/payments/status`,{headers:{Authorization:'Bearer '+session.access_token}});
+    const j=await res.json();
+    if(res.ok)stripeStatus={configured:!!j.configured,webhookConfigured:!!j.webhookConfigured};
+  }catch(e){console.error('Load Stripe status failed',e);}
+}
 async function loadCalendarConnections(){
   const url=backendUrl();
   const {data:{session}}=await sb.auth.getSession();
@@ -5888,6 +5956,22 @@ async function syncGoogleCalendarNow(){
     toast(`Synced ${j.imported} event${j.imported===1?'':'s'} ✓`);
     await loadCalendarConnections();openConnections();
   }catch(e){console.error('Google Calendar sync failed',e);toast('Sync failed — try again');}
+}
+// Silent background counterpart to syncGoogleCalendarNow() — that one is
+// built for the explicit "Sync now" button (toasts, reopens Connections),
+// which would be disruptive fired on a timer. This is the only thing that
+// previously made Calendar sync manual-trigger-only, unlike Gmail's
+// automatic 90s poll: busy-block conflict checking could silently run on
+// data that was hours (or days) stale until someone happened to click Sync.
+// No-ops quietly if Calendar isn't connected or there's no active session.
+async function syncGoogleCalendarBackground(){
+  if(!calendarConnections.some(c=>c.provider==='google'))return;
+  const url=backendUrl(); if(!url||!sb)return;
+  const {data:{session}}=await sb.auth.getSession(); if(!session)return;
+  try{
+    await fetch(`${url}/api/calendar/sync`,{method:'POST',headers:{Authorization:'Bearer '+session.access_token}});
+    await loadCalendarBusyBlocks();
+  }catch(e){console.error('Background Google Calendar sync failed',e);}
 }
 /* ===== Push a job onto the connected Google Calendar as an event, kept in
    sync as it's booked/rescheduled/cancelled. Silently does nothing if
@@ -5995,6 +6079,22 @@ async function syncEmail(){
     }
   }catch(e){}
 })();
+// Same round trip for Google Calendar — the backend redirects to
+// ?calendar_connect=success|error the same way it does for Gmail's
+// email_connect, but nothing was listening for it here, so a failed
+// Calendar connection silently looked like nothing had happened at all.
+(function(){
+  try{
+    const u=new URL(location.href);
+    const status=u.searchParams.get('calendar_connect');
+    if(status){
+      if(status==='success'){toast('Google Calendar connected ✓');if(typeof loadCalendarConnections==='function')loadCalendarConnections();}
+      else toast('Could not connect Google Calendar'+(u.searchParams.get('msg')?': '+u.searchParams.get('msg'):''));
+      u.searchParams.delete('calendar_connect');u.searchParams.delete('msg');
+      history.replaceState({},'',u.pathname+u.search);
+    }
+  }catch(e){}
+})();
 /* ===== PERSISTENCE: everything auto-saves locally on this device ===== */
 const STORE_KEY='turnkey-app-v1';
 function saveState(){
@@ -6087,6 +6187,7 @@ async function handleAuthedSession(session){
   loadCalendarConnections();
   loadCalendarBusyBlocks();
   loadNotificationPrefs();
+  loadStripeStatus();
   retryPendingPhotos();
 }
 

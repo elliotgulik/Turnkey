@@ -68,7 +68,14 @@ const app = express()
 
 app.set('trust proxy', 1) // needed for req.ip to reflect the real client (behind Render's proxy), not the proxy itself
 app.use(cors())
-app.use(express.json({ limit: '25mb' }))
+// `verify` captures the exact raw request bytes into req.rawBody alongside
+// the normal parsed req.body — needed for the Stripe webhook below, which
+// must verify its signature against the untouched raw payload, not a
+// re-serialized copy of the parsed JSON (Stripe's HMAC won't match a
+// re-stringified body, even if the content is logically identical). Capturing
+// it here avoids the usual express.raw()-before-express.json() route-order
+// dance for one route — every other route just ignores req.rawBody.
+app.use(express.json({ limit: '25mb', verify: (req, res, buf) => { req.rawBody = buf } }))
 
 // Lightweight in-memory rate limiter for the one truly public write route
 // (POST /api/leads — no auth by design, since a customer submitting a quote
@@ -726,7 +733,16 @@ app.post('/api/automations/run-due', async (req, res) => {
    (test mode first — sk_test_... — before switching to a live key).
    ===================================================================== */
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || ''
+const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || ''
 const isStripeConfigured = () => !!STRIPE_SECRET_KEY
+
+// Lets the CRM show accurate "connected"/"not set up" state instead of a
+// hardcoded "coming soon" that stayed wrong even once a business actually
+// had this working (create-link has been functional all along whenever
+// STRIPE_SECRET_KEY was set — the UI just never reflected that).
+app.get('/api/payments/status', requireBusiness, (req, res) => {
+  res.json({ configured: isStripeConfigured(), webhookConfigured: !!STRIPE_WEBHOOK_SECRET })
+})
 
 app.post('/api/payments/create-link', requireBusiness, async (req, res) => {
   if (!isStripeConfigured()) return res.status(501).json({ error: 'Stripe is not configured on this server yet — ask whoever manages your TurnKey deployment to add STRIPE_SECRET_KEY' })
@@ -747,10 +763,16 @@ app.post('/api/payments/create-link', requireBusiness, async (req, res) => {
     if (!priceRes.ok) throw new Error('Stripe price creation failed: ' + await priceRes.text())
     const price = await priceRes.json()
 
+    // metadata.invoice_id is what lets the webhook below know which invoice
+    // a payment belongs to — Stripe carries Payment Link metadata through
+    // onto the Checkout Session it creates when someone pays, so the
+    // webhook event includes it without any extra lookup.
+    const linkParams = new URLSearchParams({ 'line_items[0][price]': price.id, 'line_items[0][quantity]': '1' })
+    if (invoiceId) linkParams.set('metadata[invoice_id]', String(invoiceId))
     const linkRes = await fetch('https://api.stripe.com/v1/payment_links', {
       method: 'POST',
       headers: { Authorization: authHeader, 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ 'line_items[0][price]': price.id, 'line_items[0][quantity]': '1' })
+      body: linkParams
     })
     if (!linkRes.ok) throw new Error('Stripe payment link creation failed: ' + await linkRes.text())
     const link = await linkRes.json()
@@ -760,6 +782,78 @@ app.post('/api/payments/create-link', requireBusiness, async (req, res) => {
   } catch (err) {
     console.error('POST /api/payments/create-link', err)
     res.status(500).json({ error: 'Could not create a payment link' })
+  }
+})
+
+// Verifies a Stripe webhook's signature by hand (no stripe npm package, same
+// no-heavy-SDK style as the rest of this backend) — implements Stripe's
+// documented scheme: the header is `t=<timestamp>,v1=<hex hmac>[,v0=...]`,
+// the signed payload is `${timestamp}.${rawBody}`, HMAC-SHA256'd with the
+// webhook signing secret. Rejects anything older than 5 minutes (replay
+// protection) same as Stripe's own official libraries do.
+function verifyStripeSignature(rawBody, sigHeader, secret) {
+  if (!rawBody || !sigHeader || !secret) return false
+  const parts = Object.fromEntries(sigHeader.split(',').map((p) => p.split('=')))
+  const timestamp = parts.t
+  const expectedSig = parts.v1
+  if (!timestamp || !expectedSig) return false
+  if (Math.abs(Date.now() / 1000 - Number(timestamp)) > 300) return false
+  const signedPayload = `${timestamp}.${rawBody.toString('utf8')}`
+  const computed = crypto.createHmac('sha256', secret).update(signedPayload).digest('hex')
+  const a = Buffer.from(computed, 'hex')
+  const b = Buffer.from(expectedSig, 'hex')
+  if (a.length !== b.length) return false
+  return crypto.timingSafeEqual(a, b)
+}
+
+// Stripe calls this directly (no CRM session — Stripe isn't a logged-in
+// user), so it's deliberately NOT behind requireBusiness; the webhook
+// signature is what proves the request is genuinely from Stripe instead.
+// On a completed, paid checkout session, marks the matching invoice AND its
+// job paid — the same two writes the CRM's own markPaid() does, done here
+// so a customer paying via the link updates TurnKey without anyone in the
+// business needing to notice and click "mark paid" themselves.
+app.post('/api/payments/webhook', async (req, res) => {
+  if (!STRIPE_WEBHOOK_SECRET) return res.status(501).json({ error: 'Stripe webhook secret not configured' })
+  const sig = req.get('stripe-signature')
+  if (!verifyStripeSignature(req.rawBody, sig, STRIPE_WEBHOOK_SECRET)) {
+    return res.status(400).json({ error: 'Invalid signature' })
+  }
+  try {
+    const event = req.body
+    if (event.type === 'checkout.session.completed') {
+      const session = event.data?.object || {}
+      if (session.payment_status === 'paid') {
+        const invoiceId = session.metadata?.invoice_id
+        if (invoiceId) {
+          const { data: invoice, error: invErr } = await authClient
+            .from('invoices').select('id, job_id')
+            .eq('id', invoiceId).maybeSingle()
+          if (invErr) throw invErr
+          if (invoice) {
+            await authClient.from('invoices').update({
+              paid: true, payment_status: 'paid', payment_date: new Date().toISOString(), payment_method: 'Card (Stripe)'
+            }).eq('id', invoice.id)
+            if (invoice.job_id) {
+              await authClient.from('jobs').update({ status: 'paid' }).eq('id', invoice.job_id)
+            }
+          } else {
+            console.error('Stripe webhook: no invoice found for id', invoiceId)
+          }
+        } else {
+          console.error('Stripe webhook: checkout.session.completed with no invoice_id metadata — payment link may have been created before metadata support was added')
+        }
+      }
+    }
+    // Any other event type: acknowledge and ignore — Stripe retries on
+    // anything but a 2xx, so unhandled-but-irrelevant events must still 200.
+    res.json({ received: true })
+  } catch (err) {
+    console.error('POST /api/payments/webhook', err)
+    // Still 200: our own error shouldn't make Stripe hammer retries for an
+    // event we may have already partially processed (invoice updated,
+    // job update failed, say) — the failure is logged for manual follow-up.
+    res.json({ received: true, warning: 'Processed with errors — check server logs' })
   }
 })
 

@@ -546,6 +546,19 @@ function enableSatelliteLatLng(lat,lng,label,viewport){
   reloadMapAt(lat,lng,zoom,label);
   return true;
 }
+// A plain fetch().catch() only reacts to a real network error — a request
+// that just hangs (flaky wifi, a corporate proxy silently swallowing the
+// response) never resolves OR rejects, so nothing downstream ever runs and
+// the loading hint sits there forever with no recovery. Racing every
+// geocode call against a timeout closes that gap.
+function fetchWithTimeout(url,ms){
+  return new Promise((resolve,reject)=>{
+    let settled=false;
+    const timer=setTimeout(()=>{if(!settled){settled=true;reject(new Error('timeout'));}},ms);
+    fetch(url).then(r=>r.json()).then(j=>{if(!settled){settled=true;clearTimeout(timer);resolve(j);}})
+      .catch(e=>{if(!settled){settled=true;clearTimeout(timer);reject(e);}});
+  });
+}
 function enableSatellite(address){
   if(!MAPS_KEY||!address)return false;
   const hint=document.getElementById('hint');
@@ -553,7 +566,7 @@ function enableSatellite(address){
   const geocodeUrl='https://maps.googleapis.com/maps/api/geocode/json?address='+
     encodeURIComponent(address+', '+(BIZ_REGION||'New Zealand'))+'&key='+encodeURIComponent(MAPS_KEY);
   if(typeof fetch==='function'){
-    fetch(geocodeUrl).then(r=>r.json()).then(j=>{
+    fetchWithTimeout(geocodeUrl,8000).then(j=>{
       if(j.status==='OK'&&j.results&&j.results[0]){
         const res=j.results[0];
         enableSatelliteLatLng(res.geometry.location.lat,res.geometry.location.lng,
@@ -579,8 +592,8 @@ function enableOsm(address){
   if(!address)return false;
   const hint=document.getElementById('hint');
   hint.textContent='⏳ Locating address…';
-  fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(address+', '+(BIZ_REGION||'New Zealand')))
-    .then(r=>r.json()).then(results=>{
+  fetchWithTimeout('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(address+', '+(BIZ_REGION||'New Zealand')),8000)
+    .then(results=>{
       if(!results||!results.length){hint.textContent='⚠️ Address not found — try the full street address';return;}
       enableOsmLatLng(parseFloat(results[0].lat),parseFloat(results[0].lon),results[0].display_name||address);
     }).catch(()=>{hint.textContent='⚠️ Could not load the map — check your connection';});
@@ -592,7 +605,18 @@ function loadSatelliteUrl(url,cacheKey,label){
   const hint=document.getElementById('hint');
   hint.textContent='⏳ Loading map…';
   const probe=new Image();
+  let settled=false;
+  // Image() only ever fires onload or onerror — if the request just hangs
+  // (no response at all), neither fires and the map is stuck on "Loading
+  // map…" indefinitely. This gives it 8s before falling back to OSM itself.
+  const imgTimer=setTimeout(function(){
+    if(settled)return;
+    settled=true;
+    enableOsmLatLng(parseFloat(cacheKey.split(',')[0]),parseFloat(cacheKey.split(',')[1]),label);
+  },8000);
   probe.onload=function(){
+    if(settled)return;
+    settled=true;clearTimeout(imgTimer);
     visual.style.transform='none'; // snap the live pan/pinch preview back now that fresh, correctly-scaled imagery has arrived
     if(tiles)tiles.innerHTML=''; // clear any OSM tiles from a previous no-key state
     visual.style.backgroundImage='url("'+url+'")';
@@ -619,6 +643,8 @@ function loadSatelliteUrl(url,cacheKey,label){
     if(typeof renderAreas==='function')renderAreas();
   };
   probe.onerror=function(){
+    if(settled)return;
+    settled=true;clearTimeout(imgTimer);
     // A configured key that fails (bad key, quota, network) still shouldn't
     // dead-end on an error message — quietly try the free map instead.
     enableOsmLatLng(parseFloat(cacheKey.split(',')[0]),parseFloat(cacheKey.split(',')[1]),label);

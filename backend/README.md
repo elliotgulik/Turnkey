@@ -63,6 +63,18 @@ With `STORAGE=file`, data persists in `backend/data/` on the instance disk. Fine
 | GET | `/api/leads/pending` | Supabase session (`Authorization: Bearer <token>`) | Poll for new leads, scoped to the caller's own business — the bearer token is verified against Supabase and the business_id is derived server-side from `public.users`, never trusted from the client. |
 | POST | `/api/leads/ack` | Supabase session (`Authorization: Bearer <token>`) | Mark leads collected — scoped server-side to the caller's own `business_id`, so acking someone else's lead IDs is a no-op. |
 | POST | `/api/email/*`, `/api/calendar/*`, `/api/ai/marketing` | Supabase session (`Authorization: Bearer <token>`) | Gmail, Google Calendar and AI marketing — all resolve `business_id`/`user_id` server-side from the caller's own session. |
+| GET | `/api/payments/status` | Supabase session | Whether Stripe (and its webhook) are configured on this deployment — lets the CRM show accurate connected/not-set-up state. |
+| POST | `/api/payments/create-link` | Supabase session | Creates a Stripe Payment Link for an invoice. |
+| POST | `/api/payments/webhook` | Stripe signature (`Stripe-Signature` header, verified against `STRIPE_WEBHOOK_SECRET`) | Stripe calls this directly, not the CRM — no Supabase session involved. On a paid checkout, marks the matching invoice and job paid automatically. |
+
+## Stripe (optional)
+
+Card payments work once you set two env vars — this is a one-time setup on the server, not something each business configures individually:
+
+1. `STRIPE_SECRET_KEY` — from [dashboard.stripe.com](https://dashboard.stripe.com) (use a `sk_test_...` key first)
+2. `STRIPE_WEBHOOK_SECRET` — create a webhook endpoint in the Stripe dashboard pointing at `https://<your-backend>/api/payments/webhook`, subscribed to the `checkout.session.completed` event, then copy its signing secret (`whsec_...`)
+
+Without `STRIPE_WEBHOOK_SECRET` set, payment links still work (`create-link` only needs `STRIPE_SECRET_KEY`), but a paid invoice won't mark itself paid automatically — someone has to notice the payment and mark it paid by hand, same as today.
 
 `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` are required unconditionally (not just when `STORAGE=supabase`) — they're used to verify the CRM's Supabase session on every authenticated route.
 
