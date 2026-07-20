@@ -109,6 +109,21 @@
   .board{display:grid;grid-template-columns:repeat(5,1fr);gap:14px}
   .board.seven{grid-template-columns:repeat(7,minmax(0,1fr));gap:10px}
   @media(max-width:1100px){.board.seven{overflow-x:auto;grid-auto-flow:column;grid-template-columns:none;grid-auto-columns:minmax(180px,1fr);padding-bottom:8px}}
+  /* Stage pills — a compact selector strip is fine to scroll horizontally
+     (it's a control, not content); the point is the seven-column BOARD
+     itself never needs horizontal scrolling on a phone. */
+  .stage-pills{display:none}
+  @media(max-width:720px){
+    .stage-pills{display:flex;gap:8px;overflow-x:auto;padding:2px 2px 12px;scrollbar-width:none}
+    .stage-pills::-webkit-scrollbar{display:none}
+    .stage-pill{flex-shrink:0;font-size:12.5px;font-weight:600;padding:8px 14px;min-height:36px;border-radius:980px;background:var(--surface-2);color:var(--ink-soft);white-space:nowrap;display:flex;align-items:center;gap:6px}
+    .stage-pill span{background:rgba(0,0,0,.08);padding:1px 6px;border-radius:980px;font-size:11px}
+    .stage-pill.active{background:var(--pill-wash);color:var(--pill-tone)}
+    .stage-pill.active span{background:rgba(255,255,255,.6)}
+    .board.seven{overflow-x:visible;display:block}
+    .board.seven .col{display:none}
+    .board.seven .col.mobile-active{display:flex}
+  }
   .col-head{display:flex;align-items:center;justify-content:space-between;padding:0 2px 12px;font-size:12px;font-weight:600;letter-spacing:-.01em;color:var(--ink-soft)}
   .col-head .dot{width:6px;height:6px;border-radius:50%;display:inline-block;margin-right:7px;opacity:.55}
   .col-body{display:flex;flex-direction:column;gap:10px;min-height:60px}
@@ -155,11 +170,36 @@
   .btn:disabled{opacity:.4;cursor:not-allowed}
   .add-lead-bar{display:flex;justify-content:flex-end;margin-bottom:18px;gap:10px}
 
+  /* ===== mobile touch targets — Apple's 44px minimum, for every user on a
+     phone (not just technicians — body.tech-mode below adds a further bump
+     on top of this for that role specifically, the two are independent). ===== */
+  @media(max-width:720px){
+    .btn{min-height:44px}
+    .btn.sm{min-height:40px;padding:9px 14px}
+    .modal-head .x{min-width:36px;min-height:36px;font-size:22px}
+    .sop-check{width:30px;height:30px}
+    .photo-slot{min-height:72px}
+    .fe-arrow{min-width:32px;min-height:32px;font-size:11px}
+    input,select,textarea{font-size:16px} /* prevents iOS Safari auto-zoom-on-focus below 16px */
+  }
+
   /* overlay + modal — Apple sheet feel */
   .overlay{position:fixed;inset:0;background:rgba(10,28,43,.32);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);z-index:100;display:none;align-items:flex-start;justify-content:center;padding:48px 16px;overflow-y:auto}
   .overlay.open{display:flex}
   .modal{background:var(--surface);border-radius:22px;width:100%;max-width:560px;box-shadow:var(--shadow-lg);animation:pop .28s cubic-bezier(.2,.8,.2,1);overflow:hidden}
   @keyframes pop{from{opacity:0;transform:scale(.97) translateY(10px)}to{opacity:1;transform:none}}
+
+  /* On phones, every modal becomes an iOS-style bottom sheet instead of a
+     centered popup — full width, rounded top corners only, slides up from
+     the bottom edge, capped height with its own internal scroll so a tall
+     form never fights the page behind it. */
+  @media(max-width:720px){
+    .overlay{align-items:flex-end;padding:0}
+    .modal{max-width:none;border-radius:20px 20px 0 0;max-height:88vh;display:flex;flex-direction:column;animation:sheet-up .26s cubic-bezier(.2,.8,.2,1);padding-bottom:env(safe-area-inset-bottom)}
+    .modal::before{content:'';display:block;width:36px;height:4px;border-radius:980px;background:var(--line);margin:10px auto 0;flex-shrink:0}
+    .modal-body{overflow-y:auto;flex:1}
+  }
+  @keyframes sheet-up{from{opacity:0;transform:translateY(100%)}to{opacity:1;transform:none}}
   .modal-head{display:flex;align-items:flex-start;justify-content:space-between;padding:24px 26px 16px}
   .modal-head h3{font-size:20px;font-weight:600;letter-spacing:-.02em}
   .modal-head p{font-size:13.5px;color:var(--ink-soft);margin-top:3px}
@@ -302,12 +342,24 @@
   /* ops */
   .ops-grid{display:grid;grid-template-columns:1.3fr 1fr;gap:26px}
   @media(max-width:720px){.ops-grid{grid-template-columns:1fr}}
-  .route-stop{display:flex;align-items:center;gap:13px;padding:15px 16px;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-sm);margin-bottom:10px}
+  .ops-wx{display:flex;gap:14px;align-items:flex-start;padding:14px 16px;border-radius:var(--radius-sm);border:1px solid var(--line);background:var(--surface);margin-bottom:18px}
+  .ops-wx-ico{font-size:26px;line-height:1;flex-shrink:0}
+  .ops-wx-body{flex:1;min-width:0}
+  .ops-wx-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .ops-wx-top b{font-size:14.5px;color:var(--ink)}
+  .ops-wx-stats{font-size:12.5px;color:var(--ink-soft);margin-top:3px}
+  .ops-wx-note{font-size:12px;color:var(--ink-faint);margin-top:3px}
+  .ops-wx-bad{border-color:var(--coral);background:var(--coral-wash)}
+  .ops-wx-warn{border-color:var(--amber);background:var(--amber-wash)}
+  .route-stop{display:flex;align-items:center;gap:13px;padding:15px 16px;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-sm);margin-bottom:10px;flex-wrap:wrap}
   .route-stop.mine{border-color:var(--teal);background:var(--teal-wash)}
   .route-num{width:28px;height:28px;border-radius:50%;background:var(--surface-2);color:var(--ink);font-weight:600;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
-  .route-info{flex:1}
+  .route-info{flex:1;min-width:140px}
   .route-info .rn{font-size:14px;font-weight:600}
   .route-info .ra{font-size:12px;color:var(--ink-soft)}
+  .route-info .rn-badge{margin-top:4px}
+  .rs-actions{display:flex;gap:6px;flex-shrink:0}
+  @media(max-width:720px){.rs-actions{width:100%;margin-left:42px}.rs-actions .btn{flex:1}}
   .gps{font-size:11px;font-weight:600;padding:4px 10px;border-radius:980px;white-space:nowrap}
   .gps.checked{background:var(--teal-wash);color:var(--teal)}
   .gps.enroute{background:var(--amber-wash);color:var(--amber)}
@@ -500,6 +552,8 @@
   .fc-wx-badge.fc-wx-bad{background:#fbf0ec;color:#b5573e}
   .fc-wx-badge.fc-wx-hist{opacity:.55;border:1px dashed currentColor;background:transparent}
   .fc-daygrid-day-top{display:flex;align-items:center;justify-content:space-between}
+  .fc-day-summary{display:flex;gap:5px;flex-wrap:wrap;padding:2px 4px 4px;font-size:9.5px;font-weight:600;color:var(--ink-faint)}
+  .fc-day-summary span{white-space:nowrap}
   .fc-wrap .fc-button{box-shadow:none!important;text-transform:capitalize}
   @media(max-width:640px){
     .fc-wrap{padding:10px}
@@ -610,6 +664,26 @@
   .contact-table .ct-sub{font-size:11px;color:var(--ink-faint)}
   .contact-table a{color:var(--accent);text-decoration:none}
   .contact-table a:hover{text-decoration:underline}
+  .customer-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
+  .customer-card{text-align:left;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-sm);padding:14px 16px;display:flex;flex-direction:column;gap:6px;transition:border-color .12s,box-shadow .12s}
+  .customer-card:hover{border-color:var(--accent);box-shadow:0 2px 8px rgba(10,28,43,.06)}
+  .customer-card .cc-top{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
+  .customer-card .cc-name{font-weight:600;font-size:14.5px;color:var(--ink)}
+  .customer-card .cc-sub{font-size:12.5px;color:var(--ink-faint)}
+  .customer-card .cc-contact{display:flex;flex-direction:column;gap:2px;margin-top:4px;font-size:12.5px}
+  .customer-card .cc-contact a{color:var(--accent);text-decoration:none}
+  .customer-card .cc-contact a:hover{text-decoration:underline}
+  @media(max-width:720px){.customer-grid{grid-template-columns:1fr}.customer-card{padding:16px;min-height:44px}}
+  /* iOS-Settings-style tappable list row — icon, label, chevron */
+  .more-row{display:flex;align-items:center;gap:12px;width:100%;padding:13px 4px;min-height:44px;border-bottom:1px solid var(--line-soft);text-align:left}
+  .more-row:last-child{border-bottom:none}
+  .more-row:hover{background:var(--surface-2)}
+  .more-row .mr-ico{font-size:19px;width:26px;text-align:center;flex-shrink:0}
+  .more-row .mr-label{flex:1;font-size:14.5px;color:var(--ink);font-weight:500}
+  .more-row .mr-chev{color:var(--ink-faint);font-size:16px}
+  .more-row.danger .mr-label{color:var(--coral)}
+  .more-group-label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.03em;color:var(--ink-faint);margin:18px 0 4px;padding:0 4px}
+  .more-group-label:first-child{margin-top:0}
   .contact-rows{display:flex;flex-direction:column;gap:2px}
   .contact-row{display:flex;align-items:center;gap:12px;padding:10px 4px;border-bottom:1px solid var(--line-soft);text-decoration:none;color:inherit;transition:background .12s}
   .contact-row:last-child{border-bottom:none}
@@ -920,16 +994,17 @@
     <button data-view="goals">Goals</button>
   </nav>
   <nav class="bottom-nav" id="bottom-nav">
-    <button data-view="pipeline" class="active"><span class="bn-ico">📋</span>Pipeline</button>
-    <button data-view="jobsflow"><span class="bn-ico">🧽</span>Jobs</button>
+    <button data-view="dashboard"><span class="bn-ico">🏠</span>Dashboard</button>
+    <button data-view="customers"><span class="bn-ico">👥</span>Customers</button>
     <button data-view="calendar"><span class="bn-ico">📅</span>Calendar</button>
-    <button data-view="ops"><span class="bn-ico">🚚</span>Ops</button>
-    <button onclick="openSettings()"><span class="bn-ico">⚙️</span>Settings</button>
+    <button data-view="jobsflow"><span class="bn-ico">🧽</span>Jobs</button>
+    <button onclick="openMoreSheet()"><span class="bn-ico">⋯</span>More</button>
   </nav>
   <main>
     <section class="view active" id="view-pipeline"></section>
     <section class="view" id="view-jobsflow"></section>
     <section class="view" id="view-leads"></section>
+    <section class="view" id="view-customers"></section>
     <section class="view" id="view-calendar"></section>
     <section class="view" id="view-inbox"></section>
     <section class="view" id="view-ops"></section>
@@ -999,6 +1074,11 @@
   <div class="modal-head"><div><h3>Preview</h3><p>This is exactly what the customer receives.</p></div><button class="x" aria-label="Close" onclick="closeDocPreview()">×</button></div>
   <div class="modal-body doc-scroll" id="doc-preview-body"></div>
   <div class="modal-foot" id="doc-preview-foot"></div>
+</div></div>
+
+<div class="overlay" id="more-overlay"><div class="modal">
+  <div class="modal-head"><div><h3>More</h3></div><button class="x" aria-label="Close" onclick="closeModal('more-overlay')">×</button></div>
+  <div class="modal-body" id="more-body"></div>
 </div></div>
 
 <div class="overlay" id="settings-overlay"><div class="modal wide">
@@ -1078,7 +1158,7 @@
 </div></div>
 
 <div class="overlay" id="cal-pick-overlay"><div class="modal">
-  <div class="modal-head"><div><h3 id="cp-title">Schedule a job</h3><p>Pick a won job to book on this date.</p></div><button class="x" aria-label="Close" onclick="closeModal('cal-pick-overlay')">×</button></div>
+  <div class="modal-head"><div><h3 id="cp-title">Day</h3></div><button class="x" aria-label="Close" onclick="closeModal('cal-pick-overlay')">×</button></div>
   <div class="modal-body"><div id="cp-list"></div></div>
   <div class="modal-foot"><button class="btn ghost" onclick="closeModal('cal-pick-overlay')">Close</button></div>
 </div></div>
@@ -1561,6 +1641,8 @@ function goalProgress(g){
 }
 
 let records=[], seq=1, draftLines=[], activeLeadId=null;
+let pipelineMobileStage='new'; // which Pipeline column shows on a phone (desktop always shows all 7)
+function selectPipelineStage(key){pipelineMobileStage=key;render();}
 
 /* ===== Editable quote/invoice template (header, terms, colours) =====
    business/tagline/phone/email start blank and are auto-seeded from the
@@ -1834,11 +1916,12 @@ function switchView(v){
   if(v==='pricing')renderPricing();
   if(v==='dashboard')renderDashboard();
   if(v==='goals')renderGoals();
+  if(v==='customers')renderCustomers();
   window.scrollTo({top:0,behavior:'smooth'});
 }
 const MODULE_ACCENT={
   pipeline:['--m-sales','--m-sales-wash'], leads:['--m-sales','--m-sales-wash'],
-  jobsflow:['--m-sales','--m-sales-wash'],
+  jobsflow:['--m-sales','--m-sales-wash'], customers:['--m-sales','--m-sales-wash'],
   calendar:['--m-cal','--m-cal-wash'],
   inbox:['--m-money','--m-money-wash'],
   ops:['--m-ops','--m-ops-wash'],
@@ -3244,6 +3327,10 @@ function render(){
       <div class="pipe-primary"><button class="btn primary" onclick="openLeadModal()">+ New lead</button></div>
       <div class="pipe-legend">${actionCount?`<span class="legend-flag">● ${actionCount} need${actionCount===1?'s':''} action</span>`:'<span class="legend-clear">✓ nothing stuck</span>'}</div>
     </div>
+    <div class="stage-pills" id="stage-pills">${STAGES.map(stage=>{
+      const n=records.filter(r=>r.stage===stage.key).length;
+      return `<button class="stage-pill ${stage.key===pipelineMobileStage?'active':''}" data-stage="${stage.key}" style="--pill-tone:${stage.tone};--pill-wash:${stage.wash}" onclick="selectPipelineStage('${stage.key}')">${stage.label} <span>${n}</span></button>`;
+    }).join('')}</div>
     <div class="board seven" id="board"></div>`;
 
   const board=document.getElementById('board');
@@ -3251,7 +3338,7 @@ function render(){
     const items=records.filter(r=>r.stage===stage.key);
     const stageVal=items.reduce((s,r)=>s+r.total,0);
     const body=items.length?items.map(cardHtml).join(''):`<div class="col-empty">—</div>`;
-    return `<div class="col" style="--col-tone:${stage.tone};--col-wash:${stage.wash}">
+    return `<div class="col${stage.key===pipelineMobileStage?' mobile-active':''}" data-stage="${stage.key}" style="--col-tone:${stage.tone};--col-wash:${stage.wash}">
       <div class="col-head">
         <span class="col-title"><span class="dot" style="background:${stage.dot}"></span>${stage.label}</span>
         <span class="col-count">${items.length}</span>
@@ -3267,29 +3354,47 @@ function render(){
     <div class="info-strip"><b>Instant lead capture:</b> a website enquiry lands here in seconds, the source is recorded for cost-per-lead tracking, and a 3-step follow-up sequence arms automatically.</div>
     <div class="pipe-bar"><div class="pipe-primary"><button class="btn primary" onclick="openLeadModal()">+ New lead</button></div></div>
     ${leads.length?`<div class="board" style="grid-template-columns:repeat(auto-fill,minmax(220px,1fr))">${leads.map(cardHtml).join('')}</div>`:`<div class="empty-state"><div class="big">No open leads yet</div><div class="sm">Click <b>+ New lead</b> above, or share your booking link (Connections) so website enquiries land here automatically.</div></div>`}
-    ${(()=>{
-      // One row per CUSTOMER, not per job — a repeat customer with two jobs
-      // shows once here with a job count, and opens their full profile.
-      const groups={};
-      records.forEach(r=>{
-        const key=r.customerId||('local'+r.id);
-        if(!groups[key])groups[key]={firstId:r.id,customerId:r.customerId,name:r.name,phone:r.phone,email:r.email,address:r.address,suburb:r.suburb,stage:r.stage,jobs:[]};
-        groups[key].jobs.push(r);
-      });
-      const list=Object.values(groups);
-      return `<div class="panel" style="margin-top:22px"><h4>Customers <span class="demo-tag">${list.length}</span></h4>
-      ${list.length?`<table class="contact-table">
-        <thead><tr><th>Client</th><th>Phone</th><th>Email</th><th>Suburb</th><th class="r">Jobs</th></tr></thead>
-        <tbody>${list.map(g=>{const st=stageObj(g.stage);return `<tr onclick="openCustomerProfile(${g.firstId})">
-          <td><div class="ct-name">${g.name}</div><div class="ct-sub">${g.address||''}</div></td>
-          <td>${g.phone?`<a href="tel:${g.phone.replace(/\s/g,'')}" onclick="event.stopPropagation()">${g.phone}</a>`:'—'}</td>
-          <td>${g.email?`<a href="mailto:${g.email}" onclick="event.stopPropagation()">${g.email}</a>`:'—'}</td>
-          <td>${g.suburb||'—'}</td>
-          <td class="r">${g.jobs.length>1?`<span class="pill">${g.jobs.length} jobs</span>`:`<span class="pill ${st.cls}">${st.label}</span>`}</td>
-        </tr>`}).join('')}</tbody>
-      </table>`:'<div class="empty-state" style="padding:30px"><div class="sm">No clients yet — they\'ll appear here as soon as you add a lead or one comes in from your booking page.</div></div>'}
+    <p style="font-size:13px;color:var(--ink-faint);margin-top:18px">Looking for an existing customer? Head to <a href="#" onclick="switchView('customers');return false" style="color:var(--teal)">Customers</a>.</p>`;
+}
+// One row per CUSTOMER, not per job — a repeat customer with two jobs shows
+// once here with a job count. Shared by the Customers view and anything
+// else that needs the same grouping, so there's exactly one place this
+// logic lives.
+function groupRecordsByCustomer(){
+  const groups={};
+  records.forEach(r=>{
+    const key=r.customerId||('local'+r.id);
+    if(!groups[key])groups[key]={firstId:r.id,customerId:r.customerId,name:r.name,phone:r.phone,email:r.email,address:r.address,suburb:r.suburb,stage:r.stage,jobs:[]};
+    groups[key].jobs.push(r);
+  });
+  return Object.values(groups);
+}
+/* ===== Customers — a real directory, not a table squeezed onto a phone.
+   Cards at every width (desktop included) rather than two different
+   markups to maintain; a search box narrows the list client-side since
+   there's no pagination to worry about at this scale. ===== */
+let customerSearchQuery='';
+function renderCustomers(){
+  const list=groupRecordsByCustomer().sort((a,b)=>a.name.localeCompare(b.name));
+  const q=customerSearchQuery.trim().toLowerCase();
+  const filtered=q?list.filter(g=>(g.name||'').toLowerCase().includes(q)||(g.suburb||'').toLowerCase().includes(q)||(g.phone||'').includes(q)||(g.email||'').toLowerCase().includes(q)):list;
+  document.getElementById('view-customers').innerHTML=`
+    <div class="view-head"><div><h2>Customers</h2><p>Every customer you've quoted, booked or invoiced.</p></div></div>
+    <div class="field" style="max-width:360px"><input id="customer-search" placeholder="Search by name, suburb, phone or email" value="${customerSearchQuery.replace(/"/g,'&quot;')}" oninput="customerSearchQuery=this.value;renderCustomers()"></div>
+    <div class="customer-grid" style="margin-top:16px">
+      ${filtered.length?filtered.map(g=>{
+        const st=stageObj(g.stage);
+        const latest=g.jobs.reduce((a,b)=>(b.createdAt||0)>(a.createdAt||0)?b:a,g.jobs[0]);
+        return `<button class="customer-card" onclick="openCustomerProfile(${g.firstId})">
+          <div class="cc-top"><div class="cc-name">${g.name}</div>${g.jobs.length>1?`<span class="pill">${g.jobs.length} jobs</span>`:jobStatusBadge(latest)}</div>
+          <div class="cc-sub">${[g.address,g.suburb].filter(Boolean).join(', ')||'No address on file'}</div>
+          <div class="cc-contact">
+            ${g.phone?`<a href="tel:${g.phone.replace(/\s/g,'')}" onclick="event.stopPropagation()">📞 ${g.phone}</a>`:''}
+            ${g.email?`<a href="mailto:${g.email}" onclick="event.stopPropagation()">✉️ ${g.email}</a>`:''}
+          </div>
+        </button>`;
+      }).join(''):`<div class="empty-state"><div class="big">${q?'No matches':'No customers yet'}</div><div class="sm">${q?'Try a different search.':'They\'ll appear here as soon as you add a lead or one comes in from your booking page.'}</div></div>`}
     </div>`;
-    })()}`;
 }
 function cardHtml(r){
   const tags=r.services.map(s=>`<span class="tag">${SERVICES[s.svc].label.split(' ')[0]}</span>`).join('');
@@ -3362,9 +3467,10 @@ function renderCustomerProfile(){
   const photos=ctx.attachments.filter(a=>a.kind==='before_photo'||a.kind==='after_photo');
   const files=ctx.attachments.filter(a=>a.kind!=='before_photo'&&a.kind!=='after_photo');
 
+  const latestJob=jobs.reduce((a,b)=>(b.createdAt||0)>(a.createdAt||0)?b:a,jobs[0]);
   document.getElementById('customer-body').innerHTML=`
     <div class="cp-head">
-      <div><div class="cp-name">${c.name}</div><div class="cp-sub">${c.suburb||c.address||'No address on file'}</div></div>
+      <div><div class="cp-name">${c.name} ${jobStatusBadge(latestJob)}</div><div class="cp-sub">${c.suburb||c.address||'No address on file'}</div></div>
       <div class="cp-actions">
         <button class="btn ghost sm" onclick="openNewJobModal('${ctx.customerId}')">+ New job</button>
         ${c.phone?`<a class="btn ghost sm" href="tel:${c.phone.replace(/\s/g,'')}">Call</a>`:''}
@@ -3591,12 +3697,32 @@ function renderOps(){
   const techs=staff.filter(u=>u.role==='technician').map(u=>u.name||u.email||'Unnamed');
   const techLoad=techs.map(t=>({t,jobs:records.filter(r=>r.tech===t&&isBooked(r)&&r.scheduledDateISO===todayIso).length}));
   const mapsKey=turnkeyMapsKey();
+  const wx=weatherForDate(todayIso);
+  const wxBadge=calendarDayWeatherBadge(todayIso);
   document.getElementById('view-ops').innerHTML=`
     <div class="view-head"><div><h2>Operations</h2><p>Today's run sheet — who's on each job, addresses, and check-ins. The job checklist and photos live inside each job.</p></div><span class="eng-badge">Operations</span></div>
+    ${renderOpsWeatherPanel(wx,wxBadge)}
     <div class="ops-grid">
       <div>
         <div class="panel" style="margin-bottom:0"><h4>Today's jobs — ${stops.length} stop${stops.length!==1?'s':''}</h4>
-          ${stops.length?stops.map((s,i)=>`<div class="route-stop ${isTech&&s.r.assignedStaffId===currentUserId?'mine':''}" style="cursor:pointer" onclick="openCustomerProfile(${s.r.id})"><div class="route-num" style="background:${PIN_COLORS[i%5]}22;color:${PIN_COLORS[i%5]}">${i+1}</div><div class="route-info"><div class="rn">${s.r.name}</div><div class="ra">${s.r.address||''}${s.r.suburb?', '+s.r.suburb:''} · ${s.r.tech}</div></div><span class="gps ${s.r.gps}">${s.r.gps==='checked'?'On site ✓':s.r.gps==='enroute'?'En route':'Pending'}</span></div>`).join(''):'<div class="empty-state"><div class="sm">No jobs scheduled for today. Book one from Pipeline to see it here.</div></div>'}
+          ${stops.length?stops.map((s,i)=>{
+            const r=s.r;
+            const addr=[r.address,r.suburb].filter(Boolean).join(', ');
+            const notStarted=r.stage==='scheduled'&&!r.startedAt;
+            return `<div class="route-stop ${isTech&&r.assignedStaffId===currentUserId?'mine':''}" style="cursor:pointer" onclick="openDetail(${r.id})">
+              <div class="route-num" style="background:${PIN_COLORS[i%5]}22;color:${PIN_COLORS[i%5]}">${i+1}</div>
+              <div class="route-info">
+                <div class="rn">${r.name}</div>
+                <div class="ra">${addr||''}${addr?' · ':''}${r.tech}</div>
+                <div class="rn-badge">${jobStatusBadge(r)}</div>
+              </div>
+              <div class="rs-actions">
+                ${notStarted?`<button class="btn accent sm" onclick="event.stopPropagation();startJob(${r.id})">▶ Start</button>`:''}
+                ${r.phone?`<button class="btn ghost sm" onclick="event.stopPropagation();window.location.href='tel:${r.phone.replace(/\s/g,'')}'" title="Call ${r.name}">📞</button>`:''}
+                ${addr?`<button class="btn ghost sm" onclick="event.stopPropagation();window.open('https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}','_blank')" title="Navigate">🧭</button>`:''}
+              </div>
+            </div>`;
+          }).join(''):'<div class="empty-state"><div class="sm">No jobs scheduled for today. Book one from Pipeline to see it here.</div></div>'}
         </div>
       </div>
       <div>
@@ -3605,6 +3731,25 @@ function renderOps(){
       </div>
     </div>`;
   renderOpsMap(stops,mapsKey);
+}
+// Same weather source Calendar uses (weatherForDate/calendarDayWeatherBadge) —
+// Operations shouldn't have its own separate read of "what's today's weather".
+function renderOpsWeatherPanel(wx,badge){
+  if(wx.type==='unavailable')return '';
+  const icon=wx.type==='forecast'?(wx.icon||'🌤️'):'📊';
+  const headline=wx.type==='forecast'?wx.cond:`Historical avg for ${wx.month}`;
+  const stats=wx.type==='forecast'
+    ?`${wx.rainPct}% rain · ${wx.tempHi}°C · ${wx.windKmh}km/h wind`
+    :`${wx.rainDayPct}% of days had rain · ~${wx.avgHighTemp}°C avg`;
+  const cls=badge?badge.cls:'good';
+  return `<div class="ops-wx ops-wx-${cls}">
+    <div class="ops-wx-ico">${icon}</div>
+    <div class="ops-wx-body">
+      <div class="ops-wx-top"><b>${headline||badge?.label||'Working conditions'}</b><span class="pill ${cls==='bad'?'bad':cls==='warn'?'followup':'won'}">${wx.label}</span></div>
+      <div class="ops-wx-stats">${stats}</div>
+      ${wx.impact&&wx.impact.length&&wx.impact[0]!==wx.label?`<div class="ops-wx-note">${wx.impact.join(' · ')}</div>`:wx.type==='historical'?`<div class="ops-wx-note">${wx.note}</div>`:''}
+    </div>
+  </div>`;
 }
 function renderOpsMap(stops,mapsKey){
   const box=document.getElementById('ops-map-box');if(!box)return;
@@ -4321,20 +4466,46 @@ function fcDayCellDidMount(arg){
   const d=arg.date;
   const iso=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
   const badge=calendarDayWeatherBadge(iso);
-  if(!badge)return;
-  const el=document.createElement('span');
-  el.className='fc-wx-badge fc-wx-'+badge.cls+(badge.forecast?'':' fc-wx-hist');
-  el.textContent=badge.label;
-  el.title=badge.forecast?'Live forecast':'Historical average for this month — not a forecast';
-  const frame=arg.el.querySelector('.fc-daygrid-day-top');
-  if(frame)frame.appendChild(el);
+  const top=arg.el.querySelector('.fc-daygrid-day-top');
+  if(badge&&top){
+    const el=document.createElement('span');
+    el.className='fc-wx-badge fc-wx-'+badge.cls+(badge.forecast?'':' fc-wx-hist');
+    el.textContent=badge.label;
+    el.title=badge.forecast?'Live forecast':'Historical average for this month — not a forecast';
+    top.appendChild(el);
+  }
+  // Job count / revenue / technician count for the day — the same numbers
+  // a click-through would show, visible at a glance without opening it.
+  const dayJobs=records.filter(r=>isBooked(r)&&r.scheduledDateISO===iso);
+  if(dayJobs.length){
+    const revenue=dayJobs.reduce((s,r)=>s+(r.total||0),0);
+    const techCount=new Set(dayJobs.map(r=>r.assignedStaffId).filter(Boolean)).size;
+    const frame=arg.el.querySelector('.fc-daygrid-day-frame');
+    if(frame){
+      const summary=document.createElement('div');
+      summary.className='fc-day-summary';
+      summary.innerHTML=`<span>📋 ${dayJobs.length}</span>${revenue?`<span>${money(revenue)}</span>`:''}${techCount?`<span>👷 ${techCount}</span>`:''}`;
+      frame.appendChild(summary);
+    }
+  }
 }
 function openCalPicker(iso){
+  const dayJobs=records.filter(r=>isBooked(r)&&r.scheduledDateISO===iso);
   const unscheduled=records.filter(r=>r.stage==='won'||(isWon(r)&&!r.scheduledDateISO));
-  document.getElementById('cp-title').textContent='Schedule a job — '+isoToLabel(iso);
-  document.getElementById('cp-list').innerHTML=unscheduled.length
-    ?unscheduled.map(r=>`<div class="kv" style="cursor:pointer" onclick="closeModal('cal-pick-overlay');openSchedule(${r.id},'${iso}')"><span class="k">${r.name}</span><span class="v">${r.suburb||''} · ${r.total?money(r.total):'no quote'}</span></div>`).join('')
-    :'<div class="empty-state" style="padding:20px"><div class="sm">No won jobs waiting to be scheduled. Mark a quote as won in Pipeline first.</div></div>';
+  document.getElementById('cp-title').textContent=isoToLabel(iso);
+  const wx=weatherForDate(iso);
+  const wxLine=wx.type==='forecast'?`${wx.icon||''} ${wx.cond||''} · ${wx.rainPct}% rain · ${wx.tempHi}°C · ${wx.windKmh}km/h wind`
+    :wx.type==='historical'?`📊 Historical avg for ${wx.month}: ${wx.rainDayPct}% of days had rain, ~${wx.avgHighTemp}°C`
+    :'Weather data unavailable for this date';
+  const revenue=dayJobs.reduce((s,r)=>s+(r.total||0),0);
+  const jobsSection=`
+    <div style="font-size:12px;color:var(--ink-faint);margin-bottom:10px">${wxLine}</div>
+    <div class="more-group-label">Scheduled jobs${dayJobs.length?' — '+dayJobs.length+' · '+money(revenue):''}</div>
+    ${dayJobs.length?dayJobs.map(r=>`<div class="kv" style="cursor:pointer" onclick="closeModal('cal-pick-overlay');openDetail(${r.id})"><span class="k">${r.name}${r.tech&&r.tech!=='Unassigned'?' · '+r.tech:''}</span><span class="v">${jobStatusBadge(r)} ${r.total?money(r.total):''}</span></div>`).join(''):'<div class="empty-state" style="padding:16px"><div class="sm">Nothing scheduled yet.</div></div>'}`;
+  const bookSection=`
+    <div class="more-group-label" style="margin-top:18px">Book a won job on this day</div>
+    ${unscheduled.length?unscheduled.map(r=>`<div class="kv" style="cursor:pointer" onclick="closeModal('cal-pick-overlay');openSchedule(${r.id},'${iso}')"><span class="k">${r.name}</span><span class="v">${r.suburb||''} · ${r.total?money(r.total):'no quote'}</span></div>`).join(''):'<div class="empty-state" style="padding:16px"><div class="sm">No won jobs waiting to be scheduled.</div></div>'}`;
+  document.getElementById('cp-list').innerHTML=jobsSection+bookSection;
   openModal('cal-pick-overlay');
 }
 // Customers whose last job set a repeat interval (e.g. "every 6 months")
@@ -4587,22 +4758,45 @@ try{window.addEventListener('focus',syncEmail);}catch(e){}
 /* ===== SETTINGS: one home for everything about how the business runs —
    business profile, booking page, connections, team, templates, imports,
    and account/data actions. Replaces the old flat row of header buttons. ===== */
+/* ===== More sheet — mobile bottom-nav's 5th tab. A plain list of
+   destinations (iOS "More" tab convention) rather than duplicating
+   Settings' content; most rows just open the relevant existing screen. ===== */
+function openMoreSheet(){
+  const row=(ico,label,onclick,danger)=>`<button class="more-row${danger?' danger':''}" onclick="closeModal('more-overlay');${onclick}"><span class="mr-ico">${ico}</span><span class="mr-label">${label}</span><span class="mr-chev">›</span></button>`;
+  const isTech=currentUserRole==='technician';
+  document.getElementById('more-body').innerHTML=`
+    ${!isTech?`<div class="more-group-label">Work</div>${row('🚚','Operations',"switchView('ops')")}${row('💲','Pricing',"switchView('pricing')")}${row('🎯','Goals',"switchView('goals')")}`:''}
+    <div class="more-group-label">Business</div>
+    ${row('⚙️','Settings',"openSettings()")}
+    ${row('🔌','Connections',"openConnections()")}
+    ${row('✉️','Templates',"openTemplateEditor()")}
+    ${row('📥','Imports',"openImportWizard()")}
+    <div class="more-group-label">Account</div>
+    ${row('🚪','Log out',"handleLogout()",true)}`;
+  openModal('more-overlay');
+}
+// iPhone-Settings-style grouped layout — every group the user asked for
+// (Business/Branding/Team/Templates/Pricing/Notifications/Calendar/Email/
+// Integrations/Imports/Billing/Support/Advanced), each with a small caps
+// label, so this reads like a settings app instead of a stack of cards.
+function settingsGroup(label,inner){return `<div class="more-group-label">${label}</div>${inner}`;}
+function settingsRow(ico,label,sub,onclick){
+  return `<button class="more-row" onclick="${onclick}"><span class="mr-ico">${ico}</span><span class="mr-label">${label}${sub?`<br><span style="font-weight:400;font-size:12px;color:var(--ink-faint)">${sub}</span>`:''}</span><span class="mr-chev">›</span></button>`;
+}
 function openSettings(){
   const bookingLink=currentBusinessId?`${location.origin}/booking.html?biz=${currentBusinessId}`:'';
   const embedCode=bookingLink?`<iframe\n  src="${location.origin}/booking.html?biz=${currentBusinessId}&embed=1"\n  width="100%"\n  height="900"\n  frameborder="0">\n</iframe>`:'';
   const canEditBusiness=currentUserRole==='owner'||currentUserRole==='manager';
   const biz=currentBusinessProfile||{};
   const mapsKey=turnkeyMapsKey();
+  const hasGoogleCal=calendarConnections.some(c=>c.provider==='google');
+  const icalConns=calendarConnections.filter(c=>c.provider==='ical');
+  const calConnected=hasGoogleCal||icalConns.length>0;
   document.getElementById('settings-body').innerHTML=`
+    ${settingsGroup('Business',`
     <div class="conn-card ${biz.name?'live':''}">
       <div class="conn-top"><span class="conn-name">🏢 Business profile</span><span class="conn-badge ${biz.name?'on':'off'}">${biz.name?'● SET':'not set yet'}</span></div>
-      <p>Shown to your customers on your booking page and in every quote/invoice — your name, logo and contact details.</p>
-      <div style="display:flex;gap:14px;align-items:center;margin-bottom:10px">
-        <div style="width:56px;height:56px;border-radius:12px;overflow:hidden;background:var(--surface-2);display:flex;align-items:center;justify-content:center;flex-shrink:0">
-          ${biz.logo_url?`<img src="${biz.logo_url}" alt="Your business logo" style="width:100%;height:100%;object-fit:cover">`:`<span style="font-size:22px">🏢</span>`}
-        </div>
-        ${canEditBusiness?`<div><input type="file" id="biz-logo-input" accept="image/*" style="display:none" onchange="onBizLogoChosen(this)"><button class="btn ghost sm" onclick="document.getElementById('biz-logo-input').click()">${biz.logo_url?'Change logo':'Upload logo'}</button></div>`:''}
-      </div>
+      <p>Shown to your customers on your booking page and in every quote/invoice.</p>
       ${canEditBusiness?`
       <div class="field"><label>Business name</label><input id="biz-name-input" placeholder="e.g. North Shore Pressure Wash" value="${(biz.name||'').replace(/"/g,'&quot;')}"></div>
       <div class="field"><label>Phone</label><input id="biz-phone-input" placeholder="e.g. 021 000 0000" value="${(biz.phone||'').replace(/"/g,'&quot;')}"></div>
@@ -4611,29 +4805,24 @@ function openSettings(){
       <p style="font-size:11px;color:var(--ink-faint);margin:4px 0 10px">Also drives weather and satellite maps — set this to where you actually operate.</p>
       <button class="btn primary sm" onclick="saveBusinessProfile()">Save business profile</button>
       `:`<p style="font-size:12px;color:var(--ink-faint)">Only an owner or manager can edit this.</p>`}
-    </div>
-    <div class="conn-card ${bookingLink?'live':''}">
-      <div class="conn-top"><span class="conn-name">🔗 Booking page</span><span class="conn-badge ${bookingLink?'on':'off'}">${bookingLink?'● READY TO SHARE':'sign in first'}</span></div>
-      <p>Share this with customers — every quote request they submit lands straight in your Pipeline.</p>
-      ${bookingLink?`<div class="conn-keyrow"><input id="conn-booking-link" readonly value="${bookingLink}" onclick="this.select()"><button class="btn accent sm" onclick="copyBookingLink()" id="copy-booking-btn">Copy link</button></div>
-      <p style="font-size:12px;color:var(--ink-faint);margin-top:12px">Want it directly on your own website instead? Copy the code below into Wix, Squarespace or WordPress.</p>
-      <textarea id="conn-embed-code" readonly onclick="this.select()" style="width:100%;min-height:80px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;padding:10px 12px;border:1px solid var(--line);border-radius:var(--radius-sm);resize:vertical;color:var(--ink)">${embedCode}</textarea>
-      <button class="btn accent sm" style="margin-top:8px" onclick="copyEmbedCode()" id="copy-embed-btn">Copy embed code</button>
-      <p style="font-size:11px;color:var(--ink-faint);margin-top:10px"><b>Wix:</b> Add Elements → Embed → Embed a Widget → paste the code → Publish. <b>Squarespace:</b> Add a Code Block, paste the code. <b>WordPress:</b> Add a Custom HTML block, paste the code.</p>`:''}
-    </div>
+    </div>`)}
+    ${settingsGroup('Branding',`
     <div class="conn-card">
-      <div class="conn-top"><span class="conn-name">🧰 Your tools</span></div>
-      <p>Everything else about how your business runs in Turnkey.</p>
-      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">
-        <button class="btn ghost sm" onclick="closeModal('settings-overlay');openConnections()">Connections</button>
-        <button class="btn ghost sm" onclick="closeModal('settings-overlay');openTeam()">Team</button>
-        <button class="btn ghost sm" onclick="closeModal('settings-overlay');openTemplateEditor()">Email &amp; document templates</button>
-        <button class="btn ghost sm" onclick="closeModal('settings-overlay');openImportWizard()">Import customers</button>
-        <button class="btn ghost sm" onclick="closeModal('settings-overlay');openMarketing()">✨ Marketing</button>
+      <div class="conn-top"><span class="conn-name">🎨 Logo &amp; colours</span></div>
+      <p>Your logo and accent colour appear on quotes, invoices and your booking page.</p>
+      <div style="display:flex;gap:14px;align-items:center;margin-top:10px">
+        <div style="width:56px;height:56px;border-radius:12px;overflow:hidden;background:var(--surface-2);display:flex;align-items:center;justify-content:center;flex-shrink:0">
+          ${biz.logo_url?`<img src="${biz.logo_url}" alt="Your business logo" style="width:100%;height:100%;object-fit:cover">`:`<span style="font-size:22px">🏢</span>`}
+        </div>
+        ${canEditBusiness?`<div><input type="file" id="biz-logo-input" accept="image/*" style="display:none" onchange="onBizLogoChosen(this)"><button class="btn ghost sm" onclick="document.getElementById('biz-logo-input').click()">${biz.logo_url?'Change logo':'Upload logo'}</button></div>`:''}
       </div>
     </div>
+    ${settingsRow('🖌️','Colours &amp; document templates','Customise how quotes and invoices look',"closeModal('settings-overlay');openTemplateEditor()")}`)}
+    ${settingsGroup('Team',settingsRow('👥','Team &amp; roles',null,"closeModal('settings-overlay');openTeam()"))}
+    ${settingsGroup('Templates',settingsRow('✉️','Email &amp; document templates',null,"closeModal('settings-overlay');openTemplateEditor()"))}
+    ${settingsGroup('Pricing',settingsRow('💲','Rates, chemical costs &amp; margins',null,"closeModal('settings-overlay');switchView('pricing')"))}
+    ${settingsGroup('Notifications',`
     <div class="conn-card">
-      <div class="conn-top"><span class="conn-name">🔔 Notifications</span></div>
       <p>Get told when something needs you — sent to the address below by email. SMS and push are on the roadmap.</p>
       <div class="field"><label>Send notifications to</label><input id="notif-email" type="email" placeholder="${(biz.email||'your email')}" value="${(NOTIFICATION_EVENTS.map(e=>notificationPrefs[e.key]&&notificationPrefs[e.key].notify_email).find(Boolean)||'').replace(/"/g,'&quot;')}"></div>
       ${NOTIFICATION_EVENTS.map(ev=>{
@@ -4646,18 +4835,32 @@ function openSettings(){
         </span></div>`;
       }).join('')}
       <button class="btn accent sm" style="margin-top:10px" onclick="saveNotificationPrefs()">Save notification preferences</button>
+    </div>`)}
+    ${settingsGroup('Calendar',`
+    <div class="conn-card ${bookingLink?'live':''}">
+      <div class="conn-top"><span class="conn-name">🔗 Booking page</span><span class="conn-badge ${bookingLink?'on':'off'}">${bookingLink?'● READY TO SHARE':'sign in first'}</span></div>
+      <p>Share this with customers — every quote request they submit lands straight in your Pipeline.</p>
+      ${bookingLink?`<div class="conn-keyrow"><input id="conn-booking-link" readonly value="${bookingLink}" onclick="this.select()"><button class="btn accent sm" onclick="copyBookingLink()" id="copy-booking-btn">Copy link</button></div>
+      <p style="font-size:12px;color:var(--ink-faint);margin-top:12px">Want it directly on your own website instead? Copy the code below into Wix, Squarespace or WordPress.</p>
+      <textarea id="conn-embed-code" readonly onclick="this.select()" style="width:100%;min-height:80px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;padding:10px 12px;border:1px solid var(--line);border-radius:var(--radius-sm);resize:vertical;color:var(--ink)">${embedCode}</textarea>
+      <button class="btn accent sm" style="margin-top:8px" onclick="copyEmbedCode()" id="copy-embed-btn">Copy embed code</button>`:''}
     </div>
-    <div class="conn-card">
-      <div class="conn-top"><span class="conn-name">🔐 Permissions</span></div>
-      <div class="kv"><span class="k">Owner</span><span class="v">Everything</span></div>
-      <div class="kv"><span class="k">Manager</span><span class="v">Operations, customers, jobs, quotes</span></div>
-      <div class="kv"><span class="k">Worker</span><span class="v">Assigned jobs only</span></div>
-      <p style="font-size:12px;color:var(--ink-faint);margin-top:10px">Set a teammate's role from <a href="#" onclick="closeModal('settings-overlay');openTeam();return false" style="color:var(--teal)">Team</a>.</p>
-    </div>
-    <div class="conn-card">
-      <div class="conn-top"><span class="conn-name">💳 Billing</span><span class="conn-badge">coming soon</span></div>
-      <p>Your Turnkey subscription and billing details will show up here.</p>
-    </div>
+    ${settingsRow('📅','Calendar sync',calConnected?'Connected — avoids double-booking':'Connect Google Calendar or iCloud',"closeModal('settings-overlay');openConnections()")}`)}
+    ${settingsGroup('Email',settingsRow('📧','Gmail — inbox &amp; sending',emailAccount?`Connected as ${emailAccount.email_address}`:'Not connected',"closeModal('settings-overlay');openConnections()"))}
+    ${settingsGroup('Integrations',`
+    ${settingsRow('💳','Card payments (Stripe)','Coming soon',"toast('Card payments are coming soon')")}
+    <div class="conn-card ${mapsKey?'live':''}" style="margin-top:8px">
+      <div class="conn-top"><span class="conn-name">🛰️ Satellite map imagery</span><span class="conn-badge ${mapsKey?'on':'off'}">${mapsKey?'● ACTIVE':'not set'}</span></div>
+      <p>Shows real satellite photos of a property when building a quote, with accurate scale. Contact support if you'd like this turned on for your account.</p>
+      <div class="conn-keyrow">
+        <input id="conn-maps-key" placeholder="Paste access code" value="${mapsKey.replace(/"/g,'&quot;')}">
+        <button class="btn accent sm" onclick="saveMapsKey()">${mapsKey?'Update':'Activate'}</button>
+      </div>
+    </div>`)}
+    ${settingsGroup('Imports',settingsRow('📥','Import customers','From a spreadsheet or another CRM',"closeModal('settings-overlay');openImportWizard()"))}
+    ${settingsGroup('Billing',`<div class="conn-card"><div class="conn-top"><span class="conn-name">💳 Subscription</span><span class="conn-badge">coming soon</span></div><p>Your Turnkey subscription and billing details will show up here.</p></div>`)}
+    ${settingsGroup('Support',`<div class="conn-card"><p style="margin:0">Need a hand? Reach out to whoever set up your Turnkey account, or check the guidance notes throughout the app — most screens explain what they do as you go.</p></div>`)}
+    ${settingsGroup('Advanced',`
     <div class="conn-card">
       <div class="conn-top"><span class="conn-name">💾 Backup &amp; data</span></div>
       <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">
@@ -4667,20 +4870,13 @@ function openSettings(){
       </div>
     </div>
     <div class="conn-card">
-      <div class="conn-top"><span class="conn-name">👤 Account</span></div>
-      <button class="btn ghost sm" style="margin-top:8px" onclick="handleLogout()">Log out</button>
-    </div>
-    <details style="margin-top:16px">
-      <summary style="cursor:pointer;font-size:12.5px;color:var(--ink-faint)">Advanced</summary>
-      <div class="conn-card ${mapsKey?'live':''}" style="margin-top:10px">
-        <div class="conn-top"><span class="conn-name">🛰️ Satellite map imagery</span><span class="conn-badge ${mapsKey?'on':'off'}">${mapsKey?'● ACTIVE':'not set'}</span></div>
-        <p>Shows real satellite photos of a property when building a quote, with accurate scale. Contact support if you'd like this turned on for your account.</p>
-        <div class="conn-keyrow">
-          <input id="conn-maps-key" placeholder="Paste access code" value="${mapsKey.replace(/"/g,'&quot;')}">
-          <button class="btn accent sm" onclick="saveMapsKey()">${mapsKey?'Update':'Activate'}</button>
-        </div>
-      </div>
-    </details>`;
+      <div class="conn-top"><span class="conn-name">🔐 Permissions</span></div>
+      <div class="kv"><span class="k">Owner</span><span class="v">Everything</span></div>
+      <div class="kv"><span class="k">Manager</span><span class="v">Operations, customers, jobs, quotes</span></div>
+      <div class="kv"><span class="k">Worker</span><span class="v">Assigned jobs only</span></div>
+    </div>`)}
+    <div class="more-group-label" style="margin-top:22px"></div>
+    <button class="more-row danger" onclick="handleLogout()"><span class="mr-ico">🚪</span><span class="mr-label">Log out</span></button>`;
   openModal('settings-overlay');
 }
 
@@ -4997,12 +5193,11 @@ async function handleAuthedSession(session){
    Cosmetic tab-hiding only — same precedent as the Marketing/Accounting tabs
    already hidden for everyone ("code intact, just hidden"). Actual data
    access is governed by RLS regardless of what's shown in the nav. */
-const TECH_HIDDEN_VIEWS=['pipeline','leads','pricing','dashboard','goals'];
+const TECH_HIDDEN_VIEWS=['pipeline','leads','customers','pricing','dashboard','goals'];
 function applyRoleVisibility(){
   const hide=currentUserRole==='technician';
   TECH_HIDDEN_VIEWS.forEach(v=>{
-    const btn=document.querySelector(`nav.tabs button[data-view="${v}"]`);
-    if(btn)btn.style.display=hide?'none':'';
+    document.querySelectorAll(`nav.tabs button[data-view="${v}"], .bottom-nav button[data-view="${v}"]`).forEach(btn=>{btn.style.display=hide?'none':'';});
   });
   // Bigger buttons/tap targets everywhere for technicians on mobile — they're
   // usually operating one-handed, often with wet or gloved hands.

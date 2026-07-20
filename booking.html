@@ -75,12 +75,23 @@
   .map-stage{position:relative;width:100%;aspect-ratio:4/3;background:#dfe6e3;overflow:hidden;cursor:crosshair;touch-action:none;user-select:none}
   @media(max-width:560px){.map-stage{aspect-ratio:1/1}}
   .map-stage svg{position:absolute;inset:0;width:100%;height:100%;display:block}
+  /* Pan/pinch live-transform this whole layer (background photo + drawn
+     points move together as one rigid image) — .map-hint sits outside it so
+     the hint text never scales/shifts with the gesture. */
+  .map-visual{position:absolute;inset:0;background-size:cover;background-position:center;transform-origin:0 0}
+  .map-visual.gesturing{transition:none}
+  .map-visual:not(.gesturing){transition:transform .22s cubic-bezier(.2,.8,.2,1)}
   .map-hint{position:absolute;left:50%;top:14px;transform:translateX(-50%);background:rgba(10,28,43,.78);color:#fff;font-size:12.5px;font-weight:500;padding:7px 14px;border-radius:980px;pointer-events:none;white-space:nowrap;max-width:92%;text-align:center;backdrop-filter:blur(4px)}
   .map-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 16px;border-top:1px solid var(--line);flex-wrap:wrap}
   .map-zoom{display:flex;align-items:center;gap:6px;background:rgba(0,0,0,.55);border-radius:980px;padding:4px 10px}
   .zoom-label{font-size:10px;font-weight:700;color:rgba(255,255,255,.7);letter-spacing:.04em;text-transform:uppercase}
   .zoom-val{font-size:13px;font-weight:700;color:#fff;min-width:20px;text-align:center}
   .zoom-btn{font-size:19px;font-weight:700;color:#fff;padding:0;width:34px;height:34px;line-height:1;opacity:.85;display:flex;align-items:center;justify-content:center;touch-action:manipulation}
+  @media(max-width:720px){
+    .zoom-btn{width:44px;height:44px}
+    .mini-btn,.svc-btn{min-height:44px}
+    input,select,textarea{font-size:16px}
+  }
   .zoom-btn:hover{opacity:1}
   .map-note{font-size:11.5px;color:var(--ink-faint)}
   .map-btns{display:flex;gap:8px}
@@ -262,7 +273,9 @@ function initPlacesAutocomplete(){
         <div class="svc-pick" id="svc-pick"></div>
       </div>
       <div class="map-stage" id="stage">
-        <svg id="map-svg" viewBox="0 0 800 600" preserveAspectRatio="none"></svg>
+        <div class="map-visual" id="map-visual">
+          <svg id="map-svg" viewBox="0 0 800 600" preserveAspectRatio="none"></svg>
+        </div>
         <div class="map-hint" id="hint">Tap to drop points around an area · tap the first point to finish</div>
       </div>
       <div class="map-foot">
@@ -526,14 +539,13 @@ function enableSatellite(address){
   return true;
 }
 function loadSatelliteUrl(url,cacheKey,label){
-  const stage=document.getElementById('stage');
+  const visual=document.getElementById('map-visual');
   const hint=document.getElementById('hint');
   hint.textContent='\u23f3 Loading satellite image\u2026';
   const probe=new Image();
   probe.onload=function(){
-    stage.style.backgroundImage='url("'+url+'")';
-    stage.style.backgroundSize='cover';
-    stage.style.backgroundPosition='center';
+    visual.style.transform='none'; // snap the live pan/pinch preview back now that fresh, correctly-scaled imagery has arrived
+    visual.style.backgroundImage='url("'+url+'")';
     document.getElementById('map-svg').querySelectorAll('rect,line').forEach(function(elm){
       if(!elm.closest('#layer-areas')&&!elm.closest('#layer-draw'))elm.style.opacity='0.14';
     });
@@ -783,6 +795,105 @@ function initPointDragHandlers(){
     suppressNextStageClick=true;
     updateHint();
   });
+}
+/* ===== Pan + pinch-zoom on the satellite photo, Google-Maps style =====
+   Only meaningful once real satellite imagery is loaded (_lastLat set) — in
+   demo/grid mode there's no bigger map behind the canvas to reveal, so
+   gestures are a no-op there and single-finger taps keep placing points
+   exactly as before (zero change to existing behaviour).
+   During the gesture we rigid-transform #map-visual (photo + drawn points
+   move together as one image, so nothing drifts relative to anything else);
+   on release we snap the transform back and ask Google for a fresh, correctly
+   -scaled image at the new center/zoom, then reprojectAreas() re-derives
+   every point's true pixel position from its stable lat/lng — the same
+   mechanism the +/- zoom buttons already rely on. */
+function initMapGestures(){
+  const stageEl=document.getElementById('stage');
+  const visual=document.getElementById('map-visual');
+  let mode=null; // null | 'pan' | 'pinch'
+  let startTouches=null, startCenter=null, startDist=0, liveScale=1, liveDx=0, liveDy=0;
+  const dist=(a,b)=>Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY);
+  const mid=(a,b)=>({x:(a.clientX+b.clientX)/2,y:(a.clientY+b.clientY)/2});
+  function beginGesture(touches){
+    if(!_lastLat)return; // demo mode — let normal tap-to-place-point handle it
+    if(touches.length===1&&touches[0].target&&touches[0].target.closest&&touches[0].target.closest('.pt-handle'))return; // point-drag owns this touch
+    startTouches=touches;
+    liveScale=1;liveDx=0;liveDy=0;
+    visual.classList.add('gesturing');
+    if(touches.length>=2){
+      mode='pinch';
+      startDist=dist(touches[0],touches[1]);
+      const m=mid(touches[0],touches[1]);
+      const r=stageEl.getBoundingClientRect();
+      visual.style.transformOrigin=(m.x-r.left)+'px '+(m.y-r.top)+'px';
+    }else{
+      mode='pan';
+      startCenter={x:touches[0].clientX,y:touches[0].clientY};
+    }
+  }
+  function updateGesture(touches){
+    if(!mode)return;
+    if(mode==='pinch'&&touches.length>=2){
+      liveScale=dist(touches[0],touches[1])/startDist;
+      visual.style.transform='scale('+liveScale+')';
+    }else if(mode==='pan'&&touches.length>=1){
+      liveDx=touches[0].clientX-startCenter.x;
+      liveDy=touches[0].clientY-startCenter.y;
+      // haven't crossed the tap-vs-drag threshold yet — let it resolve as a click if released now
+      if(Math.hypot(liveDx,liveDy)<10)return;
+      visual.style.transform='translate('+liveDx+'px,'+liveDy+'px)';
+      suppressNextStageClick=true;
+    }
+  }
+  function endGesture(){
+    if(!mode)return;
+    visual.classList.remove('gesturing');
+    if(mode==='pinch'&&Math.abs(liveScale-1)>0.03){
+      const newZoom=Math.max(17,Math.min(21,SAT_ZOOM+Math.round(Math.log2(liveScale))));
+      if(newZoom!==SAT_ZOOM){
+        SAT_ZOOM=newZoom;SAT_ADDRESS=null;
+        document.getElementById('zoom-val').textContent=SAT_ZOOM;
+        const url='https://maps.googleapis.com/maps/api/staticmap?center='+_lastLat+','+_lastLng+
+          '&zoom='+SAT_ZOOM+'&size=640x480&scale=2&maptype=satellite&key='+encodeURIComponent(MAPS_KEY);
+        loadSatelliteUrl(url,_lastLat+','+_lastLng+','+SAT_ZOOM,_lastLabel);
+      }else{
+        visual.style.transform='none';
+      }
+    }else if(mode==='pan'&&Math.hypot(liveDx,liveDy)>=10){
+      const r=stageEl.getBoundingClientRect();
+      const dxSvg=liveDx/r.width*800, dySvg=liveDy/r.height*600;
+      const newCenter=svgToLatLng({x:400-dxSvg,y:300-dySvg});
+      if(newCenter){
+        _lastLat=newCenter.lat;_lastLng=newCenter.lng;SAT_ADDRESS=null;
+        const url='https://maps.googleapis.com/maps/api/staticmap?center='+_lastLat+','+_lastLng+
+          '&zoom='+SAT_ZOOM+'&size=640x480&scale=2&maptype=satellite&key='+encodeURIComponent(MAPS_KEY);
+        loadSatelliteUrl(url,_lastLat+','+_lastLng+','+SAT_ZOOM,_lastLabel);
+      }else{
+        visual.style.transform='none';
+      }
+    }else{
+      visual.style.transform='none';
+    }
+    mode=null;startTouches=null;
+  }
+  stageEl.addEventListener('touchstart',e=>{
+    if(e.touches.length>=1)beginGesture(Array.from(e.touches));
+    if(mode)e.preventDefault();
+  },{passive:false});
+  stageEl.addEventListener('touchmove',e=>{
+    if(!mode)return;
+    e.preventDefault();
+    updateGesture(Array.from(e.touches));
+  },{passive:false});
+  stageEl.addEventListener('touchend',e=>{
+    if(!mode)return;
+    if(e.touches.length===0)endGesture();
+    else{ // finger count changed mid-gesture — finalize then re-baseline from what's left
+      endGesture();
+      beginGesture(Array.from(e.touches));
+    }
+  });
+  stageEl.addEventListener('touchcancel',()=>{visual.style.transform='none';visual.classList.remove('gesturing');mode=null;});
 }
 function commitArea(){
   if(drawing.length<3){return;}
@@ -1045,7 +1156,7 @@ stage.addEventListener('click',onStageClick);
 stage.addEventListener('dblclick',e=>{e.preventDefault();if(drawing.length>=3)commitArea();});
 
 // init
-buildMap();buildSvcPicker();updateHint();initPointDragHandlers();
+buildMap();buildSvcPicker();updateHint();initPointDragHandlers();initMapGestures();
 // On load: if we already have a key and an address, drop satellite immediately.
 setTimeout(tryAutoSatellite,60);
 </script>
