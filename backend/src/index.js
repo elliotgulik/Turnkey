@@ -13,12 +13,7 @@ import * as googleCalendar from './providers/googleCalendar.js'
 import { fetchIcs } from './ical.js'
 
 const PORT = Number(process.env.PORT || 3001)
-const SYNC_KEY = process.env.SYNC_KEY || ''
 const STORAGE = (process.env.STORAGE || 'file').toLowerCase()
-
-if (!SYNC_KEY || SYNC_KEY === 'change-me-to-a-long-random-secret') {
-  console.warn('⚠️ Warning: set SYNC_KEY to a strong secret before going live.')
-}
 
 if (STORAGE === 'supabase') {
   if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
@@ -71,27 +66,35 @@ const storage =
 
 const app = express()
 
+app.set('trust proxy', 1) // needed for req.ip to reflect the real client (behind Render's proxy), not the proxy itself
 app.use(cors())
 app.use(express.json({ limit: '25mb' }))
 
-
-function requireKey(req, res, next) {
-  const key = req.get('X-Turnkey-Key') || req.query.key
-
-  if (!SYNC_KEY) {
-    return res.status(500).json({
-      error: 'SYNC_KEY not configured'
-    })
+// Lightweight in-memory rate limiter for the one truly public write route
+// (POST /api/leads — no auth by design, since a customer submitting a quote
+// has no Supabase session yet). Single-process/in-memory is fine for this
+// app's actual deployment shape (one Render instance); it resets on restart
+// and won't share state across horizontally-scaled instances, which is an
+// acceptable, documented limitation rather than a full distributed limiter.
+function rateLimit({ windowMs, max }) {
+  const hits = new Map() // ip -> [timestamps]
+  return (req, res, next) => {
+    const now = Date.now()
+    const ip = req.ip || 'unknown'
+    const timestamps = (hits.get(ip) || []).filter((t) => now - t < windowMs)
+    if (timestamps.length >= max) {
+      return res.status(429).json({ error: 'Too many requests — please try again shortly' })
+    }
+    timestamps.push(now)
+    hits.set(ip, timestamps)
+    if (hits.size > 5000) { // simple unbounded-growth guard — drop the oldest-looking entries
+      for (const [k, v] of hits) { if (!v.length || now - v[v.length - 1] > windowMs) hits.delete(k) }
+    }
+    next()
   }
-
-  if (key !== SYNC_KEY) {
-    return res.status(401).json({
-      error: 'Invalid access code'
-    })
-  }
-
-  next()
 }
+const leadsRateLimit = rateLimit({ windowMs: 10 * 60 * 1000, max: 12 })
+
 
 async function requireBusiness(req, res, next) {
   const auth = req.get('Authorization') || ''
@@ -122,55 +125,40 @@ app.get('/api/health', (_req, res) => {
 })
 
 
-app.get('/api/state', requireKey, async (_req, res) => {
-  try {
-    const data = await storage.getState()
+// The old whole-app /api/state (GET/POST) has been removed — it stored one
+// unscoped row keyed by a single shared SYNC_KEY, with no business_id at
+// all, so any business's key could overwrite every other business's entire
+// dataset in one shot. It was already unreachable from the CRM UI (nothing
+// sets a sync key from Connections any more); real sync goes through the
+// per-business Supabase tables under RLS instead.
 
-    if (!data) {
-      return res.json({
-        state: null,
-        savedAt: 0
-      })
+
+// Basic shape/size validation for the one route the public can post to
+// without any auth — rejects obviously-malformed or abusive payloads before
+// they ever reach storage. Deliberately permissive on content (this isn't
+// the place to second-guess a legitimate customer's address or notes), just
+// bounds the shape so a scripted attacker can't stuff huge arrays/strings
+// into a single quote request.
+function validateLeadPayload(payload) {
+  if (!payload || typeof payload !== 'object') return 'Invalid lead payload'
+  const c = payload.customer
+  if (!c || typeof c !== 'object') return 'Invalid lead payload'
+  if (!c.name || typeof c.name !== 'string' || c.name.length > 200) return 'A valid name is required'
+  if (c.email && (typeof c.email !== 'string' || c.email.length > 320 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c.email))) return 'That email address doesn\'t look right'
+  if (c.phone && (typeof c.phone !== 'string' || c.phone.length > 40)) return 'That phone number doesn\'t look right'
+  if (c.address && (typeof c.address !== 'string' || c.address.length > 500)) return 'That address is too long'
+  if (c.notes && (typeof c.notes !== 'string' || c.notes.length > 4000)) return 'Notes are too long'
+  if (payload.areas) {
+    if (!Array.isArray(payload.areas) || payload.areas.length > 100) return 'Too many mapped areas'
+    for (const a of payload.areas) {
+      if (a && Array.isArray(a.points) && a.points.length > 500) return 'A mapped area has too many points'
     }
-
-    res.json(data)
-
-  } catch (err) {
-    console.error('GET /api/state', err)
-    res.status(500).json({
-      error: 'Failed to load state'
-    })
   }
-})
+  if (payload.photos && (!Array.isArray(payload.photos) || payload.photos.length > 12)) return 'Too many photos'
+  return null
+}
 
-
-app.post('/api/state', requireKey, async (req, res) => {
-  try {
-    const { state, savedAt } = req.body ?? {}
-
-    if (!state) {
-      return res.status(400).json({
-        error: 'Missing state'
-      })
-    }
-
-    const result = await storage.saveState(
-      state,
-      savedAt || Date.now()
-    )
-
-    res.json(result)
-
-  } catch (err) {
-    console.error('POST /api/state', err)
-    res.status(500).json({
-      error: 'Failed to save state'
-    })
-  }
-})
-
-
-app.post('/api/leads', async (req, res) => {
+app.post('/api/leads', leadsRateLimit, async (req, res) => {
   try {
     const payload = req.body
 
@@ -184,6 +172,11 @@ app.post('/api/leads', async (req, res) => {
       return res.status(400).json({
         error: 'Missing business_id — check the booking page\'s ?biz= link'
       })
+    }
+
+    const validationError = validateLeadPayload(payload)
+    if (validationError) {
+      return res.status(400).json({ error: validationError })
     }
 
     const lead = await storage.addLead(payload)

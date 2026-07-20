@@ -446,11 +446,23 @@ try{const u=new URL(location.href);EMBED_MODE=u.searchParams.get('embed')==='1';
 (function(){
   if(!TURNKEY_BUSINESS_ID)return;
   if(!window.TURNKEY_CONFIG||!window.TURNKEY_CONFIG.supabaseUrl||!window.TURNKEY_CONFIG.supabaseAnonKey)return;
-  const url=window.TURNKEY_CONFIG.supabaseUrl+'/rest/v1/businesses?id=eq.'+encodeURIComponent(TURNKEY_BUSINESS_ID)+'&select=name,phone,email,region,logo_url,accent_color';
+  const url=window.TURNKEY_CONFIG.supabaseUrl+'/rest/v1/businesses?id=eq.'+encodeURIComponent(TURNKEY_BUSINESS_ID)+'&select=name,phone,email,region,logo_url,accent_color,pricing_config';
   fetch(url,{headers:{apikey:window.TURNKEY_CONFIG.supabaseAnonKey}})
     .then(r=>r.json()).then(rows=>{
       const biz=(rows&&rows[0])||null;
       if(!biz)return;
+      // Rates here were a hardcoded constant labelled "mirrored from the CRM"
+      // that never actually synced — a business changing a rate in Settings
+      // → Pricing had no effect on what customers were quoted here, forever.
+      // Apply the business's real live rates on top of the defaults now.
+      if(biz.pricing_config&&biz.pricing_config.rates){
+        Object.entries(biz.pricing_config.rates).forEach(([k,v])=>{
+          if(SERVICES[k]&&typeof v==='number'&&v>0)SERVICES[k].rate=v;
+        });
+        buildSvcPicker(); // re-render service picker labels/prices if already built
+        if(typeof renderList==='function')renderList();
+        if(typeof updateEstimate==='function')updateEstimate();
+      }
       if(biz.name){
         const nameEl=document.getElementById('biz-name');
         if(nameEl)nameEl.textContent=biz.name;
@@ -849,7 +861,16 @@ function initPointDragHandlers(){
   stageEl.addEventListener('pointerdown',e=>{
     const handle=e.target.closest('.pt-handle');
     if(!handle)return;
-    draggingPointIdx=+handle.dataset.idx;
+    const idx=+handle.dataset.idx;
+    // The first point doubles as the "tap to close" target once there are
+    // enough points — if a tap aimed at closing the shape lands ON that
+    // handle (very likely, since it's what you're told to aim for), don't
+    // treat it as a drag-start: let it fall through to the native click,
+    // whose own distance check is what actually closes the polygon. Without
+    // this, closing could silently register as a zero-movement "drag"
+    // instead, and suppressNextStageClick below would swallow the close.
+    if(idx===0&&drawing.length>=3)return;
+    draggingPointIdx=idx;
     handle.setPointerCapture(e.pointerId);
     handle.style.cursor='grabbing';
     e.stopPropagation();
@@ -1122,7 +1143,15 @@ function buildPayload(){
       source:document.getElementById('c-source').value,
       notes:document.getElementById('c-notes').value.trim()
     },
-    areas:areas.map(a=>({service:a.svc,label:SERVICES[a.svc].label,size:a.size,unit:SERVICES[a.svc].unit,rate:effectiveRate(a),price:Math.round(a.size*effectiveRate(a)),storeys:a.storeys||null,points:a.pts})),
+    // geoPts (real lat/lng per point) is what lets the business reopen this
+    // quote later and have the areas land in the right place on a freshly
+    // loaded map — previously only the raw pixel points were sent, which
+    // are only valid for the exact pan/zoom state of THIS drawing session.
+    // If the customer panned/zoomed while drawing, replaying bare pixel
+    // coordinates onto a independently-recentred business-side map could
+    // put the polygon in visibly the wrong spot.
+    areas:areas.map(a=>({service:a.svc,label:SERVICES[a.svc].label,size:a.size,unit:SERVICES[a.svc].unit,rate:effectiveRate(a),price:Math.round(a.size*effectiveRate(a)),storeys:a.storeys||null,points:a.pts,geoPts:a.geoPts||null})),
+    mapCenter:(_lastLat&&_lastLng)?{lat:_lastLat,lng:_lastLng,zoom:SAT_ZOOM}:null,
     windows:windowPanes>0?{panes:windowPanes,rate:SERVICES.windows.rate,price:Math.round(windowPanes*SERVICES.windows.rate)}:null,
     estimateRange:{min,max,total:base,currency:'NZD'},
     preferredDate:document.getElementById('c-date').value||null,

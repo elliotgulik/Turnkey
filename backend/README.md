@@ -7,7 +7,6 @@ Small API server for the TurnKey CRM MVP. Implements the exact endpoints the fro
 ```bash
 cd backend
 cp .env.example .env
-# Edit .env — set SYNC_KEY to any long random string
 npm install
 npm run dev
 ```
@@ -24,16 +23,10 @@ curl http://localhost:3001/api/health
 ## Connect the CRM
 
 The backend URL is read automatically from `config.js` — no manual step needed.
-Lead delivery (`/api/leads/pending`, `/api/leads/ack`) authenticates purely with
-the operator's own Supabase login session; there's nothing to paste in for it.
-
-The `SYNC_KEY` access code is only needed if you want cross-device state backup
-(`/api/state`) or Gmail sending:
-
-1. Deploy this backend (see below)
-2. Open the CRM → **Connections** → **Backend — access code (optional)** → paste
-   the same value as `SYNC_KEY`
-3. Status should show **● LIVE**
+Every route the CRM actually calls (leads, Gmail, Google Calendar, AI marketing)
+authenticates with the operator's own Supabase login session, scoped server-side
+to their `business_id` — there's nothing to paste in, and no shared secret for
+the CRM to hold.
 
 ## Deploy to Render (recommended, ~10 min)
 
@@ -44,7 +37,6 @@ The `SYNC_KEY` access code is only needed if you want cross-device state backup
    - **Build command:** `npm install`
    - **Start command:** `npm start`
 4. Environment variables:
-   - `SYNC_KEY` — long random secret (this is your CRM access code)
    - `STORAGE` — `file` (default) or `supabase`
    - `NODE_VERSION` — `20`
 5. Deploy → copy the URL (e.g. `https://turnkey-backend-xxxx.onrender.com`)
@@ -67,16 +59,14 @@ With `STORAGE=file`, data persists in `backend/data/` on the instance disk. Fine
 | Method | Path | Auth | Purpose |
 |--------|------|------|---------|
 | GET | `/api/health` | — | Health check |
-| GET | `/api/state` | `X-Turnkey-Key` | Pull CRM state |
-| POST | `/api/state` | `X-Turnkey-Key` | Push CRM state |
 | POST | `/api/leads` | — | Receive booking page submissions. Body must include `business_id` (the CRM's booking link puts this in `?biz=`). |
-| GET | `/api/leads/pending` | Supabase session (`Authorization: Bearer <token>`) | Poll for new leads, scoped to the caller's own business — the bearer token is verified against Supabase and the business_id is derived server-side from `public.users`, never trusted from the client. No `SYNC_KEY` involved. |
-| POST | `/api/leads/ack` | Supabase session (`Authorization: Bearer <token>`) | Mark leads collected — scoped server-side to the caller's own `business_id`, so acking someone else's lead IDs is a no-op. No `SYNC_KEY` involved. |
-| GET | `/api/gmail/status` | `X-Turnkey-Key` | Gmail integration status |
+| GET | `/api/leads/pending` | Supabase session (`Authorization: Bearer <token>`) | Poll for new leads, scoped to the caller's own business — the bearer token is verified against Supabase and the business_id is derived server-side from `public.users`, never trusted from the client. |
+| POST | `/api/leads/ack` | Supabase session (`Authorization: Bearer <token>`) | Mark leads collected — scoped server-side to the caller's own `business_id`, so acking someone else's lead IDs is a no-op. |
+| POST | `/api/email/*`, `/api/calendar/*`, `/api/ai/marketing` | Supabase session (`Authorization: Bearer <token>`) | Gmail, Google Calendar and AI marketing — all resolve `business_id`/`user_id` server-side from the caller's own session. |
 
-`SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` are required unconditionally (not just when `STORAGE=supabase`) — they're used to verify the CRM's Supabase session on every `/api/leads/pending` and `/api/leads/ack` call.
+`SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` are required unconditionally (not just when `STORAGE=supabase`) — they're used to verify the CRM's Supabase session on every authenticated route.
 
-`SYNC_KEY` is no longer involved in lead sync at all (tenant isolation for leads comes entirely from the verified Supabase session). It's still required for `/api/state` (cross-device backup sync) and the Gmail routes, which have no per-business scoping of their own.
+There is no shared access-code / `SYNC_KEY` anywhere in this backend — every route is either public-by-design (`/api/leads`, rate-limited and validated server-side) or scoped per-business via a verified Supabase session. An earlier version had a whole-app `/api/state` push/pull sync gated by one shared key with no per-business scoping at all — it's been removed; it was a genuine cross-tenant risk (any business's key could overwrite every other business's data) and had no remaining caller in the CRM.
 
 ## Booking page
 

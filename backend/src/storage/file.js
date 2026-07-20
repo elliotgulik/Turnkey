@@ -1,11 +1,8 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 
-const STATE_FILE = 'state.json'
-
 export function createFileStorage(dataDir) {
   const dir = path.resolve(dataDir)
-  const statePath = path.join(dir, STATE_FILE)
   const leadsPath = path.join(dir, 'leads.json')
 
   async function ensureDir() {
@@ -27,15 +24,6 @@ export function createFileStorage(dataDir) {
   }
 
   return {
-    async getState() {
-      return readJson(statePath, null)
-    },
-
-    async saveState(state, savedAt) {
-      await writeJson(statePath, { state, savedAt })
-      return { state, savedAt }
-    },
-
     async addLead(payload) {
       const leads = await readJson(leadsPath, [])
       const lead = {
@@ -51,8 +39,21 @@ export function createFileStorage(dataDir) {
 
     async getPendingLeads(businessId) {
       if (!businessId) return []
+      // Same atomic-claim idea as the Supabase backend (see
+      // schema-leads-claim.sql) — mark rows claimed in the same pass that
+      // reads them, so a second concurrent poll doesn't also pick them up.
+      const now = Date.now()
+      const claimCutoff = now - 60000
       const leads = await readJson(leadsPath, [])
-      return leads.filter((l) => !l.ackedAt && l.businessId === businessId)
+      const claimed = []
+      for (const l of leads) {
+        if (l.ackedAt || l.businessId !== businessId) continue
+        if (l.claimedAt && l.claimedAt >= claimCutoff) continue
+        l.claimedAt = now
+        claimed.push(l)
+      }
+      if (claimed.length) await writeJson(leadsPath, leads)
+      return claimed
     },
 
     async ackLeads(businessId, ids) {

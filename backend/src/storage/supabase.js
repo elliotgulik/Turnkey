@@ -1,37 +1,11 @@
 import { createClient } from '@supabase/supabase-js'
 
-const STATE_ID = 'default'
-
 export function createSupabaseStorage(url, serviceRoleKey) {
   const supabase = createClient(url, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   })
 
   return {
-    async getState() {
-      const { data, error } = await supabase
-        .from('crm_state')
-        .select('state, saved_at')
-        .eq('id', STATE_ID)
-        .maybeSingle()
-
-      if (error) throw error
-      if (!data) return null
-      return { state: data.state, savedAt: data.saved_at }
-    },
-
-    async saveState(state, savedAt) {
-      const { error } = await supabase.from('crm_state').upsert({
-        id: STATE_ID,
-        state,
-        saved_at: savedAt,
-        updated_at: new Date().toISOString(),
-      })
-
-      if (error) throw error
-      return { state, savedAt }
-    },
-
     async addLead(payload) {
       const { data, error } = await supabase
         .from('leads')
@@ -50,19 +24,29 @@ export function createSupabaseStorage(url, serviceRoleKey) {
     async getPendingLeads(businessId) {
       if (!businessId) return []
 
+      // Atomically CLAIM rows in the same statement that reads them — a
+      // plain SELECT here would let two concurrent polls (two tabs, or a
+      // slow ack) both fetch and ingest the same lead. Only rows unacked
+      // AND not claimed within the last 60s match, so a second poll racing
+      // right behind this one sees nothing left to claim. If this poll's
+      // ack never lands, the claim expires and the lead is pollable again.
+      const claimCutoff = new Date(Date.now() - 60000).toISOString()
       const { data, error } = await supabase
         .from('leads')
-        .select('id, payload, created_at')
-        .is('acked_at', null)
+        .update({ claimed_at: new Date().toISOString() })
         .eq('business_id', businessId)
-        .order('created_at', { ascending: true })
+        .is('acked_at', null)
+        .or(`claimed_at.is.null,claimed_at.lt.${claimCutoff}`)
+        .select('id, payload, created_at')
 
       if (error) throw error
-      return (data ?? []).map((row) => ({
-        id: row.id,
-        payload: row.payload,
-        createdAt: new Date(row.created_at).getTime(),
-      }))
+      return (data ?? [])
+        .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+        .map((row) => ({
+          id: row.id,
+          payload: row.payload,
+          createdAt: new Date(row.created_at).getTime(),
+        }))
     },
 
     async ackLeads(businessId, ids) {

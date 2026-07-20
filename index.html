@@ -882,6 +882,37 @@
   .qm-leg{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--ink-soft)}
   .qm-sw{width:11px;height:11px;border-radius:3px}
 
+  /* ===== editable quote map (staff-side) — reuses .qmap/.qmap-h/.qmap-stage
+     from the read-only viewer above so it stays visually consistent with the
+     rest of the app; everything below is new interactive layers within
+     that same stage. ===== */
+  .qe-toolbar{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:9px}
+  .qe-toolbar .btn.sm{padding:6px 11px;font-size:12px}
+  .qe-toolbar .btn.sm.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .qe-svc-pick{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:9px}
+  .qe-svc-btn{display:flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;padding:5px 10px;border-radius:980px;background:var(--surface-2);color:var(--ink-soft);border:1.5px solid transparent}
+  .qe-svc-btn.sel{background:#fff;border-color:currentColor}
+  .qe-svc-btn .sw{width:9px;height:9px;border-radius:50%}
+  .qe-visual{position:absolute;inset:0;background-size:cover;background-position:center;transform-origin:0 0}
+  .qe-visual.gesturing{transition:none}
+  .qe-visual:not(.gesturing){transition:transform .2s cubic-bezier(.2,.8,.2,1)}
+  .qe-tiles{position:absolute;inset:0}
+  .qmap-stage{cursor:crosshair;touch-action:none;user-select:none}
+  .qmap-stage.qe-select-mode{cursor:default}
+  .qe-hint{position:absolute;left:50%;top:8px;transform:translateX(-50%);background:rgba(10,28,43,.8);color:#fff;font-size:11px;font-weight:500;padding:5px 12px;border-radius:980px;pointer-events:none;white-space:nowrap;max-width:90%;overflow:hidden;text-overflow:ellipsis;z-index:6}
+  .qe-zoom{position:absolute;right:8px;bottom:8px;display:flex;flex-direction:column;gap:5px;z-index:6}
+  .qe-zoom button{width:28px;height:28px;border-radius:8px;background:#fff;border:1px solid var(--line);font-size:15px;font-weight:700;color:var(--ink);box-shadow:0 1px 4px rgba(10,28,43,.18);line-height:1}
+  .qe-pt-handle{cursor:grab;touch-action:none}
+  .qe-panel{margin-top:10px;background:var(--surface);border:1px solid var(--line);border-radius:9px;padding:12px 14px}
+  .qe-panel-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+  .qe-panel-title{font-size:12.5px;font-weight:700;color:var(--ink)}
+  .qe-panel-actions{display:flex;gap:6px;flex-wrap:wrap}
+  .qe-panel textarea{width:100%;min-height:52px;font-size:12.5px;font-family:inherit;border:1px solid var(--line);border-radius:6px;padding:7px 9px;margin-top:6px;resize:vertical}
+  .qe-photo-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .qe-photo-thumb{width:46px;height:46px;border-radius:6px;background:var(--surface-2) center/cover;position:relative;flex-shrink:0}
+  .qe-photo-rm{position:absolute;top:-5px;right:-5px;width:16px;height:16px;border-radius:50%;background:var(--coral);color:#fff;font-size:10px;line-height:16px;text-align:center}
+  @media(max-width:720px){.qe-toolbar .btn.sm{min-height:36px}.qe-zoom button{width:36px;height:36px}}
+
   /* adjust-assumptions panel */
   .assume-box{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:15px 16px;margin:16px 0}
   .assume-h{font-size:12px;font-weight:700;letter-spacing:.02em;text-transform:uppercase;color:var(--ink-soft);margin-bottom:13px;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
@@ -1068,7 +1099,7 @@
   <div class="modal-foot"><button class="btn ghost" onclick="closeModal('lead-overlay')">Cancel</button><button class="btn primary" onclick="saveLead()">Save lead</button></div>
 </div></div>
 
-<div class="overlay" id="quote-overlay"><div class="modal">
+<div class="overlay" id="quote-overlay"><div class="modal wide">
   <div class="modal-head"><div><h3>Build quote</h3><p id="q-for">—</p></div><button class="x" aria-label="Close" onclick="closeModal('quote-overlay')">×</button></div>
   <div class="modal-body">
     <div id="quote-map-zone"></div>
@@ -2068,124 +2099,648 @@ async function viewAttachmentPath(path){
   if(url)window.open(url,'_blank');else toast('Could not open file');
 }
 // Show the property with the customer's outlined areas (if the lead came from the booking widget), else a placeholder.
+/* =====================================================================
+   EDITABLE QUOTE MAP (staff-side) — replaces the old read-only viewer.
+   Ports the same lat/lng-anchored geometry engine already proven in
+   booking.html (Web Mercator projection, Google/OSM provider fallback,
+   pan/zoom) so a polygon a customer drew reprojects correctly here too —
+   regardless of what pan/zoom state their own session happened to be in —
+   and so staff edits (move/resize/add/delete/duplicate) use the exact same
+   already-debugged math instead of a second, divergent geometry engine.
+   ===================================================================== */
+const QE_SVC_HEX={driveway:'#c2683a',housewash:'#2f7d8f',roof:'#7a5bbf',patio:'#0f7d6b',gutter:'#b08a1e',fence:'#6b7a3a',windows:'#4a6b8a'};
+const QE_ZOOM_DEFAULT=19, QE_ZOOM_MIN=17, QE_ZOOM_MAX=21, QE_OSM_ZOOM_MAX=19, QE_OSM_ZOOM_MIN=15, QE_OSM_TILES=3;
+let qe=null; // the whole live editor state for whichever quote is open — reset each time renderQuoteMap() runs
+let qeSuppressClick=false;
+
+function qeNormalizeAreas(r){
+  if(!r.areaPolys)r.areaPolys=[];
+  r.areaPolys.forEach((a,i)=>{
+    if(!a.id)a.id='a'+Date.now()+'_'+i;
+    if(a.notes==null)a.notes='';
+    if(!a.photoPaths)a.photoPaths=[];
+  });
+  return r.areaPolys; // same reference as r.areaPolys — mutations persist directly, same as how the rest of the app treats `r`
+}
+
 function renderQuoteMap(r){
   const zone=document.getElementById('quote-map-zone'); if(!zone)return;
-  const polys=r.areaPolys;
-  const SVCHEX={driveway:'#c2683a',housewash:'#2f7d8f',roof:'#7a5bbf',patio:'#0f7d6b',gutter:'#b08a1e',fence:'#6b7a3a',windows:'#4a6b8a'};
   const addr=[r.address,r.suburb].filter(Boolean).join(', ');
+  const geoRegion=(currentBusinessProfile&&currentBusinessProfile.region)||'Auckland, New Zealand';
+  qe={
+    r, areas:qeNormalizeAreas(r), selectedId:null,
+    history:[], future:[],
+    mode:'select', drawSvc:'driveway', drawing:[], drawingGeoPts:[],
+    lat:null,lng:null,zoom:QE_ZOOM_DEFAULT,scale:0.06,provider:null,
+    mapsKey:turnkeyMapsKey(), addr, geoRegion,
+    draggingVertex:null, draggingAreaId:null, dragStart:null, panStart:null
+  };
+  zone.innerHTML=`<div class="qmap">
+    <div class="qmap-h">📍 ${addr||'Property map'} <span class="demo-tag">editable</span></div>
+    <div class="qe-toolbar" id="qe-toolbar"></div>
+    <div class="qe-svc-pick" id="qe-svc-pick"></div>
+    <div class="qmap-stage qe-select-mode" id="qe-stage">
+      <div class="qe-visual" id="qe-visual">
+        <div class="qe-tiles" id="qe-tiles"></div>
+        <svg id="qe-svg" viewBox="0 0 800 600" preserveAspectRatio="none"></svg>
+      </div>
+      <div class="qe-hint" id="qe-hint">Loading map…</div>
+      <div class="qe-zoom"><button type="button" onclick="qeAdjustZoom(1)" title="Zoom in (or scroll up)">+</button><button type="button" onclick="qeAdjustZoom(-1)" title="Zoom out (or scroll down)">−</button></div>
+    </div>
+    <div id="qe-panel"></div>
+  </div>`;
+  qeRenderToolbar();
+  qeRenderSvcPicker();
+  qeRenderPanel();
+  qeInitStageEvents();
+  qeSyncToDraftLines(); // seed pricing from whatever areas already exist, don't wait for the first edit
+  qeLoadMap();
+}
 
-  // SVG overlay of the customer's traced areas — same 800x600 space they drew in.
-  // preserveAspectRatio="none" because the booking stage is 4/3 and stretches the
-  // SVG to fill it, exactly like the drawing surface did.
-  function polysSVG(){
-    if(!polys||!polys.length) return '';
-    const shapes=polys.map(p=>{
-      const pts=p.points.map(pt=>`${pt.x},${pt.y}`).join(' ');
-      const hex=SVCHEX[p.service]||'#0f7d6b';
-      return `<polygon points="${pts}" fill="${hex}44" stroke="${hex}" stroke-width="3" stroke-linejoin="round"/>`;
-    }).join('');
-    return `<svg viewBox="0 0 800 600" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none">${shapes}</svg>`;
+/* ---------- map loading: geocode → Google satellite, else free OSM tiles,
+   else the customer's own last-known centre, else a plain drawing grid ---------- */
+function qeLoadMap(){
+  if(qe.addr&&qe.mapsKey){qeGeocodeGoogle();return;}
+  if(qe.addr){qeLoadOsm();return;}
+  qeFallbackOrGrid();
+}
+function qeFallbackOrGrid(){
+  if(qe.r.mapCenter&&qe.r.mapCenter.lat){
+    qe.provider='osm';
+    qeReloadAt(qe.r.mapCenter.lat,qe.r.mapCenter.lng,Math.min(qe.r.mapCenter.zoom||QE_OSM_ZOOM_MAX,QE_OSM_ZOOM_MAX));
+  }else{
+    qeShowGridFallback();
   }
-
-  // Same faint grid the customer drew on when there was no satellite — familiar view.
-  function gridBG(){
-    let g='';
-    for(let x=0;x<=800;x+=40)g+=`<line x1="${x}" y1="0" x2="${x}" y2="600" stroke="#c9d4d0" stroke-width="1"/>`;
-    for(let y=0;y<=600;y+=40)g+=`<line x1="0" y1="${y}" x2="800" y2="${y}" stroke="#c9d4d0" stroke-width="1"/>`;
-    return `<svg viewBox="0 0 800 600" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%">${g}</svg>`;
+}
+function qeGeocodeGoogle(){
+  fetch('https://maps.googleapis.com/maps/api/geocode/json?address='+encodeURIComponent(qe.addr+', '+qe.geoRegion)+'&key='+encodeURIComponent(qe.mapsKey))
+    .then(res=>res.json()).then(j=>{
+      if(j.status!=='OK'||!j.results||!j.results[0]){qeLoadOsm();return;}
+      const loc=j.results[0].geometry.location;
+      qe.provider='google';
+      qeReloadAt(loc.lat,loc.lng,QE_ZOOM_DEFAULT);
+    }).catch(()=>qeLoadOsm());
+}
+function qeLoadOsm(){
+  fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(qe.addr+', '+qe.geoRegion))
+    .then(res=>res.json()).then(results=>{
+      if(!results||!results.length){qeFallbackOrGrid();return;}
+      qe.provider='osm';
+      qeReloadAt(parseFloat(results[0].lat),parseFloat(results[0].lon),QE_OSM_ZOOM_MAX);
+    }).catch(()=>qeFallbackOrGrid());
+}
+function qeReloadAt(lat,lng,zoom){
+  qe.lat=lat;qe.lng=lng;
+  const visual=document.getElementById('qe-visual'); if(!visual)return;
+  visual.style.transform='none';
+  if(qe.provider==='google'){
+    zoom=Math.max(QE_ZOOM_MIN,Math.min(QE_ZOOM_MAX,zoom));
+    qe.zoom=zoom;
+    const url='https://maps.googleapis.com/maps/api/staticmap?center='+lat+','+lng+'&zoom='+zoom+'&size=640x480&scale=2&maptype=satellite&key='+encodeURIComponent(qe.mapsKey);
+    const probe=new Image();
+    probe.onload=()=>{
+      const tiles=document.getElementById('qe-tiles'); if(tiles)tiles.innerHTML='';
+      visual.style.backgroundImage='url("'+url+'")';
+      qe.scale=156543.03392*Math.cos(lat*Math.PI/180)/Math.pow(2,zoom)*(640/800);
+      qeAfterMapLoad();
+    };
+    probe.onerror=()=>{qe.provider='osm';qeReloadAt(lat,lng,QE_OSM_ZOOM_MAX);};
+    probe.src=url;
+  }else{
+    zoom=Math.max(QE_OSM_ZOOM_MIN,Math.min(QE_OSM_ZOOM_MAX,zoom));
+    qe.zoom=zoom;
+    visual.style.backgroundImage='none';
+    const n=Math.pow(2,zoom);
+    const xF=(lng+180)/360*n, yF=(1-Math.log(Math.tan(lat*Math.PI/180)+1/Math.cos(lat*Math.PI/180))/Math.PI)/2*n;
+    const tx=Math.floor(xF), ty=Math.floor(yF);
+    const half=(QE_OSM_TILES-1)/2;
+    const offX=(xF-tx-0.5)*100, offY=(yF-ty-0.5)*100;
+    let imgs='';
+    for(let dy=-half;dy<=half;dy++)for(let dx=-half;dx<=half;dx++)
+      imgs+=`<img src="https://tile.openstreetmap.org/${zoom}/${tx+dx}/${ty+dy}.png" style="width:${100/QE_OSM_TILES}%;height:${100/QE_OSM_TILES}%;position:absolute;left:${(dx+half)*(100/QE_OSM_TILES)-offX/QE_OSM_TILES}%;top:${(dy+half)*(100/QE_OSM_TILES)-offY/QE_OSM_TILES}%" loading="lazy">`;
+    const tiles=document.getElementById('qe-tiles'); if(tiles)tiles.innerHTML=imgs;
+    qe.scale=156543.03392*Math.cos(lat*Math.PI/180)/Math.pow(2,zoom)*(QE_OSM_TILES*256/800);
+    qeAfterMapLoad();
   }
+}
+function qeAfterMapLoad(){
+  qeReprojectAreas();
+  qeRenderAreas();
+  qeUpdateHint();
+}
+function qeShowGridFallback(){
+  qe.provider='grid';
+  const visual=document.getElementById('qe-visual');
+  const tiles=document.getElementById('qe-tiles');
+  if(visual)visual.style.backgroundImage='none';
+  if(tiles)tiles.innerHTML='';
+  const stage=document.getElementById('qe-stage');
+  if(stage)stage.style.background='#e8eeec';
+  let grid='';
+  for(let x=0;x<=800;x+=40)grid+=`<line x1="${x}" y1="0" x2="${x}" y2="600" stroke="#c9d4d0" stroke-width="1"/>`;
+  for(let y=0;y<=600;y+=40)grid+=`<line x1="0" y1="${y}" x2="800" y2="${y}" stroke="#c9d4d0" stroke-width="1"/>`;
+  const svg=document.getElementById('qe-svg');
+  if(svg)svg.insertAdjacentHTML('afterbegin',`<g id="qe-grid">${grid}</g>`);
+  qeRenderAreas();
+  qeUpdateHint();
+}
 
-  function legend(){
-    if(!polys||!polys.length) return '';
-    return '<div class="qmap-legend">'+polys.map(p=>`<span class="qm-leg"><span class="qm-sw" style="background:${SVCHEX[p.service]||'#0f7d6b'}"></span>${SERVICES[p.service]?SERVICES[p.service].label.split(' ')[0]:p.service} · ${p.size}${p.unit||'m²'}</span>`).join('')+'</div>';
-  }
+/* ---------- lat/lng anchoring — same approach as booking.html's
+   svgToLatLng/latLngToSvg/reprojectAreas, keyed off qe state instead of
+   page-global variables ---------- */
+function qeSvgToLatLng(p){
+  if(!qe.lat||!qe.lng)return null;
+  const dxM=(p.x-400)*qe.scale, dyM=(p.y-300)*qe.scale;
+  return {lat:qe.lat-(dyM/111320), lng:qe.lng+(dxM/(111320*Math.cos(qe.lat*Math.PI/180)))};
+}
+function qeLatLngToSvg(ll){
+  if(!qe.lat||!qe.lng)return {x:400,y:300};
+  const dLat=ll.lat-qe.lat, dLng=ll.lng-qe.lng;
+  const dyM=-dLat*111320, dxM=dLng*111320*Math.cos(qe.lat*Math.PI/180);
+  return {x:400+dxM/qe.scale, y:300+dyM/qe.scale};
+}
+function qeReprojectAreas(){
+  if(!qe.lat||!qe.lng)return;
+  qe.areas.forEach(a=>{
+    // Areas with no geoPts (pre-fix records, or grid-only sketches with no
+    // georeference at all) keep whatever pixel points they last had —
+    // nothing stable to re-derive them from, same honest fallback
+    // booking.html itself uses for the same situation.
+    if(a.geoPts&&a.geoPts.length===a.points.length&&a.geoPts.every(Boolean)){
+      a.points=a.geoPts.map(qeLatLngToSvg);
+    }
+  });
+}
 
-  // Free OSM street map of the property via Nominatim geocode + tile grid —
-  // used whenever there's no Google Maps key, or a configured key fails for
-  // any reason. No technical wording, no mention of why — it just shows a map.
-  function renderQuoteMapOSM(geoRegion){
-    zone.innerHTML=`<div class="qmap"><div class="qmap-h">📍 ${addr} <span class="demo-tag">map</span></div>
-      <div class="qmap-stage placeholder" id="qmap-osm-stage"><span>Loading map…</span></div></div>`;
-    fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(addr+', '+geoRegion))
-      .then(res=>res.json()).then(results=>{
-        const stage=document.getElementById('qmap-osm-stage'); if(!stage)return;
-        if(!results||!results.length){stage.innerHTML='<span>Map unavailable for this address.</span>';return;}
-        const lat=parseFloat(results[0].lat), lon=parseFloat(results[0].lon), z=18;
-        const n=Math.pow(2,z);
-        const xF=(lon+180)/360*n;
-        const yF=(1-Math.log(Math.tan(lat*Math.PI/180)+1/Math.cos(lat*Math.PI/180))/Math.PI)/2*n;
-        const tx=Math.floor(xF), ty=Math.floor(yF);
-        // fractional offset of the property inside its tile → shift the 3x3 grid so the property is centred
-        const offX=(xF-tx-0.5)*100, offY=(yF-ty-0.5)*100;
-        let imgs='';
-        for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++)
-          imgs+=`<img src="https://tile.openstreetmap.org/${z}/${tx+dx}/${ty+dy}.png" style="width:33.34%;height:33.34%;position:absolute;left:${(dx+1)*33.33-offX/3}%;top:${(dy+1)*33.33-offY/3}%" loading="lazy">`;
-        stage.className='qmap-stage';
-        stage.style.cssText='overflow:hidden;position:relative';
-        stage.innerHTML=`<div style="position:absolute;inset:0">${imgs}</div>
-          <div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-100%);font-size:22px">📍</div>${polysSVG()}`;
-      }).catch(()=>{
-        const stage=document.getElementById('qmap-osm-stage');
-        if(stage)stage.innerHTML='<span>Map unavailable offline</span>';
+/* ---------- geometry ---------- */
+function qePolyArea(pts){let a=0;for(let i=0;i<pts.length;i++){const j=(i+1)%pts.length;a+=pts[i].x*pts[j].y-pts[j].x*pts[i].y;}return Math.abs(a/2);}
+function qePolyPerim(pts){let p=0;for(let i=0;i<pts.length;i++){const j=(i+1)%pts.length;p+=Math.hypot(pts[j].x-pts[i].x,pts[j].y-pts[i].y);}return p;}
+function qeSizeOf(area){
+  const basis=SERVICES[area.service].basis;
+  if(basis==='length'||basis==='perimeter')return Math.round(qePolyPerim(area.points)*qe.scale);
+  return Math.round(qePolyArea(area.points)*qe.scale*qe.scale);
+}
+function qeStageToSvg(clientX,clientY){
+  const svg=document.getElementById('qe-svg'); if(!svg)return {x:400,y:300};
+  const r=svg.getBoundingClientRect();
+  const x=(clientX-r.left)/r.width*800, y=(clientY-r.top)/r.height*600;
+  return {x:Math.max(0,Math.min(800,x)),y:Math.max(0,Math.min(600,y))};
+}
+
+/* ---------- rendering ---------- */
+function qeRenderAreas(){
+  const svg=document.getElementById('qe-svg'); if(!svg)return;
+  const existingGrid=document.getElementById('qe-grid');
+  let out=existingGrid?existingGrid.outerHTML:'';
+  qe.areas.forEach(a=>{
+    const hex=QE_SVC_HEX[a.service]||'#0f7d6b';
+    const sel=a.id===qe.selectedId;
+    const pts=a.points.map(p=>`${p.x},${p.y}`).join(' ');
+    const cx=a.points.reduce((s,p)=>s+p.x,0)/a.points.length;
+    const cy=a.points.reduce((s,p)=>s+p.y,0)/a.points.length;
+    out+=`<polygon class="qe-area" data-id="${a.id}" points="${pts}" fill="${hex}${sel?'55':'33'}" stroke="${hex}" stroke-width="${sel?4:3}" stroke-dasharray="${sel?'6 3':'none'}" stroke-linejoin="round" style="cursor:${qe.mode==='select'?'move':'crosshair'}"/>`;
+    out+=`<g style="pointer-events:none"><rect x="${cx-32}" y="${cy-13}" width="64" height="26" rx="13" fill="#fff" opacity=".92"/><text x="${cx}" y="${cy+5}" text-anchor="middle" font-size="12" font-weight="700" fill="${hex}">${a.size}${a.unit}</text></g>`;
+    if(sel){
+      a.points.forEach((p,i)=>{
+        out+=`<circle class="qe-pt-handle" data-area="${a.id}" data-idx="${i}" cx="${p.x}" cy="${p.y}" r="8" fill="#fff" stroke="${hex}" stroke-width="3"/>`;
       });
+      a.points.forEach((p,i)=>{
+        const q=a.points[(i+1)%a.points.length];
+        const mx=(p.x+q.x)/2, my=(p.y+q.y)/2;
+        out+=`<circle class="qe-mid-handle" data-area="${a.id}" data-idx="${i}" cx="${mx}" cy="${my}" r="5" fill="${hex}" opacity=".6"/>`;
+      });
+    }
+  });
+  if(qe.drawing.length){
+    const hex=QE_SVC_HEX[qe.drawSvc]||'#0f7d6b';
+    const pts=qe.drawing.map(p=>`${p.x},${p.y}`).join(' ');
+    if(qe.drawing.length>1)out+=`<polyline points="${pts}" fill="${hex}22" stroke="${hex}" stroke-width="3" stroke-linejoin="round" style="pointer-events:none"/>`;
+    qe.drawing.forEach((p,i)=>{out+=`<circle class="qe-pt-handle qe-draw-handle" data-idx="${i}" cx="${p.x}" cy="${p.y}" r="${i===0?10:8}" fill="#fff" stroke="${hex}" stroke-width="3"/>`;});
   }
-
-  // === Case 1: The lead came from the booking widget WITH a satellite view ===
-  // Reproduce the customer's EXACT view: same image, same 800x600 overlay space.
-  if(polys&&polys.length&&r.mapView&&r.mapView.satUrl){
-    zone.innerHTML=`<div class="qmap">
-      <div class="qmap-h">📍 Areas the customer outlined <span class="demo-tag">satellite · as the customer saw it</span></div>
-      <div class="qmap-stage" style="background-image:url('${r.mapView.satUrl.replace(/'/g,"%27")}');background-size:cover;background-position:center">${polysSVG()}</div>
-      ${legend()}</div>`;
+  svg.innerHTML=out;
+}
+function qeRenderToolbar(){
+  const el=document.getElementById('qe-toolbar'); if(!el)return;
+  const sel=qe.selectedId;
+  el.innerHTML=`
+    <button type="button" class="btn ghost sm ${qe.mode==='select'?'active':''}" onclick="qeSetMode('select')">↖ Select</button>
+    <button type="button" class="btn ghost sm" onclick="qeUndo()" ${qe.history.length?'':'disabled'}>↺ Undo</button>
+    <button type="button" class="btn ghost sm" onclick="qeRedo()" ${qe.future.length?'':'disabled'}>↻ Redo</button>
+    <button type="button" class="btn ghost sm" onclick="qeDeleteArea('${sel||''}')" ${sel?'':'disabled'}>🗑 Delete</button>
+    <button type="button" class="btn ghost sm" onclick="qeDuplicateArea('${sel||''}')" ${sel?'':'disabled'}>⧉ Duplicate</button>
+    <button type="button" class="btn ghost sm" onclick="qeFitAll()">⤢ Fit all</button>
+  `;
+}
+function qeRenderSvcPicker(){
+  const el=document.getElementById('qe-svc-pick'); if(!el)return;
+  el.innerHTML=Object.entries(SERVICES).filter(([k])=>k!=='windows').map(([k,v])=>{
+    const hex=QE_SVC_HEX[k]||'#0f7d6b';
+    const active=qe.mode==='draw'&&qe.drawSvc===k;
+    return `<button type="button" class="qe-svc-btn ${active?'sel':''}" style="color:${hex}" onclick="qeStartDraw('${k}')"><span class="sw" style="background:${hex}"></span>+ ${v.label.split(' ')[0]}</button>`;
+  }).join('');
+}
+function qeUpdateHint(){
+  const hint=document.getElementById('qe-hint'); if(!hint)return;
+  if(qe.mode==='draw'){hint.textContent='Tap to place points for '+SERVICES[qe.drawSvc].label+' — tap the first point to finish';return;}
+  if(!qe.lat){hint.textContent=qe.addr?'Loading map…':'No address on file — drawing on a plain grid';return;}
+  hint.textContent=qe.selectedId?'Drag the shape to move it, drag a dot to reshape':'Tap a shape to select it, or pick a service above to draw a new one';
+}
+function qeRenderPanel(){
+  const el=document.getElementById('qe-panel'); if(!el)return;
+  if(qe.mode==='draw'){
+    el.innerHTML=`<div class="qe-panel"><div class="qe-panel-title">Drawing: ${SERVICES[qe.drawSvc].label} — tap to place points, tap the first point (or double-click) to finish</div></div>`;
     return;
   }
+  const area=qe.areas.find(a=>a.id===qe.selectedId);
+  if(!area){el.innerHTML='';return;}
+  const svc=SERVICES[area.service];
+  el.innerHTML=`<div class="qe-panel">
+    <div class="qe-panel-head">
+      <div class="qe-panel-title">${svc.label} · ${area.size}${area.unit}</div>
+      <select onchange="qeChangeAreaService('${area.id}',this.value)" style="font-size:12px">
+        ${Object.entries(SERVICES).filter(([k])=>k!=='windows').map(([k,v])=>`<option value="${k}" ${k===area.service?'selected':''}>${v.label}</option>`).join('')}
+      </select>
+    </div>
+    <textarea placeholder="Notes for this area (access, hazards, extra prep…)" oninput="qeSaveAreaNotes('${area.id}',this.value)">${(area.notes||'').replace(/</g,'&lt;')}</textarea>
+    <div class="qe-photo-row" id="qe-photo-row">${qeRenderAreaPhotos(area)}</div>
+    <div style="margin-top:8px"><input type="file" accept="image/*" id="qe-photo-input" style="display:none" onchange="qeUploadAreaPhoto('${area.id}',this)"><button type="button" class="btn ghost sm" onclick="document.getElementById('qe-photo-input').click()">📷 Add photo</button></div>
+  </div>`;
+  qeLoadAreaPhotoThumbs();
+}
+function qeRenderAreaPhotos(area){
+  return (area.photoPaths||[]).map((p)=>`<div class="qe-photo-thumb" data-path="${p}" onclick="qeOpenAreaPhoto('${p}')"><span class="qe-photo-rm" onclick="event.stopPropagation();qeRemoveAreaPhoto('${area.id}','${p}')">×</span></div>`).join('');
+}
+async function qeLoadAreaPhotoThumbs(){
+  const row=document.getElementById('qe-photo-row'); if(!row)return;
+  const cells=row.querySelectorAll('.qe-photo-thumb[data-path]');
+  for(const cell of cells){
+    const url=await signedUrlFor(cell.dataset.path);
+    if(url)cell.style.backgroundImage=`url("${url}")`;
+  }
+}
 
-  // === Case 2: No captured satellite snapshot, but we have an address — always
-  // prefer a real satellite (or street) map of the property over the flat sketch
-  // grid, whether or not the customer traced areas. If they did, overlay their
-  // traced areas on top rather than letting the sketch replace the real map. ===
-  if(addr){
-    const mapsKey=turnkeyMapsKey();
-    // Region suffix for geocoding — the business's own configured region
-    // (Business profile in Connections) when set, else the original default.
-    const geoRegion=(currentBusinessProfile&&currentBusinessProfile.region)||'Auckland, New Zealand';
+/* ---------- mode / drawing / selection / CRUD ---------- */
+function qeSetMode(mode){
+  qe.mode=mode;qe.drawing=[];qe.drawingGeoPts=[];
+  const stage=document.getElementById('qe-stage');
+  if(stage)stage.classList.toggle('qe-select-mode',mode==='select');
+  qeRenderToolbar();qeRenderSvcPicker();qeRenderPanel();qeRenderAreas();qeUpdateHint();
+}
+function qeStartDraw(svc){
+  qe.mode='draw';qe.drawSvc=svc;qe.drawing=[];qe.drawingGeoPts=[];qe.selectedId=null;
+  const stage=document.getElementById('qe-stage');
+  if(stage)stage.classList.remove('qe-select-mode');
+  qeRenderToolbar();qeRenderSvcPicker();qeRenderPanel();qeRenderAreas();qeUpdateHint();
+}
+function qeCommitDrawing(){
+  if(qe.drawing.length<3)return;
+  qePushHistory();
+  const area={id:'a'+Date.now()+'_'+Math.round(Math.random()*9999),service:qe.drawSvc,points:qe.drawing.slice(),geoPts:qe.drawingGeoPts.every(Boolean)?qe.drawingGeoPts.slice():null,notes:'',photoPaths:[]};
+  area.unit=SERVICES[area.service].unit;
+  area.size=qeSizeOf(area);
+  qe.areas.push(area);
+  qe.drawing=[];qe.drawingGeoPts=[];
+  qe.mode='select';qe.selectedId=area.id;
+  const stage=document.getElementById('qe-stage');
+  if(stage)stage.classList.add('qe-select-mode');
+  qeCommit();
+}
+function qeSelectArea(id){
+  qe.selectedId=id;
+  qeRenderToolbar();qeRenderAreas();qeRenderPanel();
+}
+function qeDeleteArea(id){
+  if(!id)return;
+  qePushHistory();
+  qe.areas=qe.areas.filter(a=>a.id!==id);
+  if(qe.selectedId===id)qe.selectedId=null;
+  qeCommit();
+}
+function qeDuplicateArea(id){
+  if(!id)return;
+  qePushHistory();
+  const src=qe.areas.find(a=>a.id===id); if(!src)return;
+  const offset=20; // small pixel offset so the copy is visibly distinct, not stacked exactly on top
+  const copy=JSON.parse(JSON.stringify(src));
+  copy.id='a'+Date.now()+'_'+Math.round(Math.random()*9999);
+  copy.points=copy.points.map(p=>({x:p.x+offset,y:p.y+offset}));
+  if(copy.geoPts)copy.geoPts=copy.points.map(qeSvgToLatLng);
+  qe.areas.push(copy);
+  qe.selectedId=copy.id;
+  qeCommit();
+}
+function qeChangeAreaService(id,svc){
+  const area=qe.areas.find(a=>a.id===id); if(!area)return;
+  qePushHistory();
+  area.service=svc;area.unit=SERVICES[svc].unit;area.size=qeSizeOf(area);
+  qeCommit();
+}
 
-    if(mapsKey){
-      // Geocode → static satellite of the property
-      zone.innerHTML=`<div class="qmap"><div class="qmap-h">📍 ${addr} <span class="demo-tag">satellite</span></div>
-        <div class="qmap-stage placeholder" id="qmap-sat-stage"><span>Loading map…</span></div></div>`;
-      const fullAddr=encodeURIComponent(addr+', '+geoRegion);
-      fetch('https://maps.googleapis.com/maps/api/geocode/json?address='+fullAddr+'&key='+encodeURIComponent(mapsKey))
-        .then(res=>res.json()).then(j=>{
-          const stage=document.getElementById('qmap-sat-stage'); if(!stage)return;
-          if(j.status!=='OK'){renderQuoteMapOSM(geoRegion);return;} // quietly fall back to the free map — never surface a status code
-          const loc=j.results&&j.results[0]?j.results[0].geometry.location:null;
-          const center=loc?loc.lat+','+loc.lng:fullAddr;
-          const url='https://maps.googleapis.com/maps/api/staticmap?center='+center+'&zoom=19&size=800x600&scale=2&maptype=satellite&key='+encodeURIComponent(mapsKey);
-          stage.className='qmap-stage';
-          stage.style.cssText=`background-image:url("${url}");background-size:cover;background-position:center`;
-          stage.innerHTML=polysSVG();
-        }).catch(()=>renderQuoteMapOSM(geoRegion));
+/* ---------- undo/redo — snapshot-based; capped rather than truly
+   unbounded, since a JSON-snapshot-per-edit history has real memory cost
+   and a real editing session is very unlikely to ever hit 50 edits ---------- */
+function qePushHistory(){
+  qe.history.push(JSON.stringify(qe.areas));
+  if(qe.history.length>50)qe.history.shift();
+  qe.future=[];
+}
+function qeUndo(){
+  if(!qe.history.length)return;
+  qe.future.push(JSON.stringify(qe.areas));
+  qe.areas=JSON.parse(qe.history.pop());
+  qe.selectedId=null;
+  qeReprojectAreas();
+  qeCommit(true);
+}
+function qeRedo(){
+  if(!qe.future.length)return;
+  qe.history.push(JSON.stringify(qe.areas));
+  qe.areas=JSON.parse(qe.future.pop());
+  qe.selectedId=null;
+  qeReprojectAreas();
+  qeCommit(true);
+}
+
+/* ---------- commit / persistence / pricing sync ---------- */
+function qeCommit(skipHistoryPush){
+  qe.r.areaPolys=qe.areas;
+  qeRenderAreas();
+  qeRenderToolbar();
+  qeRenderPanel();
+  qeSyncToDraftLines();
+  saveState();
+  if(typeof scheduleSupabaseSync==='function')scheduleSupabaseSync();
+}
+function qeSyncToDraftLines(){
+  // Aggregate polygon sizes per service into draftLines — the map becomes a
+  // visual way of populating the exact same data the line-item editor and
+  // pricing engine already use, so there's only ever one pricing path.
+  // Deliberately never DELETES a line just because its last polygon was
+  // removed — that's still the operator's call via the line editor's own
+  // remove button, not something a map edit should do silently.
+  const sums={};
+  qe.areas.forEach(a=>{sums[a.service]=(sums[a.service]||0)+(a.size||0);});
+  Object.entries(sums).forEach(([svc,qty])=>{
+    let line=draftLines.find(l=>l.svc===svc);
+    if(!line){line={svc,qty};draftLines.push(line);}
+    else if(line.fixedPrice==null){line.qty=qty;}
+  });
+  if(!draftLines.length)draftLines=[{svc:'driveway',qty:''}];
+  renderSvcLines();
+}
+
+/* ---------- notes / photos per area ---------- */
+function qeSaveAreaNotes(id,text){
+  const area=qe.areas.find(a=>a.id===id); if(!area)return;
+  area.notes=text;
+  qe.r.areaPolys=qe.areas;
+  saveState();
+}
+async function qeUploadAreaPhoto(id,input){
+  const file=input.files&&input.files[0]; input.value='';
+  if(!file)return;
+  const area=qe.areas.find(a=>a.id===id); if(!area)return;
+  if(!sb){toast('Something went wrong — try refreshing the page');return;}
+  toast('Uploading…');
+  await ensureRecordSynced(qe.r);
+  const row=await uploadAttachment(file,'quote_area_photo',{jobId:qe.r.jobId,customerId:qe.r.customerId});
+  if(!row)return;
+  if(!area.photoPaths)area.photoPaths=[];
+  area.photoPaths.push(row.path);
+  qe.r.areaPolys=qe.areas;
+  saveState();
+  qeRenderPanel();
+  toast('Photo added');
+}
+function qeRemoveAreaPhoto(id,path){
+  const area=qe.areas.find(a=>a.id===id); if(!area||!area.photoPaths)return;
+  area.photoPaths=area.photoPaths.filter(p=>p!==path);
+  qe.r.areaPolys=qe.areas;
+  saveState();
+  qeRenderPanel();
+}
+async function qeOpenAreaPhoto(path){
+  const url=await signedUrlFor(path);
+  if(url)window.open(url,'_blank');else toast('Could not open photo');
+}
+
+/* ---------- fit-all / zoom ---------- */
+function qeFitAll(){
+  if(!qe.lat)return;
+  const withGeo=qe.areas.filter(a=>a.geoPts&&a.geoPts.length&&a.geoPts.every(Boolean));
+  if(!withGeo.length){qeReloadAt(qe.lat,qe.lng,QE_ZOOM_DEFAULT);return;}
+  const allPts=withGeo.flatMap(a=>a.geoPts);
+  const lat=allPts.reduce((s,p)=>s+p.lat,0)/allPts.length;
+  const lng=allPts.reduce((s,p)=>s+p.lng,0)/allPts.length;
+  qeReloadAt(lat,lng,qe.zoom);
+}
+function qeAdjustZoom(delta,anchorLatLng){
+  if(!qe.lat)return;
+  const maxZ=qe.provider==='google'?QE_ZOOM_MAX:QE_OSM_ZOOM_MAX;
+  const minZ=qe.provider==='google'?QE_ZOOM_MIN:QE_OSM_ZOOM_MIN;
+  const newZoom=Math.max(minZ,Math.min(maxZ,qe.zoom+delta));
+  if(newZoom===qe.zoom)return;
+  const center=anchorLatLng||{lat:qe.lat,lng:qe.lng};
+  qeReloadAt(center.lat,center.lng,newZoom);
+}
+
+/* ---------- stage interaction: click (select/draw/insert-vertex), drag
+   (move shape / reshape vertex / pan), wheel (zoom toward cursor), touch
+   pinch (zoom). Listeners are attached once per modal-open — the whole
+   #quote-map-zone is rebuilt fresh by renderQuoteMap() each time the quote
+   modal opens, so there's never a stale-listener buildup to worry about. ---------- */
+function qeInitStageEvents(){
+  const stage=document.getElementById('qe-stage'); if(!stage)return;
+  stage.addEventListener('click',qeHandleClick);
+  stage.addEventListener('dblclick',e=>{
+    e.preventDefault();
+    if(qe.mode==='draw'&&qe.drawing.length>=3){qeCommitDrawing();return;}
+    if(qe.mode==='select'&&!e.target.closest('.qe-area')&&!e.target.closest('.qe-pt-handle')){qeAdjustZoom(1);}
+  });
+  stage.addEventListener('pointerdown',qeHandlePointerDown);
+  stage.addEventListener('pointermove',qeHandlePointerMove);
+  stage.addEventListener('pointerup',qeHandlePointerUp);
+  stage.addEventListener('pointercancel',qeHandlePointerUp);
+  stage.addEventListener('wheel',qeHandleWheel,{passive:false});
+  qeInitPinch(stage);
+}
+function qeHandleClick(e){
+  if(qeSuppressClick){qeSuppressClick=false;return;}
+  const midHandle=e.target.closest('.qe-mid-handle');
+  if(midHandle){
+    qePushHistory();
+    const area=qe.areas.find(a=>a.id===midHandle.dataset.area);
+    const idx=+midHandle.dataset.idx;
+    const a1=area.points[idx], a2=area.points[(idx+1)%area.points.length];
+    const mid={x:(a1.x+a2.x)/2,y:(a1.y+a2.y)/2};
+    area.points.splice(idx+1,0,mid);
+    if(area.geoPts&&area.geoPts.length===area.points.length-1)area.geoPts.splice(idx+1,0,qeSvgToLatLng(mid));
+    area.size=qeSizeOf(area);
+    qeCommit();
+    return;
+  }
+  if(qe.mode==='draw'){
+    const p=qeStageToSvg(e.clientX,e.clientY);
+    if(qe.drawing.length>=3){
+      const d=Math.hypot(p.x-qe.drawing[0].x,p.y-qe.drawing[0].y);
+      if(d<18){qeCommitDrawing();return;}
+    }
+    qe.drawing.push(p);
+    qe.drawingGeoPts.push(qeSvgToLatLng(p));
+    qeRenderAreas();qeUpdateHint();
+    return;
+  }
+  const areaEl=e.target.closest('.qe-area');
+  if(areaEl)qeSelectArea(areaEl.dataset.id);
+  else if(!e.target.closest('.qe-pt-handle'))qeSelectArea(null);
+}
+function qeHandlePointerDown(e){
+  const vertexHandle=e.target.closest('.qe-pt-handle');
+  if(vertexHandle){
+    const isDraft=vertexHandle.classList.contains('qe-draw-handle');
+    const idx=+vertexHandle.dataset.idx;
+    // The first drawing point doubles as the "tap to close" target once
+    // there are enough points — a tap aimed at closing the shape very
+    // likely lands ON that handle (it's what you're told to aim for), so
+    // don't start a drag from it; let the tap fall through to the native
+    // click handler, whose own distance check is what actually closes the
+    // polygon. Without this, the close-tap silently registers as a
+    // zero-movement drag instead and gets swallowed by qeSuppressClick.
+    if(isDraft&&idx===0&&qe.drawing.length>=3)return;
+    if(!isDraft)qePushHistory();
+    qe.draggingVertex={areaId:isDraft?null:vertexHandle.dataset.area,idx};
+    vertexHandle.setPointerCapture(e.pointerId);
+    e.stopPropagation();
+    return;
+  }
+  const areaEl=e.target.closest('.qe-area');
+  if(qe.mode==='select'&&areaEl&&areaEl.dataset.id===qe.selectedId){
+    qePushHistory();
+    qe.draggingAreaId=areaEl.dataset.id;
+    qe.dragStart=qeStageToSvg(e.clientX,e.clientY);
+    e.stopPropagation();
+    return;
+  }
+  if(qe.mode==='select'&&e.pointerType!=='touch'){
+    qe.panStart={x:e.clientX,y:e.clientY};
+  }
+}
+function qeHandlePointerMove(e){
+  if(qe.draggingVertex){
+    const p=qeStageToSvg(e.clientX,e.clientY);
+    if(qe.draggingVertex.areaId){
+      const area=qe.areas.find(a=>a.id===qe.draggingVertex.areaId);
+      area.points[qe.draggingVertex.idx]=p;
+      if(area.geoPts)area.geoPts[qe.draggingVertex.idx]=qeSvgToLatLng(p);
+      area.size=qeSizeOf(area);
+    }else{
+      qe.drawing[qe.draggingVertex.idx]=p;
+      qe.drawingGeoPts[qe.draggingVertex.idx]=qeSvgToLatLng(p);
+    }
+    qeRenderAreas();
+    return;
+  }
+  if(qe.draggingAreaId){
+    const p=qeStageToSvg(e.clientX,e.clientY);
+    const dx=p.x-qe.dragStart.x, dy=p.y-qe.dragStart.y;
+    if(Math.abs(dx)<0.5&&Math.abs(dy)<0.5)return;
+    const area=qe.areas.find(a=>a.id===qe.draggingAreaId);
+    area.points=area.points.map(pt=>({x:pt.x+dx,y:pt.y+dy}));
+    if(area.geoPts)area.geoPts=area.points.map(qeSvgToLatLng);
+    qe.dragStart=p;
+    qeRenderAreas();
+    return;
+  }
+  if(qe.panStart){
+    const dx=e.clientX-qe.panStart.x, dy=e.clientY-qe.panStart.y;
+    if(Math.hypot(dx,dy)<4)return;
+    const visual=document.getElementById('qe-visual');
+    if(visual){visual.classList.add('gesturing');visual.style.transform=`translate(${dx}px,${dy}px)`;}
+  }
+}
+function qeHandlePointerUp(e){
+  if(qe.draggingVertex){
+    const area=qe.draggingVertex.areaId?qe.areas.find(a=>a.id===qe.draggingVertex.areaId):null;
+    qe.draggingVertex=null;qeSuppressClick=true;
+    if(area)qeCommit();else{qeRenderAreas();}
+    return;
+  }
+  if(qe.draggingAreaId){
+    qe.draggingAreaId=null;qeSuppressClick=true;
+    qeCommit();
+    return;
+  }
+  if(qe.panStart){
+    const dx=e.clientX-qe.panStart.x, dy=e.clientY-qe.panStart.y;
+    const visual=document.getElementById('qe-visual');
+    if(Math.hypot(dx,dy)>=4&&qe.lat){
+      qeSuppressClick=true;
+      const stage=document.getElementById('qe-stage');
+      const r=stage.getBoundingClientRect();
+      const dxSvg=dx/r.width*800, dySvg=dy/r.height*600;
+      const newCenter=qeSvgToLatLng({x:400-dxSvg,y:300-dySvg});
+      qe.panStart=null;
+      if(newCenter){qeReloadAt(newCenter.lat,newCenter.lng,qe.zoom);}
+      else if(visual){visual.classList.remove('gesturing');visual.style.transform='none';}
       return;
     }
-
-    renderQuoteMapOSM(geoRegion);
-    return;
+    qe.panStart=null;
+    if(visual){visual.classList.remove('gesturing');visual.style.transform='none';}
   }
-
-  // === Case 3: No address at all — last resort, show the customer's sketch on
-  // the flat demo grid (nothing to geocode, so a real map isn't possible). ===
-  if(polys&&polys.length){
-    zone.innerHTML=`<div class="qmap">
-      <div class="qmap-h">📍 Areas the customer outlined <span class="demo-tag">customer sketch — no address to map</span></div>
-      <div class="qmap-stage" style="background:#e8eeec">${gridBG()}${polysSVG()}</div>
-      ${legend()}</div>`;
-    return;
-  }
-
-  // Nothing to show
-  zone.innerHTML='';
 }
+function qeHandleWheel(e){
+  if(!qe.lat)return;
+  e.preventDefault();
+  const p=qeStageToSvg(e.clientX,e.clientY);
+  const anchor=qeSvgToLatLng(p);
+  qeAdjustZoom(e.deltaY<0?1:-1,anchor);
+}
+function qeInitPinch(stageEl){
+  let active=false,startDist=0;
+  const dist=(a,b)=>Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY);
+  stageEl.addEventListener('touchstart',e=>{
+    const visual=document.getElementById('qe-visual'); if(!visual)return;
+    if(e.touches.length>=2&&qe.lat){
+      active=true;startDist=dist(e.touches[0],e.touches[1]);
+      visual.classList.add('gesturing');
+      const r=stageEl.getBoundingClientRect();
+      const mx=(e.touches[0].clientX+e.touches[1].clientX)/2-r.left;
+      const my=(e.touches[0].clientY+e.touches[1].clientY)/2-r.top;
+      visual.style.transformOrigin=mx+'px '+my+'px';
+      e.preventDefault();
+    }
+  },{passive:false});
+  stageEl.addEventListener('touchmove',e=>{
+    if(!active||e.touches.length<2)return;
+    e.preventDefault();
+    const scale=dist(e.touches[0],e.touches[1])/startDist;
+    const visual=document.getElementById('qe-visual');
+    if(visual)visual.style.transform='scale('+scale+')';
+  },{passive:false});
+  stageEl.addEventListener('touchend',e=>{
+    if(!active||e.touches.length>=2)return;
+    active=false;
+    const visual=document.getElementById('qe-visual'); if(!visual)return;
+    visual.classList.remove('gesturing');
+    const m=(visual.style.transform||'').match(/scale\(([\d.]+)\)/);
+    const s=m?parseFloat(m[1]):1;
+    if(Math.abs(s-1)>0.03)qeAdjustZoom(Math.round(Math.log2(s)));
+    else visual.style.transform='none';
+  });
+}
+/* ---------- keyboard shortcuts — only while the quote modal is open and
+   focus isn't inside a text field ---------- */
+document.addEventListener('keydown',function(e){
+  const overlay=document.getElementById('quote-overlay');
+  if(!overlay||!overlay.classList.contains('open')||!qe)return;
+  const tag=(document.activeElement&&document.activeElement.tagName)||'';
+  if(tag==='INPUT'||tag==='TEXTAREA'||tag==='SELECT')return;
+  if(e.key==='Delete'||e.key==='Backspace'){if(qe.selectedId){e.preventDefault();qeDeleteArea(qe.selectedId);}return;}
+  if(e.key==='Escape'){if(qe.mode==='draw'){qeSetMode('select');}else if(qe.selectedId){qeSelectArea(null);}return;}
+  if((e.ctrlKey||e.metaKey)&&!e.shiftKey&&e.key.toLowerCase()==='z'){e.preventDefault();qeUndo();return;}
+  if((e.ctrlKey||e.metaKey)&&e.shiftKey&&e.key.toLowerCase()==='z'){e.preventDefault();qeRedo();return;}
+  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='d'){if(qe.selectedId){e.preventDefault();qeDuplicateArea(qe.selectedId);}return;}
+});
 function reviewQuote(){
   const lines=draftLines.filter(l=>(parseFloat(l.qty)||0)>0);
   if(!lines.length){toast('Add at least one service with a quantity');return}
@@ -4876,45 +5431,23 @@ document.querySelectorAll('.overlay').forEach(o=>o.addEventListener('click',e=>{
 let toastTimer;
 function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.remove('show'),2200)}
 
-/* ===== BACKEND: one URL + one key = sync + 24/7 lead inbox =====
-   URL comes from config.js automatically; the access code (SYNC_KEY) stays a
-   manual per-device entry — it's never shipped in a public file since it's
-   the only thing gating write access to synced CRM state. */
+/* ===== BACKEND: base URL for every per-business route (leads, email,
+   calendar, AI marketing) — always comes from config.js, resolved per
+   request via the caller's own Supabase session (requireBusiness on the
+   backend), never a shared secret. =====
+   The old whole-app state push/pull (a single unscoped /api/state row keyed
+   by one shared SYNC_KEY, no business_id at all) has been removed — it was
+   already unreachable from this UI (nothing has set turnkey-backend-key
+   since the last Connections cleanup) and left a live cross-tenant
+   vulnerability on the backend: any business's SYNC_KEY could overwrite
+   every other business's entire dataset in one shot, since that table was
+   never scoped per-business. Real per-record sync (scheduleSupabaseSync
+   below) already covers this properly, scoped by RLS. */
 function backendUrl(){try{return ((window.TURNKEY_CONFIG&&window.TURNKEY_CONFIG.backendUrl)||localStorage.getItem('turnkey-backend-url')||'').replace(/\/+$/,'')}catch(e){return ''}}
-function backendKey(){try{return localStorage.getItem('turnkey-backend-key')||''}catch(e){return ''}}
 /* Google Maps key is safe to auto-configure from config.js (restrict it by HTTP
    referrer in Google Cloud Console); localStorage remains as a manual override. */
 function turnkeyMapsKey(){try{return (window.TURNKEY_CONFIG&&window.TURNKEY_CONFIG.mapsKey)||''}catch(e){return ''}}
-function backendHeaders(){return {'Content-Type':'application/json','X-Turnkey-Key':backendKey()};}
-let backendOnline=false, pushTimer=null;
-function pushStateRemote(){
-  // Unlike lead polling, /api/state still requires SYNC_KEY server-side —
-  // backendUrl() alone is no longer a reliable "opt-in" signal since it's
-  // now always populated from config.js, so gate on backendKey() too.
-  const url=backendUrl(),key=backendKey(); if(!url||!key||typeof fetch!=='function')return;
-  clearTimeout(pushTimer);
-  pushTimer=setTimeout(()=>{
-    let raw=null; try{raw=localStorage.getItem(STORE_KEY);}catch(e){}
-    if(!raw)return;
-    const d=JSON.parse(raw);
-    fetch(url+'/api/state',{method:'POST',headers:backendHeaders(),body:JSON.stringify({state:d,savedAt:d.savedAt||Date.now()})})
-      .then(r=>{backendOnline=r.ok;})
-      .catch(()=>{backendOnline=false;});
-  },1500); // debounce: batch rapid edits into one push
-}
-function pullStateRemote(){
-  const url=backendUrl(),key=backendKey(); if(!url||!key||typeof fetch!=='function')return;
-  fetch(url+'/api/state',{headers:backendHeaders()}).then(r=>r.json()).then(j=>{
-    backendOnline=true;
-    if(!j||!j.state)return;
-    let localAt=0; try{const raw=localStorage.getItem(STORE_KEY);if(raw)localAt=(JSON.parse(raw).savedAt||0);}catch(e){}
-    if((j.savedAt||0)>localAt){
-      localStorage.setItem(STORE_KEY,JSON.stringify(j.state));
-      loadState();render();renderAll();
-      toast('Synced from backend \u2713');
-    }
-  }).catch(()=>{backendOnline=false;});
-}
+let backendOnline=false;
 async function pollBackendLeads(){
   // Leads are authenticated purely by the CRM's own Supabase session — no
   // SYNC_KEY involved, so this needs no manual "Connect" step at all. The
@@ -5319,7 +5852,6 @@ function saveState(){
       savedAt:Date.now()
     }));
   }catch(e){/* storage full or unavailable — app still works, just won't persist */}
-  pushStateRemote();
   scheduleSupabaseSync();
 }
 
@@ -5392,7 +5924,6 @@ async function handleAuthedSession(session){
   fetchLiveWeather();
   fetchClimateNormals();
   loadChecklistTemplates();
-  pullStateRemote();
   pollBackendLeads();
   await loadEmailAccountStatus();
   syncEmail();
@@ -6266,9 +6797,15 @@ function ingestQuoteRequest(payload){
     services,
     total
   });
-  // keep the customer's outlined polygons so they show on the quote property map
-  rec.areaPolys=(payload.areas||[]).filter(a=>a.points&&a.points.length).map(a=>({service:a.service,size:a.size,unit:a.unit,points:a.points}));
-  rec.mapView=payload.mapView||null; // the exact satellite view the customer drew on
+  // Keep the customer's outlined polygons so they show — and stay editable —
+  // on the quote property map. geoPts (real lat/lng per point) is what lets
+  // the map editor correctly reproject each polygon onto a freshly loaded
+  // map regardless of what pan/zoom state the customer's own session was in
+  // when they drew it — see the matching comment in booking.html's
+  // buildPayload(). id is assigned here so the editor has stable identity to
+  // select/undo/delete/duplicate by, since the customer's payload never has one.
+  rec.areaPolys=(payload.areas||[]).filter(a=>a.points&&a.points.length).map((a,i)=>({id:'a'+Date.now()+'_'+i,service:a.service,size:a.size,unit:a.unit,points:a.points,geoPts:a.geoPts||null,notes:'',photoPaths:[]}));
+  rec.mapCenter=payload.mapCenter||null; // real lat/lng the customer's map was centred on — fallback anchor for areas with no geoPts of their own
   rec.preferredDate=payload.preferredDate||null;
   rec.preferredWindow=payload.preferredWindow||null;
   // Photos arrive as base64 from the public booking page (it has no Supabase
