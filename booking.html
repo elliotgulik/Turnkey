@@ -274,6 +274,7 @@ function initPlacesAutocomplete(){
       </div>
       <div class="map-stage" id="stage">
         <div class="map-visual" id="map-visual">
+          <div id="map-tiles" style="position:absolute;inset:0"></div>
           <svg id="map-svg" viewBox="0 0 800 600" preserveAspectRatio="none"></svg>
         </div>
         <div class="map-hint" id="hint">Tap to drop points around an area · tap the first point to finish</div>
@@ -475,9 +476,11 @@ try{const u=new URL(location.href);EMBED_MODE=u.searchParams.get('embed')==='1';
 })();
 
 const SAT_ZOOM_DEFAULT=19; // covers ~153m×115m — right for a full NZ residential section
+const OSM_ZOOM_DEFAULT=18, OSM_ZOOM_MIN=15, OSM_ZOOM_MAX=19, OSM_TILES=3;
 let SAT_ZOOM=SAT_ZOOM_DEFAULT;  // may be overridden per-property based on geocode viewport
 let SAT_LAT=-36.8;              // updated to actual property lat after geocoding
 let SAT_ADDRESS=null;
+let _lastLat=null,_lastLng=null,_lastLabel=null;
 function satScale(){
   // metres per SVG unit at current zoom and actual property latitude
   const mPerPx=156543.03392*Math.cos(SAT_LAT*Math.PI/180)/Math.pow(2,SAT_ZOOM);
@@ -497,30 +500,44 @@ function zoomForViewport(ne,sw){
   return SAT_ZOOM_DEFAULT;
 }
 
+/* ===== Single reload entry point for both map providers — every caller
+   (initial address lookup, +/- zoom buttons, pinch/pan gesture commit) goes
+   through here so there's exactly one place that decides "Google satellite
+   or free OSM street map", instead of three separate call sites each
+   duplicating that choice and risking drifting out of sync with each other. */
+function reloadMapAt(lat,lng,zoom,label){
+  _lastLat=lat;_lastLng=lng;_lastLabel=label||_lastLabel;
+  SAT_ZOOM=zoom;
+  if(MAPS_KEY){
+    SAT_LAT=lat;
+    const cacheKey=lat+','+lng+','+zoom;
+    const url='https://maps.googleapis.com/maps/api/staticmap?center='+lat+','+lng+
+      '&zoom='+zoom+'&size=640x480&scale=2&maptype=satellite&key='+encodeURIComponent(MAPS_KEY);
+    loadSatelliteUrl(url,cacheKey,_lastLabel);
+  }else{
+    loadOsmMosaic(lat,lng,zoom,_lastLabel);
+  }
+}
+
 // enableSatelliteLatLng: most accurate — called directly by Places autocomplete
+// (which only ever loads when a Maps key is configured, so this path is Google-only).
 function enableSatelliteLatLng(lat,lng,label,viewport){
   if(!MAPS_KEY)return false;
-  _lastLat=lat;_lastLng=lng;_lastLabel=label; // store for zoom adjustments
+  let zoom=SAT_ZOOM_DEFAULT;
   if(viewport&&viewport.northeast&&viewport.southwest){
-    SAT_ZOOM=zoomForViewport(
+    zoom=zoomForViewport(
       {lat:viewport.northeast.lat,lng:viewport.northeast.lng},
       {lat:viewport.southwest.lat,lng:viewport.southwest.lng}
     );
-  }else{
-    SAT_ZOOM=SAT_ZOOM_DEFAULT;
   }
-  SAT_LAT=lat;
-  const cacheKey=lat+','+lng+','+SAT_ZOOM;
-  if(SAT_ADDRESS===cacheKey)return true;
-  const url='https://maps.googleapis.com/maps/api/staticmap?center='+lat+','+lng+
-    '&zoom='+SAT_ZOOM+'&size=640x480&scale=2&maptype=satellite&key='+encodeURIComponent(MAPS_KEY);
-  loadSatelliteUrl(url,cacheKey,label);
+  if(SAT_ADDRESS===lat+','+lng+','+zoom)return true;
+  reloadMapAt(lat,lng,zoom,label);
   return true;
 }
 function enableSatellite(address){
   if(!MAPS_KEY||!address)return false;
   const hint=document.getElementById('hint');
-  hint.textContent='\u23f3 Locating address\u2026';
+  hint.textContent='⏳ Locating address…';
   const geocodeUrl='https://maps.googleapis.com/maps/api/geocode/json?address='+
     encodeURIComponent(address+', '+(BIZ_REGION||'New Zealand'))+'&key='+encodeURIComponent(MAPS_KEY);
   if(typeof fetch==='function'){
@@ -530,21 +547,42 @@ function enableSatellite(address){
         enableSatelliteLatLng(res.geometry.location.lat,res.geometry.location.lng,
           res.formatted_address||address, res.geometry.viewport);
       }else{
-        hint.textContent=j.status==='REQUEST_DENIED'
-          ?'\u26a0\ufe0f Maps key rejected \u2014 ask the business to check their Google Maps key'
-          :'\u26a0\ufe0f Address not found \u2014 try the full street address';
+        // Never surface a Google status code to a customer — just fall back
+        // to the free map instead of showing an error they can't act on.
+        enableOsm(address);
       }
-    }).catch(()=>{hint.textContent='\u26a0\ufe0f Geocode failed \u2014 check your connection';});
+    }).catch(()=>enableOsm(address));
   }
+  return true;
+}
+// enableOsm/enableOsmLatLng: the no-key fallback — a free OpenStreetMap tile
+// mosaic via Nominatim geocoding, built the same way renderOpsMap/
+// renderQuoteMap already do it elsewhere in this codebase. No key, no setup,
+// no technical wording a customer would ever see.
+function enableOsmLatLng(lat,lng,label){
+  reloadMapAt(lat,lng,SAT_ZOOM||OSM_ZOOM_DEFAULT,label);
+  return true;
+}
+function enableOsm(address){
+  if(!address)return false;
+  const hint=document.getElementById('hint');
+  hint.textContent='⏳ Locating address…';
+  fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(address+', '+(BIZ_REGION||'New Zealand')))
+    .then(r=>r.json()).then(results=>{
+      if(!results||!results.length){hint.textContent='⚠️ Address not found — try the full street address';return;}
+      enableOsmLatLng(parseFloat(results[0].lat),parseFloat(results[0].lon),results[0].display_name||address);
+    }).catch(()=>{hint.textContent='⚠️ Could not load the map — check your connection';});
   return true;
 }
 function loadSatelliteUrl(url,cacheKey,label){
   const visual=document.getElementById('map-visual');
+  const tiles=document.getElementById('map-tiles');
   const hint=document.getElementById('hint');
-  hint.textContent='\u23f3 Loading satellite image\u2026';
+  hint.textContent='⏳ Loading map…';
   const probe=new Image();
   probe.onload=function(){
     visual.style.transform='none'; // snap the live pan/pinch preview back now that fresh, correctly-scaled imagery has arrived
+    if(tiles)tiles.innerHTML=''; // clear any OSM tiles from a previous no-key state
     visual.style.backgroundImage='url("'+url+'")';
     document.getElementById('map-svg').querySelectorAll('rect,line').forEach(function(elm){
       if(!elm.closest('#layer-areas')&&!elm.closest('#layer-draw'))elm.style.opacity='0.14';
@@ -553,9 +591,9 @@ function loadSatelliteUrl(url,cacheKey,label){
     SAT_ADDRESS=cacheKey;
     const coverage=Math.round(SCALE*800);
     document.getElementById('scale-note').textContent=
-      (label||'')+' \u00b7 zoom '+SAT_ZOOM+' \u00b7 '+coverage+'m wide \u00b7 '+
+      (label||'')+' · zoom '+SAT_ZOOM+' · '+coverage+'m wide · '+
       (SCALE*GRID).toFixed(1)+'m per grid sq';
-    hint.textContent='Satellite loaded \u2014 tap to trace your first area';
+    hint.textContent='Map loaded — tap to trace your first area';
     // show zoom control
     const zc=document.getElementById('zoom-ctrl');
     if(zc){zc.style.display='flex';document.getElementById('zoom-val').textContent=SAT_ZOOM;}
@@ -569,28 +607,62 @@ function loadSatelliteUrl(url,cacheKey,label){
     if(typeof renderAreas==='function')renderAreas();
   };
   probe.onerror=function(){
-    hint.textContent='\u26a0\ufe0f Satellite image failed \u2014 check your Maps key in Connections';
-    document.getElementById('scale-note').textContent='Satellite unavailable';
+    // A configured key that fails (bad key, quota, network) still shouldn't
+    // dead-end on an error message — quietly try the free map instead.
+    enableOsmLatLng(parseFloat(cacheKey.split(',')[0]),parseFloat(cacheKey.split(',')[1]),label);
   };
   probe.src=url;
 }
-function adjustZoom(delta){
-  const newZoom=Math.max(17,Math.min(21,SAT_ZOOM+delta));
-  if(newZoom===SAT_ZOOM)return;
-  SAT_ZOOM=newZoom;
-  SAT_ADDRESS=null; // force reload at new zoom
-  document.getElementById('zoom-val').textContent=SAT_ZOOM;
-  // reload satellite at new zoom using last known lat/lng from cacheKey
-  if(typeof _lastLat!=='undefined'&&_lastLat){
-    const url='https://maps.googleapis.com/maps/api/staticmap?center='+_lastLat+','+_lastLng+
-      '&zoom='+SAT_ZOOM+'&size=640x480&scale=2&maptype=satellite&key='+encodeURIComponent(MAPS_KEY);
-    loadSatelliteUrl(url,_lastLat+','+_lastLng+','+SAT_ZOOM,_lastLabel);
-  }
+// Free OpenStreetMap tile mosaic — same DOM-absolute-positioned-tiles
+// technique the CRM already uses (renderOpsMap/renderQuoteMap), built as
+// children of #map-tiles (behind the drawing SVG) instead of a single flat
+// background image, since OSM's tile server doesn't allow the canvas
+// compositing a single-image approach would need. #map-visual still moves
+// tiles + SVG together as one rigid layer during pan/pinch either way, since
+// the CSS transform applies to the whole subtree regardless of how many
+// child elements are in it.
+function loadOsmMosaic(lat,lng,zoom,label){
+  const visual=document.getElementById('map-visual');
+  const tiles=document.getElementById('map-tiles');
+  const hint=document.getElementById('hint');
+  hint.textContent='⏳ Loading map…';
+  zoom=Math.max(OSM_ZOOM_MIN,Math.min(OSM_ZOOM_MAX,zoom));
+  visual.style.transform='none';
+  visual.style.backgroundImage='none';
+  const n=Math.pow(2,zoom);
+  const xF=(lng+180)/360*n;
+  const yF=(1-Math.log(Math.tan(lat*Math.PI/180)+1/Math.cos(lat*Math.PI/180))/Math.PI)/2*n;
+  const tx=Math.floor(xF), ty=Math.floor(yF);
+  const half=(OSM_TILES-1)/2;
+  const offX=(xF-tx-0.5)*100, offY=(yF-ty-0.5)*100;
+  let imgs='';
+  for(let dy=-half;dy<=half;dy++)for(let dx=-half;dx<=half;dx++)
+    imgs+=`<img src="https://tile.openstreetmap.org/${zoom}/${tx+dx}/${ty+dy}.png" style="width:${100/OSM_TILES}%;height:${100/OSM_TILES}%;position:absolute;left:${(dx+half)*(100/OSM_TILES)-offX/OSM_TILES}%;top:${(dy+half)*(100/OSM_TILES)-offY/OSM_TILES}%" loading="lazy">`;
+  if(tiles)tiles.innerHTML=imgs;
+  SAT_ZOOM=zoom;
+  SCALE=156543.03392*Math.cos(lat*Math.PI/180)/Math.pow(2,zoom)*(OSM_TILES*256/800);
+  SAT_ADDRESS=lat+','+lng+','+zoom+',osm';
+  const coverage=Math.round(SCALE*800);
+  document.getElementById('scale-note').textContent=
+    (label||'')+' · zoom '+zoom+' · '+coverage+'m wide · '+(SCALE*GRID).toFixed(1)+'m per grid sq';
+  hint.textContent='Map loaded — tap to trace your first area';
+  const zc=document.getElementById('zoom-ctrl');
+  if(zc){zc.style.display='flex';document.getElementById('zoom-val').textContent=zoom;}
+  if(typeof reprojectAreas==='function')reprojectAreas();
+  if(typeof renderAreas==='function')renderAreas();
 }
-let _lastLat=null,_lastLng=null,_lastLabel=null;
+function adjustZoom(delta){
+  if(!_lastLat)return;
+  const maxZ=MAPS_KEY?21:OSM_ZOOM_MAX, minZ=MAPS_KEY?17:OSM_ZOOM_MIN;
+  const newZoom=Math.max(minZ,Math.min(maxZ,SAT_ZOOM+delta));
+  if(newZoom===SAT_ZOOM)return;
+  reloadMapAt(_lastLat,_lastLng,newZoom,_lastLabel);
+}
 function tryAutoSatellite(){
   const addr=(document.getElementById('addr').value||'').trim();
-  if(MAPS_KEY&&addr)enableSatellite(addr);
+  if(!addr)return;
+  if(MAPS_KEY)enableSatellite(addr);
+  else enableOsm(addr);
 }
 
 let activeSvc = 'driveway';
@@ -849,13 +921,11 @@ function initMapGestures(){
     if(!mode)return;
     visual.classList.remove('gesturing');
     if(mode==='pinch'&&Math.abs(liveScale-1)>0.03){
-      const newZoom=Math.max(17,Math.min(21,SAT_ZOOM+Math.round(Math.log2(liveScale))));
+      const maxZ=MAPS_KEY?21:OSM_ZOOM_MAX, minZ=MAPS_KEY?17:OSM_ZOOM_MIN;
+      const newZoom=Math.max(minZ,Math.min(maxZ,SAT_ZOOM+Math.round(Math.log2(liveScale))));
       if(newZoom!==SAT_ZOOM){
-        SAT_ZOOM=newZoom;SAT_ADDRESS=null;
-        document.getElementById('zoom-val').textContent=SAT_ZOOM;
-        const url='https://maps.googleapis.com/maps/api/staticmap?center='+_lastLat+','+_lastLng+
-          '&zoom='+SAT_ZOOM+'&size=640x480&scale=2&maptype=satellite&key='+encodeURIComponent(MAPS_KEY);
-        loadSatelliteUrl(url,_lastLat+','+_lastLng+','+SAT_ZOOM,_lastLabel);
+        document.getElementById('zoom-val').textContent=newZoom;
+        reloadMapAt(_lastLat,_lastLng,newZoom,_lastLabel);
       }else{
         visual.style.transform='none';
       }
@@ -864,10 +934,7 @@ function initMapGestures(){
       const dxSvg=liveDx/r.width*800, dySvg=liveDy/r.height*600;
       const newCenter=svgToLatLng({x:400-dxSvg,y:300-dySvg});
       if(newCenter){
-        _lastLat=newCenter.lat;_lastLng=newCenter.lng;SAT_ADDRESS=null;
-        const url='https://maps.googleapis.com/maps/api/staticmap?center='+_lastLat+','+_lastLng+
-          '&zoom='+SAT_ZOOM+'&size=640x480&scale=2&maptype=satellite&key='+encodeURIComponent(MAPS_KEY);
-        loadSatelliteUrl(url,_lastLat+','+_lastLng+','+SAT_ZOOM,_lastLabel);
+        reloadMapAt(newCenter.lat,newCenter.lng,SAT_ZOOM,_lastLabel);
       }else{
         visual.style.transform='none';
       }
@@ -1134,8 +1201,8 @@ function startOver(){
 function locateAddr(){
   const v=document.getElementById('addr').value.trim();
   if(!v){document.getElementById('hint').textContent='Enter an address first';return;}
-  if(MAPS_KEY){enableSatellite(v);}
-  else{document.getElementById('hint').textContent='No Maps key \u2014 tracing on demo map. Add a Google Maps key in Connections for real satellite.';}
+  if(MAPS_KEY)enableSatellite(v);
+  else enableOsm(v);
 }
 function toggleIntegration(){
   const el=document.getElementById('integration');

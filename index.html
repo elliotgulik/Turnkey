@@ -129,8 +129,9 @@
   .col-body{display:flex;flex-direction:column;gap:10px;min-height:60px}
   .col-empty{border:1px dashed var(--line);border-radius:var(--radius-sm);padding:18px 10px;text-align:center;font-size:12px;color:var(--ink-faint)}
 
-  .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-sm);padding:14px 15px;text-align:left;width:100%;transition:box-shadow .18s,transform .18s,border-color .18s}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-sm);padding:14px 15px;text-align:left;width:100%;cursor:pointer;transition:box-shadow .18s,transform .18s,border-color .18s}
   .card:hover{box-shadow:var(--shadow);transform:translateY(-2px);border-color:var(--line)}
+  .card-resched{display:block;margin-top:10px;width:100%;cursor:pointer}
   .card .name{font-size:14.5px;font-weight:600;letter-spacing:-.01em}
   .card .meta{font-size:12.5px;color:var(--ink-soft);margin-top:2px}
   .card .foot{display:flex;align-items:center;justify-content:space-between;margin-top:11px}
@@ -545,15 +546,34 @@
     font-family:inherit;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:16px}
   .fc-wrap .fc-toolbar-title{font-size:17px;color:var(--ink)}
   .fc-wrap .fc-daygrid-day-number,.fc-wrap .fc-col-header-cell-cushion{color:var(--ink-soft);font-size:12.5px}
-  .fc-wrap .fc-event{cursor:pointer;font-size:11.5px;padding:1px 4px;border:none}
+  /* Large coloured job indicators — was a 1px-padding sliver of text, now a
+     solid rounded pill with real weight so a booked day reads at a glance. */
+  .fc-wrap .fc-event{cursor:pointer;font-size:11.5px;font-weight:600;padding:3px 7px;border:none;border-radius:6px;margin-top:2px}
+  .fc-wrap .fc-daygrid-event-dot{display:none} /* redundant once the whole chip is solid-coloured */
+  .fc-wrap .fc-daygrid-day-frame{min-height:92px}
+  .fc-wrap .fc-daygrid-more-link{font-size:11px;font-weight:600;color:var(--ink-soft)}
   .fc-wx-badge{font-size:9.5px;font-weight:700;letter-spacing:.02em;text-transform:uppercase;padding:1px 5px;border-radius:980px;display:inline-block;margin:2px 4px 0 auto}
   .fc-wx-badge.fc-wx-good{background:var(--teal-wash);color:var(--teal)}
   .fc-wx-badge.fc-wx-warn{background:#fbf6ec;color:#9a7a32}
   .fc-wx-badge.fc-wx-bad{background:#fbf0ec;color:#b5573e}
   .fc-wx-badge.fc-wx-hist{opacity:.55;border:1px dashed currentColor;background:transparent}
   .fc-daygrid-day-top{display:flex;align-items:center;justify-content:space-between}
-  .fc-day-summary{display:flex;gap:5px;flex-wrap:wrap;padding:2px 4px 4px;font-size:9.5px;font-weight:600;color:var(--ink-faint)}
-  .fc-day-summary span{white-space:nowrap}
+  .fc-day-summary{display:flex;gap:4px;flex-wrap:wrap;padding:2px 4px 4px}
+  .fc-day-summary span{white-space:nowrap;font-size:10px;font-weight:700;color:var(--ink-soft);background:var(--surface-2);padding:1px 6px;border-radius:980px}
+  .fc-day-summary span.fc-ds-rev{color:var(--teal);background:var(--teal-wash)}
+  .cal-job-row{padding:10px 4px;border-bottom:1px solid var(--line-soft);display:flex;flex-direction:column;gap:6px}
+  .cal-job-row:last-child{border-bottom:none}
+  .cal-job-row .cjr-main{display:flex;align-items:center;gap:10px}
+  .cal-job-row .cjr-dot{width:11px;height:11px;border-radius:50%;flex-shrink:0}
+  .cal-job-row .cjr-info{flex:1;min-width:0}
+  .cal-job-row .cjr-name{font-size:13.5px;font-weight:600;color:var(--ink)}
+  .cal-job-row .cjr-meta{font-size:12px;color:var(--ink-faint)}
+  .cal-job-row .cjr-right{text-align:right;flex-shrink:0}
+  .cal-job-row .cjr-amt{font-size:12px;color:var(--ink-faint);margin-top:3px}
+  .cal-job-row .cjr-resched{align-self:flex-end}
+  .cal-legend{display:flex;flex-wrap:wrap;gap:12px;margin:10px 2px 4px;font-size:11.5px;color:var(--ink-soft)}
+  .cal-legend span{display:inline-flex;align-items:center;gap:5px}
+  .cal-legend i{width:9px;height:9px;border-radius:50%;display:inline-block}
   .fc-wrap .fc-button{box-shadow:none!important;text-transform:capitalize}
   @media(max-width:640px){
     .fc-wrap{padding:10px}
@@ -831,6 +851,7 @@
     .jf-detail{max-width:88px}
     .jf-next{flex-direction:column;align-items:stretch}
     .jf-next .btn{width:100%}
+    .jf-next>div{flex-direction:column}
   }
 
   /* quote property map */
@@ -2062,6 +2083,36 @@ function renderQuoteMap(r){
     return '<div class="qmap-legend">'+polys.map(p=>`<span class="qm-leg"><span class="qm-sw" style="background:${SVCHEX[p.service]||'#0f7d6b'}"></span>${SERVICES[p.service]?SERVICES[p.service].label.split(' ')[0]:p.service} · ${p.size}${p.unit||'m²'}</span>`).join('')+'</div>';
   }
 
+  // Free OSM street map of the property via Nominatim geocode + tile grid —
+  // used whenever there's no Google Maps key, or a configured key fails for
+  // any reason. No technical wording, no mention of why — it just shows a map.
+  function renderQuoteMapOSM(geoRegion){
+    zone.innerHTML=`<div class="qmap"><div class="qmap-h">📍 ${addr} <span class="demo-tag">map</span></div>
+      <div class="qmap-stage placeholder" id="qmap-osm-stage"><span>Loading map…</span></div></div>`;
+    fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(addr+', '+geoRegion))
+      .then(res=>res.json()).then(results=>{
+        const stage=document.getElementById('qmap-osm-stage'); if(!stage)return;
+        if(!results||!results.length){stage.innerHTML='<span>Map unavailable for this address.</span>';return;}
+        const lat=parseFloat(results[0].lat), lon=parseFloat(results[0].lon), z=18;
+        const n=Math.pow(2,z);
+        const xF=(lon+180)/360*n;
+        const yF=(1-Math.log(Math.tan(lat*Math.PI/180)+1/Math.cos(lat*Math.PI/180))/Math.PI)/2*n;
+        const tx=Math.floor(xF), ty=Math.floor(yF);
+        // fractional offset of the property inside its tile → shift the 3x3 grid so the property is centred
+        const offX=(xF-tx-0.5)*100, offY=(yF-ty-0.5)*100;
+        let imgs='';
+        for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++)
+          imgs+=`<img src="https://tile.openstreetmap.org/${z}/${tx+dx}/${ty+dy}.png" style="width:33.34%;height:33.34%;position:absolute;left:${(dx+1)*33.33-offX/3}%;top:${(dy+1)*33.33-offY/3}%" loading="lazy">`;
+        stage.className='qmap-stage';
+        stage.style.cssText='overflow:hidden;position:relative';
+        stage.innerHTML=`<div style="position:absolute;inset:0">${imgs}</div>
+          <div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-100%);font-size:22px">📍</div>${polysSVG()}`;
+      }).catch(()=>{
+        const stage=document.getElementById('qmap-osm-stage');
+        if(stage)stage.innerHTML='<span>Map unavailable offline</span>';
+      });
+  }
+
   // === Case 1: The lead came from the booking widget WITH a satellite view ===
   // Reproduce the customer's EXACT view: same image, same 800x600 overlay space.
   if(polys&&polys.length&&r.mapView&&r.mapView.satUrl){
@@ -2085,50 +2136,23 @@ function renderQuoteMap(r){
     if(mapsKey){
       // Geocode → static satellite of the property
       zone.innerHTML=`<div class="qmap"><div class="qmap-h">📍 ${addr} <span class="demo-tag">satellite</span></div>
-        <div class="qmap-stage placeholder" id="qmap-sat-stage"><span>Loading satellite…</span></div></div>`;
+        <div class="qmap-stage placeholder" id="qmap-sat-stage"><span>Loading map…</span></div></div>`;
       const fullAddr=encodeURIComponent(addr+', '+geoRegion);
       fetch('https://maps.googleapis.com/maps/api/geocode/json?address='+fullAddr+'&key='+encodeURIComponent(mapsKey))
         .then(res=>res.json()).then(j=>{
           const stage=document.getElementById('qmap-sat-stage'); if(!stage)return;
-          if(j.status!=='OK'){stage.innerHTML=`<span>Satellite unavailable — ${j.status==='REQUEST_DENIED'?'check your satellite map setup':'address not found'}</span>`;return;}
+          if(j.status!=='OK'){renderQuoteMapOSM(geoRegion);return;} // quietly fall back to the free map — never surface a status code
           const loc=j.results&&j.results[0]?j.results[0].geometry.location:null;
           const center=loc?loc.lat+','+loc.lng:fullAddr;
           const url='https://maps.googleapis.com/maps/api/staticmap?center='+center+'&zoom=19&size=800x600&scale=2&maptype=satellite&key='+encodeURIComponent(mapsKey);
           stage.className='qmap-stage';
           stage.style.cssText=`background-image:url("${url}");background-size:cover;background-position:center`;
           stage.innerHTML=polysSVG();
-        }).catch(()=>{
-          const stage=document.getElementById('qmap-sat-stage');
-          if(stage)stage.innerHTML='<span>Satellite unavailable — network error</span>';
-        });
+        }).catch(()=>renderQuoteMapOSM(geoRegion));
       return;
     }
 
-    // No key: free OSM street map of the property via Nominatim geocode + tile grid
-    zone.innerHTML=`<div class="qmap"><div class="qmap-h">📍 ${addr} <span class="demo-tag">street map — no Maps key set</span></div>
-      <div class="qmap-stage placeholder" id="qmap-osm-stage"><span>Loading map…</span></div></div>`;
-    fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(addr+', '+geoRegion))
-      .then(res=>res.json()).then(results=>{
-        const stage=document.getElementById('qmap-osm-stage'); if(!stage)return;
-        if(!results||!results.length){stage.innerHTML='<span>Address not found</span>';return;}
-        const lat=parseFloat(results[0].lat), lon=parseFloat(results[0].lon), z=18;
-        const n=Math.pow(2,z);
-        const xF=(lon+180)/360*n;
-        const yF=(1-Math.log(Math.tan(lat*Math.PI/180)+1/Math.cos(lat*Math.PI/180))/Math.PI)/2*n;
-        const tx=Math.floor(xF), ty=Math.floor(yF);
-        // fractional offset of the property inside its tile → shift the 3x3 grid so the property is centred
-        const offX=(xF-tx-0.5)*100, offY=(yF-ty-0.5)*100;
-        let imgs='';
-        for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++)
-          imgs+=`<img src="https://tile.openstreetmap.org/${z}/${tx+dx}/${ty+dy}.png" style="width:33.34%;height:33.34%;position:absolute;left:${(dx+1)*33.33-offX/3}%;top:${(dy+1)*33.33-offY/3}%" loading="lazy">`;
-        stage.className='qmap-stage';
-        stage.style.cssText='overflow:hidden;position:relative';
-        stage.innerHTML=`<div style="position:absolute;inset:0">${imgs}</div>
-          <div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-100%);font-size:22px">📍</div>${polysSVG()}`;
-      }).catch(()=>{
-        const stage=document.getElementById('qmap-osm-stage');
-        if(stage)stage.innerHTML='<span>Map unavailable offline</span>';
-      });
+    renderQuoteMapOSM(geoRegion);
     return;
   }
 
@@ -3000,8 +3024,9 @@ function confirmSchedule(){
   render();renderAll();
   if(paired)toast(`Booked: ${r.name} on ${r.scheduledDate} — paired with ${paired.name} in ${r.suburb}`);
   else toast(`Booked: ${r.name} on ${r.scheduledDate}`);
-  logActivity(r.customerId,r.jobId,'job_scheduled',r.name+' booked for '+r.scheduledDate+(r.tech!=='Unassigned'?' · '+r.tech:''));
+  logActivity(r.customerId,r.jobId,'job_scheduled',r.name+(wasBooked?' rescheduled to ':' booked for ')+r.scheduledDate+(r.tech!=='Unassigned'?' · '+r.tech:''));
   if(!wasBooked&&typeof sendLifecycleEmail==='function')sendLifecycleEmail(r,'job_booked');
+  pushJobToGoogleCalendar(r);
 }
 
 /* ---------- detail ---------- */
@@ -3408,6 +3433,21 @@ function cardHtml(r){
   // sitting in Scheduled gives no clue whether the tech has actually
   // started/paused it without this).
   const jobStatusChip=(r.jobStatus&&r.stage==='scheduled')?` ${jobStatusBadge(r)}`:'';
+  // Scheduled-stage cards need a nested Reschedule button, and a <button>
+  // can't validly contain another <button> — this one card variant uses a
+  // div+role="button" wrapper instead so the click target still behaves
+  // identically (click, Enter, focus) while allowing the reschedule action
+  // inside it without invalid/unreliable nested-button markup.
+  if(r.stage==='scheduled'){
+    return `<div class="card${flag?' has-flag flag-'+flag.tone:''}" role="button" tabindex="0" onclick="openDetail(${r.id})" onkeydown="if(event.key==='Enter')openDetail(${r.id})">
+      ${flag?`<div class="card-flag ${flag.tone}">${flag.label}</div>`:''}
+      <div class="name">${r.name}${invoiceBadge}${jobStatusChip}</div>
+      <div class="meta">${r.suburb||r.address||'—'}</div>
+      ${tags?`<div class="svc-tags">${tags}</div>`:''}
+      <div class="foot"><span class="price">${r.total?money(r.total):'No quote'}</span><span class="meta">${r.source||''}</span></div>
+      <button class="btn ghost sm card-resched" onclick="event.stopPropagation();openSchedule(${r.id})">↻ Reschedule</button>
+    </div>`;
+  }
   return `<button class="card${flag?' has-flag flag-'+flag.tone:''}" onclick="openDetail(${r.id})">
     ${flag?`<div class="card-flag ${flag.tone}">${flag.label}</div>`:''}
     <div class="name">${r.name}${invoiceBadge}${jobStatusChip}</div>
@@ -3486,7 +3526,7 @@ function renderCustomerProfile(){
     </div>
 
     ${upcoming.length?`<div class="panel" style="margin-bottom:14px"><h4>Upcoming work</h4>
-      ${upcoming.map(r=>`<div class="kv"><span class="k">${r.name} — ${r.scheduledDate||'Date TBC'}</span><span class="v">${jobStatusBadge(r)}</span></div>`).join('')}
+      ${upcoming.map(r=>`<div class="kv"><span class="k">${r.name} — ${r.scheduledDate||'Date TBC'}</span><span class="v">${jobStatusBadge(r)}${r.stage==='scheduled'?` <button class="btn ghost sm" style="padding:2px 9px;font-size:11px" onclick="openSchedule(${r.id})">↻ Reschedule</button>`:''}</span></div>`).join('')}
     </div>`:''}
 
     <div class="cp-grid">
@@ -3720,6 +3760,7 @@ function renderOps(){
                 ${notStarted?`<button class="btn accent sm" onclick="event.stopPropagation();startJob(${r.id})">▶ Start</button>`:''}
                 ${r.phone?`<button class="btn ghost sm" onclick="event.stopPropagation();window.location.href='tel:${r.phone.replace(/\s/g,'')}'" title="Call ${r.name}">📞</button>`:''}
                 ${addr?`<button class="btn ghost sm" onclick="event.stopPropagation();window.open('https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}','_blank')" title="Navigate">🧭</button>`:''}
+                ${r.stage==='scheduled'?`<button class="btn ghost sm" onclick="event.stopPropagation();openSchedule(${r.id})" title="Reschedule">↻</button>`:''}
               </div>
             </div>`;
           }).join(''):'<div class="empty-state"><div class="sm">No jobs scheduled for today. Book one from Pipeline to see it here.</div></div>'}
@@ -3758,22 +3799,70 @@ function renderOpsMap(stops,mapsKey){
     box.innerHTML=`<div class="empty-state" style="padding:20px"><div class="sm">${stops.length?'No addresses on today\'s jobs yet.':'Nothing scheduled today.'}</div></div>`;
     return;
   }
-  if(!mapsKey){
-    box.innerHTML=`<div class="empty-state" style="padding:20px"><div class="sm">Add a Google Maps key in Connections to see today's stops on a real map.</div></div>`;
+  if(mapsKey){
+    // Google Static Maps geocodes each address server-side — no separate
+    // geocode round-trips needed for a handful of markers.
+    const markers=withAddr.map((s,i)=>{
+      const loc=encodeURIComponent(`${s.r.address}, ${s.r.suburb||''}`.trim());
+      const hex=PIN_COLORS[i%5].replace('#','0x');
+      return `markers=color:${hex}%7Clabel:${i+1}%7C${loc}`;
+    }).join('&');
+    const url=`https://maps.googleapis.com/maps/api/staticmap?size=640x480&scale=2&maptype=roadmap&${markers}&key=${encodeURIComponent(mapsKey)}`;
+    const img=new Image();
+    img.onload=()=>{box.style.cssText='background-image:url("'+url+'");background-size:cover;background-position:center';box.innerHTML='';};
+    img.onerror=()=>{renderOpsMapOSM(box,withAddr);}; // never surface the failure — just try the free map instead
+    img.src=url;
     return;
   }
-  // Google Static Maps geocodes each address server-side — no separate
-  // geocode round-trips needed for a handful of markers.
-  const markers=withAddr.map((s,i)=>{
-    const loc=encodeURIComponent(`${s.r.address}, ${s.r.suburb||''}`.trim());
-    const hex=PIN_COLORS[i%5].replace('#','0x');
-    return `markers=color:${hex}%7Clabel:${i+1}%7C${loc}`;
-  }).join('&');
-  const url=`https://maps.googleapis.com/maps/api/staticmap?size=640x480&scale=2&maptype=roadmap&${markers}&key=${encodeURIComponent(mapsKey)}`;
-  const img=new Image();
-  img.onload=()=>{box.style.cssText='background-image:url("'+url+'");background-size:cover;background-position:center';box.innerHTML='';};
-  img.onerror=()=>{box.innerHTML='<div class="empty-state" style="padding:20px"><div class="sm">Map unavailable — check your satellite map setup in Settings.</div></div>';};
-  img.src=url;
+  renderOpsMapOSM(box,withAddr);
+}
+// Free fallback when no Google Maps key is configured — geocodes each stop
+// via Nominatim (same free service the CRM's quote-map viewer already uses)
+// and composites a tile mosaic sized to fit every stop, with numbered pins.
+// No key, no setup, no error text a business owner would have to interpret.
+async function renderOpsMapOSM(box,withAddr){
+  box.innerHTML='<div class="empty-state" style="padding:20px"><div class="sm">Loading map…</div></div>';
+  const geocoded=[];
+  for(let i=0;i<withAddr.length;i++){
+    const s=withAddr[i];
+    const q=`${s.r.address}, ${s.r.suburb||''}`.trim();
+    try{
+      const res=await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(q));
+      const results=await res.json();
+      if(results&&results.length)geocoded.push({lat:parseFloat(results[0].lat),lng:parseFloat(results[0].lon),idx:i,name:s.r.name});
+    }catch(e){/* skip this stop — one bad address shouldn't blank the whole map */}
+  }
+  if(!geocoded.length){
+    box.innerHTML='<div class="empty-state" style="padding:20px"><div class="sm">Couldn\'t locate today\'s addresses on the map — the stop list above still has everything.</div></div>';
+    return;
+  }
+  const lats=geocoded.map(g=>g.lat), lngs=geocoded.map(g=>g.lng);
+  const centerLat=(Math.min(...lats)+Math.max(...lats))/2, centerLng=(Math.min(...lngs)+Math.max(...lngs))/2;
+  const latSpan=Math.max(0.004,Math.max(...lats)-Math.min(...lats));
+  const lngSpan=Math.max(0.004,Math.max(...lngs)-Math.min(...lngs));
+  const TILES=5;
+  let z=18;
+  for(;z>=10;z--){
+    const degPerTile=360/Math.pow(2,z);
+    if(TILES*degPerTile>=lngSpan*1.6 && TILES*degPerTile*Math.cos(centerLat*Math.PI/180)>=latSpan*1.6)break;
+  }
+  const n=Math.pow(2,z);
+  const project=(lat,lng)=>({x:(lng+180)/360*n,y:(1-Math.log(Math.tan(lat*Math.PI/180)+1/Math.cos(lat*Math.PI/180))/Math.PI)/2*n});
+  const c=project(centerLat,centerLng);
+  const originX=c.x-TILES/2, originY=c.y-TILES/2;
+  const baseTX=Math.floor(originX), baseTY=Math.floor(originY);
+  const fracX=originX-baseTX, fracY=originY-baseTY;
+  let tiles='';
+  for(let dy=0;dy<TILES;dy++)for(let dx=0;dx<TILES;dx++)
+    tiles+=`<img src="https://tile.openstreetmap.org/${z}/${baseTX+dx}/${baseTY+dy}.png" style="position:absolute;width:${100/TILES}%;height:${100/TILES}%;left:${(dx-fracX)/TILES*100}%;top:${(dy-fracY)/TILES*100}%" loading="lazy">`;
+  let pins='';
+  geocoded.forEach(g=>{
+    const p=project(g.lat,g.lng);
+    const leftPct=(p.x-originX)/TILES*100, topPct=(p.y-originY)/TILES*100;
+    pins+=`<div class="map-pin" style="left:${leftPct}%;top:${topPct}%;transform:translate(-50%,-100%) rotate(-45deg);background:${PIN_COLORS[g.idx%5]}" title="${g.name.replace(/"/g,'&quot;')}"><span>${g.idx+1}</span></div>`;
+  });
+  box.style.cssText='position:relative;overflow:hidden';
+  box.innerHTML=`<div style="position:absolute;inset:0">${tiles}</div>${pins}`;
 }
 
 /* ---------- B. PRICING ENGINE ---------- */
@@ -3996,42 +4085,7 @@ function renderDashboard(){
       ${sourceRows.length?sourceRows.map(([src,n])=>`<div class="kv"><span class="k">${src}</span><span class="v" style="display:flex;align-items:center;gap:8px"><span style="display:inline-block;height:6px;width:${Math.max(6,n/maxSource*80)}px;background:var(--teal);border-radius:3px"></span>${n}</span></div>`).join(''):'<div class="empty-state" style="padding:16px"><div class="sm">No leads yet.</div></div>'}
       <p style="font-size:12px;color:var(--ink-faint);margin-top:12px">Cost per lead needs ad-spend data — connect a marketing integration to calculate this.</p>
     </div>
-    <div class="panel" style="margin-top:16px"><h4>Ask TurnKey</h4>
-      <p style="font-size:12px;color:var(--ink-faint);margin:-4px 0 10px">Ask about your own data — "what should I schedule this week", "who owes money", "which customers need follow up". Not turned on for your account yet.</p>
-      <div class="conn-keyrow"><input id="ai-question" placeholder="Who owes money?" onkeydown="if(event.key==='Enter')askAi()"><button class="btn accent sm" onclick="askAi()">Ask</button></div>
-      <div id="ai-answer" style="margin-top:10px;font-size:13.5px;color:var(--ink);white-space:pre-wrap"></div>
-    </div>`;
-}
-// Real-data snapshot the AI assistant answers from — never fabricated, just a
-// compact reshaping of what's already loaded client-side into `records`.
-function buildAiBusinessSummary(){
-  const todayIso=todayISO();
-  return {
-    today:todayIso,
-    totalLeads:records.length,
-    openQuotes:records.filter(r=>r.stage==='quoted'||r.stage==='followup').map(r=>({name:r.name,total:r.total,daysSinceSent:r.quoteSentAt?Math.round((Date.now()-r.quoteSentAt)/86400000):null})),
-    wonNotScheduled:records.filter(r=>r.stage==='won').map(r=>({name:r.name,total:r.total,suburb:r.suburb})),
-    upcomingJobs:records.filter(r=>isBooked(r)&&r.scheduledDateISO&&r.scheduledDateISO>=todayIso).sort((a,b)=>a.scheduledDateISO.localeCompare(b.scheduledDateISO)).slice(0,25).map(r=>({name:r.name,date:r.scheduledDateISO,tech:r.tech,total:r.total,suburb:r.suburb})),
-    overdueInvoices:records.filter(r=>invoiceDisplayStatus(r)==='overdue').map(r=>({name:r.name,total:r.total,dueDate:r.dueDate})),
-    unpaidInvoices:records.filter(r=>r.invoiceId&&r.stage!=='paid').map(r=>({name:r.name,total:r.total,status:invoiceDisplayStatus(r)})),
-    needsFollowUp:records.filter(r=>r.stage==='followup').map(r=>({name:r.name,total:r.total}))
-  };
-}
-async function askAi(){
-  const input=document.getElementById('ai-question');
-  const q=(input?.value||'').trim();
-  if(!q){toast('Ask a question first');return;}
-  const out=document.getElementById('ai-answer');
-  if(out)out.textContent='Thinking…';
-  const url=backendUrl();
-  const {data:{session}}=await sb.auth.getSession();
-  if(!url||!session){if(out)out.textContent='Something\u2019s not set up right \u2014 contact support.';return;}
-  try{
-    const res=await fetch(`${url}/api/ai/ask`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.access_token},body:JSON.stringify({question:q,businessSummary:buildAiBusinessSummary()})});
-    const j=await res.json();
-    if(!res.ok){if(out)out.textContent=j.error||'Could not get an answer';return;}
-    if(out)out.textContent=j.answer;
-  }catch(e){console.error('AI ask failed',e);if(out)out.textContent='Couldn\u2019t connect \u2014 check your internet connection and try again';}
+`;
 }
 
 /* ===== Marketing: AI-generated ad copy/captions/campaigns \u2014 text only, no
@@ -4165,7 +4219,7 @@ function renderJobsFlow(){
           ${i<FLOW_STEPS.length-1?`<div class="jf-conn ${i<cur?'done':''}"></div>`:''}
         `).join('')}
       </div>
-      ${na?`<div class="jf-next"><div class="jf-next-label">Next step</div><button class="btn primary" onclick="${na.fn}">${na.label}</button></div>`:''}
+      ${na?`<div class="jf-next"><div class="jf-next-label">Next step</div><div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn primary" onclick="${na.fn}">${na.label}</button>${r.stage==='scheduled'?`<button class="btn ghost" onclick="openSchedule(${r.id})">↻ Reschedule</button>`:''}</div></div>`:''}
     </div>`;
 }
 // workflow transition helpers
@@ -4192,6 +4246,7 @@ async function confirmCancelJob(){
   closeModal('cancel-job-overlay');
   render();renderAll();
   toast(r.name+' marked cancelled');
+  removeJobFromGoogleCalendar(r);
   if(notify&&emailAccount&&r.email){
     const first=(r.name||'').split(' ')[0]||'there';
     const bizName=docBizName();
@@ -4408,18 +4463,48 @@ function weatherAlerts(){
    innerHTML on its container, since renderCalendar() can be called more than once per
    visit — e.g. when live weather finishes loading while the tab is already open). */
 let fcCalendarInstance=null;
+// Calendar-eligible = "was actually booked for a date, ever" — broader than
+// isBooked() (scheduled/completed only), which on purpose excludes paid and
+// cancelled jobs since those don't belong in Operations' "today's active
+// work" list. The calendar needs the opposite: a paid or cancelled job still
+// happened (or was meant to) on the date it was scheduled for, so it should
+// keep showing there in its own colour — previously it just vanished the
+// moment a job was marked paid or cancelled, which is why Red/Purple/Dark
+// Green never actually appeared on the calendar.
+function isCalendarJob(r){return !!r.scheduledDateISO;}
+// Matches the 6 colours requested for the calendar specifically. Keyed off
+// jobStatusKeyOf() — the same canonical status function every badge in the
+// app already uses — instead of the old hand-rolled key calc here, which had
+// drifted out of sync with it (e.g. never handled cancelled/invoiced at all).
 const JOB_STATUS_CAL_COLOR={
-  in_progress:'#c2683a', paused:'#9a7a32', travelling:'#2f7d8f', on_site:'#2c7a6b',
-  completed:'#138a72', paid:'#5b6b78'
+  scheduled:'#3a5e9c',                                    // Blue
+  travelling:'#c2683a', on_site:'#c2683a', in_progress:'#c2683a', // Orange
+  paused:'#9a7a32',
+  completed:'#138a72',                                    // Green
+  cancelled:'#b5573e',                                    // Red
+  invoiced:'#7a5bbf',                                     // Purple
+  paid:'#0b5c3f',                                         // Dark Green
+  overdue:'#b5573e'                                       // Red — unpaid past due reads the same urgency as cancelled
 };
+// Estimated start time for a job on its scheduled day — the same back-to-back
+// running-order estimate the scheduling modal and Job Detail already show
+// (dayTimeline()), never a real chosen appointment time since the app has no
+// such field. Callers label it "estimated" so it's never read as a promise.
+function calJobStartTime(r){
+  if(!r.scheduledDateISO)return null;
+  const tl=dayTimeline(r.scheduledDateISO);
+  const mine=tl.find(s=>s.job.id===r.id);
+  return mine?fmtTime(mine.start):null;
+}
 function buildCalendarEvents(){
-  return records.filter(r=>isBooked(r)&&r.scheduledDateISO).map(r=>{
-    const key=r.stage==='paid'?'paid':(r.stage==='completed'?'completed':r.jobStatus);
-    const color=JOB_STATUS_CAL_COLOR[key]||'#3d6fae';
+  return records.filter(r=>isCalendarJob(r)).map(r=>{
+    const key=jobStatusKeyOf(r);
+    const color=JOB_STATUS_CAL_COLOR[key]||'#3a5e9c';
     const status=jobStatusOf(r);
+    const start=calJobStartTime(r);
     return {
       id:String(r.id),
-      title:status.icon+' '+r.name+(r.tech&&r.tech!=='Unassigned'?' · '+r.tech:''),
+      title:status.icon+' '+r.name+(start?' · '+start:'')+(r.tech&&r.tech!=='Unassigned'?' · '+r.tech:''),
       start:r.scheduledDateISO,
       allDay:true,
       backgroundColor:color,borderColor:color,
@@ -4437,6 +4522,7 @@ function fcHandleEventDrop(info){
   renderCalendarSidebar();
   toast('Moved '+r.name+' to '+r.scheduledDate);
   logActivity(r.customerId,r.jobId,'status_change',r.name+' rescheduled to '+r.scheduledDate);
+  pushJobToGoogleCalendar(r);
 }
 function fcHandleEventClick(info){
   openDetail(info.event.extendedProps.recordId);
@@ -4476,7 +4562,7 @@ function fcDayCellDidMount(arg){
   }
   // Job count / revenue / technician count for the day — the same numbers
   // a click-through would show, visible at a glance without opening it.
-  const dayJobs=records.filter(r=>isBooked(r)&&r.scheduledDateISO===iso);
+  const dayJobs=records.filter(r=>isCalendarJob(r)&&r.scheduledDateISO===iso);
   if(dayJobs.length){
     const revenue=dayJobs.reduce((s,r)=>s+(r.total||0),0);
     const techCount=new Set(dayJobs.map(r=>r.assignedStaffId).filter(Boolean)).size;
@@ -4484,24 +4570,38 @@ function fcDayCellDidMount(arg){
     if(frame){
       const summary=document.createElement('div');
       summary.className='fc-day-summary';
-      summary.innerHTML=`<span>📋 ${dayJobs.length}</span>${revenue?`<span>${money(revenue)}</span>`:''}${techCount?`<span>👷 ${techCount}</span>`:''}`;
+      summary.innerHTML=`<span>📋 ${dayJobs.length}</span>${revenue?`<span class="fc-ds-rev">${money(revenue)}</span>`:''}${techCount?`<span>👷 ${techCount}</span>`:''}`;
       frame.appendChild(summary);
     }
   }
 }
 function openCalPicker(iso){
-  const dayJobs=records.filter(r=>isBooked(r)&&r.scheduledDateISO===iso);
+  const dayJobs=records.filter(r=>isCalendarJob(r)&&r.scheduledDateISO===iso);
   const unscheduled=records.filter(r=>r.stage==='won'||(isWon(r)&&!r.scheduledDateISO));
   document.getElementById('cp-title').textContent=isoToLabel(iso);
   const wx=weatherForDate(iso);
   const wxLine=wx.type==='forecast'?`${wx.icon||''} ${wx.cond||''} · ${wx.rainPct}% rain · ${wx.tempHi}°C · ${wx.windKmh}km/h wind`
     :wx.type==='historical'?`📊 Historical avg for ${wx.month}: ${wx.rainDayPct}% of days had rain, ~${wx.avgHighTemp}°C`
     :'Weather data unavailable for this date';
+  const techCount=new Set(dayJobs.map(r=>r.assignedStaffId).filter(Boolean)).size;
   const revenue=dayJobs.reduce((s,r)=>s+(r.total||0),0);
   const jobsSection=`
-    <div style="font-size:12px;color:var(--ink-faint);margin-bottom:10px">${wxLine}</div>
+    <div style="font-size:12px;color:var(--ink-faint);margin-bottom:10px">${wxLine}${techCount?' · 👷 '+techCount+' technician'+(techCount!==1?'s':''):''}</div>
     <div class="more-group-label">Scheduled jobs${dayJobs.length?' — '+dayJobs.length+' · '+money(revenue):''}</div>
-    ${dayJobs.length?dayJobs.map(r=>`<div class="kv" style="cursor:pointer" onclick="closeModal('cal-pick-overlay');openDetail(${r.id})"><span class="k">${r.name}${r.tech&&r.tech!=='Unassigned'?' · '+r.tech:''}</span><span class="v">${jobStatusBadge(r)} ${r.total?money(r.total):''}</span></div>`).join(''):'<div class="empty-state" style="padding:16px"><div class="sm">Nothing scheduled yet.</div></div>'}`;
+    ${dayJobs.length?dayJobs.map(r=>{
+      const start=calJobStartTime(r);
+      return `<div class="cal-job-row">
+        <div class="cjr-main" style="cursor:pointer" onclick="closeModal('cal-pick-overlay');openDetail(${r.id})">
+          <span class="cjr-dot" style="background:${JOB_STATUS_CAL_COLOR[jobStatusKeyOf(r)]||'#3a5e9c'}"></span>
+          <div class="cjr-info">
+            <div class="cjr-name">${r.name}</div>
+            <div class="cjr-meta">${start?start+' (est.) · ':''}${r.tech&&r.tech!=='Unassigned'?r.tech:'Unassigned'}</div>
+          </div>
+          <div class="cjr-right">${jobStatusBadge(r)}${r.total?`<div class="cjr-amt">${money(r.total)}</div>`:''}</div>
+        </div>
+        ${r.stage==='scheduled'?`<button class="btn ghost sm cjr-resched" onclick="closeModal('cal-pick-overlay');openSchedule(${r.id})">↻ Reschedule</button>`:''}
+      </div>`;
+    }).join(''):'<div class="empty-state" style="padding:16px"><div class="sm">Nothing scheduled yet.</div></div>'}`;
   const bookSection=`
     <div class="more-group-label" style="margin-top:18px">Book a won job on this day</div>
     ${unscheduled.length?unscheduled.map(r=>`<div class="kv" style="cursor:pointer" onclick="closeModal('cal-pick-overlay');openSchedule(${r.id},'${iso}')"><span class="k">${r.name}</span><span class="v">${r.suburb||''} · ${r.total?money(r.total):'no quote'}</span></div>`).join(''):'<div class="empty-state" style="padding:16px"><div class="sm">No won jobs waiting to be scheduled.</div></div>'}`;
@@ -4573,6 +4673,7 @@ function renderCalendar(){
     document.getElementById('view-calendar').innerHTML=`
       <div class="view-head"><div><h2>Calendar</h2><p>Unlimited future scheduling — drag a job to reschedule, click any date to book, click a job to open it. Weather-aware where data exists.</p></div><span class="eng-badge">Scheduling</span></div>
       <div class="info-strip" id="cal-info-strip"></div>
+      <div class="cal-legend">${Object.entries({scheduled:'Scheduled',in_progress:'In Progress',completed:'Completed',cancelled:'Cancelled',invoiced:'Invoiced',paid:'Paid'}).map(([k,label])=>`<span><i style="background:${JOB_STATUS_CAL_COLOR[k]}"></i>${label}</span>`).join('')}</div>
       <div class="fc-wrap"><div id="fc-calendar"></div></div>
       <div class="panel" style="margin-top:18px"><h4>Live forecast${currentBusinessProfile&&currentBusinessProfile.region?' — '+currentBusinessProfile.region:''}</h4>
         <div class="wx-row" id="cal-wx-strip"></div>
@@ -4687,7 +4788,7 @@ function backendUrl(){try{return ((window.TURNKEY_CONFIG&&window.TURNKEY_CONFIG.
 function backendKey(){try{return localStorage.getItem('turnkey-backend-key')||''}catch(e){return ''}}
 /* Google Maps key is safe to auto-configure from config.js (restrict it by HTTP
    referrer in Google Cloud Console); localStorage remains as a manual override. */
-function turnkeyMapsKey(){try{return (window.TURNKEY_CONFIG&&window.TURNKEY_CONFIG.mapsKey)||localStorage.getItem('turnkey-maps-key')||''}catch(e){return ''}}
+function turnkeyMapsKey(){try{return (window.TURNKEY_CONFIG&&window.TURNKEY_CONFIG.mapsKey)||''}catch(e){return ''}}
 function backendHeaders(){return {'Content-Type':'application/json','X-Turnkey-Key':backendKey()};}
 let backendOnline=false, pushTimer=null;
 function pushStateRemote(){
@@ -4733,20 +4834,6 @@ async function pollBackendLeads(){
     j.leads.forEach(l=>ingestQuoteRequest(l.payload));
     fetch(url+'/api/leads/ack',{method:'POST',headers:Object.assign({'Content-Type':'application/json'},headers),body:JSON.stringify({ids:j.leads.map(l=>l.id)})}).catch(()=>{});
   }).catch(()=>{backendOnline=false;});
-}
-function connectBackend(){
-  const url=(document.getElementById('conn-be-url').value||'').trim().replace(/\/+$/,'');
-  const key=(document.getElementById('conn-be-key').value||'').trim();
-  if(!url){localStorage.removeItem('turnkey-backend-url');localStorage.removeItem('turnkey-backend-key');toast('Backend disconnected');openConnections();return;}
-  localStorage.setItem('turnkey-backend-url',url);
-  localStorage.setItem('turnkey-backend-key',key);
-  fetch(url+'/api/health').then(r=>r.json()).then(j=>{
-    if(!j.ok)throw 0;
-    backendOnline=true;
-    toast('Backend connected \u2713');
-    pullStateRemote();pushStateRemote();
-    openConnections();
-  }).catch(()=>{backendOnline=false;toast('Could not reach that URL \u2014 check it and try again');openConnections();});
 }
 // poll for website leads every 30s + when the app regains focus
 setInterval(pollBackendLeads,30000);
@@ -4849,13 +4936,9 @@ function openSettings(){
     ${settingsGroup('Email',settingsRow('📧','Gmail — inbox &amp; sending',emailAccount?`Connected as ${emailAccount.email_address}`:'Not connected',"closeModal('settings-overlay');openConnections()"))}
     ${settingsGroup('Integrations',`
     ${settingsRow('💳','Card payments (Stripe)','Coming soon',"toast('Card payments are coming soon')")}
-    <div class="conn-card ${mapsKey?'live':''}" style="margin-top:8px">
-      <div class="conn-top"><span class="conn-name">🛰️ Satellite map imagery</span><span class="conn-badge ${mapsKey?'on':'off'}">${mapsKey?'● ACTIVE':'not set'}</span></div>
-      <p>Shows real satellite photos of a property when building a quote, with accurate scale. Contact support if you'd like this turned on for your account.</p>
-      <div class="conn-keyrow">
-        <input id="conn-maps-key" placeholder="Paste access code" value="${mapsKey.replace(/"/g,'&quot;')}">
-        <button class="btn accent sm" onclick="saveMapsKey()">${mapsKey?'Update':'Activate'}</button>
-      </div>
+    <div class="conn-card" style="margin-top:8px">
+      <div class="conn-top"><span class="conn-name">🛰️ Satellite maps on quotes</span><span class="conn-badge ${mapsKey?'on':'off'}">${mapsKey?'● ON':'basic map'}</span></div>
+      <p>${mapsKey?'Property photos and satellite scale are turned on for your account.':'On the free basic map for now — satellite photos with accurate scale are available for your account, just ask whoever set up your TurnKey.'}</p>
     </div>`)}
     ${settingsGroup('Imports',settingsRow('📥','Import customers','From a spreadsheet or another CRM',"closeModal('settings-overlay');openImportWizard()"))}
     ${settingsGroup('Billing',`<div class="conn-card"><div class="conn-top"><span class="conn-name">💳 Subscription</span><span class="conn-badge">coming soon</span></div><p>Your Turnkey subscription and billing details will show up here.</p></div>`)}
@@ -4941,7 +5024,7 @@ async function loadEmailAccountStatus(){
 }
 async function connectGmailOAuth(){
   const url=backendUrl();
-  if(!url){toast('Backend URL not configured');return;}
+  if(!url){toast('Something went wrong — try again shortly');return;}
   const {data:{session}}=await sb.auth.getSession();
   if(!session){toast('Please sign in again');return;}
   try{
@@ -4991,7 +5074,7 @@ async function loadCalendarConnections(){
 }
 async function connectGoogleCalendarOAuth(){
   const url=backendUrl();
-  if(!url){toast('Backend URL not configured');return;}
+  if(!url){toast('Something went wrong — try again shortly');return;}
   const {data:{session}}=await sb.auth.getSession();
   if(!session){toast('Please sign in again');return;}
   try{
@@ -5021,6 +5104,48 @@ async function syncGoogleCalendarNow(){
     toast(`Synced ${j.imported} event${j.imported===1?'':'s'} ✓`);
     await loadCalendarConnections();openConnections();
   }catch(e){console.error('Google Calendar sync failed',e);toast('Sync failed — try again');}
+}
+/* ===== Push a job onto the connected Google Calendar as an event, kept in
+   sync as it's booked/rescheduled/cancelled. Silently does nothing if
+   Google Calendar isn't connected — same "quiet no-op until connected"
+   pattern as every other integration in this app; the reschedule/cancel
+   flow itself never waits on this, it's fire-and-forget so a slow or failed
+   Calendar push can never block finishing the actual TurnKey action. ===== */
+async function pushJobToGoogleCalendar(r){
+  if(!calendarConnections.some(c=>c.provider==='google'))return;
+  if(!r.scheduledDateISO)return;
+  const url=backendUrl();
+  const {data:{session}}=await sb.auth.getSession();
+  if(!url||!session)return;
+  const tl=dayTimeline(r.scheduledDateISO);
+  const mine=tl.find(s=>s.job.id===r.id);
+  const startMin=mine?mine.start:DAY_START_MIN;
+  const durMin=r.services.length?estimateJob(r.services).labourMin:60;
+  const startDate=new Date(r.scheduledDateISO+'T00:00:00');
+  startDate.setMinutes(startMin);
+  const endDate=new Date(startDate.getTime()+durMin*60000);
+  const addr=[r.address,r.suburb].filter(Boolean).join(', ');
+  try{
+    const res=await fetch(`${url}/api/calendar/push-job`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.access_token},body:JSON.stringify({
+      googleEventId:r.googleEventId||null,
+      summary:r.name+(r.tech&&r.tech!=='Unassigned'?' · '+r.tech:''),
+      description:'TurnKey job'+(r.total?' · '+money(r.total):''),
+      startIso:startDate.toISOString(),endIso:endDate.toISOString(),
+      location:addr||undefined
+    })});
+    const j=await res.json();
+    if(j.ok&&j.googleEventId){r.googleEventId=j.googleEventId;saveState();}
+  }catch(e){console.error('Google Calendar push failed',e);}
+}
+async function removeJobFromGoogleCalendar(r){
+  if(!r.googleEventId||!calendarConnections.some(c=>c.provider==='google'))return;
+  const url=backendUrl();
+  const {data:{session}}=await sb.auth.getSession();
+  if(!url||!session)return;
+  try{
+    await fetch(`${url}/api/calendar/push-job`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.access_token},body:JSON.stringify({googleEventId:r.googleEventId,deleted:true})});
+    r.googleEventId=null;saveState();
+  }catch(e){console.error('Google Calendar delete failed',e);}
 }
 async function connectIcalFeed(){
   const input=document.getElementById('conn-ical-url');
@@ -5086,12 +5211,6 @@ async function syncEmail(){
     }
   }catch(e){}
 })();
-function saveMapsKey(){
-  const v=document.getElementById('conn-maps-key').value.trim();
-  if(v)localStorage.setItem('turnkey-maps-key',v);else localStorage.removeItem('turnkey-maps-key');
-  toast(v?'Satellite maps active on this device':'Satellite map access removed');
-  openSettings();
-}
 /* ===== PERSISTENCE: everything auto-saves locally on this device ===== */
 const STORE_KEY='turnkey-app-v1';
 function saveState(){

@@ -560,6 +560,38 @@ app.post('/api/calendar/sync', requireBusiness, async (req, res) => {
   }
 })
 
+// Push a TurnKey job onto the technician's connected Google Calendar as an
+// event, keeping it in sync as the job is booked/rescheduled/cancelled.
+// Silently no-ops (ok:true, skipped:true) if Google Calendar isn't connected
+// — this route is called unconditionally from confirmSchedule()/cancelJob(),
+// same "quietly do nothing extra" pattern as everywhere else in the app that
+// only activates once a business has actually connected something.
+app.post('/api/calendar/push-job', requireBusiness, async (req, res) => {
+  if (!googleCalendar.isConfigured()) return res.json({ ok: true, skipped: true })
+  try {
+    const auth = await getGoogleCalendarToken(req.businessId, req.userId)
+    if (!auth) return res.json({ ok: true, skipped: true })
+    const { googleEventId, deleted, summary, description, startIso, endIso, location } = req.body || {}
+    if (deleted) {
+      if (googleEventId) await googleCalendar.deleteEvent(auth.accessToken, googleEventId)
+      return res.json({ ok: true, deleted: true })
+    }
+    if (!summary || !startIso || !endIso) return res.status(400).json({ error: 'summary, startIso and endIso are required' })
+    if (googleEventId) {
+      await googleCalendar.updateEvent(auth.accessToken, googleEventId, { summary, description, startIso, endIso, location })
+      return res.json({ ok: true, googleEventId })
+    }
+    const created = await googleCalendar.createEvent(auth.accessToken, { summary, description, startIso, endIso, location })
+    res.json({ ok: true, googleEventId: created.id })
+  } catch (err) {
+    console.error('POST /api/calendar/push-job', err)
+    // Best-effort: a push failure shouldn't block the job being scheduled in
+    // TurnKey itself, so this reports ok:false without a 500 — the frontend
+    // just skips updating the stored googleEventId and moves on.
+    res.json({ ok: false, error: 'Could not sync to Google Calendar' })
+  }
+})
+
 app.post('/api/calendar/ical/connect', requireBusiness, async (req, res) => {
   const url = String(req.body?.url || '').trim()
   if (!/^https?:\/\//.test(url)) return res.status(400).json({ error: 'A valid https:// feed URL is required' })
@@ -739,50 +771,14 @@ app.post('/api/payments/create-link', requireBusiness, async (req, res) => {
 })
 
 /* =====================================================================
-   AI ASSISTANT — answers questions about the business ("what should I
-   schedule this week", "who owes money") using Claude, given a compact
-   real-data summary the frontend computes from its own already-loaded
-   records (see index.html buildAiBusinessSummary()) — nothing is fabricated
-   or invented server-side, the model only ever sees numbers TurnKey already
-   has. NOT LIVE until ANTHROPIC_API_KEY is set in the backend environment.
+   AI MARKETING — generates ad copy/captions/campaigns using Claude, grounded
+   in the business's own real services/region so it never invents an offer
+   that doesn't exist. NOT LIVE until ANTHROPIC_API_KEY is set in the backend
+   environment.
    ===================================================================== */
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || ''
 const isAiConfigured = () => !!ANTHROPIC_API_KEY
 
-app.post('/api/ai/ask', requireBusiness, async (req, res) => {
-  if (!isAiConfigured()) return res.status(501).json({ error: 'AI assistant is not configured on this server yet — ask whoever manages your TurnKey deployment to add ANTHROPIC_API_KEY' })
-  try {
-    const { question, businessSummary } = req.body || {}
-    if (!question || !String(question).trim()) return res.status(400).json({ error: 'A question is required' })
-    const system = 'You are the TurnKey CRM assistant for a service business (exterior cleaning, roofing, etc). ' +
-      'Answer only using the JSON business data snapshot provided — it is the complete, current, real state of ' +
-      'their jobs/quotes/invoices. Never invent customers, amounts, or dates not present in the data. If the data ' +
-      'doesn\'t contain enough to answer, say so plainly. Keep answers short and actionable — this is read on a ' +
-      'phone between jobs.'
-    const aiRes = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-5', max_tokens: 512, system,
-        messages: [{ role: 'user', content: `Business data:\n${JSON.stringify(businessSummary || {}).slice(0, 12000)}\n\nQuestion: ${question}` }]
-      })
-    })
-    if (!aiRes.ok) throw new Error('Anthropic API call failed: ' + await aiRes.text())
-    const data = await aiRes.json()
-    const answer = (data.content || []).map(b => b.text || '').join('').trim() || 'No answer returned.'
-    res.json({ ok: true, answer })
-  } catch (err) {
-    console.error('POST /api/ai/ask', err)
-    res.status(500).json({ error: 'Could not reach the AI assistant' })
-  }
-})
-
-// Separate from /api/ai/ask on purpose: that route is deliberately
-// constrained to only ever state facts from the business's own data
-// (never invents a customer or amount); marketing copy needs the opposite
-// instinct — persuasive, creative writing — so it gets its own system
-// prompt rather than fighting the data-only constraint. Text only, same as
-// /api/ai/ask — no image generation.
 app.post('/api/ai/marketing', requireBusiness, async (req, res) => {
   if (!isAiConfigured()) return res.status(501).json({ error: 'AI assistant is not configured on this server yet — ask whoever manages your TurnKey deployment to add ANTHROPIC_API_KEY' })
   try {
