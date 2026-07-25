@@ -40,6 +40,7 @@ declare
   c record;
   j record;
   b record;
+  v_services jsonb;
 begin
   select * into q from public.quotes where public_token = p_token;
   if q.id is null then
@@ -50,19 +51,43 @@ begin
   select id, status, details into j from public.jobs where quote_id = q.id::text limit 1;
   select name, phone, email, logo_url, accent_color into b from public.businesses where id = q.business_id;
 
+  -- Strip internal cost/margin fields (recommendedPrice, estCost — added by
+  -- the Pricing Engine Refinement's per-line cost snapshot) before this
+  -- ever reaches an anonymous visitor. Every other field a service line
+  -- carries (svc, qty, roofType, storeys, sides, customRate, fixedPrice)
+  -- is customer-relevant and stays.
+  select coalesce(jsonb_agg(elem - 'recommendedPrice' - 'estCost'), '[]'::jsonb)
+    into v_services
+    from jsonb_array_elements(coalesce(j.details->'services', '[]'::jsonb)) elem;
+
   return jsonb_build_object(
     'quoteId', q.id,
+    -- No sequential quote-number column exists (the CRM's Q-XXXX numbers
+    -- are a client-side-only counter, never synced to Supabase) — a short,
+    -- stable code derived from the quote's own uuid is the nearest honest
+    -- equivalent without a schema change or a backfill.
+    'quoteNumber', 'Q-'||upper(right(q.id::text, 6)),
     'status', q.status,
     'amount', q.amount,
     'createdAt', q.created_at,
+    -- Computed, not stored — works retroactively for every existing quote,
+    -- including ones created before this column/concept existed.
+    'validUntil', q.created_at + interval '30 days',
+    'estimatedDurationMin', j.details->>'estimatedDurationMin',
     'customer', jsonb_build_object('name', c.name, 'address', c.address, 'suburb', c.suburb),
     'business', jsonb_build_object(
       'name', coalesce(b.name,'Your service provider'), 'phone', b.phone, 'email', b.email,
       'logoUrl', b.logo_url, 'accentColor', b.accent_color
     ),
-    'services', coalesce(j.details->'services', '[]'::jsonb),
+    'services', v_services,
     'notes', j.details->>'notes',
-    'jobStatus', j.status
+    'jobStatus', j.status,
+    -- Raw mapped geometry for the read-only property map — absent entirely
+    -- on quotes built before mapping existed or drawn without a
+    -- georeferenced address, which the public page treats as "no map to
+    -- show" rather than an error (see quote.html boot()).
+    'areaPolys', coalesce(j.details->'areaPolys', '[]'::jsonb),
+    'mapCenter', j.details->'mapCenter'
   );
 end;
 $$;
@@ -134,6 +159,8 @@ grant execute on function public.respond_to_public_quote(uuid,text,text) to anon
 -- anyone with a leaked session) could otherwise alter or erase the record
 -- of what happened, including this quote-response history. =====
 drop policy if exists "own business" on public.activity_log;
+drop policy if exists "read own business" on public.activity_log;
+drop policy if exists "insert own business" on public.activity_log;
 create policy "read own business" on public.activity_log
   for select
   using (business_id = public.current_business_id());
@@ -142,3 +169,20 @@ create policy "insert own business" on public.activity_log
   with check (business_id = public.current_business_id());
 -- Deliberately no update/delete policy for regular clients — matches the
 -- import_batches/import_records precedent (schema-import-wizard.sql).
+
+-- ===== Realtime: lets a signed-in CRM session hear about a customer's
+-- quote response live, instead of requiring a manual reload. Realtime
+-- still goes through the same RLS policies as a normal read (the "read own
+-- business" policy above), so a session only ever receives rows for its
+-- own business — same boundary as everywhere else, nothing new opened up.
+-- Checked via pg_publication_tables rather than a bare ALTER PUBLICATION
+-- ADD TABLE, which errors (not idempotent) if this has already run once. =====
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'activity_log'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.activity_log;
+  END IF;
+END $$;

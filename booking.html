@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <script src="config.js"></script>
+<script src="pricing-engine.js"></script>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>Get an instant wash quote — Turnkey</title>
 <style>
@@ -312,7 +313,7 @@ function initPlacesAutocomplete(){
 
         <!-- Window pane counter — always visible, hidden until interacted -->
         <div class="win-row" id="win-row">
-          <span class="win-label">🪟 Window clean</span>
+          <span class="win-label">Window clean</span>
           <div class="win-ctrl">
             <button class="win-btn" onclick="addWindows(-1)" aria-label="Remove a window pane">−</button>
             <input class="win-input" id="win-count" type="number" min="0" step="1" value="0"
@@ -375,15 +376,15 @@ function initPlacesAutocomplete(){
   <!-- integration explainer (standalone only) — the real, business-specific embed
        code now lives in the CRM's Connections panel, not hardcoded here. -->
   <div class="integration hidden" id="integration">
-    <h4>🔌 Want this on your own website?</h4>
+    <h4>Want this on your own website?</h4>
     <p>Log into your Turnkey CRM → <b>Connections</b> → <b>Embed on your website</b> for your personalised embed code and Wix instructions.</p>
   </div>
 
   <div class="trust">
-    <span>🛡️ Fully insured</span>
-    <span>💧 Soft-wash safe</span>
-    <span>⚡ Same-day quotes</span>
-    <span id="biz-region-trust">📍 Local &amp; insured</span>
+    <span>Fully insured</span>
+    <span>Soft-wash safe</span>
+    <span>Same-day quotes</span>
+    <span id="biz-region-trust">Local &amp; insured</span>
   </div>
 </div>
 
@@ -398,22 +399,22 @@ function initPlacesAutocomplete(){
 // min 3 points, must be closed) · 'length' (an open line — a fence run,
 // a gutter run — measured point-to-point with NO closing segment, min 2
 // points, never forced closed) · 'count' (not drawn on the map at all).
+// Base rates come from pricing-engine.js (TK_PRICING.SERVICES) — the same
+// numbers index.html's quote builder and PDFs use — so this preliminary
+// estimate is never built off a stale, hand-copied rate. `kind`/`color`/
+// `hex` are presentation-only and stay local to this page.
 const SERVICES = {
-  driveway: {label:'Driveway / concrete',   unit:'m²', rate:4,   kind:'area',      color:'var(--c-driveway)', hex:'#c2683a'},
-  housewash:{label:'House wash (perimeter)', unit:'m', rate:5, kind:'perimeter', color:'var(--c-housewash)', hex:'#2f7d8f'},
-  roof:     {label:'Roof treatment',         unit:'m²', rate:9,   kind:'area',      color:'var(--c-roof)',      hex:'#7a5bbf'},
-  patio:    {label:'Patio / deck',            unit:'m²', rate:6,   kind:'area',      color:'var(--c-patio)',     hex:'#0f7d6b'},
-  gutter:   {label:'Gutter clean',            unit:'m',  rate:3.5, kind:'length',    color:'var(--c-gutter)',    hex:'#b08a1e'},
-  fence:    {label:'Fence / wall wash',       unit:'m',  rate:4,   kind:'length',    color:'var(--c-fence)',     hex:'#6b7a3a'},
-  windows:  {label:'Window clean',             unit:'panes', rate:4, kind:'count',  color:'var(--c-windows)',  hex:'#4a6b8a'}
+  driveway: {label:'Driveway / concrete',   unit:'m²', rate:TK_PRICING.SERVICES.driveway.rate,  kind:'area',      color:'var(--c-driveway)', hex:'#c2683a'},
+  housewash:{label:'House wash (perimeter)', unit:'m', rate:TK_PRICING.SERVICES.housewash.rate, kind:'perimeter', color:'var(--c-housewash)', hex:'#2f7d8f'},
+  roof:     {label:'Roof treatment',         unit:'m²', rate:TK_PRICING.SERVICES.roof.rate,      kind:'area',      color:'var(--c-roof)',      hex:'#7a5bbf'},
+  patio:    {label:'Patio / deck',            unit:'m²', rate:TK_PRICING.SERVICES.patio.rate,    kind:'area',      color:'var(--c-patio)',     hex:'#0f7d6b'},
+  gutter:   {label:'Gutter clean',            unit:'m',  rate:TK_PRICING.SERVICES.gutter.rate,   kind:'length',    color:'var(--c-gutter)',    hex:'#b08a1e'},
+  fence:    {label:'Fence / wall wash',       unit:'m',  rate:TK_PRICING.SERVICES.fence.rate,    kind:'length',    color:'var(--c-fence)',     hex:'#6b7a3a'},
+  windows:  {label:'Window clean',             unit:'panes', rate:TK_PRICING.SERVICES.windows.rate, kind:'count',  color:'var(--c-windows)',  hex:'#4a6b8a'}
 };
 // metres per SVG pixel — the map "scale". Demo value; with real satellite imagery this comes from the map zoom level.
 const M_PER_PX = 0.06; // 1px ≈ 6cm at this demo zoom → grid square (40px) ≈ 2.4m... tuned below
-const STOREY_TYPES = {
-  1:{label:'Single storey',  mult:1.0},
-  2:{label:'Two storey',     mult:1.2},
-  3:{label:'Three storey',   mult:1.44}
-};
+const STOREY_TYPES = TK_PRICING.STOREY_TYPES;
 const GRID = 40;
 const M_PER_GRID = 1.3; // each grid square ≈ 1.3m for the demo scale note
 let SCALE = M_PER_GRID / GRID; // metres per pixel (demo). Satellite mode replaces this with real-world scale.
@@ -452,7 +453,12 @@ try{const u=new URL(location.href);EMBED_MODE=u.searchParams.get('embed')==='1';
 (function(){
   if(!TURNKEY_BUSINESS_ID)return;
   if(!window.TURNKEY_CONFIG||!window.TURNKEY_CONFIG.supabaseUrl||!window.TURNKEY_CONFIG.supabaseAnonKey)return;
-  const url=window.TURNKEY_CONFIG.supabaseUrl+'/rest/v1/businesses?id=eq.'+encodeURIComponent(TURNKEY_BUSINESS_ID)+'&select=name,phone,email,region,logo_url,accent_color,pricing_config';
+  // Selects only the `rates` key out of pricing_config, not the whole
+  // column — pricing_config also holds cost_inputs (wage rate, target
+  // margin, fuel cost) and chemical cost-per-litre, which is internal
+  // business-economics data that has no reason to ever reach a public,
+  // unauthenticated page's network tab.
+  const url=window.TURNKEY_CONFIG.supabaseUrl+'/rest/v1/businesses?id=eq.'+encodeURIComponent(TURNKEY_BUSINESS_ID)+'&select=name,phone,email,region,logo_url,accent_color,rates:pricing_config->rates';
   fetch(url,{headers:{apikey:window.TURNKEY_CONFIG.supabaseAnonKey}})
     .then(r=>r.json()).then(rows=>{
       const biz=(rows&&rows[0])||null;
@@ -461,8 +467,8 @@ try{const u=new URL(location.href);EMBED_MODE=u.searchParams.get('embed')==='1';
       // that never actually synced — a business changing a rate in Settings
       // → Pricing had no effect on what customers were quoted here, forever.
       // Apply the business's real live rates on top of the defaults now.
-      if(biz.pricing_config&&biz.pricing_config.rates){
-        Object.entries(biz.pricing_config.rates).forEach(([k,v])=>{
+      if(biz.rates){
+        Object.entries(biz.rates).forEach(([k,v])=>{
           if(SERVICES[k]&&typeof v==='number'&&v>0)SERVICES[k].rate=v;
         });
         buildSvcPicker(); // re-render service picker labels/prices if already built
@@ -479,9 +485,9 @@ try{const u=new URL(location.href);EMBED_MODE=u.searchParams.get('embed')==='1';
         if(slot)slot.innerHTML=`<img src="${biz.logo_url.replace(/"/g,'&quot;')}" alt="" style="width:100%;height:100%;object-fit:cover">`;
       }
       const contactEl=document.getElementById('biz-contact');
-      if(contactEl&&biz.phone)contactEl.textContent='📞 '+biz.phone;
+      if(contactEl&&biz.phone)contactEl.textContent=biz.phone;
       const regionEl=document.getElementById('biz-region-trust');
-      if(regionEl&&biz.region)regionEl.textContent='📍 '+biz.region;
+      if(regionEl&&biz.region)regionEl.textContent=biz.region;
       if(biz.region)BIZ_REGION=biz.region;
       // Match the booking page's accent to the business's own brand colour
       // (set in Turnkey → Settings → Email & document templates) instead of
@@ -600,9 +606,9 @@ function enableOsm(address){
   hint.textContent='⏳ Locating address…';
   fetchWithTimeout('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(address+', '+(BIZ_REGION||'New Zealand')),8000)
     .then(results=>{
-      if(!results||!results.length){hint.textContent='⚠️ Address not found — try the full street address';return;}
+      if(!results||!results.length){hint.textContent='Address not found — try the full street address';return;}
       enableOsmLatLng(parseFloat(results[0].lat),parseFloat(results[0].lon),results[0].display_name||address);
-    }).catch(()=>{hint.textContent='⚠️ Could not load the map — check your connection';});
+    }).catch(()=>{hint.textContent='Could not load the map — check your connection';});
   return true;
 }
 function loadSatelliteUrl(url,cacheKey,label){
@@ -697,7 +703,7 @@ function loadOsmMosaic(lat,lng,zoom,label){
 }
 function adjustZoom(delta){
   if(!_lastLat)return;
-  const maxZ=MAPS_KEY?21:OSM_ZOOM_MAX, minZ=MAPS_KEY?17:OSM_ZOOM_MIN;
+  const maxZ=MAPS_KEY?22:OSM_ZOOM_MAX, minZ=MAPS_KEY?17:OSM_ZOOM_MIN; // 22 matches index.html's QE_ZOOM_MAX / Google Static Maps' real ceiling
   const newZoom=Math.max(minZ,Math.min(maxZ,SAT_ZOOM+delta));
   if(newZoom===SAT_ZOOM)return;
   reloadMapAt(_lastLat,_lastLng,newZoom,_lastLabel);
@@ -815,8 +821,13 @@ function sizeOf(area){
   return Math.round(polyArea(area.pts)*SCALE*SCALE); // m²
 }
 function effectiveRate(area){
+  // Base rate is this page's own SERVICES[svc].rate, not TK_PRICING's — it
+  // may carry a business-specific override applied after the pricing_config
+  // fetch below. Only the multiplier TABLE (STOREY_TYPES) is shared, so the
+  // *shape* of the formula can never drift from index.html even though the
+  // *value* is business-specific.
   let rate=SERVICES[area.svc].rate;
-  if(area.svc==='housewash'&&area.storeys)rate*=STOREY_TYPES[area.storeys].mult;
+  if(area.svc==='housewash'&&area.storeys&&STOREY_TYPES[area.storeys])rate*=STOREY_TYPES[area.storeys].mult;
   return rate;
 }
 
@@ -964,7 +975,7 @@ function initWheelZoom(){
       const delta=Math.round(wheelZoomAccum);
       const anchor=wheelZoomAnchor;
       wheelZoomAccum=0;wheelZoomAnchor=null;
-      const maxZ=MAPS_KEY?21:OSM_ZOOM_MAX, minZ=MAPS_KEY?17:OSM_ZOOM_MIN;
+      const maxZ=MAPS_KEY?22:OSM_ZOOM_MAX, minZ=MAPS_KEY?17:OSM_ZOOM_MIN; // 22 matches index.html's QE_ZOOM_MAX / Google Static Maps' real ceiling
       const newZoom=Math.max(minZ,Math.min(maxZ,SAT_ZOOM+delta));
       if(newZoom===SAT_ZOOM){visual.classList.remove('gesturing');visual.style.transform='none';return;}
       const center=anchor||{lat:_lastLat,lng:_lastLng};
@@ -1026,7 +1037,7 @@ function initMapGestures(){
     if(!mode)return;
     visual.classList.remove('gesturing');
     if(mode==='pinch'&&Math.abs(liveScale-1)>0.03){
-      const maxZ=MAPS_KEY?21:OSM_ZOOM_MAX, minZ=MAPS_KEY?17:OSM_ZOOM_MIN;
+      const maxZ=MAPS_KEY?22:OSM_ZOOM_MAX, minZ=MAPS_KEY?17:OSM_ZOOM_MIN; // 22 matches index.html's QE_ZOOM_MAX / Google Static Maps' real ceiling
       const newZoom=Math.max(minZ,Math.min(maxZ,SAT_ZOOM+Math.round(Math.log2(liveScale))));
       if(newZoom!==SAT_ZOOM){
         document.getElementById('zoom-val').textContent=newZoom;
@@ -1298,7 +1309,7 @@ async function submitRequest(){
       showSuccess(payload);
     }catch(e){
       if(btn){btn.disabled=false;btn.textContent='Send my quote request';}
-      if(status)status.textContent='⚠️ Could not send your request — check your connection and try again, or call us directly.';
+      if(status)status.textContent='Could not send your request — check your connection and try again, or call us directly.';
     }
     return;
   }

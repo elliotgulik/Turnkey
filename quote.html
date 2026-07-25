@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <script src="config.js"></script>
+<script src="pricing-engine.js"></script>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>Your quote</title>
 <style>
@@ -27,14 +28,53 @@
   .head .biz-name{font-size:17px;font-weight:650;letter-spacing:-.01em}
   .head .biz-sub{font-size:12.5px;color:var(--ink-faint);margin-top:2px}
   .body{padding:26px 28px}
+  .qmeta{display:flex;justify-content:space-between;align-items:baseline;font-size:11.5px;color:var(--ink-faint);margin-bottom:16px}
+  .qmeta b{color:var(--ink-soft);font-weight:600}
   .greeting{font-size:21px;font-weight:650;letter-spacing:-.02em;margin-bottom:4px}
-  .addr{font-size:13.5px;color:var(--ink-soft);margin-bottom:22px}
+  .addr{font-size:13.5px;color:var(--ink-soft);margin-bottom:16px}
+  .dur-badge{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;color:var(--teal);background:var(--teal-wash);padding:4px 10px;border-radius:999px;margin-bottom:16px}
+
+  /* ---- property map ---- */
+  /* aspect-ratio:4/3 matches the SVG's 0 0 800 600 viewBox exactly (same
+     convention as index.html's .qmap-stage) — background image and SVG
+     overlay then scale together pixel-for-pixel, with no cover/slice
+     cropping mismatch that would make shapes drift off their true position. */
+  .qmap-wrap{position:relative;width:100%;aspect-ratio:4/3;border-radius:var(--radius-sm);overflow:hidden;background:var(--surface-2);margin-bottom:8px;touch-action:none;border:1px solid var(--line)}
+  .qmap-visual{position:absolute;inset:0;background-size:cover;background-position:center;cursor:grab}
+  .qmap-visual.dragging{cursor:grabbing}
+  .qmap-svg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+  .qmap-zoom{position:absolute;right:8px;bottom:8px;display:flex;flex-direction:column;gap:6px;z-index:2}
+  .qmap-zoom button{width:44px;height:44px;border-radius:11px;background:rgba(255,255,255,.94);box-shadow:var(--shadow);font-size:19px;font-weight:700;color:var(--ink);display:flex;align-items:center;justify-content:center}
+  .qmap-zoom button:active{background:#fff}
+  .qmap-badge{position:absolute;left:8px;top:8px;background:rgba(10,28,43,.6);color:#fff;font-size:10.5px;font-weight:600;padding:4px 9px;border-radius:999px;z-index:2;pointer-events:none}
+  .qmap-legend{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:18px;font-size:11px;color:var(--ink-soft)}
+  .qmap-legend span{display:inline-flex;align-items:center;gap:5px}
+  .qmap-legend i{width:9px;height:9px;border-radius:3px;display:inline-block}
+
+  /* ---- property summary ---- */
+  .psum{border:1px solid var(--line);border-radius:var(--radius-sm);padding:14px 15px;margin-bottom:14px}
+  .psum-title{font-size:11px;font-weight:700;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px}
+  .psum-row{display:flex;justify-content:space-between;font-size:13.5px;padding:6px 0;border-bottom:1px solid var(--line-soft)}
+  .psum-row:last-child{border-bottom:none}
+  .psum-row .n{color:var(--ink);font-weight:500}
+  .psum-row .v{color:var(--ink-soft)}
+  .svc-checklist{margin-top:10px;padding-top:10px;border-top:1px solid var(--line-soft)}
+  .svc-check{display:flex;align-items:center;gap:7px;font-size:13px;padding:3px 0;color:var(--ink)}
+  .svc-check .tick{color:var(--teal);font-weight:700}
+
   .svc-list{border:1px solid var(--line);border-radius:var(--radius-sm);overflow:hidden;margin-bottom:18px}
   .svc-row{display:flex;justify-content:space-between;gap:10px;padding:13px 15px;font-size:14px;border-bottom:1px solid var(--line-soft)}
   .svc-row:last-child{border-bottom:none}
   .svc-row .n{color:var(--ink);font-weight:500}
+  .svc-row .n .note{display:block;font-size:11.5px;color:var(--ink-faint);font-weight:400;margin-top:1px}
   .svc-row .q{color:var(--ink-faint);font-size:12.5px}
+  .svc-row .amt{color:var(--ink);font-weight:600;font-size:13.5px;white-space:nowrap}
   .notes-box{background:var(--surface-2);border-radius:var(--radius-sm);padding:14px 15px;font-size:13px;color:var(--ink-soft);margin-bottom:18px;line-height:1.55}
+
+  .price-bd{border:1px solid var(--line);border-radius:var(--radius-sm);padding:2px 15px;margin-bottom:6px}
+  .price-row{display:flex;justify-content:space-between;font-size:13px;color:var(--ink-soft);padding:9px 0;border-bottom:1px solid var(--line-soft)}
+  .price-row:last-child{border-bottom:none}
+  .price-row.total{border-top:2px solid var(--ink);margin-top:2px;padding-top:12px;font-weight:700;font-size:16px;color:var(--ink)}
   .total-row{display:flex;justify-content:space-between;align-items:baseline;padding:16px 4px;border-top:2px solid var(--ink);margin-top:4px}
   .total-row .l{font-size:13px;color:var(--ink-soft);font-weight:500}
   .total-row .v{font-size:28px;font-weight:700;letter-spacing:-.02em}
@@ -51,7 +91,8 @@
   .question-box .btn{margin-top:10px}
   .foot{text-align:center;font-size:11.5px;color:var(--ink-faint);margin-top:22px;padding:0 10px}
   .state{text-align:center;padding:50px 28px}
-  .state .ico{font-size:44px;margin-bottom:14px}
+  .state .ico{margin-bottom:14px;color:var(--ink-faint);display:flex;justify-content:center}
+  .state .ico svg{width:44px;height:44px}
   .state h2{font-size:20px;font-weight:650;margin-bottom:6px}
   .state p{font-size:13.5px;color:var(--ink-soft);max-width:360px;margin:0 auto}
   .state.accepted .ico{color:var(--teal)}
@@ -73,12 +114,19 @@
   <p class="foot" id="foot" style="display:none">Quote tool by <b>Turnkey</b> — sent securely, viewable only with this link.</p>
 </div>
 <script>
-const SVC_LABELS={
-  driveway:'Driveway / concrete', housewash:'House wash', roof:'Roof treatment',
-  patio:'Patio / deck', gutter:'Gutter clean', fence:'Fence / wall wash', windows:'Window clean'
+// Small inline icon set — replaces emoji so state icons actually respect
+// the surrounding colour (.state.accepted/.declined .ico), which a colour
+// emoji glyph never does since it renders its own fixed colours.
+const STATE_ICONS={
+  check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.5"/><path d="M8 12.3l2.6 2.6L16 9.5"/></svg>',
+  dash:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.5"/><line x1="8" y1="12" x2="16" y2="12"/></svg>',
+  link:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 15l6-6"/><path d="M13 5.5l1-1a3.5 3.5 0 0 1 5 5l-1 1"/><path d="M11 18.5l-1 1a3.5 3.5 0 0 1-5-5l1-1"/></svg>',
+  search:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><line x1="20" y1="20" x2="15.3" y2="15.3"/></svg>',
+  warn:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l9.5 16.5H2.5z"/><line x1="12" y1="10" x2="12" y2="14.5"/><circle cx="12" cy="17.3" r="0.6" fill="currentColor" stroke="none"/></svg>'
 };
-const SVC_UNITS={driveway:'m²',housewash:'m',roof:'m²',patio:'m²',gutter:'m',fence:'m',windows:'panes'};
-function money(n){return '$'+Math.round(n||0).toLocaleString('en-NZ');}
+function money(n){const v=Math.round(n||0);return (v<0?'-$':'$')+Math.abs(v).toLocaleString('en-NZ');}
+function fmtDur(min){if(!min)return '';const h=Math.floor(min/60),m=Math.round(min%60);return h?(h+'h'+(m?' '+m+'m':'')):(m+'m');}
+function fmtDate(iso){try{return new Date(iso).toLocaleDateString('en-NZ',{day:'numeric',month:'short',year:'numeric'});}catch(e){return '';}}
 function getToken(){try{return new URL(location.href).searchParams.get('t')||'';}catch(e){return '';}}
 async function callRpc(name,args){
   const cfg=window.TURNKEY_CONFIG;
@@ -97,31 +145,223 @@ const token=getToken();
 function renderState(icon,title,body,cls){
   document.getElementById('card').innerHTML=`<div class="state ${cls||''}"><div class="ico">${icon}</div><h2>${title}</h2><p>${body}</p></div>`;
 }
+
+/* ===== read-only property map — same projection/measurement formulas as
+   the staff quote editor (index.html's qe.*) so a measurement can never
+   read differently here than it does internally, but pan/zoom only: no
+   drawing, no vertex dragging, nothing editable. Gracefully renders
+   nothing at all if a quote has no georeferenced areas (older quotes, or
+   ones drawn on a plain non-geo grid) rather than showing a broken map. ===== */
+const PUB_ZOOM_MIN=15, PUB_ZOOM_MAX=22, PUB_OSM_TILES=3;
+const PMAP={lat:null,lng:null,zoom:19,scale:1,mapsKey:'',areas:[],loadToken:0};
+function pubAreasWithGeo(areaPolys){
+  return (areaPolys||[]).filter(a=>a.geoPts&&a.points&&a.geoPts.length===a.points.length&&a.geoPts.length>=2&&a.geoPts.every(Boolean));
+}
+function pubLatLngToSvg(ll){
+  const dLat=ll.lat-PMAP.lat, dLng=ll.lng-PMAP.lng;
+  const dyM=-dLat*111320, dxM=dLng*111320*Math.cos(PMAP.lat*Math.PI/180);
+  return {x:400+dxM/PMAP.scale, y:300+dyM/PMAP.scale};
+}
+function pubReprojectAreas(){
+  PMAP.areas.forEach(a=>{a.svgPts=a.geoPts.map(pubLatLngToSvg);});
+}
+function pubComputeFit(areas){
+  let minLat=Infinity,maxLat=-Infinity,minLng=Infinity,maxLng=-Infinity;
+  areas.forEach(a=>a.geoPts.forEach(p=>{minLat=Math.min(minLat,p.lat);maxLat=Math.max(maxLat,p.lat);minLng=Math.min(minLng,p.lng);maxLng=Math.max(maxLng,p.lng);}));
+  if(!isFinite(minLat))return null;
+  const lat=(minLat+maxLat)/2, lng=(minLng+maxLng)/2;
+  const spanLatM=(maxLat-minLat)*111320;
+  const spanLngM=(maxLng-minLng)*111320*Math.cos(lat*Math.PI/180);
+  const spanM=Math.max(spanLatM,spanLngM,8); // floor so one small shape doesn't zoom in absurdly tight
+  const targetPx=800*0.66; // leave ~1/3 padding around the shapes
+  let zoom=PUB_ZOOM_MIN;
+  for(let z=PUB_ZOOM_MAX;z>=PUB_ZOOM_MIN;z--){
+    const scale=156543.03392*Math.cos(lat*Math.PI/180)/Math.pow(2,z)*(640/800);
+    if(spanM/scale<=targetPx){zoom=z;break;}
+  }
+  return {lat,lng,zoom};
+}
+function pubReloadAt(lat,lng,zoom){
+  zoom=Math.max(PUB_ZOOM_MIN,Math.min(PUB_ZOOM_MAX,zoom));
+  PMAP.lat=lat;PMAP.lng=lng;PMAP.zoom=zoom;
+  const visual=document.getElementById('qmap-visual'); if(!visual)return;
+  const token=++PMAP.loadToken;
+  if(PMAP.mapsKey){
+    const url='https://maps.googleapis.com/maps/api/staticmap?center='+lat+','+lng+'&zoom='+zoom+'&size=640x480&scale=2&maptype=satellite&key='+encodeURIComponent(PMAP.mapsKey);
+    const probe=new Image();
+    const imgTimer=setTimeout(()=>{if(token!==PMAP.loadToken)return;PMAP.mapsKey='';pubReloadAt(lat,lng,Math.min(zoom,19));},8000);
+    probe.onload=()=>{
+      if(token!==PMAP.loadToken)return;clearTimeout(imgTimer);
+      const tiles=document.getElementById('qmap-tiles'); if(tiles)tiles.innerHTML='';
+      visual.style.backgroundImage='url("'+url+'")';
+      PMAP.scale=156543.03392*Math.cos(lat*Math.PI/180)/Math.pow(2,zoom)*(640/800);
+      pubReprojectAreas();pubRenderAreas();
+    };
+    probe.onerror=()=>{if(token!==PMAP.loadToken)return;clearTimeout(imgTimer);PMAP.mapsKey='';pubReloadAt(lat,lng,Math.min(zoom,19));};
+    probe.src=url;
+  }else{
+    // OSM raster-tile fallback — same 3x3 mosaic math as the staff editor.
+    const osmZoom=Math.max(15,Math.min(19,zoom));
+    PMAP.zoom=osmZoom;
+    visual.style.backgroundImage='none';
+    const n=Math.pow(2,osmZoom);
+    const xF=(lng+180)/360*n, yF=(1-Math.log(Math.tan(lat*Math.PI/180)+1/Math.cos(lat*Math.PI/180))/Math.PI)/2*n;
+    const tx=Math.floor(xF), ty=Math.floor(yF);
+    const half=(PUB_OSM_TILES-1)/2;
+    const offX=(xF-tx-0.5)*100, offY=(yF-ty-0.5)*100;
+    let imgs='';
+    for(let dy=-half;dy<=half;dy++)for(let dx=-half;dx<=half;dx++)
+      imgs+=`<img src="https://tile.openstreetmap.org/${osmZoom}/${tx+dx}/${ty+dy}.png" style="width:${100/PUB_OSM_TILES}%;height:${100/PUB_OSM_TILES}%;position:absolute;left:${(dx+half)*(100/PUB_OSM_TILES)-offX/PUB_OSM_TILES}%;top:${(dy+half)*(100/PUB_OSM_TILES)-offY/PUB_OSM_TILES}%" loading="lazy">`;
+    const tiles=document.getElementById('qmap-tiles'); if(tiles)tiles.innerHTML=imgs;
+    PMAP.scale=156543.03392*Math.cos(lat*Math.PI/180)/Math.pow(2,osmZoom)*(PUB_OSM_TILES*256/800);
+    pubReprojectAreas();pubRenderAreas();
+  }
+}
+function pubShapeSvg(area){
+  const svc=TK_PRICING.SERVICES[area.service];
+  const color=(svc&&svc.color)||'#138a72';
+  const pts=area.svgPts;
+  const d=pts.map((p,i)=>(i===0?'M':'L')+p.x+','+p.y).join(' ')+(svc&&svc.shape==='closed'?' Z':'');
+  const fill=svc&&svc.shape==='closed'?color+'2e':'none';
+  const cx=pts.reduce((s,p)=>s+p.x,0)/pts.length, cy=pts.reduce((s,p)=>s+p.y,0)/pts.length;
+  const label=(svc&&svc.label)||area.service;
+  return `<path d="${d}" fill="${fill}" stroke="${color}" stroke-width="2.5" stroke-linejoin="round"/>`+
+    `<text x="${cx}" y="${cy}" text-anchor="middle" font-size="11" font-weight="700" fill="#fff" stroke="${color}" stroke-width="3" paint-order="stroke" style="font-family:-apple-system,sans-serif">${label}</text>`;
+}
+function pubRenderAreas(){
+  const svg=document.getElementById('qmap-svg'); if(!svg)return;
+  svg.innerHTML=PMAP.areas.map(pubShapeSvg).join('');
+}
+function pubZoom(delta){
+  pubReloadAt(PMAP.lat,PMAP.lng,PMAP.zoom+delta);
+}
+function pubInitPan(){
+  const visual=document.getElementById('qmap-visual'); if(!visual)return;
+  let dragging=false, startX=0, startY=0;
+  const onDown=(x,y)=>{dragging=true;startX=x;startY=y;visual.classList.add('dragging');};
+  const onMove=(x,y)=>{
+    if(!dragging)return;
+    visual.style.transform=`translate(${x-startX}px,${y-startY}px)`;
+    const svg=document.getElementById('qmap-svg');
+    if(svg)svg.style.transform=`translate(${x-startX}px,${y-startY}px)`;
+  };
+  const onUp=(x,y)=>{
+    if(!dragging)return;
+    dragging=false;visual.classList.remove('dragging');
+    const dx=x-startX, dy=y-startY;
+    visual.style.transform='none';
+    const svg=document.getElementById('qmap-svg'); if(svg)svg.style.transform='none';
+    if(Math.abs(dx)>2||Math.abs(dy)>2){
+      // dx/dy are real rendered CSS px — convert into the SVG's 800×600
+      // logical space first (same conversion qeStageToSvg uses in
+      // index.html), THEN apply PMAP.scale (metres per logical-space px).
+      // Skipping this step would make the pan distance wrong on every
+      // screen size except one that happens to render the box at exactly
+      // 800×600 CSS px.
+      const rect=visual.getBoundingClientRect();
+      const ldx=dx*800/rect.width, ldy=dy*600/rect.height;
+      // Dragging the visual RIGHT/DOWN reveals content that was further
+      // LEFT/UP — the new centre is whatever used to sit at old logical
+      // pixel (400-ldx, 300-ldy), inverted through the same
+      // pubLatLngToSvg projection used to place every shape on this map.
+      const newLat=PMAP.lat+ldy*PMAP.scale/111320;
+      const newLng=PMAP.lng-ldx*PMAP.scale/(111320*Math.cos(PMAP.lat*Math.PI/180));
+      pubReloadAt(newLat,newLng,PMAP.zoom);
+    }
+  };
+  visual.addEventListener('pointerdown',e=>{visual.setPointerCapture(e.pointerId);onDown(e.clientX,e.clientY);});
+  visual.addEventListener('pointermove',e=>onMove(e.clientX,e.clientY));
+  visual.addEventListener('pointerup',e=>onUp(e.clientX,e.clientY));
+  visual.addEventListener('pointercancel',e=>onUp(e.clientX,e.clientY));
+  visual.addEventListener('wheel',e=>{e.preventDefault();pubZoom(e.deltaY<0?1:-1);},{passive:false});
+}
+function pubMapLegend(areas){
+  const seen={};
+  areas.forEach(a=>{const svc=TK_PRICING.SERVICES[a.service];if(svc)seen[a.service]=svc;});
+  return Object.values(seen).map(svc=>`<span><i style="background:${svc.color}"></i>${svc.label}</span>`).join('');
+}
+function pubMountMap(areaPolys){
+  const withGeo=pubAreasWithGeo(areaPolys);
+  const zone=document.getElementById('qmap-zone'); if(!zone)return;
+  if(!withGeo.length){zone.innerHTML='';return;}
+  PMAP.mapsKey=(window.TURNKEY_CONFIG&&window.TURNKEY_CONFIG.mapsKey)||'';
+  PMAP.areas=withGeo.map(a=>({service:a.service,geoPts:a.geoPts}));
+  zone.innerHTML=`
+    <div class="qmap-wrap" id="qmap-wrap">
+      <div class="qmap-visual" id="qmap-visual"><div id="qmap-tiles" style="position:absolute;inset:0"></div></div>
+      <svg class="qmap-svg" id="qmap-svg" viewBox="0 0 800 600" preserveAspectRatio="xMidYMid meet"></svg>
+      <div class="qmap-badge">Drag to pan · scroll or +/− to zoom</div>
+      <div class="qmap-zoom"><button type="button" onclick="pubZoom(1)" aria-label="Zoom in">+</button><button type="button" onclick="pubZoom(-1)" aria-label="Zoom out">−</button></div>
+    </div>
+    <div class="qmap-legend">${pubMapLegend(withGeo)}</div>`;
+  const fit=pubComputeFit(withGeo);
+  if(fit){pubInitPan();pubReloadAt(fit.lat,fit.lng,fit.zoom);}
+}
+
+/* ===== property summary + price breakdown — sourced from the same
+   services[] the business actually priced, using the shared pricing
+   engine so nothing here can ever total differently than the PDF/CRM. ===== */
+function pubPropertySummary(services){
+  if(!services||!services.length)return '';
+  const rows=services.map(s=>{
+    const svc=TK_PRICING.SERVICES[s.svc]; if(!svc)return '';
+    return `<div class="psum-row"><span class="n">${svc.label}</span><span class="v">${s.qty} ${svc.unit}</span></div>`;
+  }).join('');
+  const checks=services.map(s=>{
+    const svc=TK_PRICING.SERVICES[s.svc]; if(!svc)return '';
+    return `<div class="svc-check"><span class="tick">✓</span>${svc.label}</div>`;
+  }).join('');
+  return `<div class="psum">
+    <div class="psum-title">Property summary</div>
+    ${rows}
+    <div class="svc-checklist"><div class="psum-title">Services included</div>${checks}</div>
+  </div>`;
+}
+function pubPriceBreakdown(q){
+  const services=q.services||[];
+  const lineSum=services.reduce((s,x)=>s+TK_PRICING.lineTotal(x),0);
+  const adjustment=Math.round((q.amount||0)-lineSum);
+  const rows=services.map(s=>{
+    const svc=TK_PRICING.SERVICES[s.svc]; if(!svc)return '';
+    const note=(s.svc==='roof'&&s.roofType&&TK_PRICING.ROOF_TYPES[s.roofType])?TK_PRICING.ROOF_TYPES[s.roofType].label
+      :(s.svc==='housewash'&&s.storeys&&TK_PRICING.STOREY_TYPES[s.storeys])?TK_PRICING.STOREY_TYPES[s.storeys].label
+      :(s.svc==='fence'&&s.sides&&TK_PRICING.FENCE_SIDES[s.sides])?TK_PRICING.FENCE_SIDES[s.sides].label:'';
+    const sub=s.fixedPrice!=null?'Fixed price':(s.qty+' '+svc.unit+' × $'+TK_PRICING.effectiveRate(s).toFixed(2)+'/'+svc.unit+(note?' · '+note:''));
+    return `<div class="svc-row"><span class="n">${svc.label}<span class="note">${sub}</span></span><span class="amt">${money(TK_PRICING.lineTotal(s))}</span></div>`;
+  }).join('')||'<div class="svc-row"><span class="n">Service details</span><span class="q">as discussed</span></div>';
+  const gstSplit=TK_PRICING.gstFromInclusive(q.amount);
+  const bd=[];
+  if(adjustment)bd.push(['Site adjustment',money(adjustment)]);
+  bd.push(['Subtotal (excl. GST)',money(gstSplit.exGst)]);
+  bd.push(['GST 15%',money(gstSplit.gst)]);
+  return `<div class="svc-list">${rows}</div>
+    <div class="price-bd">${bd.map(r=>`<div class="price-row"><span>${r[0]}</span><span>${r[1]}</span></div>`).join('')}
+    <div class="price-row total"><span>Total</span><span>${money(q.amount)}</span></div></div>`;
+}
+
 function renderQuote(q){
   currentQuote=q;
   const biz=q.business||{}, cust=q.customer||{};
   const accent=(biz.accentColor&&/^#[0-9a-fA-F]{6}$/.test(biz.accentColor))?biz.accentColor:'#138a72';
   document.documentElement.style.setProperty('--teal',accent);
   document.documentElement.style.setProperty('--teal-bright',accent);
-  const svcRows=(q.services||[]).map(s=>{
-    const label=SVC_LABELS[s.svc]||s.svc;
-    const unit=SVC_UNITS[s.svc]||'';
-    return `<div class="svc-row"><span class="n">${label}</span><span class="q">${s.qty||''}${unit}</span></div>`;
-  }).join('')||'<div class="svc-row"><span class="n">Service details</span><span class="q">as discussed</span></div>';
   const notesHtml=q.notes?`<div class="notes-box">${q.notes.replace(/</g,'&lt;')}</div>`:'';
   const addrLine=[cust.address,cust.suburb].filter(Boolean).join(', ');
+  const durMin=parseInt(q.estimatedDurationMin,10);
+  const durBadge=durMin?`<div class="dur-badge">⏱ Estimated ${fmtDur(durMin)} on site</div>`:'';
+  const withGeo=pubAreasWithGeo(q.areaPolys);
 
   let actionsHtml='';
   if(q.status==='accepted'){
-    actionsHtml=`<div class="state accepted" style="padding:20px 0 0"><div class="ico">✅</div><h2 style="font-size:16px">You approved this quote</h2><p>${biz.name||'We'} will be in touch to confirm your booking date.</p></div>`;
+    actionsHtml=`<div class="state accepted" style="padding:20px 0 0"><div class="ico">${STATE_ICONS.check}</div><h2 style="font-size:18px">Quote Approved</h2><p>Thank you for accepting your quote. We've received your approval and will contact you shortly to confirm your booking.</p></div>`;
   }else if(q.status==='declined'){
-    actionsHtml=`<div class="state declined" style="padding:20px 0 0"><div class="ico">—</div><h2 style="font-size:16px">You declined this quote</h2><p>Changed your mind? Call or email ${biz.name||'us'} any time — ${biz.phone||biz.email||'we’re happy to help'}.</p></div>`;
+    actionsHtml=`<div class="state declined" style="padding:20px 0 0"><div class="ico">${STATE_ICONS.dash}</div><h2 style="font-size:16px">You said you're not ready yet</h2><p>No problem — changed your mind? Call or email ${biz.name||'us'} any time${biz.phone||biz.email?' — '+(biz.phone||biz.email):''}.</p></div>`;
   }else{
     actionsHtml=`
       <div class="actions">
-        <button class="btn primary" id="approve-btn" onclick="respond('accept')">✓ Approve quote</button>
-        <button class="btn ghost" onclick="toggleQuestion()">Ask a question</button>
-        <button class="btn ghost" onclick="respond('decline')" style="color:var(--ink-faint)">Not right now</button>
+        <button class="btn primary" id="approve-btn" onclick="respond('accept')">✓ Approve Quote</button>
+        <button class="btn ghost" onclick="toggleQuestion()">Ask a Question</button>
+        <button class="btn ghost" onclick="respond('decline')" style="color:var(--ink-faint)">Not Ready Yet</button>
       </div>
       <div class="question-box" id="question-box">
         <textarea id="question-text" placeholder="What would you like to ask or change?"></textarea>
@@ -137,14 +377,18 @@ function renderQuote(q){
       <div class="biz-sub">${biz.phone||biz.email||''}</div>
     </div>
     <div class="body">
+      ${(q.quoteNumber||q.validUntil)?`<div class="qmeta">${q.quoteNumber?`<span>Quote <b>${q.quoteNumber}</b></span>`:'<span></span>'}${q.validUntil?`<span>Valid until <b>${fmtDate(q.validUntil)}</b></span>`:''}</div>`:''}
       <div class="greeting">Quote for ${cust.name||'you'}</div>
-      ${addrLine?`<div class="addr">📍 ${addrLine}</div>`:''}
-      <div class="svc-list">${svcRows}</div>
+      ${addrLine?`<div class="addr">${addrLine}</div>`:''}
+      ${durBadge}
+      <div id="qmap-zone"></div>
+      ${pubPropertySummary(q.services)}
       ${notesHtml}
-      <div class="total-row"><span class="l">Total</span><span class="v">${money(q.amount)}</span></div>
+      ${pubPriceBreakdown(q)}
       ${actionsHtml}
     </div>`;
   document.getElementById('foot').style.display='';
+  if(withGeo.length)pubMountMap(q.areaPolys);
 }
 function toggleQuestion(){
   document.getElementById('question-box').classList.toggle('open');
@@ -179,13 +423,13 @@ async function respond(action,message){
   }
 }
 async function boot(){
-  if(!token){renderState('🔗','Link looks incomplete','This quote link is missing some information — ask the business to resend it.');return;}
+  if(!token){renderState(STATE_ICONS.link,'Link looks incomplete','This quote link is missing some information — ask the business to resend it.');return;}
   try{
     const q=await callRpc('get_public_quote',{p_token:token});
-    if(!q||q.error){renderState('🔍','Quote not found','This link may have expired or been mistyped — contact the business for a fresh one.');return;}
+    if(!q||q.error){renderState(STATE_ICONS.search,'Quote not found','This link may have expired or been mistyped — contact the business for a fresh one.');return;}
     renderQuote(q);
   }catch(e){
-    renderState('⚠️','Could not load your quote','Check your connection and try refreshing this page.');
+    renderState(STATE_ICONS.warn,'Could not load your quote','Check your connection and try refreshing this page.');
   }
 }
 boot();

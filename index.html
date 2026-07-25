@@ -8,6 +8,9 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
 <script src="config.js"></script>
+<script src="pricing-engine.js"></script>
+<script src="cost-engine.js"></script>
+<script src="map-snapshot.js"></script>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#138a72">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -100,7 +103,8 @@
     padding:9px 12px;font-size:13.5px;font-weight:500;color:var(--ink-soft);
     border-radius:9px;transition:background .15s,color .15s;letter-spacing:-.01em;
   }
-  nav.tabs button .nav-ico{font-size:15px;width:19px;text-align:center;flex-shrink:0;opacity:.85}
+  nav.tabs button .nav-ico{width:19px;height:19px;flex-shrink:0;opacity:.85;display:inline-flex;align-items:center;justify-content:center}
+  nav.tabs button .nav-ico svg{width:16px;height:16px}
   nav.tabs button:hover{color:var(--ink);background:var(--surface-2)}
   nav.tabs button .count{margin-left:auto;font-size:11px;font-weight:600;background:var(--surface-2);color:var(--ink-soft);padding:1px 7px;border-radius:980px}
   nav.tabs button.active{color:var(--ink);background:var(--accent-wash,var(--teal-wash));font-weight:650}
@@ -113,7 +117,8 @@
     border-radius:9px;transition:background .15s,color .15s;
   }
   .sidebar-settings:hover{color:var(--ink);background:var(--surface-2)}
-  .sidebar-settings .nav-ico{font-size:15px;width:19px;text-align:center}
+  .sidebar-settings .nav-ico{width:19px;height:19px;display:inline-flex;align-items:center;justify-content:center}
+  .sidebar-settings .nav-ico svg{width:16px;height:16px}
   /* engine letter tags removed visually for restraint */
   .eng-tag{display:none}
   .view{display:none;animation:fade .3s cubic-bezier(.2,.7,.2,1)}
@@ -287,6 +292,15 @@
   .svc-line .sub{font-size:14px;font-weight:600;color:var(--ink);white-space:nowrap;text-align:right}
   .svc-line .rm{color:var(--ink-faint);font-size:18px;padding:0 4px}
   .svc-line .rm:hover{color:var(--coral)}
+  .price-compare{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;font-size:11.5px;color:var(--ink-faint);border-top:1px dashed var(--line);margin-top:6px;padding-top:6px}
+  .price-compare b{font-weight:700}
+  .price-compare .pc-rec{color:var(--ink-soft)}
+  .price-compare .pc-you{color:var(--ink-soft)}
+  .price-compare .pc-diff{font-weight:600;padding:1px 7px;border-radius:980px}
+  .price-compare .pc-diff.pc-green{background:#dcf0e9;color:#16745f}
+  .price-compare .pc-diff.pc-grey{background:var(--line);color:var(--ink-faint);font-weight:500}
+  .price-compare .pc-diff.pc-orange{background:#faf1d9;color:#8a6212}
+  .price-compare .pc-diff.pc-red{background:#f1d5cc;color:#a4472f}
   .add-svc{font-size:13px;color:var(--teal);font-weight:500;padding:6px 0;align-self:flex-start}
   .quote-total{display:flex;align-items:center;justify-content:space-between;margin-top:18px;padding-top:16px;border-top:1px solid var(--line)}
   .quote-total .lbl{font-size:14px;color:var(--ink-soft)}
@@ -300,12 +314,6 @@
   .qt-override-note button{font-size:11.5px;color:var(--teal);font-weight:600}
   .gst-note{font-size:12px;color:var(--ink-faint);text-align:right;margin-top:3px}
 
-  /* AI assist — switched from purple to teal accent */
-  .ai-box{background:var(--teal-wash);border:1px solid #d4ebe5;border-radius:var(--radius-sm);padding:15px 16px;margin-bottom:18px}
-  .ai-box .ai-h{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--teal);display:flex;align-items:center;gap:6px;margin-bottom:9px}
-  .ai-box p{font-size:13px;color:var(--ink-soft);line-height:1.5}
-  .ai-suggest{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;font-size:13px;border-top:1px solid #dcefe9}
-  .ai-suggest:first-of-type{border-top:none}
   
   @keyframes spin{to{transform:rotate(360deg)}}
   
@@ -468,7 +476,9 @@
   .cp-photo{aspect-ratio:1;border-radius:var(--radius-sm);background:var(--surface-2) center/cover;position:relative;overflow:hidden}
   .cp-photo-tag{position:absolute;left:5px;bottom:5px;font-size:9px;font-weight:700;text-transform:uppercase;background:rgba(10,28,43,.65);color:#fff;padding:2px 6px;border-radius:980px}
   .cp-timeline-row{display:flex;gap:10px;padding:9px 0;border-bottom:1px solid var(--line-soft)}
-  .cp-timeline-ico{font-size:15px;flex-shrink:0}
+  .cp-timeline-dot{width:8px;height:8px;border-radius:50%;background:var(--ink-faint);flex-shrink:0;margin-top:5px}
+  .cp-timeline-dot.pos{background:var(--teal)}
+  .cp-timeline-dot.neg{background:var(--coral)}
   .cp-timeline-sum{font-size:13px}
   .cp-timeline-when{font-size:11px;color:var(--ink-faint);margin-top:1px}
   @media(max-width:720px){.cp-grid{grid-template-columns:1fr}.cp-stats{grid-template-columns:repeat(2,1fr)}}
@@ -555,7 +565,8 @@
       padding:6px 2px;font-size:10.5px;font-weight:600;color:var(--ink-faint);border-radius:12px;
     }
     .bottom-nav button.active{color:var(--teal);background:var(--teal-wash)}
-    .bottom-nav .bn-ico{font-size:19px;line-height:1}
+    .bottom-nav .bn-ico{display:flex;align-items:center;justify-content:center;height:20px}
+    .bottom-nav .bn-ico svg{width:20px;height:20px}
   }
 
   /* ===== technician mode — bigger tap targets everywhere, one-handed/gloved use ===== */
@@ -714,7 +725,10 @@
   .wx-alert.warn{background:#fbf6ec;border-color:#ecdcc2}
   .wx-alert.good{background:var(--teal-wash);border-color:#cde8df}
   .wx-alert-btn{background:none;border:none;padding:0;cursor:pointer;text-align:left;width:100%}
-  .wx-alert-ico{font-size:24px}
+  .wx-alert-ico{width:9px;height:9px;border-radius:50%;background:var(--ink-faint);flex-shrink:0;margin-top:5px}
+  .wx-alert.warn .wx-alert-ico{background:var(--amber)}
+  .wx-alert.bad .wx-alert-ico{background:var(--coral)}
+  .wx-alert.good .wx-alert-ico{background:var(--teal)}
   .wx-alert-body{flex:1}
   .wx-alert-ttl{font-size:13.5px;font-weight:600}
   .wx-alert-sub{font-size:12px;color:var(--ink-soft)}
@@ -739,9 +753,26 @@
   .est-rec-l{font-size:13px;font-weight:600;color:var(--ink)}
   .est-rec-sub{font-size:11px;color:var(--ink-faint)}
   .est-rec-amt{font-size:24px;font-weight:600;letter-spacing:-.02em;color:#9a7a18}
-  .est-margin{margin-top:10px;font-size:12px;font-weight:600;padding:7px 11px;border-radius:9px;text-align:center}
-  .est-margin.good{background:#dcf0e9;color:#16745f}
-  .est-margin.warn{background:#f1d5cc;color:#a4472f}
+  .est-rec-detail{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:10px;font-size:11.5px;color:var(--ink-faint)}
+  .est-rec-detail b{color:var(--ink-soft);font-weight:700}
+
+  /* one-click pricing actions + live profit summary (quote modal) */
+  .pricing-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px}
+  .pa-pct{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  .pa-pct input{width:56px;padding:7px 8px;font-size:13px;border:1px solid var(--line);border-radius:7px;background:var(--surface);text-align:center}
+  .profit-summary{border:1px solid var(--line);border-radius:12px;padding:4px 15px;margin-top:14px}
+  .ps-row{display:flex;justify-content:space-between;font-size:13px;color:var(--ink-soft);padding:8px 0;border-bottom:1px solid var(--line-soft)}
+  .ps-row:last-of-type{border-bottom:none}
+  .ps-row.total{border-top:2px solid var(--ink);margin-top:2px;padding-top:11px;font-weight:700;font-size:15px;color:var(--ink)}
+  .profit-warn{margin:10px 0 12px;font-size:12.5px;font-weight:600;padding:9px 12px;border-radius:9px;text-align:center;background:#faf1d9;color:#8a6212}
+  .profit-warn.danger{background:#f1d5cc;color:#a4472f}
+  /* plain colour utilities — shared by profit-summary rows (no badge) and
+     reused, more specifically, by .price-compare .pc-diff (badge look) */
+  .pc-green{color:#16745f}
+  .pc-grey{color:var(--ink-faint)}
+  .pc-orange{color:#8a6212}
+  .pc-red{color:#a4472f}
+  .pc-reset{grid-column:auto;font-size:11px;font-weight:600;color:var(--teal);background:none;border:none;padding:8px 0;margin:-8px 0;text-decoration:underline;cursor:pointer}
 
   /* goals */
   .goal-celebrate{background:var(--m-goal-wash);border:1px solid #ecc9da;color:#8e3d63;font-size:14px;font-weight:500;padding:14px 18px;border-radius:14px;margin-bottom:18px}
@@ -878,7 +909,7 @@
   .legend-flag{color:var(--coral)}
   .legend-clear{color:var(--teal)}
 
-  /* smart alerts bar */
+  /* dashboard alerts bar */
   .alerts-bar{display:flex;align-items:stretch;gap:12px;margin-bottom:18px;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:12px 14px;box-shadow:var(--shadow)}
   .alerts-lead{display:flex;flex-direction:column;justify-content:center;font-size:12px;font-weight:600;color:var(--ink-soft);white-space:nowrap;padding-right:12px;border-right:1px solid var(--line)}
   .alerts-count{font-size:22px;font-weight:700;color:var(--coral);letter-spacing:-.03em}
@@ -886,7 +917,13 @@
   .alert-chip{display:flex;align-items:center;gap:10px;background:var(--surface-2);border:1px solid var(--line);border-radius:12px;padding:9px 12px;min-width:290px;flex-shrink:0}
   .alert-chip.warn{background:#fbf3ec;border-color:#f0dcc9}
   .alert-chip.info{background:var(--m-money-wash);border-color:#cfe4ea}
-  .ac-ico{font-size:17px;flex-shrink:0}
+  .alert-chip.bad{background:var(--coral-wash);border-color:#eccfc6}
+  .alert-chip.good{background:var(--teal-wash);border-color:#cde8df}
+  .ac-ico{width:9px;height:9px;border-radius:50%;background:var(--ink-faint);flex-shrink:0;margin-top:5px}
+  .alert-chip.warn .ac-ico{background:var(--amber)}
+  .alert-chip.info .ac-ico{background:var(--m-money)}
+  .alert-chip.bad .ac-ico{background:var(--coral)}
+  .alert-chip.good .ac-ico{background:var(--teal)}
   .ac-body{flex:1;min-width:0}
   .ac-title{font-size:12.5px;font-weight:700;color:var(--ink)}
   .ac-text{font-size:11.5px;color:var(--ink-soft);line-height:1.35}
@@ -1149,34 +1186,34 @@
     </div>
     <div class="sidebar-scroll">
       <div class="sidebar-nav">
-        <button data-view="dashboard"><span class="nav-ico">🏠</span>Dashboard</button>
+        <button data-view="dashboard"><span class="nav-ico" data-icon="dashboard"></span>Dashboard</button>
         <div class="sidebar-label">Sales</div>
-        <button data-view="pipeline" class="active"><span class="nav-ico">🧭</span>Pipeline</button>
-        <button data-view="leads"><span class="nav-ico">📇</span>Leads <span class="count" id="cnt-leads">0</span></button>
-        <button data-view="customers"><span class="nav-ico">👥</span>Customers</button>
+        <button data-view="pipeline" class="active"><span class="nav-ico" data-icon="pipeline"></span>Pipeline</button>
+        <button data-view="leads"><span class="nav-ico" data-icon="leads"></span>Leads <span class="count" id="cnt-leads">0</span></button>
+        <button data-view="customers"><span class="nav-ico" data-icon="customers"></span>Customers</button>
         <div class="sidebar-label">Jobs</div>
-        <button data-view="jobsflow"><span class="nav-ico">🧽</span>Jobs Flow</button>
-        <button data-view="calendar"><span class="nav-ico">📅</span>Calendar</button>
-        <button data-view="ops"><span class="nav-ico">🚚</span>Operations</button>
+        <button data-view="jobsflow"><span class="nav-ico" data-icon="jobsflow"></span>Jobs Flow</button>
+        <button data-view="calendar"><span class="nav-ico" data-icon="calendar"></span>Calendar</button>
+        <button data-view="ops"><span class="nav-ico" data-icon="ops"></span>Operations</button>
         <div class="sidebar-label">Business</div>
-        <button data-view="pricing"><span class="nav-ico">💲</span>Pricing</button>
-        <button data-view="inbox"><span class="nav-ico">📨</span>Inbox <span class="count" id="cnt-inbox">0</span></button>
-        <button data-view="goals"><span class="nav-ico">🎯</span>Goals</button>
+        <button data-view="pricing"><span class="nav-ico" data-icon="pricing"></span>Pricing</button>
+        <button data-view="inbox"><span class="nav-ico" data-icon="inbox"></span>Inbox <span class="count" id="cnt-inbox">0</span></button>
+        <button data-view="goals"><span class="nav-ico" data-icon="goals"></span>Goals</button>
       </div>
     </div>
     <div class="sidebar-foot">
       <input type="file" id="import-file" accept=".json,application/json" style="display:none" onchange="importData(this)">
       <input type="file" id="photo-upload-input" accept="image/*" style="display:none" onchange="onPhotoChosen(this)">
       <input type="file" id="quote-attach-input" accept="image/*,application/pdf" style="display:none" onchange="onQuoteAttachChosen(this)">
-      <button class="sidebar-settings" onclick="openSettings()"><span class="nav-ico">⚙️</span>Settings</button>
+      <button class="sidebar-settings" onclick="openSettings()"><span class="nav-ico" data-icon="settings"></span>Settings</button>
     </div>
   </nav>
   <nav class="bottom-nav" id="bottom-nav">
-    <button data-view="dashboard"><span class="bn-ico">🏠</span>Dashboard</button>
-    <button data-view="customers"><span class="bn-ico">👥</span>Customers</button>
-    <button data-view="calendar"><span class="bn-ico">📅</span>Calendar</button>
-    <button data-view="jobsflow"><span class="bn-ico">🧽</span>Jobs</button>
-    <button onclick="openMoreSheet()"><span class="bn-ico">⋯</span>More</button>
+    <button data-view="dashboard"><span class="bn-ico" data-icon="dashboard"></span>Dashboard</button>
+    <button data-view="customers"><span class="bn-ico" data-icon="customers"></span>Customers</button>
+    <button data-view="calendar"><span class="bn-ico" data-icon="calendar"></span>Calendar</button>
+    <button data-view="jobsflow"><span class="bn-ico" data-icon="jobsflow"></span>Jobs</button>
+    <button onclick="openMoreSheet()"><span class="bn-ico" data-icon="more"></span>More</button>
   </nav>
   <main>
     <section class="view active" id="view-pipeline"></section>
@@ -1219,7 +1256,7 @@
     <div class="field" style="margin-top:14px">
       <label>Attachments</label>
       <div id="quote-attach-list" style="display:flex;flex-wrap:wrap;gap:8px;margin:8px 0"></div>
-      <button class="btn ghost sm" onclick="pickQuoteAttachment()">📎 Attach file</button>
+      <button class="btn ghost sm" onclick="pickQuoteAttachment()">Attach file</button>
     </div>
     <div class="quote-total">
       <span class="lbl">Quote total</span>
@@ -1303,7 +1340,7 @@
   <div class="modal-body">
     <div class="field-row"><div class="field"><label>To</label><input id="sd-to" type="email"></div><div class="field"><label>Subject</label><input id="sd-subject"></div></div>
     <div class="field"><label>Message</label><textarea id="sd-body" rows="10"></textarea></div>
-    <p style="font-size:12px;color:var(--ink-faint);margin:2px 0 0" id="sd-attach-note">📎 <span id="sd-attach-name"></span> will be attached automatically.</p>
+    <p style="font-size:12px;color:var(--ink-faint);margin:2px 0 0" id="sd-attach-note"><span id="sd-attach-name"></span> will be attached automatically.</p>
     <p style="font-size:12px;color:var(--ink-faint);margin:4px 0 0">Loaded from your <a href="#" onclick="closeModal('send-doc-overlay');openTemplateEditor();return false" style="color:var(--teal)">email template</a> — edit freely, it only affects this send.</p>
   </div>
   <div class="modal-foot"><button class="btn ghost" onclick="closeModal('send-doc-overlay')">Cancel</button><button class="btn ghost" id="sd-draft-btn" onclick="saveSendDocDraft()">Save draft</button><button class="btn primary" id="sd-send-btn" onclick="confirmSendDocEmail()">Send email</button></div>
@@ -1327,7 +1364,7 @@
       </div>
       <div class="field"><label>Anything specific? <span style="color:var(--ink-faint);font-weight:400">(optional)</span></label><input id="mk-brief" placeholder="e.g. 20% off gutter cleaning this month"></div>
     </div>
-    <button class="btn accent" onclick="generateMarketingContent()" id="mk-gen-btn">✨ Generate</button>
+    <button class="btn accent" onclick="generateMarketingContent()" id="mk-gen-btn">Generate</button>
     <div style="margin-top:16px"><label style="font-size:12px;font-weight:600;color:var(--ink-soft)">Result</label>
       <textarea id="mk-output" rows="10" placeholder="Your generated copy will appear here — fully editable, copy and paste anywhere." style="margin-top:6px"></textarea>
     </div>
@@ -1345,9 +1382,9 @@
   <div class="modal-head"><div><h3>Pause job</h3><p>Why's it pausing? This gets logged on the job.</p></div><button class="x" aria-label="Close" onclick="closeModal('pause-overlay')">×</button></div>
   <div class="modal-body">
     <div id="pause-reasons" style="display:flex;flex-direction:column;gap:8px">
-      <button class="btn ghost block" onclick="confirmPause('Weather')">🌧️ Weather</button>
-      <button class="btn ghost block" onclick="confirmPause('Customer unavailable')">🚪 Customer unavailable</button>
-      <button class="btn ghost block" onclick="confirmPause('Equipment issue')">🔧 Equipment issue</button>
+      <button class="btn ghost block" onclick="confirmPause('Weather')">Weather</button>
+      <button class="btn ghost block" onclick="confirmPause('Customer unavailable')">Customer unavailable</button>
+      <button class="btn ghost block" onclick="confirmPause('Equipment issue')">Equipment issue</button>
     </div>
     <div class="field" style="margin-top:14px"><label>Other reason</label><input id="pause-other" placeholder="Type a reason and press Pause"></div>
   </div>
@@ -1398,7 +1435,7 @@
       <div class="field"><label>Track against</label><select id="g-metric"><option value="revenue">Approved revenue ($)</option><option value="jobs">Approved jobs (count)</option><option value="repeatRate">Repeat customers (%)</option></select></div>
       <div class="field"><label>Target number</label><input id="g-target" type="number" placeholder="100000"></div>
     </div>
-    <div class="field"><label>Your reward</label><input id="g-reward" placeholder="e.g. Go to Bali 🌴"></div>
+    <div class="field"><label>Your reward</label><input id="g-reward" placeholder="e.g. Go to Bali"></div>
   </div>
   <div class="modal-foot"><button class="btn ghost" onclick="closeModal('goal-overlay')">Cancel</button><button class="btn accent" onclick="saveGoal()">Set goal</button></div>
 </div></div>
@@ -1407,21 +1444,35 @@
 <div class="toast" id="toast"></div>
 
 <script>
-const SERVICES = {
-  driveway: {label:'Driveway / concrete',   unit:'m²', rate:4,   basis:'area',      kw:['driveway','concrete','path','mossy','moss']},
-  housewash:{label:'House wash',            unit:'m',  rate:5, basis:'perimeter',  kw:['house wash','house','wall','exterior','siding','cladding']},
-  roof:     {label:'Roof treatment',        unit:'m²', rate:9,   basis:'roof type',  kw:['roof','tiles','treatment']},
-  gutter:   {label:'Gutter clean',          unit:'m',  rate:3.5, basis:'length',     kw:['gutter','gutters','blocked','downpipe']},
-  fence:    {label:'Fence / wall wash',     unit:'m',  rate:4,   basis:'length',     kw:['fence','wall','boundary','palings']},
-  patio:    {label:'Patio / deck',          unit:'m²', rate:6,   basis:'area',       kw:['patio','deck','courtyard','tiles']},
-  windows:  {label:'Window clean',          unit:'panes', rate:4, basis:'count',     kw:['window','windows','pane','glass','glazing']}
+// Minimal line-icon set (stroke-based, inherits currentColor) for primary
+// navigation — the one surface visible on every screen, so it's worth real
+// icons rather than removing the icon column entirely. Everywhere else
+// that used a decorative emoji favours plain text or a colour-coded badge
+// instead, consistent with "clean status badges, subtle indicators" rather
+// than a second icon system to maintain.
+const NAV_ICONS={
+  dashboard:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>',
+  pipeline:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="16" y2="12"/><line x1="4" y1="18" x2="12" y2="18"/></svg>',
+  leads:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8"/><path d="M3 8l9 6 9-6"/><path d="M3 8l6-5h6l6 5"/></svg>',
+  customers:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="8.5" r="2.6"/><path d="M15.5 14.3c2.6.4 4.5 2.6 4.5 5.7"/></svg>',
+  jobsflow:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 9l2 2 4-4"/><line x1="8" y1="15" x2="16" y2="15"/></svg>',
+  calendar:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="3" x2="8" y2="7"/><line x1="16" y1="3" x2="16" y2="7"/></svg>',
+  ops:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s7-6.4 7-12a7 7 0 1 0-14 0c0 5.6 7 12 7 12z"/><circle cx="12" cy="9" r="2.4"/></svg>',
+  pricing:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="2" x2="12" y2="22"/><path d="M17 6H9.5a2.5 2.5 0 0 0 0 5h5a2.5 2.5 0 0 1 0 5H7"/></svg>',
+  inbox:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M3 6l9 7 9-7"/></svg>',
+  goals:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="0.8" fill="currentColor"/></svg>',
+  settings:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="7" x2="20" y2="7"/><circle cx="9" cy="7" r="2" fill="currentColor" stroke="none"/><line x1="4" y1="14" x2="20" y2="14"/><circle cx="16" cy="14" r="2" fill="currentColor" stroke="none"/><line x1="4" y1="21" x2="20" y2="21"/><circle cx="11" cy="21" r="2" fill="currentColor" stroke="none"/></svg>',
+  more:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="5" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.4" fill="currentColor" stroke="none"/></svg>'
 };
-const ROOF_TYPES = { concrete:{label:'Concrete tile',mult:1.0}, metal:{label:'Metal / colorsteel',mult:0.85}, asphalt:{label:'Asphalt shingle',mult:1.15} };
-const STOREY_TYPES = {
-  1:{label:'Single storey',  mult:1.0},
-  2:{label:'Two storey',     mult:1.2},
-  3:{label:'Three storey',   mult:1.44}
-};
+document.querySelectorAll('[data-icon]').forEach(el=>{el.innerHTML=NAV_ICONS[el.dataset.icon]||'';});
+
+// SERVICES/ROOF_TYPES/STOREY_TYPES/FENCE_SIDES are the SAME objects as
+// TK_PRICING's (shared by reference, from pricing-engine.js) — booking.html
+// and quote.html use the identical rate table and multiplier math, so a
+// quote can never total differently on different pages. setRate()/
+// applyPricingConfig() below still mutate these objects directly; that
+// mutation is visible through TK_PRICING too since it's the same object.
+const SERVICES=TK_PRICING.SERVICES, ROOF_TYPES=TK_PRICING.ROOF_TYPES, STOREY_TYPES=TK_PRICING.STOREY_TYPES, FENCE_SIDES=TK_PRICING.FENCE_SIDES;
 const SOP_STEPS = [
   {t:'Pre-inspection',s:'Assess surfaces, note hazards'},
   {t:'Chemical mix',s:'Mix ratios for the surface type'},
@@ -1513,21 +1564,25 @@ function isOpenSale(r){return r.stage==='new'||r.stage==='quoted'||r.stage==='fo
    to change. jobStatusOf() is the single source of truth for "what badge
    does this job show right now" — every render site below uses it instead
    of reading r.stage/r.paymentStatus directly. */
+// No icon field — the .pill.{cls} badge these render into already carries
+// its own distinct background/text colour (see .pill.new/.quoted/.won/…
+// below), so a second colour-coded dot on top of an already-coloured badge
+// was pure redundant decoration, not a second signal.
 const JOB_STATUS_META = {
-  lead:           {label:'Lead',           icon:'⚪', cls:'new'},
-  quoted:         {label:'Quoted',         icon:'🟡', cls:'quoted'},
-  quote_sent:     {label:'Quote Sent',     icon:'🟠', cls:'quoted'},
-  quote_accepted: {label:'Quote Accepted', icon:'🟢', cls:'won'},
-  scheduled:      {label:'Scheduled',      icon:'🔵', cls:'scheduled'},
-  travelling:     {label:'Travelling',     icon:'🚗', cls:'travelling'},
-  on_site:        {label:'On Site',        icon:'📍', cls:'on_site'},
-  in_progress:    {label:'In Progress',    icon:'🟠', cls:'in_progress'},
-  paused:         {label:'Paused',         icon:'⏸️', cls:'paused'},
-  completed:      {label:'Completed',      icon:'🟢', cls:'completed'},
-  cancelled:      {label:'Cancelled',      icon:'🔴', cls:'cancelled'},
-  invoiced:       {label:'Invoiced',       icon:'🟣', cls:'invoiced'},
-  paid:           {label:'Paid',           icon:'🟢', cls:'paid'},
-  overdue:        {label:'Overdue',        icon:'🔴', cls:'overdue'}
+  lead:           {label:'Lead',           cls:'new'},
+  quoted:         {label:'Quoted',         cls:'quoted'},
+  quote_sent:     {label:'Quote Sent',     cls:'quoted'},
+  quote_accepted: {label:'Quote Accepted', cls:'won'},
+  scheduled:      {label:'Scheduled',      cls:'scheduled'},
+  travelling:     {label:'Travelling',     cls:'travelling'},
+  on_site:        {label:'On Site',        cls:'on_site'},
+  in_progress:    {label:'In Progress',    cls:'in_progress'},
+  paused:         {label:'Paused',         cls:'paused'},
+  completed:      {label:'Completed',      cls:'completed'},
+  cancelled:      {label:'Cancelled',      cls:'cancelled'},
+  invoiced:       {label:'Invoiced',       cls:'invoiced'},
+  paid:           {label:'Paid',           cls:'paid'},
+  overdue:        {label:'Overdue',        cls:'overdue'}
 };
 function jobStatusKeyOf(r){
   if(r.stage==='cancelled')return 'cancelled';
@@ -1546,7 +1601,7 @@ function jobStatusKeyOf(r){
   return 'lead';
 }
 function jobStatusOf(r){return Object.assign({key:jobStatusKeyOf(r)},JOB_STATUS_META[jobStatusKeyOf(r)])}
-function jobStatusBadge(r){const s=jobStatusOf(r);return `<span class="pill ${s.cls}">${s.icon} ${s.label}</span>`}
+function jobStatusBadge(r){const s=jobStatusOf(r);return `<span class="pill ${s.cls}">${s.label}</span>`}
 // Every status change appends here (job-detail timeline) and to activity_log
 // (the cross-job Customer Profile timeline) — both fed by the same call so
 // they can never drift out of sync with each other.
@@ -1565,58 +1620,16 @@ const PIN_COLORS = ['#c2683a','#2f5d82','#0f7d6b','#9a7a32','#4a4f7a'];
 /* ===== Cost model: time, chemicals, fuel, wages → recommended quote ===== */
 // Per-service production: m² per hour (how fast a surface is cleaned) + chemical cost per m².
 // Each service: production rate (m²/hr), which chemical it uses, and litres of that chemical per m².
-const SVC_COST = {
-  driveway: { m2ph:55, chem:'sodiumHypo', litrePerM2:0.030 },
-  housewash:{ m2ph:35, chem:'softWash',   litrePerM2:0.06  }, // per linear metre of perimeter
-  roof:     { m2ph:30, chem:'softWash',   litrePerM2:0.055 },
-  gutter:   { m2ph:45, chem:'degreaser',  litrePerM2:0.010 }, // per linear metre
-  fence:    { m2ph:55, chem:'sodiumHypo', litrePerM2:0.020 }, // per linear metre
-  patio:    { m2ph:50, chem:'sodiumHypo', litrePerM2:0.028 }
-};
-// Chemical prices per litre (concentrate) — editable in the Pricing tab.
-const CHEMICALS = {
-  sodiumHypo:{ label:'Sodium hypochlorite (12%)', perL:3.20 },
-  softWash:{ label:'Soft-wash mix (surfactant)', perL:5.80 },
-  degreaser:{ label:'Degreaser', perL:4.50 }
-};
-// Every field here is editable in the Pricing tab (setCostInput()) and
-// persisted per-business via savePricingConfig() — nothing in the cost
-// model is a fixed, invisible constant a business can't see or change.
-const COST_INPUTS = {
-  wage:32,        // $/hour per crew member on the job
-  crew:2,         // people on a typical job
-  setupMin:25,    // setup/pack-down per job (minutes)
-  fuelPerKm:0.28, // running cost $/km
-  avgKm:14,       // avg round-trip drive to a job (tune this to your area)
-  equipmentPerJob:8,   // equipment wear/maintenance allowance per job
-  consumablesPerJob:5, // PPE, rags, misc supplies per job
-  targetMargin:0.55 // owner's target gross margin → drives recommended price
-};
-// Estimate labour hours, costs and a recommended price for a set of services.
-function estimateJob(services){
-  let cleanMin=0, chem=0, litres=0;
-  services.forEach(s=>{
-    const c=SVC_COST[s.svc]; if(!c) return;
-    const qty=s.qty||0;
-    cleanMin += (qty / c.m2ph) * 60;
-    const L = qty * c.litrePerM2;
-    litres += L;
-    chem += L * (CHEMICALS[c.chem] ? CHEMICALS[c.chem].perL : 0);
-  });
-  const labourMin = cleanMin + COST_INPUTS.setupMin;
-  const labourHrs = labourMin/60;
-  const wageCost = labourHrs * COST_INPUTS.wage * COST_INPUTS.crew;
-  const fuelCost = COST_INPUTS.avgKm * COST_INPUTS.fuelPerKm;
-  const equipmentCost = COST_INPUTS.equipmentPerJob||0;
-  const consumablesCost = COST_INPUTS.consumablesPerJob||0;
-  const cost = wageCost + chem + fuelCost + equipmentCost + consumablesCost;
-  const recommended = COST_INPUTS.targetMargin<1 ? cost/(1-COST_INPUTS.targetMargin) : cost;
-  return {
-    labourMin:Math.round(labourMin), labourHrs,
-    wageCost, chem, litres, fuelCost, equipmentCost, consumablesCost, cost,
-    recommended:Math.round(recommended/5)*5  // round to nearest $5
-  };
-}
+// SVC_COST/CHEMICALS/COST_INPUTS are the SAME objects as TK_COST's (shared
+// by reference, from cost-engine.js — loaded only by index.html, never by
+// the public booking.html/quote.html pages, since this is internal cost/
+// margin data). setChemPrice()/setCostInput() below still mutate these
+// objects directly; TK_COST.costBreakdown() sees that mutation too.
+const SVC_COST=TK_COST.SVC_COST, CHEMICALS=TK_COST.CHEMICALS, COST_INPUTS=TK_COST.COST_INPUTS;
+// Thin compatibility wrapper — existing callers (renderEstimate,
+// confirmQuoteSend's duration estimate) get the same shape as before;
+// TK_COST.costBreakdown() is the one real implementation.
+function estimateJob(services){return TK_COST.costBreakdown((services||[]).map(s=>({svc:s.svc,qty:s.qty})));}
 function fmtDur(min){const h=Math.floor(min/60),m=Math.round(min%60);return h?`${h}h ${m?m+'m':''}`.trim():`${m}m`}
 const DAY_START_MIN = 8*60; // crews start at 8:00am
 function fmtTime(mins){let h=Math.floor(mins/60),m=Math.round(mins%60);const ap=h>=12?'pm':'am';let h12=h%12;if(h12===0)h12=12;return `${h12}:${String(m).padStart(2,'0')}${ap}`;}
@@ -1662,27 +1675,27 @@ function dayTimeline(dateISO, extraJob){
 const WX_FORECAST_DAYS=16;
 // Sample forecast — replaced by LIVE data from Open-Meteo when online.
 const WEATHER = [
-  {day:'Mon',date:'1 Jul',iso:null,icon:'☀️',cond:'Sunny',tempHi:16,rainPct:5,windKmh:9},
-  {day:'Tue',date:'2 Jul',iso:null,icon:'🌤️',cond:'Mostly fine',tempHi:15,rainPct:15,windKmh:12},
-  {day:'Wed',date:'3 Jul',iso:null,icon:'🌧️',cond:'Rain',tempHi:13,rainPct:80,windKmh:24},
-  {day:'Thu',date:'4 Jul',iso:null,icon:'⛅',cond:'Partly cloudy',tempHi:15,rainPct:25,windKmh:14},
-  {day:'Fri',date:'5 Jul',iso:null,icon:'☀️',cond:'Sunny',tempHi:17,rainPct:5,windKmh:8},
-  {day:'Sat',date:'6 Jul',iso:null,icon:'🌦️',cond:'Showers',tempHi:14,rainPct:55,windKmh:20},
-  {day:'Sun',date:'7 Jul',iso:null,icon:'🌧️',cond:'Heavy rain',tempHi:12,rainPct:90,windKmh:30}
+  {day:'Mon',date:'1 Jul',iso:null,cond:'Sunny',tempHi:16,rainPct:5,windKmh:9},
+  {day:'Tue',date:'2 Jul',iso:null,cond:'Mostly fine',tempHi:15,rainPct:15,windKmh:12},
+  {day:'Wed',date:'3 Jul',iso:null,cond:'Rain',tempHi:13,rainPct:80,windKmh:24},
+  {day:'Thu',date:'4 Jul',iso:null,cond:'Partly cloudy',tempHi:15,rainPct:25,windKmh:14},
+  {day:'Fri',date:'5 Jul',iso:null,cond:'Sunny',tempHi:17,rainPct:5,windKmh:8},
+  {day:'Sat',date:'6 Jul',iso:null,cond:'Showers',tempHi:14,rainPct:55,windKmh:20},
+  {day:'Sun',date:'7 Jul',iso:null,cond:'Heavy rain',tempHi:12,rainPct:90,windKmh:30}
 ];
 let weatherLive=false, weatherFetchedAt=null;
 let climateNormals=null; // {month0..11: {rainDayPct, avgHighTemp}} — historical planning data, see fetchClimateNormals()
 const WX_LAT=-36.79, WX_LON=174.75; // fallback default (Auckland) — overridden by the business's own region once set in Connections
 function wxFromCode(code){
-  if(code===0)return{icon:'☀️',cond:'Sunny'};
-  if(code<=2)return{icon:'🌤️',cond:'Mostly fine'};
-  if(code===3)return{icon:'⛅',cond:'Cloudy'};
-  if(code===45||code===48)return{icon:'🌫️',cond:'Fog'};
-  if(code>=51&&code<=57)return{icon:'🌦️',cond:'Drizzle'};
-  if(code>=61&&code<=67)return{icon:'🌧️',cond:'Rain'};
-  if(code>=80&&code<=82)return{icon:'🌦️',cond:'Showers'};
-  if(code>=95)return{icon:'⛈️',cond:'Thunderstorms'};
-  return{icon:'⛅',cond:'Mixed'};
+  if(code===0)return{cond:'Sunny'};
+  if(code<=2)return{cond:'Mostly fine'};
+  if(code===3)return{cond:'Cloudy'};
+  if(code===45||code===48)return{cond:'Fog'};
+  if(code>=51&&code<=57)return{cond:'Drizzle'};
+  if(code>=61&&code<=67)return{cond:'Rain'};
+  if(code>=80&&code<=82)return{cond:'Showers'};
+  if(code>=95)return{cond:'Thunderstorms'};
+  return{cond:'Mixed'};
 }
 function applyWeather(days){
   WEATHER.length=0;
@@ -1714,7 +1727,7 @@ function fetchLiveWeather(){
         day:['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][dt.getDay()],
         date:dt.getDate()+' '+['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][dt.getMonth()],
         iso,
-        icon:wx.icon,cond:wx.cond,
+        cond:wx.cond,
         tempHi:Math.round(j.daily.temperature_2m_max[i]),
         rainPct:Math.round(j.daily.precipitation_probability_max[i]||0),
         windKmh:Math.round(j.daily.wind_speed_10m_max[i]||0)
@@ -1828,7 +1841,7 @@ let goalSeq = 1;
 const GOAL_PERKS = [
   {at:10000,perk:'Buy the second pressure unit'},
   {at:50000,perk:'Hire a part-time crew member'},
-  {at:100000,perk:'Trip to Bali 🌴'}
+  {at:100000,perk:'Trip to Bali'}
 ];
 function goalProgress(g){
   const won=records.filter(isWon);
@@ -2038,7 +2051,7 @@ async function saveNotificationPrefs(){
   toast('Notification preferences saved');
 }
 
-function money(n){return '$'+Math.round(n).toLocaleString('en-NZ')}
+function money(n){const v=Math.round(n||0);return (v<0?'-$':'$')+Math.abs(v).toLocaleString('en-NZ');}
 function segOf(t){return t>=1200?'Large':t>=500?'Mid':'Small'}
 
 function newRecord(d){return Object.assign({
@@ -2236,7 +2249,7 @@ function renderQuoteAttachList(){
   const r=records.find(x=>x.id===activeLeadId);
   const list=(r&&r.quoteAttachments)||[];
   zone.innerHTML=list.length
-    ?list.map((a,i)=>`<span class="seg" style="cursor:pointer" onclick="viewAttachmentPath('${a.path}')">📎 ${(a.filename||'file').replace(/</g,'&lt;')}</span>`).join('')
+    ?list.map((a,i)=>`<span class="seg" style="cursor:pointer" onclick="viewAttachmentPath('${a.path}')">${(a.filename||'file').replace(/</g,'&lt;')}</span>`).join('')
     :'<span style="font-size:12px;color:var(--ink-faint)">No files attached</span>';
 }
 async function viewAttachmentPath(path){
@@ -2254,7 +2267,12 @@ async function viewAttachmentPath(path){
    already-debugged math instead of a second, divergent geometry engine.
    ===================================================================== */
 const QE_SVC_HEX={driveway:'#c2683a',housewash:'#2f7d8f',roof:'#7a5bbf',patio:'#0f7d6b',gutter:'#b08a1e',fence:'#6b7a3a',windows:'#4a6b8a'};
-const QE_ZOOM_DEFAULT=19, QE_ZOOM_MIN=17, QE_ZOOM_MAX=21, QE_OSM_ZOOM_MAX=19, QE_OSM_ZOOM_MIN=15, QE_OSM_TILES=3;
+// QE_ZOOM_MAX=22 is Google Static Maps' actual documented ceiling (21 is
+// merely where most integrations stop, not a hard limit) — imagery
+// resolution below that is a per-location Google Maps coverage question,
+// not something this app can control; the existing 8s load-timeout in
+// qeReloadAt already falls back to OSM if a zoom level returns nothing.
+const QE_ZOOM_DEFAULT=19, QE_ZOOM_MIN=17, QE_ZOOM_MAX=22, QE_OSM_ZOOM_MAX=19, QE_OSM_ZOOM_MIN=15, QE_OSM_TILES=3;
 let qe=null; // the whole live editor state for whichever quote is open — reset each time renderQuoteMap() runs
 let qeSuppressClick=false;
 
@@ -2282,7 +2300,7 @@ function renderQuoteMap(r){
     originLat:null, originLng:null, originZoom:null, mapType:'satellite', loadToken:0
   };
   zone.innerHTML=`<div class="qmap">
-    <div class="qmap-h">📍 ${addr||'Property map'} <span class="demo-tag">editable</span></div>
+    <div class="qmap-h">${addr||'Property map'} <span class="demo-tag">editable</span></div>
     <div class="qe-toolbar" id="qe-toolbar"></div>
     <div class="qe-svc-pick" id="qe-svc-pick"></div>
     <div class="qmap-stage qe-select-mode" id="qe-stage">
@@ -2562,16 +2580,16 @@ function qeLiveUpdateDrawing(cache){
 function qeRenderToolbar(){
   const el=document.getElementById('qe-toolbar'); if(!el)return;
   const sel=qe.selectedId;
-  const satLabel=qe.provider==='google'?(qe.mapType==='satellite'?'🛰️ Satellite':'🗺️ Roadmap'):'🛰️ Satellite';
+  const satLabel=qe.provider==='google'?(qe.mapType==='satellite'?'Satellite':'Roadmap'):'Satellite';
   el.innerHTML=`
     <button type="button" class="btn ghost sm ${qe.mode==='select'?'active':''}" onclick="qeSetMode('select')">↖ Select</button>
     <button type="button" class="btn ghost sm" onclick="qeUndo()" ${qe.history.length?'':'disabled'}>↺ Undo</button>
     <button type="button" class="btn ghost sm" onclick="qeRedo()" ${qe.future.length?'':'disabled'}>↻ Redo</button>
-    <button type="button" class="btn ghost sm" onclick="qeDeleteArea('${sel||''}')" ${sel?'':'disabled'}>🗑 Delete</button>
+    <button type="button" class="btn ghost sm" onclick="qeDeleteArea('${sel||''}')" ${sel?'':'disabled'}>Delete</button>
     <button type="button" class="btn ghost sm" onclick="qeDuplicateArea('${sel||''}')" ${sel?'':'disabled'}>⧉ Duplicate</button>
     <button type="button" class="btn ghost sm" onclick="qeFitAll()" ${qe.lat?'':'disabled'}>⤢ Fit all</button>
     <button type="button" class="btn ghost sm" onclick="qeResetView()" ${qe.originLat!=null?'':'disabled'}>↻ Reset view</button>
-    <button type="button" class="btn ghost sm" onclick="qeLocateProperty()" ${qe.addr?'':'disabled'}>📍 Locate</button>
+    <button type="button" class="btn ghost sm" onclick="qeLocateProperty()" ${qe.addr?'':'disabled'}>Locate</button>
     <button type="button" class="btn ghost sm" onclick="qeToggleSatellite()" ${qe.provider==='google'?'':'disabled'} title="${qe.provider==='google'?'':'Needs a Google Maps key'}">${satLabel}</button>
   `;
 }
@@ -2587,7 +2605,9 @@ const QE_IS_TOUCH=('ontouchstart' in window)||navigator.maxTouchPoints>0;
 function qeUpdateHint(){
   const hint=document.getElementById('qe-hint'); if(!hint)return;
   if(qe.mode==='draw'){
-    if(SERVICES[qe.drawSvc].basis==='length'){
+    if(qe.drawSvc==='fence'){
+      hint.textContent=qe.drawing.length<1?'Tap one end of the fence':'Tap the other end — that\'s the whole section, done in two taps. Draw another section for a corner or a separate run.';
+    }else if(SERVICES[qe.drawSvc].basis==='length'){
       if(qe.drawing.length<2){
         hint.textContent='Tap to place points for '+SERVICES[qe.drawSvc].label+' — tap the other end (add more points for corners)';
       }else{
@@ -2604,7 +2624,7 @@ function qeUpdateHint(){
   // terminal state, not still-loading. Previously this fell through to the
   // qe.addr check below and got stuck reading "Loading map…" forever,
   // which is exactly what looked like satellite imagery hanging indefinitely.
-  if(qe.provider==='grid'){hint.textContent=qe.addr?'⚠️ Could not locate that address — drawing on a plain grid (not to scale)':'No address on file — drawing on a plain grid';return;}
+  if(qe.provider==='grid'){hint.textContent=qe.addr?'Could not locate that address — drawing on a plain grid (not to scale)':'No address on file — drawing on a plain grid';return;}
   if(!qe.lat){hint.textContent='Loading map…';return;}
   if(qe.selectedId){hint.textContent='Drag points to adjust, or drag the shape to move it';return;}
   if(!qe.areas.length){hint.textContent='Select a service, then draw the area';return;}
@@ -2635,7 +2655,7 @@ function qeRenderPanel(){
     </div>
     <textarea placeholder="Notes for this area (access, hazards, extra prep…)" oninput="qeSaveAreaNotes('${area.id}',this.value)">${(area.notes||'').replace(/</g,'&lt;')}</textarea>
     <div class="qe-photo-row" id="qe-photo-row">${qeRenderAreaPhotos(area)}</div>
-    <div style="margin-top:8px"><input type="file" accept="image/*" id="qe-photo-input" style="display:none" onchange="qeUploadAreaPhoto('${area.id}',this)"><button type="button" class="btn ghost sm" onclick="document.getElementById('qe-photo-input').click()">📷 Add photo</button></div>
+    <div style="margin-top:8px"><input type="file" accept="image/*" id="qe-photo-input" style="display:none" onchange="qeUploadAreaPhoto('${area.id}',this)"><button type="button" class="btn ghost sm" onclick="document.getElementById('qe-photo-input').click()">Add photo</button></div>
   </div>`;
   qeLoadAreaPhotoThumbs();
 }
@@ -2646,14 +2666,8 @@ function qeRenderPanel(){
 // possibly-diverging estimate. Falls back to the plain business rate only
 // if this service has no line yet (e.g. area was just drawn this instant).
 function qeAreaPrice(area){
-  const svc=SERVICES[area.service];
   const line=typeof draftLines!=='undefined'?draftLines.find(l=>l.svc===area.service):null;
-  let rate=svc.rate;
-  if(line){
-    if(line.customRate!=null)rate=parseFloat(line.customRate);
-    else if(area.service==='roof'&&line.roofType)rate=svc.rate*ROOF_TYPES[line.roofType].mult;
-    else if(area.service==='housewash'&&line.storeys)rate=svc.rate*STOREY_TYPES[line.storeys].mult;
-  }
+  const rate=line?TK_PRICING.effectiveRate(line):SERVICES[area.service].rate;
   return Math.round((area.size||0)*rate);
 }
 function qeRenderAreaPhotos(area){
@@ -2916,6 +2930,12 @@ function qeHandleClick(e){
     }
     qe.drawing.push(p);
     qe.drawingGeoPts.push(qeSvgToLatLng(p));
+    // Fence measures as a straight run between two taps, full stop — no
+    // separate Finish tap needed. A fence with a corner is drawn as two
+    // straight sections back-to-back (reselect Fence, tap twice again);
+    // both sections' lengths sum into the same line item either way, so
+    // nothing is lost, it's just two clicks instead of a third "done" tap.
+    if(qe.drawSvc==='fence'&&qe.drawing.length===2){qeCommitDrawing();return;}
     qeRenderAreas();qeUpdateHint();qeRenderPanel();
     return;
   }
@@ -3123,7 +3143,7 @@ function reviewQuote(){
     <div class="rv-line"><span>Premium surface</span><b>${a.premium?'Yes (+12%)':'No'}</b></div>
     <div class="rv-line"><span>Cost to deliver</span><b>${money(e.cost)}</b></div>
     <div class="rv-line rv-total"><span>Quote total</span><b>${money(total)}</b></div>
-    <div class="rv-margin ${marginTone}">${margin}% margin ${margin>=50?'✓ healthy':margin>=40?'· a bit tight':'⚠️ below target — consider raising'}</div>
+    <div class="rv-margin ${marginTone}">${margin}% margin ${margin>=50?'✓ healthy':margin>=40?'· a bit tight':'below target — consider raising'}</div>
   `;
   closeModal('quote-overlay');
   openModal('review-overlay');
@@ -3132,23 +3152,43 @@ function reviewQuote(){
 
 function addSvcLine(){draftLines.push({svc:'driveway',qty:''});renderSvcLines()}
 function rmSvcLine(i){draftLines.splice(i,1);if(!draftLines.length)draftLines.push({svc:'driveway',qty:''});renderSvcLines()}
-function lineSubtotal(line){
-  const svc=SERVICES[line.svc];
-  let rate=line.customRate!=null?parseFloat(line.customRate):svc.rate;
-  if(!line.customRate&&line.svc==='roof'&&line.roofType)
-    rate=svc.rate*ROOF_TYPES[line.roofType].mult;
-  if(!line.customRate&&line.svc==='housewash'&&line.storeys)
-    rate=svc.rate*STOREY_TYPES[line.storeys].mult;
-  return line.fixedPrice!=null?parseFloat(line.fixedPrice)||0:(parseFloat(line.qty)||0)*rate;
+function lineSubtotal(line){return TK_PRICING.lineTotal(line);}
+// Human-readable note for whichever multiplier is actually in effect on a
+// line (roof type / storeys / fence sides) — shared by the PDF, the
+// doc-preview invoice table and the Customer Profile timeline so all three
+// describe a line identically, not just total it identically.
+function lineVariantNote(s){
+  if(s.svc==='roof'&&s.roofType&&ROOF_TYPES[s.roofType])return ROOF_TYPES[s.roofType].label;
+  if(s.svc==='housewash'&&s.storeys&&STOREY_TYPES[s.storeys])return STOREY_TYPES[s.storeys].label;
+  if(s.svc==='fence'&&s.sides&&FENCE_SIDES[s.sides])return FENCE_SIDES[s.sides].label;
+  return '';
+}
+// Green/grey/orange/red framing for one line's manual price against its
+// cost-based recommendation — below-recommendation is reframed as an
+// explicit "Discount", never just a smaller number with no explanation.
+function priceCompareHtml(sub,rec,i){
+  if(!rec)return '';
+  const diff=Math.round(sub-rec.recommendedPrice);
+  const pct=rec.recommendedPrice>0?(diff/rec.recommendedPrice*100):0;
+  let right;
+  if(diff===0){
+    right=`<span class="pc-you">Your Price <b>${money(sub)}</b></span><span class="pc-diff pc-grey">Matches recommendation</span>`;
+  }else if(diff>0){
+    right=`<span class="pc-you">Your Price <b>${money(sub)}</b></span><span class="pc-diff pc-green">+${money(diff)} (+${pct.toFixed(1)}%)</span>`;
+  }else{
+    const tone=Math.abs(pct)>10?'pc-red':'pc-orange';
+    right=`<span class="pc-you">Discount <b>-${money(Math.abs(diff))}</b></span><span class="pc-diff ${tone}">Final Price ${money(sub)}</span>`;
+  }
+  const resetBtn=diff!==0?`<button type="button" class="pc-reset" onclick="resetLineToRecommended(${i})">Reset to recommended</button>`:'';
+  return `<div class="price-compare"><span class="pc-rec">Recommended <b>${money(rec.recommendedPrice)}</b></span>${right}${resetBtn}</div>`;
 }
 function renderSvcLines(){
   const wrap=document.getElementById('svc-builder');wrap.innerHTML='';
+  const costBd=TK_COST.costBreakdown(draftLines);
   draftLines.forEach((line,i)=>{
     const svc=SERVICES[line.svc];const sub=lineSubtotal(line);
-    let baseRate=svc.rate;
-    if(line.svc==='roof'&&line.roofType)baseRate=svc.rate*ROOF_TYPES[line.roofType].mult;
-    if(line.svc==='housewash'&&line.storeys)baseRate=svc.rate*STOREY_TYPES[line.storeys].mult;
-    const displayRate=line.customRate!=null?parseFloat(line.customRate):baseRate;
+    const rec=costBd.lines.find(b=>b.line===line);
+    const displayRate=line.customRate!=null?parseFloat(line.customRate):TK_PRICING.effectiveRate(line);
     let extraRow='';
     if(line.svc==='roof'){
       if(!line.roofType)line.roofType='concrete';
@@ -3160,10 +3200,15 @@ function renderSvcLines(){
       extraRow='<select class="sl-roof" onchange="draftLines['+i+'].storeys=+this.value;draftLines['+i+'].customRate=null;renderSvcLines()">'+
         Object.entries(STOREY_TYPES).map(([k,v])=>`<option value="${k}" ${+k===line.storeys?'selected':''}>${v.label}${k>1?' (\u00d7'+v.mult+')':''}</option>`).join('')+'</select>';
     }
+    if(line.svc==='fence'){
+      if(!line.sides)line.sides=1;
+      extraRow='<select class="sl-roof" onchange="draftLines['+i+'].sides=+this.value;draftLines['+i+'].customRate=null;renderSvcLines()">'+
+        Object.entries(FENCE_SIDES).map(([k,v])=>`<option value="${k}" ${+k===line.sides?'selected':''}>${v.label}${+k>1?' (\u00d7'+v.mult+')':''}</option>`).join('')+'</select>';
+    }
     const isFixed=line.fixedPrice!=null;
     const isWindows=line.svc==='windows';
     const el=document.createElement('div');el.className='svc-line';
-    const svcSelect='<select onchange="draftLines['+i+'].svc=this.value;draftLines['+i+'].customRate=null;draftLines['+i+'].fixedPrice=null;draftLines['+i+'].storeys=null;draftLines['+i+'].roofType=null;renderSvcLines()">'+
+    const svcSelect='<select onchange="draftLines['+i+'].svc=this.value;draftLines['+i+'].customRate=null;draftLines['+i+'].fixedPrice=null;draftLines['+i+'].storeys=null;draftLines['+i+'].roofType=null;draftLines['+i+'].sides=null;renderSvcLines()">'+
       Object.entries(SERVICES).map(([k,v])=>`<option value="${k}" ${k===line.svc?'selected':''}>${v.label}</option>`).join('')+'</select>';
     const qtyField=isWindows
       ?`<div class="sl-windows"><input type="number" min="0" step="1" placeholder="0" value="${line.qty||''}" oninput="draftLines[${i}].qty=this.value;updateQuoteTotal()"><span class="sl-win-hint">panes &nbsp;<span class="sl-win-note">inside+outside\u00a0=\u00a02 per window</span></span></div>`
@@ -3176,7 +3221,7 @@ function renderSvcLines(){
     el.innerHTML=svcSelect+qtyField+
       `<div class="sl-price">${priceField}<button class="sl-mode ${isFixed?'active':''}" onclick="toggleFixedPrice(${i})">${isFixed?'fixed':'per\u00a0'+svc.unit}</button></div>`+
       `<span class="sub" data-sub="${i}">${money(sub)}</span>`+
-      `<button class="rm" onclick="rmSvcLine(${i})" aria-label="Remove ${svc.label} line">\u00d7</button>${extraRow}`;
+      `<button class="rm" onclick="rmSvcLine(${i})" aria-label="Remove ${svc.label} line">\u00d7</button>${extraRow}${priceCompareHtml(sub,rec,i)}`;
     wrap.appendChild(el);
   });
   updateQuoteTotal();
@@ -3193,18 +3238,9 @@ function toggleFixedPrice(i){
   renderSvcLines();
 }
 let quoteAssumptions={access:'standard',premium:false};
-const ACCESS_OPTS={
-  easy:{label:'Easy access',mult:0.95,note:'open, ground level'},
-  standard:{label:'Standard',mult:1.0,note:'typical site'},
-  hard:{label:'Difficult access',mult:1.15,note:'steep, tight, or high'}
-};
-const PREMIUM_MULT=1.12; // premium/delicate surface handling
-function assumptionsMult(){
-  let m=ACCESS_OPTS[quoteAssumptions.access].mult;
-  if(quoteAssumptions.premium)m*=PREMIUM_MULT;
-  return m;
-}
-function baseQuoteTotal(){return draftLines.reduce((s,l)=>s+lineSubtotal(l),0);}
+const ACCESS_OPTS=TK_PRICING.ACCESS_OPTS, PREMIUM_MULT=TK_PRICING.PREMIUM_MULT;
+function assumptionsMult(){return TK_PRICING.accessPremiumMult(quoteAssumptions);}
+function baseQuoteTotal(){return TK_PRICING.linesBaseTotal(draftLines);}
 let quoteTotalOverride = null; // null = use calculated
 
 function onQuoteTotalInput(val){
@@ -3279,14 +3315,71 @@ function renderAssumptions(){
 }
 function setAssumeAccess(k){quoteAssumptions.access=k;updateQuoteTotal();}
 function setAssumePremium(){quoteAssumptions.premium=!quoteAssumptions.premium;updateQuoteTotal();}
+// One-click pricing actions (Section 5) \u2014 every one of these sets a
+// per-line fixedPrice (clearing customRate) so the result is pinned to an
+// exact dollar figure regardless of qty/rate math, then re-renders through
+// the normal line-editor path so price-compare/profit-summary stay in sync.
+function applyRecommendedPricing(){
+  const bd=TK_COST.costBreakdown(draftLines);
+  let n=0;
+  draftLines.forEach(line=>{
+    const rec=bd.lines.find(b=>b.line===line);
+    if(rec){line.fixedPrice=rec.recommendedPrice;line.customRate=null;n++;}
+  });
+  if(!n){toast('Add a service with a quantity first');return;}
+  renderSvcLines();
+  toast('Applied recommended pricing to all services');
+}
+function resetLineToRecommended(i){
+  const line=draftLines[i]; if(!line)return;
+  const bd=TK_COST.costBreakdown(draftLines);
+  const rec=bd.lines.find(b=>b.line===line);
+  if(!rec)return;
+  line.fixedPrice=rec.recommendedPrice;line.customRate=null;
+  renderSvcLines();
+}
+function roundAllPrices(){
+  let n=0;
+  draftLines.forEach(line=>{
+    if(!((parseFloat(line.qty)||0)>0))return;
+    line.fixedPrice=Math.round(lineSubtotal(line)/10)*10;line.customRate=null;n++;
+  });
+  if(!n){toast('Add a service with a quantity first');return;}
+  renderSvcLines();
+  toast('Prices rounded to the nearest $10');
+}
+function bulkAdjustPrices(sign){
+  const pctEl=document.getElementById('pa-pct-input');
+  const pct=parseFloat(pctEl&&pctEl.value)||0;
+  if(!pct){toast('Enter a percentage first');return;}
+  const mult=1+sign*(pct/100);
+  let n=0;
+  draftLines.forEach(line=>{
+    if(!((parseFloat(line.qty)||0)>0))return;
+    line.fixedPrice=Math.max(0,Math.round(lineSubtotal(line)*mult));line.customRate=null;n++;
+  });
+  if(!n){toast('Add a service with a quantity first');return;}
+  renderSvcLines();
+  toast((sign>0?'Increased':'Decreased')+' all prices by '+pct+'%');
+}
 function renderEstimate(){
   const zone=document.getElementById('estimate-zone'); if(!zone) return;
   const lines=draftLines.filter(l=>(parseFloat(l.qty)||0)>0);
   if(!lines.length){zone.innerHTML='';return;}
   const e=estimateJob(lines.map(l=>({svc:l.svc,qty:parseFloat(l.qty)||0})));
-  const quote=quoteTotal();
-  const margin=quote>0?Math.round((quote-e.cost)/quote*100):0;
-  const recDiff = quote>0 ? (quote>=e.recommended?'on target':'below recommended') : '';
+  const finalTotal=quoteTotal();
+  const profit=finalTotal-e.cost;
+  const marginPct=TK_COST.marginPct(finalTotal,e.cost);
+  const targetPct=Math.round(COST_INPUTS.targetMargin*100);
+  const diff=finalTotal-e.recommended;
+  let warnBanner='';
+  if(finalTotal>0){
+    if(marginPct<40){
+      warnBanner=`<div class="profit-warn danger">This quote may not be profitable.</div>`;
+    }else if(marginPct<targetPct){
+      warnBanner=`<div class="profit-warn">\u26a0 Estimated margin has dropped below your target (${targetPct}%).</div>`;
+    }
+  }
   zone.innerHTML=`
     <div class="est-box">
       <div class="est-head"><span class="est-h">Cost &amp; time estimate</span><span class="est-time">\u23f1 ${fmtDur(e.labourMin)} on site</span></div>
@@ -3294,13 +3387,37 @@ function renderEstimate(){
         <div class="est-r"><span>Wages (${COST_INPUTS.crew} crew \u00d7 ${e.labourHrs.toFixed(1)}h \u00d7 $${COST_INPUTS.wage})</span><span>${money(e.wageCost)}</span></div>
         <div class="est-r"><span>Chemicals (${e.litres.toFixed(1)} L)</span><span>${money(e.chem)}</span></div>
         <div class="est-r"><span>Fuel (${COST_INPUTS.avgKm}km round trip)</span><span>${money(e.fuelCost)}</span></div>
+        <div class="est-r"><span>Equipment wear</span><span>${money(e.equipmentCost)}</span></div>
+        <div class="est-r"><span>Consumables</span><span>${money(e.consumablesCost)}</span></div>
         <div class="est-r est-total"><span>Total cost to deliver</span><span>${money(e.cost)}</span></div>
       </div>
       <div class="est-rec">
-        <div><div class="est-rec-l">Recommended price</div><div class="est-rec-sub">for your ${Math.round(COST_INPUTS.targetMargin*100)}% target margin</div></div>
+        <div><div class="est-rec-l">Recommended Price</div><div class="est-rec-sub">for your ${targetPct}% target margin${e.recommended<=COST_INPUTS.calloutMin?' \u00b7 minimum call-out applied':''}</div></div>
         <div class="est-rec-amt">${money(e.recommended)}</div>
       </div>
-      ${quote>0?`<div class="est-margin ${quote>=e.recommended?'good':'warn'}">Current quote ${money(quote)} \u00b7 ${margin}% margin \u00b7 ${recDiff}</div>`:''}
+      <div class="est-rec-detail">
+        <span>Estimated Costs <b>${money(e.cost)}</b></span>
+        <span>Estimated Gross Profit <b>${money(e.recommended-e.cost)}</b></span>
+        <span>Estimated Margin <b>${targetPct}%</b></span>
+      </div>
+    </div>
+    <div class="pricing-actions">
+      <button type="button" class="btn ghost sm" onclick="applyRecommendedPricing()">Apply Recommended Pricing</button>
+      <button type="button" class="btn ghost sm" onclick="roundAllPrices()">Round Prices</button>
+      <div class="pa-pct">
+        <input type="number" id="pa-pct-input" min="0" max="100" step="1" placeholder="%">
+        <button type="button" class="btn ghost sm" onclick="bulkAdjustPrices(1)">Increase All by %</button>
+        <button type="button" class="btn ghost sm" onclick="bulkAdjustPrices(-1)">Decrease All by %</button>
+      </div>
+    </div>
+    <div class="profit-summary">
+      <div class="ps-row"><span>Recommended Total</span><span>${money(e.recommended)}</span></div>
+      <div class="ps-row"><span>Final Total</span><span>${money(finalTotal)}</span></div>
+      <div class="ps-row"><span>Difference</span><span class="${diff>0?'pc-green':diff<0?'pc-orange':'pc-grey'}">${diff>=0?'+':'-'}${money(Math.abs(diff))}</span></div>
+      <div class="ps-row"><span>Estimated Costs</span><span>${money(e.cost)}</span></div>
+      <div class="ps-row"><span>Estimated Gross Profit</span><span>${money(profit)}</span></div>
+      <div class="ps-row total"><span>Estimated Margin</span><span class="${marginPct<40?'pc-red':marginPct<targetPct?'pc-orange':'pc-green'}">${marginPct.toFixed(1)}%</span></div>
+      ${warnBanner}
     </div>`;
 }
 function confirmQuoteSend(){
@@ -3313,9 +3430,43 @@ function confirmQuoteSend(){
   // count as an "edit"; a quote being priced for the first time isn't one.
   const wasAlreadySent=!!r.quoteSentAt;
   const oldTotal=r.total;
-  r.services=lines.map(l=>{const o={svc:l.svc,qty:parseFloat(l.qty)};if(l.roofType)o.roofType=l.roofType;return o});
+  // Carry every rate-affecting field through, not just roofType — storeys,
+  // fence sides, and manual overrides were previously dropped here, so a
+  // 2-storey housewash or a hand-fixed price would total correctly in
+  // r.total but show a mismatched (wrong) per-line rate everywhere the
+  // finalized r.services gets re-rendered (PDF, email, customer page,
+  // invoice) since those had no way to know the multiplier/override applied.
+  // Snapshot the cost/recommendation breakdown NOW, against the lines as
+  // actually sent — COST_INPUTS (wage, chemical prices, target margin) can
+  // change later, and a quote sent last month should keep showing what its
+  // margin actually was at the time, not get silently recalculated against
+  // today's rates every time someone reopens it (Reporting needs this to
+  // stay historically accurate, not just the live Quote Builder).
+  const costBd=TK_COST.costBreakdown(lines);
+  r.services=lines.map(l=>{
+    const o={svc:l.svc,qty:parseFloat(l.qty)};
+    if(l.roofType)o.roofType=l.roofType;
+    if(l.storeys)o.storeys=l.storeys;
+    if(l.sides)o.sides=l.sides;
+    if(l.customRate!=null)o.customRate=l.customRate;
+    if(l.fixedPrice!=null)o.fixedPrice=l.fixedPrice;
+    const rec=costBd.lines.find(b=>b.line===l);
+    if(rec){o.recommendedPrice=rec.recommendedPrice;o.estCost=rec.cost;}
+    return o;
+  });
   r.assumptions=Object.assign({},quoteAssumptions);
   r.total=quoteTotal();
+  r.recommendedTotal=costBd.recommended;
+  r.estimatedCost=costBd.cost;
+  r.estimatedMarginPct=Math.round(TK_COST.marginPct(r.total,costBd.cost)*10)/10;
+  // Rounded on-site time only — never the $ cost/wage/margin behind it —
+  // so the customer-facing "Estimated duration" on the public quote page
+  // has something real to show without exposing internal cost-model data.
+  r.estimatedDurationMin=estimateJob(r.services).labourMin;
+  // Fire-and-forget — starts fetching the map snapshot now so it's likely
+  // already cached by the time the operator actually hits Send, without
+  // making quote-confirmation wait on a network round trip.
+  preloadMapSnapshot(r);
   if(wasAlreadySent&&r.total!==oldTotal&&r.customerId){
     const who=(staff.find(u=>u.id===currentUserId)||{}).name||(staff.find(u=>u.id===currentUserId)||{}).email||'Someone';
     logActivity(r.customerId,r.jobId,'quote_updated',who+' changed the quote amount: '+money(oldTotal)+' → '+money(r.total),{old:oldTotal,new:r.total});
@@ -3368,6 +3519,10 @@ async function generateAndSendDoc(mode,r){
     toast('Could not save this '+mode+' before sending — check your connection and try again.');
     return;
   }
+  // Usually already resolved by now (confirmQuoteSend fires this the
+  // moment the quote is built, well before the operator gets to Send) —
+  // this just covers the case where Send happens first.
+  if(mode==='quote'&&r._mapSnapshotDataUrl===undefined)await preloadMapSnapshot(r);
   // Preferred path: Gmail connected → compose + send inside TurnKey, no
   // download required — recipient is editable in the composer, so a missing
   // email on file no longer blocks this path, just leaves it blank to fill in.
@@ -3499,7 +3654,7 @@ function buildDocPDF(mode,r,outputType){
   const ac=hexToRgb(t.accent||'#138a72');
   const today=new Date().toLocaleDateString('en-NZ',{day:'numeric',month:'long',year:'numeric'});
   const num=docNumber(mode,r);
-  const gst=Math.round(r.total-r.total/1.15);
+  const gst=TK_PRICING.gstFromInclusive(r.total).gst;
   const bizName=docBizName();
 
   // header bar
@@ -3573,15 +3728,16 @@ function buildDocPDF(mode,r,outputType){
   doc.setTextColor(30,40,50);
   r.services.forEach(function(s){
     var v=SERVICES[s.svc];
-    var rate=v.rate*(s.roofType&&ROOF_TYPES[s.roofType]?ROOF_TYPES[s.roofType].mult:1);
-    var lineAmt=Math.round(s.qty*rate);
+    var rate=TK_PRICING.effectiveRate(s);
+    var lineAmt=Math.round(TK_PRICING.lineTotal(s));
+    var note=lineVariantNote(s);
     doc.setFont('helvetica','bold');doc.setFontSize(9.5);
     doc.text(v.label,ML,y);
     doc.text(money(lineAmt),MR,y,{align:'right'});
     y+=4.5;
     doc.setFont('helvetica','normal');doc.setFontSize(8);
     doc.setTextColor(100,110,120);
-    var sub=s.qty+' '+v.unit+' \u00d7 $'+rate.toFixed(2)+'/'+v.unit+(s.roofType?' \u00b7 '+ROOF_TYPES[s.roofType].label:'');
+    var sub=s.fixedPrice!=null?(s.qty+' '+v.unit+' \u00b7 fixed price'):(s.qty+' '+v.unit+' \u00d7 $'+rate.toFixed(2)+'/'+v.unit+(note?' \u00b7 '+note:''));
     doc.text(sub,ML,y);
     doc.setTextColor(30,40,50);
     y+=7;
@@ -3601,6 +3757,24 @@ function buildDocPDF(mode,r,outputType){
   doc.text(mode==='quote'?'Quote total':'Amount due',totCol,y);
   doc.text(money(r.total),MR,y,{align:'right'});
   y+=12;
+
+  // property map snapshot — shows exactly what was measured, so the scope
+  // of work isn't just a line-item list. Best-effort only: preloadMapSnapshot()
+  // fetches this ahead of time (see confirmQuoteSend/generateAndSendDoc); if
+  // it hasn't resolved yet, or this quote has no georeferenced areas at all
+  // (older quotes, or ones drawn on a plain non-geo grid), the PDF simply
+  // omits this section rather than blocking or erroring.
+  if(mode==='quote'&&r._mapSnapshotDataUrl){
+    const imgW=TW, imgH=TW*400/640;
+    if(y+imgH>265){doc.addPage();y=20;}
+    try{
+      doc.setFont('helvetica','bold');doc.setFontSize(7);doc.setTextColor(120,130,140);
+      doc.text('PROPERTY MAP',ML,y);y+=4;
+      const mfmt=/data:image\/(\w+)/.exec(r._mapSnapshotDataUrl);
+      doc.addImage(r._mapSnapshotDataUrl,(mfmt&&mfmt[1]?mfmt[1]:'PNG').toUpperCase(),ML,y,imgW,imgH);
+      y+=imgH+8;
+    }catch(e){console.warn('Map snapshot image failed in PDF',e);}
+  }
 
   // terms box
   var terms=mode==='quote'?t.quoteTerms:t.invoiceTerms;
@@ -3632,14 +3806,13 @@ function buildDocEmailBody(mode,r){
   if(r.windows&&r.windows.panes>0)allSvcs.push({svc:'windows',qty:r.windows.panes,_price:r.windows.price});
   var lines=allSvcs.map(function(s){
     var v=SERVICES[s.svc];
-    var rate=s.customRate!=null?parseFloat(s.customRate):v.rate;
-    if(!s.customRate&&s.svc==='roof'&&s.roofType&&ROOF_TYPES[s.roofType])rate=v.rate*ROOF_TYPES[s.roofType].mult;
-    if(!s.customRate&&s.svc==='housewash'&&s.storeys&&STOREY_TYPES[s.storeys])rate=v.rate*STOREY_TYPES[s.storeys].mult;
-    var amt=s._price!=null?s._price:(s.fixedPrice!=null?Math.round(parseFloat(s.fixedPrice)||0):Math.round((parseFloat(s.qty)||0)*rate));
-    var desc=s._price!=null?v.label+' ('+s.qty+' panes)':s.fixedPrice!=null?v.label+' (fixed price)':v.label+': '+s.qty+' '+v.unit+' × $'+rate.toFixed(2)+'/'+v.unit;
+    var rate=TK_PRICING.effectiveRate(s);
+    var amt=s._price!=null?s._price:Math.round(TK_PRICING.lineTotal(s));
+    var note=lineVariantNote(s);
+    var desc=s._price!=null?v.label+' ('+s.qty+' panes)':s.fixedPrice!=null?v.label+' (fixed price)':v.label+': '+s.qty+' '+v.unit+' × $'+rate.toFixed(2)+'/'+v.unit+(note?' · '+note:'');
     return '  · '+desc+' = '+money(amt);
   }).join('\n');
-  var gst=Math.round(r.total-r.total/1.15);
+  var gst=TK_PRICING.gstFromInclusive(r.total).gst;
   var terms=mode==='quote'?t.quoteTerms:t.invoiceTerms;
   var heading=mode==='quote'?"Here's your quote:":"Here's your invoice for the work completed:";
   var bizName=docBizName();
@@ -3661,12 +3834,13 @@ function renderDocHTML(mode,r){
   const today=new Date().toLocaleDateString('en-NZ',{day:'numeric',month:'short',year:'numeric'});
   const rows=r.services.map(s=>{
     const v=SERVICES[s.svc];
-    const rate=s.customRate!=null?parseFloat(s.customRate):(s.svc==='roof'&&s.roofType&&ROOF_TYPES[s.roofType]?v.rate*ROOF_TYPES[s.roofType].mult:v.rate);
-    const line=s.fixedPrice!=null?Math.round(parseFloat(s.fixedPrice)||0):Math.round((parseFloat(s.qty)||0)*rate);
-    return `<tr><td><div class="di-name">${v.label}</div><div class="di-sub">${s.qty} ${v.unit} @ $${rate.toFixed(2)}/${v.unit}${s.roofType?' · '+ROOF_TYPES[s.roofType].label:''}</div></td><td class="di-amt">${money(line)}</td></tr>`;
+    const rate=TK_PRICING.effectiveRate(s);
+    const line=Math.round(TK_PRICING.lineTotal(s));
+    const note=lineVariantNote(s);
+    return `<tr><td><div class="di-name">${v.label}</div><div class="di-sub">${s.fixedPrice!=null?'fixed price':s.qty+' '+v.unit+' @ $'+rate.toFixed(2)+'/'+v.unit+(note?' · '+note:'')}</div></td><td class="di-amt">${money(line)}</td></tr>`;
   }).join('');
   const subtotal=r.total;
-  const gst=Math.round(subtotal-subtotal/1.15);
+  const gst=TK_PRICING.gstFromInclusive(subtotal).gst;
   const terms=mode==='quote'?t.quoteTerms:t.invoiceTerms;
   const title=mode==='quote'?'QUOTE':'TAX INVOICE';
   // Graceful fallbacks — a business that hasn't set up its profile/template
@@ -3884,7 +4058,7 @@ function openSchedule(id,presetISO){
   const techOptions=staff.map(u=>`<option value="${u.id}" ${r.assignedStaffId===u.id?'selected':''}>${(u.name||u.email||'Unnamed').replace(/</g,'&lt;')}</option>`).join('');
   document.getElementById('sched-body').innerHTML=`
     <p style="font-size:13.5px;color:var(--ink-soft);margin-bottom:6px">${r.name} · ${r.suburb||'—'} · ~${fmtDur(jobMin)} of work.</p>
-    ${pairDay?`<div class="pair-rec">💡 <b>${pairDay.sameSuburb.name}</b> is already booked in ${r.suburb} on <b>${pairDay.day} ${pairDay.date}</b>. Add this job that day to do two in one trip — saves ~22 min driving and a second callout.</div>`:''}
+    ${pairDay?`<div class="pair-rec"><b>${pairDay.sameSuburb.name}</b> is already booked in ${r.suburb} on <b>${pairDay.day} ${pairDay.date}</b>. Add this job that day to do two in one trip — saves ~22 min driving and a second callout.</div>`:''}
     <div class="field"><label>Date</label><input type="date" id="sched-date-input" value="${scheduleChoice}" min="${todayISO()}" onchange="onSchedDateInput(this.value)"></div>
     ${dayInfo.length?`<p style="font-size:12px;color:var(--ink-faint);margin:12px 0 6px">Quick-pick from the live ${dayInfo.length}-day forecast:</p>
     <div class="sched-days">
@@ -3892,7 +4066,6 @@ function openSchedule(id,presetISO){
         <button class="sched-day ${d.verdict.tone} ${d.iso===scheduleChoice?'sel':''} ${!d.fits?'full':''}" data-iso="${d.iso}" onclick="pickSchedDay('${d.iso}')">
           ${d.sameSuburb&&d.fits?'<span class="sd-pair">pair</span>':''}
           <div class="sd-dow">${d.day}<span>${d.date}</span></div>
-          <div class="sd-ico">${d.icon}</div>
           <div class="sd-load">${d.jobs.length?`${d.jobs.length} job${d.jobs.length>1?'s':''} · ${fmtDur(d.usedMin)}`:'free'}</div>
           <div class="sd-verdict ${d.verdict.tone}">${d.verdict.label}</div>
         </button>`).join('')}
@@ -3947,7 +4120,7 @@ function updateSchedDayDetail(){
   zone.innerHTML=`<div class="day-detail">
     <div class="dd-h">That day’s schedule</div>
     ${tl.map(s=>`<div class="dd-row ${s.isExtra?'dd-new':''}"><span><b>${fmtTime(s.start)}–${fmtTime(s.end)}</b> · ${s.job.name}${s.isExtra?' (new)':''} · ${s.job.suburb||''}${pairable&&!s.isExtra&&s.job.id===pairable.job.id?' <span class="dd-pair">same area</span>':''}</span><span>${fmtDur(estimateJob(s.job.services).labourMin)}</span></div>`).join('')}
-    <div class="dd-row dd-total"><span>Finishes</span><span>${fmtTime(dayEnd)} ${over?'⚠️ past 5pm':'✓'}</span></div>
+    <div class="dd-row dd-total"><span>Finishes</span><span>${fmtTime(dayEnd)} ${over?'past 5pm':'on time'}</span></div>
   </div>`;
 }
 function updateSchedWarn(){
@@ -3956,14 +4129,14 @@ function updateSchedWarn(){
   let html='';
   if(info.type==='forecast'){
     const v=workingConditionRating(info);
-    if(v.rating!=='good')html+=`<div class="sched-warning ${v.rating==='poor'?'bad':'warn'}">${info.icon||''} ${isoToLabel(scheduleChoice)} looks ${v.label.toLowerCase()} — ${info.rainPct}% rain. ${v.impact.join(' ')}</div>`;
+    if(v.rating!=='good')html+=`<div class="sched-warning ${v.rating==='poor'?'bad':'warn'}">${isoToLabel(scheduleChoice)} looks ${v.label.toLowerCase()} — ${info.rainPct}% rain. ${v.impact.join(' ')}</div>`;
   }else if(info.type==='historical'){
-    html+=`<div class="sched-warning warn">📊 No live forecast this far out — ${info.note}</div>`;
+    html+=`<div class="sched-warning warn">No live forecast this far out — ${info.note}</div>`;
   }else{
-    html+=`<div class="sched-warning warn">⚠️ No weather data available for this date — you're offline or this region has no history on file yet.</div>`;
+    html+=`<div class="sched-warning warn">No weather data available for this date — you're offline or this region has no history on file yet.</div>`;
   }
   const busy=busyBlocksForDate(scheduleChoice);
-  if(busy.length)html+=`<div class="sched-warning warn">🗓️ Calendar conflict — ${busy.map(b=>b.title||'busy').join(', ')} on your connected calendar this day.</div>`;
+  if(busy.length)html+=`<div class="sched-warning warn">Calendar conflict — ${busy.map(b=>b.title||'busy').join(', ')} on your connected calendar this day.</div>`;
   zone.innerHTML=html;
 }
 function confirmSchedule(){
@@ -4006,7 +4179,7 @@ function openDetail(id){
   const pct=checklist.steps.length?Math.round(done/checklist.steps.length*100):0;
   const allDone=r.skipChecklist?(r.photoBefore&&r.photoAfter):(lastIdx>=0&&r.sop.slice(0,lastIdx).every(Boolean)&&r.photoBefore&&r.photoAfter);
   const approved=lastIdx>=0&&r.sop[lastIdx];
-  const svcRows=r.services.map(s=>{const svc=SERVICES[s.svc];const rt=s.roofType?' · '+ROOF_TYPES[s.roofType].label:'';return `<div class="kv"><span class="k">${svc.label} · ${s.qty}${svc.unit}${rt}</span><span class="v">${money(lineSubtotal(s))}</span></div>`}).join('')||'<div class="kv"><span class="k">No services yet</span><span class="v">—</span></div>';
+  const svcRows=r.services.map(s=>{const svc=SERVICES[s.svc];const note=lineVariantNote(s);return `<div class="kv"><span class="k">${svc.label} · ${s.qty}${svc.unit}${note?' · '+note:''}</span><span class="v">${money(lineSubtotal(s))}</span></div>`}).join('')||'<div class="kv"><span class="k">No services yet</span><span class="v">—</span></div>';
   const sopHtml=checklist.steps.map((step,i)=>{const checked=r.sop[i];const locked=i===lastIdx&&!allDone;return `<div class="sop-step ${checked?'checked':''} ${locked?'locked':''}"><button class="sop-check" onclick="toggleSop(${id},${i})" ${locked?'disabled':''}>${checked?'✓':''}</button><span class="sop-num">${i+1}</span><span class="sop-label">${step.t}${step.s?`<small>${step.s}</small>`:''}</span></div>`}).join('');
   let approvalHtml;
   if(approved)approvalHtml=`<div class="approval-box approved"><div class="approved-stamp">✓ Customer approved — job closed</div></div>`;
@@ -4042,7 +4215,7 @@ function openDetail(id){
   document.getElementById('view-detail').innerHTML=`
     <a class="back-link" onclick="render();switchView('pipeline')">← Back to pipeline</a>
     <div class="view-head"><div><h2>${r.name}</h2><p>${r.address||'—'}${r.suburb?', '+r.suburb:''} · ${r.phone||'no phone'}</p></div><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-      <button class="btn ghost sm" onclick="openCustomerProfile(${id})">👤 Full profile</button>
+      <button class="btn ghost sm" onclick="openCustomerProfile(${id})">Full profile</button>
       ${jobStatusBadge(r)}
       ${canEditJobStatus(r)?`<select style="font-size:12px;padding:4px 8px;border-radius:980px" onchange="setManualStatus(${id},this.value)"><option value="">Change status…</option>${manualStatusOptions(r)}</select>`:''}
       ${r.stage!=='cancelled'&&r.stage!=='paid'?`<button class="btn ghost sm" onclick="cancelJob(${id})" title="Mark this job as cancelled">Cancel</button>`:''}
@@ -4052,20 +4225,20 @@ function openDetail(id){
         ${jobScheduleCardHtml}
         <div class="panel"><h4>Contact <span class="eng-badge">Client</span></h4>
           <div class="contact-rows">
-            <a class="contact-row" href="tel:${(r.phone||'').replace(/\s/g,'')}"><span class="ci">📞</span><div><div class="cl">Phone</div><div class="cv">${r.phone||'—'}</div></div></a>
+            <a class="contact-row" href="tel:${(r.phone||'').replace(/\s/g,'')}"><span class="ci"></span><div><div class="cl">Phone</div><div class="cv">${r.phone||'—'}</div></div></a>
             <a class="contact-row" href="mailto:${r.email||''}"><span class="ci">✉️</span><div><div class="cl">Email</div><div class="cv">${r.email||'—'}</div></div></a>
-            <div class="contact-row"><span class="ci">📍</span><div><div class="cl">Address</div><div class="cv">${r.address||'—'}${r.suburb?', '+r.suburb:''}</div></div></div>
+            <div class="contact-row"><span class="ci"></span><div><div class="cl">Address</div><div class="cv">${r.address||'—'}${r.suburb?', '+r.suburb:''}</div></div></div>
           </div>
           <div style="display:flex;gap:8px;margin-top:12px">
-            <button class="btn ghost sm" onclick="pickCustomerPhoto(${id})">${r.hasCustomerPhoto?'✓ Photo attached — replace':'📷 Add customer photo'}</button>
+            <button class="btn ghost sm" onclick="pickCustomerPhoto(${id})">${r.hasCustomerPhoto?'Photo attached — replace':'Add customer photo'}</button>
             ${r.hasCustomerPhoto?`<button class="btn ghost sm" onclick="viewCustomerPhoto(${id})">View</button>`:''}
           </div>
         </div>
         <div class="panel"><h4>Quote <span class="eng-badge">Pricing</span></h4>${svcRows}
           <div class="kv" style="border-top:1px solid var(--line);margin-top:6px;padding-top:10px"><span class="k" style="font-weight:600;color:var(--ink)">Total <span class="seg">${segOf(r.total)} job</span></span><span class="v" style="font-size:18px;color:var(--teal)">${money(r.total)}</span></div>
           ${r.stage==='new'||r.services.length===0?`<button class="btn primary block" style="margin-top:14px" onclick="openQuoteModal(${id})">Build quote</button>`:`<button class="btn ghost block" style="margin-top:14px" onclick="openQuoteModal(${id})">Edit quote</button>`}
-          ${r.selfPriced&&r.stage==='new'?`<button class="btn accent block" style="margin-top:9px" onclick="openQuoteModal(${id})">📄 Review &amp; send quote</button>`:''}
-          ${(r.stage==='completed'||r.stage==='paid')?`<button class="btn accent block" style="margin-top:9px" onclick="previewInvoice(${id})">📄 ${r.stage==='paid'?'View invoice':'Preview &amp; send invoice'}</button>`:''}
+          ${r.selfPriced&&r.stage==='new'?`<button class="btn accent block" style="margin-top:9px" onclick="openQuoteModal(${id})">Review &amp; send quote</button>`:''}
+          ${(r.stage==='completed'||r.stage==='paid')?`<button class="btn accent block" style="margin-top:9px" onclick="previewInvoice(${id})">${r.stage==='paid'?'View invoice':'Preview &amp; send invoice'}</button>`:''}
         </div>
         <div class="panel"><h4>Follow-up sequence <span class="eng-badge">Sales</span></h4>${followHtml}</div>
         <div class="panel"><h4>Lead source</h4>
@@ -4080,11 +4253,11 @@ function openDetail(id){
         <div class="panel"><h4>${r.skipChecklist?'Job progress':checklist.name+' — '+done+'/'+checklist.steps.length} <span class="eng-badge">Operations</span></h4>
           ${r.stage==='scheduled'&&!r.startedAt?`
           <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
-            ${!r.jobStatus||r.jobStatus==='travelling'?`<button class="btn ghost sm" onclick="markTravelling(${id})">🚗 On my way</button>`:''}
-            ${r.jobStatus==='travelling'||r.jobStatus==='on_site'?`<button class="btn ghost sm" onclick="markOnSite(${id})">📍 Arrived</button>`:''}
+            ${!r.jobStatus||r.jobStatus==='travelling'?`<button class="btn ghost sm" onclick="markTravelling(${id})">On my way</button>`:''}
+            ${r.jobStatus==='travelling'||r.jobStatus==='on_site'?`<button class="btn ghost sm" onclick="markOnSite(${id})">Arrived</button>`:''}
             <button class="btn accent sm" onclick="startJob(${id})">▶ Start job</button>
           </div>`:''}
-          ${r.startedAt&&r.stage==='scheduled'?`<p style="font-size:12px;color:var(--ink-faint);margin:-6px 0 14px">${jobStatusOf(r).icon} ${jobStatusOf(r).label} — started ${timeAgo(r.startedAt)}${r.jobStatus==='paused'&&r.pauseReason?' · paused: '+r.pauseReason:''}</p>`:''}
+          ${r.startedAt&&r.stage==='scheduled'?`<p style="font-size:12px;color:var(--ink-faint);margin:-6px 0 14px">${jobStatusOf(r).label} — started ${timeAgo(r.startedAt)}${r.jobStatus==='paused'&&r.pauseReason?' · paused: '+r.pauseReason:''}</p>`:''}
           ${r.skipChecklist?`<p style="font-size:12px;color:var(--ink-faint);margin:-6px 0 14px">Checklist turned off for this job — just photos and sign-off. <a href="#" onclick="toggleSkipChecklist(${id});return false" style="color:var(--teal)">Turn it back on</a></p>`:`
           <div class="progress-wrap"><div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div><div class="progress-txt">${pct}% — every step logs to the record</div></div>
           <div class="sop">${sopHtml}</div>
@@ -4093,7 +4266,7 @@ function openDetail(id){
           ${approvalHtml}
         </div>`:`
         <div class="panel"><h4>Job SOP <span class="eng-badge">Operations</span></h4>
-          <div class="sop-locked"><div class="sl-ico">🔒</div><div class="sl-ttl">The job checklist unlocks once it's booked</div><div class="sl-sub">SOP steps, before/after photos and customer sign-off appear here after you schedule the job — keeping the quote stage clean.</div>${r.services.length?`<button class="btn accent block" style="margin-top:14px" onclick="openSchedule(${id})">📅 Book this job</button>`:`<button class="btn ghost block" style="margin-top:14px" onclick="openQuoteModal(${id})">Build a quote first</button>`}</div>
+          <div class="sop-locked"><div class="sl-ico"></div><div class="sl-ttl">The job checklist unlocks once it's booked</div><div class="sl-sub">SOP steps, before/after photos and customer sign-off appear here after you schedule the job — keeping the quote stage clean.</div>${r.services.length?`<button class="btn accent block" style="margin-top:14px" onclick="openSchedule(${id})">Book this job</button>`:`<button class="btn ghost block" style="margin-top:14px" onclick="openQuoteModal(${id})">Build a quote first</button>`}</div>
         </div>`}
         <div class="panel"><h4>Assignment</h4>
           <div class="kv"><span class="k">Crew</span><span class="v">${r.tech}</span></div>
@@ -4233,7 +4406,7 @@ function computeAlerts(){
     const est=estimateJob(r.services);
     const margin=r.total>0?(r.total-est.cost)/r.total:0;
     if(margin<0.45){
-      alerts.push({tone:'warn',icon:'⚠️',title:'Quote margin low',
+      alerts.push({tone:'warn',title:'Quote margin low',
         text:`${r.name}'s quote runs ~${Math.round(margin*100)}% margin (target 55%). Consider +${Math.max(5,Math.round((est.recommended-r.total)/r.total*100))}%.`,
         action:{label:'Open quote',fn:`openDetail(${r.id})`}});
     }
@@ -4243,7 +4416,7 @@ function computeAlerts(){
     const tl=dayTimeline(i);
     const mins=tl.reduce((s,x)=>s+estimateJob(x.job.services).labourMin,0);
     if(mins>8*60){
-      alerts.push({tone:'warn',icon:'📅',title:'Crew overbooked',
+      alerts.push({tone:'warn',title:'Crew overbooked',
         text:`${w.day} has ${fmtDur(mins)} booked across ${tl.length} jobs — over an 8-hour day.`,
         action:{label:'View calendar',fn:`switchView('calendar')`}});
     }
@@ -4251,7 +4424,7 @@ function computeAlerts(){
   // 3) Repeat customer due for maintenance — last service ~a year ago
   records.filter(r=>r.lastServiceDaysAgo!=null).forEach(r=>{
     if(r.lastServiceDaysAgo>=330){
-      alerts.push({tone:'info',icon:'🔁',title:'Repeat customer due',
+      alerts.push({tone:'info',title:'Repeat customer due',
         text:`${r.name} was last done ${Math.round(r.lastServiceDaysAgo/30)} months ago — due for annual maintenance.`,
         action:{label:'Re-quote',fn:`openDetail(${r.id})`}});
     }
@@ -4262,10 +4435,10 @@ function renderAlertsBar(){
   const alerts=computeAlerts();
   if(!alerts.length)return '';
   return `<div class="alerts-bar">
-    <div class="alerts-lead"><span class="alerts-count">${alerts.length}</span> smart alert${alerts.length>1?'s':''}</div>
+    <div class="alerts-lead"><span class="alerts-count">${alerts.length}</span> alert${alerts.length>1?'s':''}</div>
     <div class="alerts-scroll">
       ${alerts.map(a=>`<div class="alert-chip ${a.tone}">
-        <span class="ac-ico">${a.icon}</span>
+        <span class="ac-ico"></span>
         <div class="ac-body"><div class="ac-title">${a.title}</div><div class="ac-text">${a.text}</div></div>
         <button class="ac-act" onclick="event.stopPropagation();${a.action.fn}">${a.action.label}</button>
       </div>`).join('')}
@@ -4380,7 +4553,7 @@ function renderCustomers(){
           <div class="cc-top"><div class="cc-name">${g.name}</div>${g.jobs.length>1?`<span class="pill">${g.jobs.length} jobs</span>`:jobStatusBadge(latest)}</div>
           <div class="cc-sub">${[g.address,g.suburb].filter(Boolean).join(', ')||'No address on file'}</div>
           <div class="cc-contact">
-            ${g.phone?`<a href="tel:${g.phone.replace(/\s/g,'')}" onclick="event.stopPropagation()">📞 ${g.phone}</a>`:''}
+            ${g.phone?`<a href="tel:${g.phone.replace(/\s/g,'')}" onclick="event.stopPropagation()">${g.phone}</a>`:''}
             ${g.email?`<a href="mailto:${g.email}" onclick="event.stopPropagation()">✉️ ${g.email}</a>`:''}
           </div>
         </button>`;
@@ -4430,15 +4603,29 @@ function cardHtml(r){
    revenue summary and upcoming work. Records are job-centric (one row per
    job), so this view aggregates every record sharing the same customerId.
    ===================================================================== */
+// `tone` drives a small colour-coded dot in the timeline (see
+// .cp-timeline-dot) instead of an emoji glyph — positive (won/paid),
+// negative (declined), or neutral (everything else, the default).
 const ACTIVITY_META={
-  note:{icon:'📝',label:'Note'},quote_sent:{icon:'📄',label:'Quote sent'},
-  quote_viewed:{icon:'👀',label:'Quote viewed'},quote_accepted:{icon:'✅',label:'Quote accepted'},
-  quote_declined:{icon:'❌',label:'Quote declined'},quote_updated:{icon:'✏️',label:'Quote amount changed'},job_scheduled:{icon:'📅',label:'Job scheduled'},
-  job_completed:{icon:'✅',label:'Job completed'},invoice_sent:{icon:'🧾',label:'Invoice sent'},
-  invoice_paid:{icon:'💰',label:'Invoice paid'},follow_up_sent:{icon:'📣',label:'Follow-up sent'},
-  email_sent:{icon:'📤',label:'Email sent'},email_received:{icon:'📥',label:'Email received'},
-  status_change:{icon:'🔄',label:'Status change'}
+  note:{label:'Note'},quote_sent:{label:'Quote sent'},
+  quote_viewed:{label:'Quote viewed'},quote_accepted:{label:'Quote accepted',tone:'pos'},
+  quote_declined:{label:'Quote declined',tone:'neg'},quote_updated:{label:'Quote amount changed'},job_scheduled:{label:'Job scheduled'},
+  job_completed:{label:'Job completed',tone:'pos'},invoice_sent:{label:'Invoice sent'},
+  invoice_paid:{label:'Invoice paid',tone:'pos'},follow_up_sent:{label:'Follow-up sent'},
+  email_sent:{label:'Email sent'},email_received:{label:'Email received'},
+  status_change:{label:'Status change'}
 };
+// Explicit actor attribution for the timeline — "Customer" for anything
+// created through the public quote-approval RPC (which never has a staff
+// created_by, by construction), otherwise the staff member on record.
+function activityActorLabel(a){
+  if(a.type==='quote_accepted'||a.type==='quote_declined')return 'Customer';
+  if(a.created_by){
+    const u=staff.find(s=>s.id===a.created_by);
+    if(u)return u.name||u.email||'';
+  }
+  return '';
+}
 let customerProfileCtx=null;
 async function openCustomerProfile(recordId){
   const r=records.find(x=>x.id===recordId);
@@ -4497,8 +4684,8 @@ function renderCustomerProfile(){
       </div>
       <div class="booked-actions">
         <button class="btn ghost sm" onclick="openSchedule(${nextBooked.id})">↻ Reschedule</button>
-        ${addr?`<button class="btn ghost sm" onclick="window.open('https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}','_blank')">🧭 Navigate</button>`:''}
-        ${c.phone?`<button class="btn ghost sm" onclick="window.location.href='tel:${c.phone.replace(/\s/g,'')}'">📞 Call</button>`:''}
+        ${addr?`<button class="btn ghost sm" onclick="window.open('https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}','_blank')">Navigate</button>`:''}
+        ${c.phone?`<button class="btn ghost sm" onclick="window.location.href='tel:${c.phone.replace(/\s/g,'')}'">Call</button>`:''}
         <button class="btn ghost sm" onclick="closeCustomerProfile();openDetail(${nextBooked.id})">Open job</button>
       </div>
     </div>`;
@@ -4562,7 +4749,12 @@ function renderCustomerProfile(){
         </div>
         <div class="panel"><h4>Communication timeline <span class="demo-tag">${ctx.activity.length}</span></h4>
           <div style="max-height:340px;overflow-y:auto">
-          ${ctx.activity.length?ctx.activity.map(a=>{const m=ACTIVITY_META[a.type]||{icon:'•',label:a.type};return `<div class="cp-timeline-row"><span class="cp-timeline-ico">${m.icon}</span><div><div class="cp-timeline-sum">${a.summary}</div><div class="cp-timeline-when">${new Date(a.created_at).toLocaleString('en-NZ',{day:'numeric',month:'short',hour:'numeric',minute:'2-digit'})}</div></div></div>`}).join(''):'<div class="empty-state" style="padding:16px"><div class="sm">Nothing logged yet — sending a quote, booking a job or connecting email will show up here.</div></div>'}
+          ${ctx.activity.length?ctx.activity.map(a=>{
+            const m=ACTIVITY_META[a.type]||{label:a.type};
+            const actor=activityActorLabel(a);
+            const when=new Date(a.created_at).toLocaleString('en-NZ',{day:'numeric',month:'short',hour:'numeric',minute:'2-digit'});
+            return `<div class="cp-timeline-row"><span class="cp-timeline-dot ${m.tone||''}"></span><div><div class="cp-timeline-sum">${a.summary}</div><div class="cp-timeline-when">${when}${actor?' · '+actor:''}</div></div></div>`;
+          }).join(''):'<div class="empty-state" style="padding:16px"><div class="sm">Nothing logged yet — sending a quote, booking a job or connecting email will show up here.</div></div>'}
           </div>
         </div>
       </div>
@@ -4658,7 +4850,7 @@ function renderThreadPane(thread){
     </div>`).join('');
   return `
     <div class="ib-thread-head">
-      <div><div class="ib-thread-subj">${last.subject||'(no subject)'}</div>${custRecord?`<div class="ib-thread-cust">👤 ${custRecord.name}</div>`:'<div class="ib-thread-cust">Not linked to a customer</div>'}</div>
+      <div><div class="ib-thread-subj">${last.subject||'(no subject)'}</div>${custRecord?`<div class="ib-thread-cust">${custRecord.name}</div>`:'<div class="ib-thread-cust">Not linked to a customer</div>'}</div>
       ${custRecord?`<div class="cp-actions"><button class="btn ghost sm" onclick="openCustomerProfile(${custRecord.id})">Full profile</button><button class="btn ghost sm" onclick="openQuoteModal(${custRecord.id})">Build quote</button><button class="btn ghost sm" onclick="openNewJobModal('${custRecord.customerId}')">+ New job</button></div>`:''}
     </div>
     <div class="ib-msgs">${msgs}</div>
@@ -4760,8 +4952,8 @@ function renderOps(){
               </div>
               <div class="rs-actions">
                 ${notStarted?`<button class="btn accent sm" onclick="event.stopPropagation();startJob(${r.id})">▶ Start</button>`:''}
-                ${r.phone?`<button class="btn ghost sm" onclick="event.stopPropagation();window.location.href='tel:${r.phone.replace(/\s/g,'')}'" title="Call ${r.name}">📞</button>`:''}
-                ${addr?`<button class="btn ghost sm" onclick="event.stopPropagation();window.open('https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}','_blank')" title="Navigate">🧭</button>`:''}
+                ${r.phone?`<button class="btn ghost sm" onclick="event.stopPropagation();window.location.href='tel:${r.phone.replace(/\s/g,'')}'" title="Call ${r.name}">Call</button>`:''}
+                ${addr?`<button class="btn ghost sm" onclick="event.stopPropagation();window.open('https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}','_blank')" title="Navigate">Navigate</button>`:''}
                 ${r.stage==='scheduled'?`<button class="btn ghost sm" onclick="event.stopPropagation();openSchedule(${r.id})" title="Reschedule">↻</button>`:''}
               </div>
             </div>`;
@@ -4779,14 +4971,12 @@ function renderOps(){
 // Operations shouldn't have its own separate read of "what's today's weather".
 function renderOpsWeatherPanel(wx,badge){
   if(wx.type==='unavailable')return '';
-  const icon=wx.type==='forecast'?(wx.icon||'🌤️'):'📊';
   const headline=wx.type==='forecast'?wx.cond:`Historical avg for ${wx.month}`;
   const stats=wx.type==='forecast'
     ?`${wx.rainPct}% rain · ${wx.tempHi}°C · ${wx.windKmh}km/h wind`
     :`${wx.rainDayPct}% of days had rain · ~${wx.avgHighTemp}°C avg`;
   const cls=badge?badge.cls:'good';
   return `<div class="ops-wx ops-wx-${cls}">
-    <div class="ops-wx-ico">${icon}</div>
     <div class="ops-wx-body">
       <div class="ops-wx-top"><b>${headline||badge?.label||'Working conditions'}</b><span class="pill ${cls==='bad'?'bad':cls==='warn'?'followup':'won'}">${wx.label}</span></div>
       <div class="ops-wx-stats">${stats}</div>
@@ -4911,7 +5101,8 @@ function renderPricing(){
       <div class="rate-tier" style="padding:9px 0;border-bottom:1px solid var(--line-soft)"><label>Avg round-trip drive</label><div class="ri"><input type="number" value="${COST_INPUTS.avgKm}" onchange="setCostInput('avgKm',this.value)"><span>km per job</span></div></div>
       <div class="rate-tier" style="padding:9px 0;border-bottom:1px solid var(--line-soft)"><label>Equipment</label><div class="ri"><span>$</span><input type="number" value="${COST_INPUTS.equipmentPerJob}" onchange="setCostInput('equipmentPerJob',this.value)"><span>/job (wear &amp; maintenance)</span></div></div>
       <div class="rate-tier" style="padding:9px 0;border-bottom:1px solid var(--line-soft)"><label>Consumables</label><div class="ri"><span>$</span><input type="number" value="${COST_INPUTS.consumablesPerJob}" onchange="setCostInput('consumablesPerJob',this.value)"><span>/job (PPE, misc supplies)</span></div></div>
-      <div class="rate-tier" style="padding:9px 0"><label>Target profit margin</label><div class="ri"><input type="number" value="${Math.round(COST_INPUTS.targetMargin*100)}" onchange="setCostInput('targetMargin',this.value/100)"><span>% — drives the recommended price on every quote</span></div></div>
+      <div class="rate-tier" style="padding:9px 0;border-bottom:1px solid var(--line-soft)"><label>Target profit margin</label><div class="ri"><input type="number" value="${Math.round(COST_INPUTS.targetMargin*100)}" onchange="setCostInput('targetMargin',this.value/100)"><span>% — drives the recommended price on every quote</span></div></div>
+      <div class="rate-tier" style="padding:9px 0"><label>Minimum call-out</label><div class="ri"><span>$</span><input type="number" value="${COST_INPUTS.calloutMin}" onchange="setCostInput('calloutMin',this.value)"><span>lowest recommended price, however small the job</span></div></div>
     </div>
     ${renderPricingStats()}`;
 }
@@ -4919,15 +5110,28 @@ function renderPricing(){
 // how often each service has been quoted, its win rate, and the average
 // price it's actually gone out at, so pricing decisions use real history.
 function renderPricingStats(){
+  // Margin history uses each quote's PERSISTED estimatedMarginPct/estCost
+  // (snapshotted in confirmQuoteSend at send time) rather than recomputing
+  // against today's COST_INPUTS — a quote sent 3 months ago at last
+  // quarter's chemical prices should keep showing what its margin actually
+  // was. Older quotes sent before this feature existed simply don't carry
+  // that data and are excluded from the margin average, not guessed at.
+  const wonWithMargin=records.filter(r=>isWon(r)&&r.estimatedMarginPct!=null);
+  const overallAvgMargin=wonWithMargin.length?wonWithMargin.reduce((s,r)=>s+r.estimatedMarginPct,0)/wonWithMargin.length:null;
+  const headline=overallAvgMargin!=null?`<div class="kv" style="border-bottom:1px solid var(--line);padding-bottom:10px;margin-bottom:4px"><span class="k" style="font-weight:600">Average margin (won quotes)</span><span class="v ${overallAvgMargin<40?'pc-red':overallAvgMargin<Math.round(COST_INPUTS.targetMargin*100)?'pc-orange':'pc-green'}" style="font-weight:700">${overallAvgMargin.toFixed(1)}%</span></div>`:'';
   const rows=Object.entries(SERVICES).map(([k,v])=>{
     const withSvc=records.filter(r=>r.services.some(s=>s.svc===k));
     const won=withSvc.filter(isWon);
     if(!withSvc.length)return null;
     const avgTotal=won.length?Math.round(won.reduce((s,r)=>s+(r.total||0),0)/won.length):0;
     const winRate=withSvc.length?Math.round(won.length/withSvc.length*100):0;
-    return `<div class="kv"><span class="k">${v.label}</span><span class="v">${withSvc.length} quoted · ${winRate}% won · avg ${avgTotal?money(avgTotal):'—'}</span></div>`;
+    const marginSamples=won.map(r=>r.services.find(s=>s.svc===k)).filter(s=>s&&s.estCost!=null&&TK_PRICING.lineTotal(s)>0)
+      .map(s=>TK_COST.marginPct(TK_PRICING.lineTotal(s),s.estCost));
+    const avgMargin=marginSamples.length?marginSamples.reduce((a,b)=>a+b,0)/marginSamples.length:null;
+    return `<div class="kv"><span class="k">${v.label}</span><span class="v">${withSvc.length} quoted · ${winRate}% won · avg ${avgTotal?money(avgTotal):'—'}${avgMargin!=null?' · '+avgMargin.toFixed(0)+'% margin':''}</span></div>`;
   }).filter(Boolean);
   return `<div class="panel" style="margin-top:14px"><h4>Per-service performance</h4>
+    ${headline}
     ${rows.length?rows.join(''):'<div class="empty-state" style="padding:16px"><div class="sm">No quotes yet — this fills in once you\'ve sent a few.</div></div>'}
   </div>`;
 }
@@ -4963,24 +5167,24 @@ function applyPricingConfig(config){
 function dashboardAlerts(){
   const alerts=[];
   const followupCount=records.filter(r=>r.stage==='followup').length;
-  if(followupCount)alerts.push({icon:'📝',tone:'warn',text:`${followupCount} quote${followupCount!==1?'s':''} need${followupCount===1?'s':''} following up.`,onclick:"switchView('pipeline')"});
+  if(followupCount)alerts.push({tone:'warn',text:`${followupCount} quote${followupCount!==1?'s':''} need${followupCount===1?'s':''} following up.`,onclick:"switchView('pipeline')"});
   const overdueCount=records.filter(r=>invoiceDisplayStatus(r)==='overdue').length;
-  if(overdueCount)alerts.push({icon:'🧾',tone:'bad',text:`${overdueCount} invoice${overdueCount!==1?'s':''} overdue.`,onclick:"switchView('pipeline')"});
+  if(overdueCount)alerts.push({tone:'bad',text:`${overdueCount} invoice${overdueCount!==1?'s':''} overdue.`,onclick:"switchView('pipeline')"});
   weatherAlerts().slice(0,2).forEach(a=>{
-    alerts.push({icon:'🌧️',tone:a.rating.rating==='poor'?'bad':'warn',
+    alerts.push({tone:a.rating.rating==='poor'?'bad':'warn',
       text:`${isoToLabel(a.r.scheduledDateISO)} — weather may affect ${a.r.name}'s job.`,onclick:"switchView('calendar')"});
   });
   const todayIso=todayISO(), weekAhead=addDaysISO(todayIso,7);
   staff.forEach(t=>{
     const hasWork=records.some(r=>r.assignedStaffId===t.id&&r.scheduledDateISO&&r.scheduledDateISO>=todayIso&&r.scheduledDateISO<=weekAhead);
-    if(!hasWork)alerts.push({icon:'👷',tone:'warn',text:`${t.name||t.email||'One technician'} has no work scheduled this week.`,onclick:"switchView('ops')"});
+    if(!hasWork)alerts.push({tone:'warn',text:`${t.name||t.email||'One technician'} has no work scheduled this week.`,onclick:"switchView('ops')"});
   });
   const wonUnscheduled=records.filter(r=>r.stage==='won').length;
-  if(wonUnscheduled)alerts.push({icon:'📅',tone:'warn',text:`${wonUnscheduled} won job${wonUnscheduled!==1?'s':''} still need${wonUnscheduled===1?'s':''} a date booked.`,onclick:"switchView('pipeline')"});
+  if(wonUnscheduled)alerts.push({tone:'warn',text:`${wonUnscheduled} won job${wonUnscheduled!==1?'s':''} still need${wonUnscheduled===1?'s':''} a date booked.`,onclick:"switchView('pipeline')"});
   const todayCount=records.filter(r=>isBooked(r)&&r.scheduledDateISO===todayIso).length;
-  if(todayCount)alerts.push({icon:'✅',tone:'good',text:`${todayCount} job${todayCount!==1?'s':''} scheduled today.`,onclick:"switchView('ops')"});
+  if(todayCount)alerts.push({tone:'good',text:`${todayCount} job${todayCount!==1?'s':''} scheduled today.`,onclick:"switchView('ops')"});
   const dueRepeats=records.filter(r=>r.nextDueDate&&r.nextDueDate<=todayIso).length;
-  if(dueRepeats)alerts.push({icon:'🔁',tone:'warn',text:`${dueRepeats} customer${dueRepeats!==1?'s are':' is'} due for their repeat clean.`,onclick:"openDueRepeats()"});
+  if(dueRepeats)alerts.push({tone:'warn',text:`${dueRepeats} customer${dueRepeats!==1?'s are':' is'} due for their repeat clean.`,onclick:"openDueRepeats()"});
   // Nothing should sit In Progress/Paused indefinitely — flag anything
   // that's been active for more than a normal working day so it gets
   // manually closed out rather than quietly rotting.
@@ -4989,7 +5193,7 @@ function dashboardAlerts(){
   if(stuck.length){
     const one=stuck.length===1;
     const word=one?(stuck[0].jobStatus==='paused'?'paused':'in progress'):'active';
-    alerts.push({icon:'⏱️',tone:'bad',text:`${stuck.length} job${one?'':'s'} ${one?'has':'have'} been ${word} for over 10 hours — check ${one?'it':'them'}.`,onclick:"openDetail("+stuck[0].id+")"});
+    alerts.push({tone:'bad',text:`${stuck.length} job${one?'':'s'} ${one?'has':'have'} been ${word} for over 10 hours — check ${one?'it':'them'}.`,onclick:"openDetail("+stuck[0].id+")"});
   }
   const tone=(a)=>({bad:0,warn:1,good:2})[a.tone];
   return alerts.sort((a,b)=>tone(a)-tone(b));
@@ -5050,7 +5254,7 @@ function renderDashboard(){
     <div class="view-head"><div><h2>Dashboard</h2><p>The health of the business at a glance — the numbers you normally only find out at tax time, live instead.</p></div></div>
     <div class="panel" style="margin-bottom:18px"><h4>Today's priorities</h4>
       ${alerts.length?alerts.map(a=>`<button class="wx-alert-btn" onclick="${a.onclick}"><div class="wx-alert ${a.tone}">
-          <div class="wx-alert-ico">${a.icon}</div>
+          <div class="wx-alert-ico"></div>
           <div class="wx-alert-body"><div class="wx-alert-ttl">${a.text}</div></div>
         </div></button>`).join(''):'<div class="empty-state" style="padding:20px"><div class="sm">Nothing needs your attention right now — nice.</div></div>'}
     </div>
@@ -5142,11 +5346,11 @@ function copyMarketingContent(){
 let jobsFlowActive=null;
 // Map the 7 pipeline stages onto the 5 workflow steps.
 const FLOW_STEPS=[
-  {key:'lead',    label:'Lead',     icon:'📥', stages:['new']},
-  {key:'quote',   label:'Quote',    icon:'📝', stages:['quoted','followup']},
-  {key:'schedule',label:'Schedule', icon:'📅', stages:['won','scheduled']},
-  {key:'job',     label:'Job',      icon:'🧽', stages:['scheduled','completed']},
-  {key:'invoice', label:'Invoice',  icon:'💰', stages:['completed','paid']}
+  {key:'lead',    label:'Lead',     stages:['new']},
+  {key:'quote',   label:'Quote',    stages:['quoted','followup']},
+  {key:'schedule',label:'Schedule', stages:['won','scheduled']},
+  {key:'job',     label:'Job',      stages:['scheduled','completed']},
+  {key:'invoice', label:'Invoice',  stages:['completed','paid']}
 ];
 function flowStepIndex(stage){
   // furthest step this stage has reached
@@ -5219,7 +5423,7 @@ function renderJobsFlow(){
       <div class="jf-track">
         ${FLOW_STEPS.map((s,i)=>`
           <div class="jf-step ${i<cur?'done':''} ${i===cur?'current':''}">
-            <div class="jf-node">${i<cur?'✓':s.icon}</div>
+            <div class="jf-node">${i<cur?'✓':i+1}</div>
             <div class="jf-label">${s.label}</div>
             <div class="jf-detail">${stepDetail(i)}</div>
           </div>
@@ -5344,10 +5548,10 @@ function renderJobScheduleCard(r){
     return `<div class="panel">
       <h4>Schedule</h4>
       <div class="sop-locked">
-        <div class="sl-ico">📅</div>
+        <div class="sl-ico"></div>
         <div class="sl-ttl">Not Scheduled</div>
         <div class="sl-sub">This job hasn't been booked in yet.</div>
-        ${r.services.length?`<button class="btn accent block" style="margin-top:14px" onclick="openSchedule(${r.id})">📅 Schedule Job</button>`:`<button class="btn ghost block" style="margin-top:14px" onclick="openQuoteModal(${r.id})">Build a quote first</button>`}
+        ${r.services.length?`<button class="btn accent block" style="margin-top:14px" onclick="openSchedule(${r.id})">Schedule Job</button>`:`<button class="btn ghost block" style="margin-top:14px" onclick="openQuoteModal(${r.id})">Build a quote first</button>`}
       </div>
     </div>`;
   }
@@ -5378,8 +5582,8 @@ function renderJobScheduleCard(r){
     </div>
     <div class="booked-actions">
       <button class="btn ghost sm" onclick="openSchedule(${r.id})">↻ Reschedule</button>
-      ${addr?`<button class="btn ghost sm" onclick="window.open('https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}','_blank')">🧭 Navigate</button>`:''}
-      ${r.phone?`<button class="btn ghost sm" onclick="window.location.href='tel:${r.phone.replace(/\s/g,'')}'">📞 Call customer</button>`:''}
+      ${addr?`<button class="btn ghost sm" onclick="window.open('https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}','_blank')">Navigate</button>`:''}
+      ${r.phone?`<button class="btn ghost sm" onclick="window.location.href='tel:${r.phone.replace(/\s/g,'')}'">Call customer</button>`:''}
       ${notStarted?`<button class="btn accent sm" onclick="startJob(${r.id})">▶ Start job</button>`:''}
     </div>
   </div>`;
@@ -5397,14 +5601,14 @@ function renderJobToolbar(r){
   const nextPhotoSlot=!r.photoBefore?'before':'after';
   const addr=[r.address,r.suburb].filter(Boolean).join(', ');
   return `<div class="job-toolbar">
-    <span class="jt-status">${status.icon} ${status.label}${r.startedAt?' · started '+timeAgo(r.startedAt):''}</span>
+    <span class="jt-status">${status.label}${r.startedAt?' · started '+timeAgo(r.startedAt):''}</span>
     <button class="jt-primary" onclick="completeJob(${r.id})">✓ Complete</button>
     ${pauseResume}
     <button class="jt-danger" onclick="cancelJob(${r.id})">✕ Cancel</button>
-    <button onclick="pickJobPhoto(${r.id},'${nextPhotoSlot}')">📷 Photos</button>
-    <button onclick="promptJobNote(${r.id})">📝 Note</button>
-    ${r.phone?`<button onclick="window.location.href='tel:${r.phone.replace(/\s/g,'')}'">📞 Call</button>`:''}
-    ${addr?`<button onclick="window.open('https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}','_blank')">🧭 Navigate</button>`:''}
+    <button onclick="pickJobPhoto(${r.id},'${nextPhotoSlot}')">Photos</button>
+    <button onclick="promptJobNote(${r.id})">Note</button>
+    ${r.phone?`<button onclick="window.location.href='tel:${r.phone.replace(/\s/g,'')}'">Call</button>`:''}
+    ${addr?`<button onclick="window.open('https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}','_blank')">Navigate</button>`:''}
   </div>`;
 }
 
@@ -5417,10 +5621,9 @@ function renderJobTimeline(r){
   if(!entries.length)return '<div class="empty-state" style="padding:16px"><div class="sm">Nothing logged yet.</div></div>';
   return entries.map(e=>{
     const meta=e.status?JOB_STATUS_META[e.status]:null;
-    const icon=meta?meta.icon:'📝';
     const label=meta?meta.label:(e.note?'Note':'Update');
     const when=new Date(e.at).toLocaleString('en-NZ',{hour:'numeric',minute:'2-digit',day:'numeric',month:'short'});
-    return `<div class="dd-row"><span><b>${when}</b> · ${icon} ${label}${e.byName?' · '+e.byName:''}${e.note&&meta?' — '+e.note:e.note?': '+e.note:''}</span></div>`;
+    return `<div class="dd-row"><span><b>${when}</b> · ${label}${e.byName?' · '+e.byName:''}${e.note&&meta?' — '+e.note:e.note?': '+e.note:''}</span></div>`;
   }).join('');
 }
 
@@ -5444,7 +5647,7 @@ const MANUAL_STATUS_MAP={
 };
 function manualStatusOptions(r){
   const current=jobStatusKeyOf(r);
-  return Object.keys(MANUAL_STATUS_MAP).map(k=>`<option value="${k}" ${current===k?'selected':''}>${JOB_STATUS_META[k].icon} ${JOB_STATUS_META[k].label}</option>`).join('');
+  return Object.keys(MANUAL_STATUS_MAP).map(k=>`<option value="${k}" ${current===k?'selected':''}>${JOB_STATUS_META[k].label}</option>`).join('');
 }
 function setManualStatus(id,key){
   const r=records.find(x=>x.id===id);if(!r)return;
@@ -5564,15 +5767,16 @@ function buildCalendarEvents(){
     const start=calJobStartTime(r);
     return {
       id:String(r.id),
-      title:status.icon+' '+r.name+(start?' · '+start:'')+(r.tech&&r.tech!=='Unassigned'?' · '+r.tech:''),
+      title:r.name+(start?' · '+start:'')+(r.tech&&r.tech!=='Unassigned'?' · '+r.tech:''),
       start:r.scheduledDateISO,
       allDay:true,
       backgroundColor:color,borderColor:color,
       // Structured fields for fcEventContent() — kept alongside the plain
       // `title` string above (used by list/agenda views and screen readers)
       // rather than replacing it, so nothing regresses for views that don't
-      // call our custom renderer.
-      extendedProps:{recordId:r.id,customerName:r.name,statusLabel:status.label,statusIcon:status.icon,tech:r.tech,startTime:start}
+      // call our custom renderer. No separate status icon — the event's own
+      // backgroundColor (JOB_STATUS_CAL_COLOR) already is the status signal.
+      extendedProps:{recordId:r.id,customerName:r.name,statusLabel:status.label,tech:r.tech,startTime:start}
     };
   });
 }
@@ -5606,10 +5810,10 @@ function fcHandleDateClick(info){
 function fcEventContent(arg){
   const p=arg.event.extendedProps;
   const compact=arg.view.type==='dayGridMonth';
-  const techBit=p.tech&&p.tech!=='Unassigned'?`<span class="fc-card-tech">👤 ${p.tech}</span>`:'';
+  const techBit=p.tech&&p.tech!=='Unassigned'?`<span class="fc-card-tech">${p.tech}</span>`:'';
   const timeBit=p.startTime?`<span class="fc-card-time">${p.startTime}</span>`:'';
   return {html:`<div class="fc-card ${compact?'fc-card-compact':''}">
-    <div class="fc-card-row1"><span class="fc-card-ico">${p.statusIcon||''}</span><span class="fc-card-name">${p.customerName||''}</span>${compact?timeBit:''}</div>
+    <div class="fc-card-row1"><span class="fc-card-name">${p.customerName||''}</span>${compact?timeBit:''}</div>
     ${compact?'':`<div class="fc-card-row2"><span class="fc-card-status">${p.statusLabel||''}</span>${timeBit}${techBit}</div>`}
   </div>`};
 }
@@ -5656,11 +5860,11 @@ function fcDayCellDidMount(arg){
       // glance at the month grid is enough to see which days have work.
       const big=document.createElement('div');
       big.className='fc-booked-badge';
-      big.innerHTML=`🟢 ${dayJobs.length} Booked`;
+      big.innerHTML=`${dayJobs.length} Booked`;
       frame.appendChild(big);
       const summary=document.createElement('div');
       summary.className='fc-day-summary';
-      summary.innerHTML=`<span>📋 ${dayJobs.length}</span>${revenue?`<span class="fc-ds-rev">${money(revenue)}</span>`:''}${techCount?`<span>👷 ${techCount}</span>`:''}`;
+      summary.innerHTML=`<span>${dayJobs.length} job${dayJobs.length===1?'':'s'}</span>${revenue?`<span class="fc-ds-rev">${money(revenue)}</span>`:''}${techCount?`<span>${techCount} tech${techCount===1?'':'s'}</span>`:''}`;
       frame.appendChild(summary);
     }
   }
@@ -5670,13 +5874,13 @@ function openCalPicker(iso){
   const unscheduled=records.filter(r=>r.stage==='won'||(isWon(r)&&!r.scheduledDateISO));
   document.getElementById('cp-title').textContent=isoToLabel(iso);
   const wx=weatherForDate(iso);
-  const wxLine=wx.type==='forecast'?`${wx.icon||''} ${wx.cond||''} · ${wx.rainPct}% rain · ${wx.tempHi}°C · ${wx.windKmh}km/h wind`
-    :wx.type==='historical'?`📊 Historical avg for ${wx.month}: ${wx.rainDayPct}% of days had rain, ~${wx.avgHighTemp}°C`
+  const wxLine=wx.type==='forecast'?`${wx.cond||''} · ${wx.rainPct}% rain · ${wx.tempHi}°C · ${wx.windKmh}km/h wind`
+    :wx.type==='historical'?`Historical avg for ${wx.month}: ${wx.rainDayPct}% of days had rain, ~${wx.avgHighTemp}°C`
     :'Weather data unavailable for this date';
   const techCount=new Set(dayJobs.map(r=>r.assignedStaffId).filter(Boolean)).size;
   const revenue=dayJobs.reduce((s,r)=>s+(r.total||0),0);
   const jobsSection=`
-    <div style="font-size:12px;color:var(--ink-faint);margin-bottom:10px">${wxLine}${techCount?' · 👷 '+techCount+' technician'+(techCount!==1?'s':''):''}</div>
+    <div style="font-size:12px;color:var(--ink-faint);margin-bottom:10px">${wxLine}${techCount?' · '+techCount+' technician'+(techCount!==1?'s':''):''}</div>
     <div class="more-group-label">Scheduled jobs${dayJobs.length?' — '+dayJobs.length+' · '+money(revenue):''}</div>
     ${dayJobs.length?dayJobs.map(r=>{
       const start=calJobStartTime(r);
@@ -5721,7 +5925,6 @@ function renderCalendarSidebar(){
     const v=weatherVerdict(w);
     return `<div class="wx-day ${v.tone}">
       <div class="wx-dow">${w.day}<span>${w.date}</span></div>
-      <div class="wx-ico">${w.icon}</div>
       <div class="wx-temp">${w.tempHi}°</div>
       <div class="wx-meta">${w.rainPct}% rain · ${w.windKmh}km/h</div>
       <div class="wx-verdict ${v.tone}">${v.label}</div>
@@ -5740,20 +5943,20 @@ function renderCalendarSidebar(){
   const rec=document.getElementById('cal-recommended');
   if(rec)rec.innerHTML=best.length?best.map((w,i)=>`<div class="rec-day">
       <div class="rec-rank">${i+1}</div>
-      <div class="rec-info"><div class="rec-when">${w.day} ${w.date} · ${w.icon} ${w.cond}</div><div class="rec-sub">${w.rainPct}% rain, wind ${w.windKmh}km/h</div></div>
+      <div class="rec-info"><div class="rec-when">${w.day} ${w.date} · ${w.cond}</div><div class="rec-sub">${w.rainPct}% rain, wind ${w.windKmh}km/h</div></div>
       <div class="rec-score">${w.score}<span>/100</span></div>
     </div>`).join(''):'<div class="empty-state" style="padding:16px"><div class="sm">No live forecast yet.</div></div>';
 
   const alertZone=document.getElementById('cal-alerts');
   if(alertZone)alertZone.innerHTML=alerts.length?alerts.map(a=>`<div class="wx-alert ${a.rating.rating==='poor'?'bad':'warn'}">
-      <div class="wx-alert-ico">${a.info.icon||'📊'}</div>
+      <div class="wx-alert-ico"></div>
       <div class="wx-alert-body"><div class="wx-alert-ttl">${a.r.name} — ${isoToLabel(a.r.scheduledDateISO)}</div><div class="wx-alert-sub">${(a.rating.impact||[a.rating.label]).join(' ')}</div></div>
       <button class="btn ghost sm" onclick="openSchedule(${a.r.id})">Reschedule</button>
     </div>`).join(''):'<div class="empty-state" style="padding:30px 16px"><div class="sm">No weather conflicts on any booked job.</div></div>';
 
   const pairZone=document.getElementById('cal-pairings');
   if(pairZone)pairZone.innerHTML=pairs.length?pairs.map(p=>`<div class="pair">
-      <div class="pair-head"><span class="pair-sub">📍 ${p.sub}</span><span class="pair-save">saves ~${p.driveSaved} min driving</span></div>
+      <div class="pair-head"><span class="pair-sub">${p.sub}</span><span class="pair-save">saves ~${p.driveSaved} min driving</span></div>
       <div class="pair-jobs">${p.jobs.map(j=>`<span class="pair-chip">${j.name} · ${fmtDur(estimateJob(j.services).labourMin)}</span>`).join('')}</div>
       <div class="pair-foot">Run together: ~${fmtDur(p.est)} of work in one trip across ${p.sub}.</div>
     </div>`).join(''):'<div class="empty-state" style="padding:30px 16px"><div class="sm">No nearby jobs to pair yet. When two jobs share a suburb, Turnkey suggests running them in one trip.</div></div>';
@@ -5900,7 +6103,7 @@ function openModal(id){document.getElementById(id).classList.add('open')}
 function closeModal(id){document.getElementById(id).classList.remove('open')}
 document.querySelectorAll('.overlay').forEach(o=>o.addEventListener('click',e=>{if(e.target===o)o.classList.remove('open')}));
 let toastTimer;
-function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.remove('show'),2200)}
+function toast(m,ms){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.remove('show'),ms||2200)}
 
 /* ===== BACKEND: base URL for every per-business route (leads, email,
    calendar, AI marketing) — always comes from config.js, resolved per
@@ -5955,17 +6158,17 @@ try{window.addEventListener('focus',syncGoogleCalendarBackground);}catch(e){}
    destinations (iOS "More" tab convention) rather than duplicating
    Settings' content; most rows just open the relevant existing screen. ===== */
 function openMoreSheet(){
-  const row=(ico,label,onclick,danger)=>`<button class="more-row${danger?' danger':''}" onclick="closeModal('more-overlay');${onclick}"><span class="mr-ico">${ico}</span><span class="mr-label">${label}</span><span class="mr-chev">›</span></button>`;
+  const row=(label,onclick,danger)=>`<button class="more-row${danger?' danger':''}" onclick="closeModal('more-overlay');${onclick}"><span class="mr-label">${label}</span><span class="mr-chev">›</span></button>`;
   const isTech=currentUserRole==='technician';
   document.getElementById('more-body').innerHTML=`
-    ${!isTech?`<div class="more-group-label">Work</div>${row('🚚','Operations',"switchView('ops')")}${row('💲','Pricing',"switchView('pricing')")}${row('🎯','Goals',"switchView('goals')")}`:''}
+    ${!isTech?`<div class="more-group-label">Work</div>${row('Operations',"switchView('ops')")}${row('Pricing',"switchView('pricing')")}${row('Goals',"switchView('goals')")}`:''}
     <div class="more-group-label">Business</div>
-    ${row('⚙️','Settings',"openSettings()")}
-    ${row('🔌','Connections',"openConnections()")}
-    ${row('✉️','Templates',"openTemplateEditor()")}
-    ${row('📥','Imports',"openImportWizard()")}
+    ${row('Settings',"openSettings()")}
+    ${row('Connections',"openConnections()")}
+    ${row('Templates',"openTemplateEditor()")}
+    ${row('Imports',"openImportWizard()")}
     <div class="more-group-label">Account</div>
-    ${row('🚪','Log out',"handleLogout()",true)}`;
+    ${row('Log out',"handleLogout()",true)}`;
   openModal('more-overlay');
 }
 // iPhone-Settings-style grouped layout — every group the user asked for
@@ -5973,8 +6176,8 @@ function openMoreSheet(){
 // Integrations/Imports/Billing/Support/Advanced), each with a small caps
 // label, so this reads like a settings app instead of a stack of cards.
 function settingsGroup(label,inner){return `<div class="more-group-label">${label}</div>${inner}`;}
-function settingsRow(ico,label,sub,onclick){
-  return `<button class="more-row" onclick="${onclick}"><span class="mr-ico">${ico}</span><span class="mr-label">${label}${sub?`<br><span style="font-weight:400;font-size:12px;color:var(--ink-faint)">${sub}</span>`:''}</span><span class="mr-chev">›</span></button>`;
+function settingsRow(label,sub,onclick){
+  return `<button class="more-row" onclick="${onclick}"><span class="mr-label">${label}${sub?`<br><span style="font-weight:400;font-size:12px;color:var(--ink-faint)">${sub}</span>`:''}</span><span class="mr-chev">›</span></button>`;
 }
 function openSettings(){
   const bookingLink=currentBusinessId?`${location.origin}/booking.html?biz=${currentBusinessId}`:'';
@@ -5988,7 +6191,7 @@ function openSettings(){
   document.getElementById('settings-body').innerHTML=`
     ${settingsGroup('Business',`
     <div class="conn-card ${biz.name?'live':''}">
-      <div class="conn-top"><span class="conn-name">🏢 Business profile</span><span class="conn-badge ${biz.name?'on':'off'}">${biz.name?'● SET':'not set yet'}</span></div>
+      <div class="conn-top"><span class="conn-name">Business profile</span><span class="conn-badge ${biz.name?'on':'off'}">${biz.name?'● SET':'not set yet'}</span></div>
       <p>Shown to your customers on your booking page and in every quote/invoice.</p>
       ${canEditBusiness?`
       <div class="field"><label>Business name</label><input id="biz-name-input" placeholder="e.g. North Shore Pressure Wash" value="${(biz.name||'').replace(/"/g,'&quot;')}"></div>
@@ -6001,19 +6204,19 @@ function openSettings(){
     </div>`)}
     ${settingsGroup('Branding',`
     <div class="conn-card">
-      <div class="conn-top"><span class="conn-name">🎨 Logo &amp; colours</span></div>
+      <div class="conn-top"><span class="conn-name">Logo &amp; colours</span></div>
       <p>Your logo and accent colour appear on quotes, invoices and your booking page.</p>
       <div style="display:flex;gap:14px;align-items:center;margin-top:10px">
         <div style="width:56px;height:56px;border-radius:12px;overflow:hidden;background:var(--surface-2);display:flex;align-items:center;justify-content:center;flex-shrink:0">
-          ${biz.logo_url?`<img src="${biz.logo_url}" alt="Your business logo" style="width:100%;height:100%;object-fit:cover">`:`<span style="font-size:22px">🏢</span>`}
+          ${biz.logo_url?`<img src="${biz.logo_url}" alt="Your business logo" style="width:100%;height:100%;object-fit:cover">`:`<span style="font-size:22px"></span>`}
         </div>
         ${canEditBusiness?`<div><input type="file" id="biz-logo-input" accept="image/*" style="display:none" onchange="onBizLogoChosen(this)"><button class="btn ghost sm" onclick="document.getElementById('biz-logo-input').click()">${biz.logo_url?'Change logo':'Upload logo'}</button></div>`:''}
       </div>
     </div>
-    ${settingsRow('🖌️','Colours &amp; document templates','Customise how quotes and invoices look',"closeModal('settings-overlay');openTemplateEditor()")}`)}
-    ${settingsGroup('Team',settingsRow('👥','Team &amp; roles',null,"closeModal('settings-overlay');openTeam()"))}
-    ${settingsGroup('Templates',settingsRow('✉️','Email &amp; document templates',null,"closeModal('settings-overlay');openTemplateEditor()"))}
-    ${settingsGroup('Pricing',settingsRow('💲','Rates, chemical costs &amp; margins',null,"closeModal('settings-overlay');switchView('pricing')"))}
+    ${settingsRow('Colours &amp; document templates','Customise how quotes and invoices look',"closeModal('settings-overlay');openTemplateEditor()")}`)}
+    ${settingsGroup('Team',settingsRow('Team &amp; roles',null,"closeModal('settings-overlay');openTeam()"))}
+    ${settingsGroup('Templates',settingsRow('Email &amp; document templates',null,"closeModal('settings-overlay');openTemplateEditor()"))}
+    ${settingsGroup('Pricing',settingsRow('Rates, chemical costs &amp; margins',null,"closeModal('settings-overlay');switchView('pricing')"))}
     ${settingsGroup('Notifications',`
     <div class="conn-card">
       <p>Get told when something needs you — sent to the address below by email. SMS and push are on the roadmap.</p>
@@ -6031,27 +6234,27 @@ function openSettings(){
     </div>`)}
     ${settingsGroup('Calendar',`
     <div class="conn-card ${bookingLink?'live':''}">
-      <div class="conn-top"><span class="conn-name">🔗 Booking page</span><span class="conn-badge ${bookingLink?'on':'off'}">${bookingLink?'● READY TO SHARE':'sign in first'}</span></div>
+      <div class="conn-top"><span class="conn-name">Booking page</span><span class="conn-badge ${bookingLink?'on':'off'}">${bookingLink?'● READY TO SHARE':'sign in first'}</span></div>
       <p>Share this with customers — every quote request they submit lands straight in your Pipeline.</p>
       ${bookingLink?`<div class="conn-keyrow"><input id="conn-booking-link" readonly value="${bookingLink}" onclick="this.select()"><button class="btn accent sm" onclick="copyBookingLink()" id="copy-booking-btn">Copy link</button></div>
       <p style="font-size:12px;color:var(--ink-faint);margin-top:12px">Want it directly on your own website instead? Copy the code below into Wix, Squarespace or WordPress.</p>
       <textarea id="conn-embed-code" readonly onclick="this.select()" style="width:100%;min-height:80px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;padding:10px 12px;border:1px solid var(--line);border-radius:var(--radius-sm);resize:vertical;color:var(--ink)">${embedCode}</textarea>
       <button class="btn accent sm" style="margin-top:8px" onclick="copyEmbedCode()" id="copy-embed-btn">Copy embed code</button>`:''}
     </div>
-    ${settingsRow('📅','Calendar sync',calConnected?'Connected — avoids double-booking':'Connect Google Calendar or iCloud',"closeModal('settings-overlay');openConnections()")}`)}
-    ${settingsGroup('Email',settingsRow('📧','Gmail — inbox &amp; sending',emailAccount?`Connected as ${emailAccount.email_address}`:'Not connected',"closeModal('settings-overlay');openConnections()"))}
+    ${settingsRow('Calendar sync',calConnected?'Connected — avoids double-booking':'Connect Google Calendar or iCloud',"closeModal('settings-overlay');openConnections()")}`)}
+    ${settingsGroup('Email',settingsRow('Gmail — inbox &amp; sending',emailAccount?`Connected as ${emailAccount.email_address}`:'Not connected',"closeModal('settings-overlay');openConnections()"))}
     ${settingsGroup('Integrations',`
-    ${settingsRow('💳','Card payments (Stripe)',stripeStatus.configured?'Connected — customers can pay invoices by card':'Not set up yet',"closeModal('settings-overlay');openConnections()")}
+    ${settingsRow('Card payments (Stripe)',stripeStatus.configured?'Connected — customers can pay invoices by card':'Not set up yet',"closeModal('settings-overlay');openConnections()")}
     <div class="conn-card" style="margin-top:8px">
-      <div class="conn-top"><span class="conn-name">🛰️ Satellite maps on quotes</span><span class="conn-badge ${mapsKey?'on':'off'}">${mapsKey?'● ON':'basic map'}</span></div>
+      <div class="conn-top"><span class="conn-name">Satellite maps on quotes</span><span class="conn-badge ${mapsKey?'on':'off'}">${mapsKey?'● ON':'basic map'}</span></div>
       <p>${mapsKey?'Property photos and satellite scale are turned on for your account.':'On the free basic map for now — satellite photos with accurate scale are available for your account, just ask whoever set up your TurnKey.'}</p>
     </div>`)}
-    ${settingsGroup('Imports',settingsRow('📥','Import customers','From a spreadsheet or another CRM',"closeModal('settings-overlay');openImportWizard()"))}
-    ${settingsGroup('Billing',`<div class="conn-card"><div class="conn-top"><span class="conn-name">💳 Subscription</span><span class="conn-badge">coming soon</span></div><p>Your Turnkey subscription and billing details will show up here.</p></div>`)}
+    ${settingsGroup('Imports',settingsRow('Import customers','From a spreadsheet or another CRM',"closeModal('settings-overlay');openImportWizard()"))}
+    ${settingsGroup('Billing',`<div class="conn-card"><div class="conn-top"><span class="conn-name">Subscription</span><span class="conn-badge">coming soon</span></div><p>Your Turnkey subscription and billing details will show up here.</p></div>`)}
     ${settingsGroup('Support',`<div class="conn-card"><p style="margin:0">Need a hand? Reach out to whoever set up your Turnkey account, or check the guidance notes throughout the app — most screens explain what they do as you go.</p></div>`)}
     ${settingsGroup('Advanced',`
     <div class="conn-card">
-      <div class="conn-top"><span class="conn-name">💾 Backup &amp; data</span></div>
+      <div class="conn-top"><span class="conn-name">Backup &amp; data</span></div>
       <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">
         <button class="btn ghost sm" onclick="exportData()">Download a backup</button>
         <button class="btn ghost sm" onclick="document.getElementById('import-file').click()">Restore from a backup</button>
@@ -6059,13 +6262,13 @@ function openSettings(){
       </div>
     </div>
     <div class="conn-card">
-      <div class="conn-top"><span class="conn-name">🔐 Permissions</span></div>
+      <div class="conn-top"><span class="conn-name">Permissions</span></div>
       <div class="kv"><span class="k">Owner</span><span class="v">Everything</span></div>
       <div class="kv"><span class="k">Manager</span><span class="v">Operations, customers, jobs, quotes</span></div>
       <div class="kv"><span class="k">Worker</span><span class="v">Assigned jobs only</span></div>
     </div>`)}
     <div class="more-group-label" style="margin-top:22px"></div>
-    <button class="more-row danger" onclick="handleLogout()"><span class="mr-ico">🚪</span><span class="mr-label">Log out</span></button>`;
+    <button class="more-row danger" onclick="handleLogout()"><span class="mr-label">Log out</span></button>`;
   openModal('settings-overlay');
 }
 
@@ -6083,18 +6286,18 @@ function openConnections(){
         `<p>Connect Gmail to send and receive customer emails right inside Turnkey — quotes, invoices, replies, all automatically linked to the right customer.</p><button class="btn accent sm" onclick="connectGmailOAuth()">Connect Gmail</button>`}
     </div>
     <div class="conn-card ${hasGoogleCal||icalConns.length?'live':''}">
-      <div class="conn-top"><span class="conn-name">📅 Calendar</span><span class="conn-badge ${hasGoogleCal||icalConns.length?'on':'off'}">${hasGoogleCal||icalConns.length?'● CONNECTED':'not connected'}</span></div>
+      <div class="conn-top"><span class="conn-name">Calendar</span><span class="conn-badge ${hasGoogleCal||icalConns.length?'on':'off'}">${hasGoogleCal||icalConns.length?'● CONNECTED':'not connected'}</span></div>
       ${!googleCalendarConfigured?`<p>Calendar connections aren't turned on for your account yet — contact support to enable this.</p>`:
         (()=>{const gc=calendarConnections.find(c=>c.provider==='google');
-          return gc?`<p><b>Connected.</b> Existing events on your calendar block scheduling conflicts.${gc.sync_status==='error'?' ⚠️ Last sync failed.':''} Last synced: ${gc.last_synced_at?timeAgo(new Date(gc.last_synced_at).getTime()):'never — click Sync now'}.</p><button class="btn ghost sm" onclick="syncGoogleCalendarNow()">Sync now</button> <button class="btn ghost sm" onclick="disconnectGoogleCalendar()">Disconnect</button>`
+          return gc?`<p><b>Connected.</b> Existing events on your calendar block scheduling conflicts.${gc.sync_status==='error'?' Last sync failed.':''} Last synced: ${gc.last_synced_at?timeAgo(new Date(gc.last_synced_at).getTime()):'never — click Sync now'}.</p><button class="btn ghost sm" onclick="syncGoogleCalendarNow()">Sync now</button> <button class="btn ghost sm" onclick="disconnectGoogleCalendar()">Disconnect</button>`
             :`<p>Connect your calendar so Turnkey knows your existing commitments and avoids double-booking.</p><button class="btn accent sm" onclick="connectGoogleCalendarOAuth()">Connect Calendar</button>`;
         })()}
       <p style="font-size:12px;color:var(--ink-faint);margin-top:12px">Using an iPhone/iCloud calendar instead? Paste your calendar's share link below to block that time too.</p>
       <div class="conn-keyrow"><input id="conn-ical-url" placeholder="Paste your calendar link"><button class="btn ghost sm" onclick="connectIcalFeed()">Add</button></div>
-      ${icalConns.map(c=>`<div class="kv"><span class="k">${(c.ical_url||'').slice(0,40)}${(c.ical_url||'').length>40?'…':''}${c.sync_status==='error'?' ⚠️':''}</span><span class="v"><button class="btn ghost sm" onclick="syncIcalFeedNow('${(c.ical_url||'').replace(/'/g,"%27")}')">Sync</button> <button class="btn ghost sm" onclick="disconnectIcalFeed('${(c.ical_url||'').replace(/'/g,"%27")}')">Remove</button></span></div>`).join('')}
+      ${icalConns.map(c=>`<div class="kv"><span class="k">${(c.ical_url||'').slice(0,40)}${(c.ical_url||'').length>40?'…':''}${c.sync_status==='error'?' (sync failed)':''}</span><span class="v"><button class="btn ghost sm" onclick="syncIcalFeedNow('${(c.ical_url||'').replace(/'/g,"%27")}')">Sync</button> <button class="btn ghost sm" onclick="disconnectIcalFeed('${(c.ical_url||'').replace(/'/g,"%27")}')">Remove</button></span></div>`).join('')}
     </div>
     <div class="conn-card ${stripeStatus.configured?'live':''}">
-      <div class="conn-top"><span class="conn-name">💳 Stripe — accept card payments</span><span class="conn-badge ${stripeStatus.configured?'on':'off'}">${stripeStatus.configured?'● CONNECTED':'not set up'}</span></div>
+      <div class="conn-top"><span class="conn-name">Stripe — accept card payments</span><span class="conn-badge ${stripeStatus.configured?'on':'off'}">${stripeStatus.configured?'● CONNECTED':'not set up'}</span></div>
       ${stripeStatus.configured
         ?`<p><b>Ready.</b> Every invoice can generate a payment link — customers pay by card, and the invoice ${stripeStatus.webhookConfigured?'marks itself paid automatically':'still needs marking paid manually once you see the payment come through'}.</p>`
         :`<p>Let customers pay their invoice online by card. This is a one-time setup on the server your TurnKey runs on, not something to configure per business — ask whoever manages your deployment to add a Stripe key. Invoices can still be marked paid manually until then.</p>`}
@@ -6498,6 +6701,7 @@ async function handleAuthedSession(session){
   applyRoleVisibility();
   showApp();
   await loadFromSupabase();
+  subscribeRealtime();
   await loadStaffAndInvites();
   await loadBusinessProfile();
   seedDocTemplateFromProfile();
@@ -6640,6 +6844,28 @@ async function preloadLogoDataUrl(){
       reader.readAsDataURL(blob);
     });
   }catch(e){console.warn('Logo preload failed',e);}
+}
+// Per-record (not global) — mirrors preloadLogoDataUrl's fetch-once-and-
+// cache-as-data-URL pattern, since jsPDF can't fetch a remote image itself.
+// Deliberately best-effort: sets r._mapSnapshotDataUrl to null (not left
+// undefined) on any failure/no-data case, so callers can tell "already
+// tried, nothing to show" apart from "never attempted yet".
+async function preloadMapSnapshot(r){
+  r._mapSnapshotDataUrl=null;
+  const mapsKey=(window.TURNKEY_CONFIG&&window.TURNKEY_CONFIG.mapsKey)||'';
+  const url=window.TK_MAP_SNAPSHOT&&r.areaPolys&&r.areaPolys.length?TK_MAP_SNAPSHOT.buildUrl(r.areaPolys,mapsKey):null;
+  if(!url)return;
+  try{
+    const res=await fetch(url);
+    if(!res.ok)return;
+    const blob=await res.blob();
+    r._mapSnapshotDataUrl=await new Promise((resolve,reject)=>{
+      const reader=new FileReader();
+      reader.onload=()=>resolve(reader.result);
+      reader.onerror=reject;
+      reader.readAsDataURL(blob);
+    });
+  }catch(e){console.warn('Map snapshot preload failed',e);}
 }
 // One-way seed, not a sync: only fills in docTemplate fields that are still
 // blank, so it never overwrites a template a business has already customised
@@ -7086,12 +7312,12 @@ function sm8Process(customersFile,jobsFile){
 
 /* ---------- Wizard state ---------- */
 const IMPORT_SOURCES=[
-  {key:'servicem8',label:'ServiceM8',icon:'🔧'},
-  {key:'jobber',label:'Jobber',icon:'📋'},
-  {key:'housecallpro',label:'Housecall Pro',icon:'🏠'},
-  {key:'tradify',label:'Tradify',icon:'🛠️'},
-  {key:'fergus',label:'Fergus',icon:'📐'},
-  {key:'generic',label:'Generic CSV',icon:'📄'}
+  {key:'servicem8',label:'ServiceM8',},
+  {key:'jobber',label:'Jobber',},
+  {key:'housecallpro',label:'Housecall Pro',},
+  {key:'tradify',label:'Tradify',},
+  {key:'fergus',label:'Fergus',},
+  {key:'generic',label:'Generic CSV',}
 ];
 let importWizard=null;
 function iwFresh(){
@@ -7161,7 +7387,7 @@ function renderImportWizard(){
 function iwRenderSource(){
   const cards=IMPORT_SOURCES.map(s=>`
     <button class="iw-src ${importWizard.source===s.key?'sel':''}" onclick="iwPickSource('${s.key}')">
-      <span class="iw-src-ico">${s.icon}</span><span>${s.label}</span>
+      <span>${s.label}</span>
     </button>`).join('');
   const hist=importWizard.history.length?`
     <div class="panel" style="margin-top:20px"><h4>Recent imports</h4>
@@ -7536,6 +7762,38 @@ function scheduleSupabaseSync(){
   clearTimeout(supabaseSyncTimer);
   supabaseSyncTimer=setTimeout(syncAllToSupabase,900);
 }
+
+/* ===== Realtime: hear about a customer's quote response the moment it
+   happens, in every open CRM session for this business, without anyone
+   reloading. Subscribes once per sign-in (handleAuthedSession), tears down
+   on sign-out. Scoped to activity_log INSERTs only — that table is
+   append-only (see schema-public-quote.sql's RLS hardening), so "a new row
+   arrived" always means "something real just happened," never an edit or
+   a delete to reconcile. */
+let realtimeChannel=null;
+function subscribeRealtime(){
+  if(!sb||!currentBusinessId)return;
+  unsubscribeRealtime();
+  realtimeChannel=sb.channel('activity-'+currentBusinessId)
+    .on('postgres_changes',{event:'INSERT',schema:'public',table:'activity_log',filter:'business_id=eq.'+currentBusinessId},handleActivityRealtimeEvent)
+    .subscribe();
+}
+function unsubscribeRealtime(){
+  if(realtimeChannel){sb.removeChannel(realtimeChannel);realtimeChannel=null;}
+}
+async function handleActivityRealtimeEvent(payload){
+  const row=payload&&payload.new; if(!row)return;
+  if(row.type!=='quote_accepted'&&row.type!=='quote_declined')return;
+  const r=records.find(x=>x.customerId===row.customer_id);
+  const name=(r&&r.name)||'A customer';
+  toast(row.type==='quote_accepted'
+    ?name+' approved their quote'+(r&&r.total?' — '+money(r.total):'')+'.'
+    :name+' said they’re not ready to go ahead yet.',4500);
+  // A silent reload mid-edit would be worse than a one-cycle delay — if
+  // anything is open right now, the next natural reload/sync picks this up
+  // instead of yanking the operator's in-progress work out from under them.
+  if(!document.querySelector('.overlay.open'))await loadFromSupabase();
+}
 async function syncAllToSupabase(){
   const failed=[];
   for(const r of records){
@@ -7589,7 +7847,11 @@ async function syncRecordToSupabase(r){
   // of their jobs' original enquiry notes with the same generic text, and a
   // Supabase reload replaced it again from customers.notes — permanently
   // destroying whatever the customer originally said about that job.
-  ['id','customerId','jobId','invoiceId','quoteId','assignedStaffId','stage','scheduledDate','scheduledDateISO','name','email','phone','address','suburb','notes','source','paymentStatus','paymentMethod','dueDate']
+  // _mapSnapshotDataUrl is a large client-side render cache (a base64 image,
+  // regenerable any time from areaPolys) — persisting it would bloat every
+  // job row in Supabase for no benefit, so it's excluded here same as id/
+  // customerId/etc.
+  ['id','customerId','jobId','invoiceId','quoteId','assignedStaffId','stage','scheduledDate','scheduledDateISO','name','email','phone','address','suburb','notes','source','paymentStatus','paymentMethod','dueDate','_mapSnapshotDataUrl']
     .forEach(k=>delete details[k]);
   const jobPayload={
     business_id:currentBusinessId,customer_id:r.customerId,quote_id:r.quoteId||null,assigned_to:r.assignedStaffId||null,
@@ -7695,7 +7957,7 @@ if(sb){
   sb.auth.onAuthStateChange((event,session)=>{
     if(event==='PASSWORD_RECOVERY'){showPasswordRecovery();return;}
     if(event==='SIGNED_IN'&&session)handleAuthedSession(session);
-    if(event==='SIGNED_OUT'){records=[];currentBusinessId=null;currentUserId=null;currentUserRole='owner';staff=[];pendingInvites=[];render();renderAll();showAuth();}
+    if(event==='SIGNED_OUT'){unsubscribeRealtime();records=[];currentBusinessId=null;currentUserId=null;currentUserRole='owner';staff=[];pendingInvites=[];render();renderAll();showAuth();}
   });
 }else{
   setAuthMsg('Turnkey isn\u2019t finished setting up yet \u2014 contact support');
