@@ -35,12 +35,30 @@ npm run db:types         # regenerate TypeScript types from DB
 
 ## Environment
 
-Copy `.env.example` to `.env.local` and set:
+The actual frontend (`index.html`, `booking.html`, `quote.html`) is plain
+JS/HTML with no build step — it reads runtime config from `window.TURNKEY_CONFIG`,
+populated by `config.js`. `config.js` is itself generated at Netlify build time
+by `scripts/generate-config.js` (the build command in `netlify.toml`) from
+these environment variables, set in Netlify → Site settings → Environment
+variables (see `.env.example` for local reference):
 
-- `VITE_SUPABASE_URL`
-- `VITE_SUPABASE_ANON_KEY`
+- `TURNKEY_BACKEND_URL`
+- `TURNKEY_SUPABASE_URL`
+- `TURNKEY_SUPABASE_ANON_KEY`
+- `TURNKEY_MAPS_KEY` — Google Maps (Static Maps + Geocoding + Places). Optional:
+  if unset, the app falls back to a free OpenStreetMap view. Restrict the key
+  by HTTP referrer in Google Cloud Console rather than keeping it secret.
 
-Never commit service role keys. Netlify gets the same `VITE_*` vars in Site settings → Environment variables.
+If the three required vars aren't all set, the build leaves the committed
+`config.js` untouched rather than overwriting it with blanks. `TURNKEY_MAPS_KEY`
+is handled separately: a build missing just that one var still deploys
+normally and *preserves whatever mapsKey is already in the current config.js*
+instead of blanking it — so a working Maps key never silently disappears just
+because one build's environment didn't happen to pass it through.
+
+Never commit service role keys or real API key values — only the committed
+`config.js`'s empty placeholders are checked in; real values live in Netlify's
+environment variables.
 
 ## Conventions
 
