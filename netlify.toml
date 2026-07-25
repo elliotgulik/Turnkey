@@ -11,3 +11,8 @@
 
 [build.environment]
   NODE_VERSION = "20"
+  # config.js intentionally contains a public, HTTP-referrer-restricted
+  # Google Maps API key (see config.js's own header comment) — without this,
+  # Netlify's build-time secrets scanner flags it as a leaked secret (it
+  # matches the TURNKEY_MAPS_KEY env var value) and can fail the deploy.
+  SECRETS_SCAN_OMIT_PATHS = "config.js"
