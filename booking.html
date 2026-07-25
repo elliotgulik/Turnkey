@@ -2,6 +2,14 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<!-- Pins this page's own outgoing-request referrer regardless of what an
+     embedding parent (e.g. a Wix "Embed a Widget" iframe) does — some embed
+     widgets set referrerpolicy="no-referrer"/"origin" on the iframe they
+     generate, and an HTTP-referrer-restricted Google Maps API key rejects
+     any request that arrives with no referrer at all. This still sends
+     enough (page origin) to satisfy a domain-based restriction without
+     leaking the full URL cross-origin. -->
+<meta name="referrer" content="strict-origin-when-cross-origin">
 <script src="config.js"></script>
 <script src="pricing-engine.js"></script>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
@@ -280,6 +288,7 @@ function initPlacesAutocomplete(){
         </div>
         <div class="map-hint" id="hint">Tap to drop points around an area · tap the first point to finish</div>
       </div>
+      <div class="map-note" id="map-provider-note" style="display:none;padding:8px 16px;font-size:12px;color:var(--ink-soft);background:var(--surface-2);border-bottom:1px solid var(--line)"></div>
       <div class="map-foot">
         <span class="map-note" id="scale-note">Scale: ~1.3 m per grid square (demo)</span>
         <div class="map-zoom" id="zoom-ctrl" style="display:none">
@@ -393,6 +402,17 @@ function initPlacesAutocomplete(){
 </footer>
 
 <script>
+// If config.js (loaded in <head>, before this script) didn't actually run —
+// blocked by something in the embedding environment, a 404 if this page was
+// copied somewhere config.js doesn't live alongside it, etc — everything
+// downstream that reads window.TURNKEY_CONFIG (map key, Supabase business
+// lookup, backend webhook URL) silently falls back to empty/defaults rather
+// than crashing, which is the right behaviour but makes the actual cause
+// invisible. Surface it loudly in the console at least, so this is
+// diagnosable from a support request instead of guesswork.
+if(!window.TURNKEY_CONFIG){
+  console.error('Turnkey: config.js did not load — map key, business branding and quote-request delivery will all be unavailable on this page load. If this page is embedded (Wix/Squarespace/etc), confirm the embed code was copied in full and config.js is reachable from wherever this page is actually being served.');
+}
 /* ===== pricing mirrored from the Turnkey CRM (operator rates) ===== */
 // kind: 'area' (closed polygon, m²) · 'perimeter' (closed loop traced around
 // something, e.g. all 4 walls of a house — measured as a closed perimeter,
@@ -424,9 +444,30 @@ let MAPS_KEY='';
 if(window.TURNKEY_CONFIG&&window.TURNKEY_CONFIG.mapsKey)MAPS_KEY=window.TURNKEY_CONFIG.mapsKey;
 try{const stored=localStorage.getItem('turnkey-maps-key');if(stored)MAPS_KEY=stored;}catch(e){}
 try{const u=new URL(location.href); if(u.searchParams.get('tkkey'))MAPS_KEY=u.searchParams.get('tkkey');}catch(e){}
+// Set the first time a real Google request actually fails (bad key, quota,
+// or — the case this exists for — an HTTP-referrer-restricted key seeing an
+// unfamiliar referrer, e.g. when this page is loaded inside a Wix/other
+// iframe embed whose referrer doesn't match what's allow-listed in Google
+// Cloud Console). Every map (re)draw funnels through reloadMapAt(), which
+// used to check only "is a key configured" — so once Google actually
+// started rejecting requests, every attempted OSM fallback looped straight
+// back into trying Google again, forever, and the map never rendered
+// anything at all. This flag makes "Google isn't working right now" sticky
+// for the rest of the session instead of re-trying on every redraw.
+let GOOGLE_MAPS_BLOCKED=false;
+function markGoogleMapsBlocked(reason){
+  if(GOOGLE_MAPS_BLOCKED)return;
+  GOOGLE_MAPS_BLOCKED=true;
+  console.warn('Turnkey: Google Maps requests are failing ('+reason+') — falling back to the free map for the rest of this session.');
+  const note=document.getElementById('map-provider-note');
+  if(note){
+    note.textContent='Showing a basic map — satellite view isn’t available on this page right now.';
+    note.style.display='block';
+  }
+}
 window.addEventListener('message',function(e){
   const d=e.data;
-  if(d&&d.type==='turnkey:maps-key'&&d.key){MAPS_KEY=d.key;tryAutoSatellite();}
+  if(d&&d.type==='turnkey:maps-key'&&d.key){MAPS_KEY=d.key;GOOGLE_MAPS_BLOCKED=false;tryAutoSatellite();}
 });
 // If a Turnkey backend is connected, submissions POST there — the CRM collects them 24/7.
 (function(){try{
@@ -532,7 +573,7 @@ function zoomForViewport(ne,sw){
 function reloadMapAt(lat,lng,zoom,label){
   _lastLat=lat;_lastLng=lng;_lastLabel=label||_lastLabel;
   SAT_ZOOM=zoom;
-  if(MAPS_KEY){
+  if(MAPS_KEY&&!GOOGLE_MAPS_BLOCKED){
     SAT_LAT=lat;
     const cacheKey=lat+','+lng+','+zoom;
     const url='https://maps.googleapis.com/maps/api/staticmap?center='+lat+','+lng+
@@ -573,8 +614,9 @@ function fetchWithTimeout(url,ms){
 }
 function enableSatellite(address){
   if(!MAPS_KEY||!address)return false;
+  if(GOOGLE_MAPS_BLOCKED)return enableOsm(address);
   const hint=document.getElementById('hint');
-  hint.textContent='⏳ Locating address…';
+  hint.textContent='Locating address…';
   const geocodeUrl='https://maps.googleapis.com/maps/api/geocode/json?address='+
     encodeURIComponent(address+', '+(BIZ_REGION||'New Zealand'))+'&key='+encodeURIComponent(MAPS_KEY);
   if(typeof fetch==='function'){
@@ -586,9 +628,14 @@ function enableSatellite(address){
       }else{
         // Never surface a Google status code to a customer — just fall back
         // to the free map instead of showing an error they can't act on.
+        // ZERO_RESULTS just means this one address wasn't found — Google
+        // itself is fine. Anything else (REQUEST_DENIED, OVER_QUERY_LIMIT,
+        // an unexpected shape) means Google requests aren't working right
+        // now — stop retrying it for the rest of this session.
+        if(j.status&&j.status!=='ZERO_RESULTS')markGoogleMapsBlocked('geocode: '+j.status);
         enableOsm(address);
       }
-    }).catch(()=>enableOsm(address));
+    }).catch(()=>{markGoogleMapsBlocked('geocode: network error');enableOsm(address);});
   }
   return true;
 }
@@ -603,7 +650,7 @@ function enableOsmLatLng(lat,lng,label){
 function enableOsm(address){
   if(!address)return false;
   const hint=document.getElementById('hint');
-  hint.textContent='⏳ Locating address…';
+  hint.textContent='Locating address…';
   fetchWithTimeout('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(address+', '+(BIZ_REGION||'New Zealand')),8000)
     .then(results=>{
       if(!results||!results.length){hint.textContent='Address not found — try the full street address';return;}
@@ -615,7 +662,7 @@ function loadSatelliteUrl(url,cacheKey,label){
   const visual=document.getElementById('map-visual');
   const tiles=document.getElementById('map-tiles');
   const hint=document.getElementById('hint');
-  hint.textContent='⏳ Loading map…';
+  hint.textContent='Loading map…';
   const probe=new Image();
   let settled=false;
   // Image() only ever fires onload or onerror — if the request just hangs
@@ -657,8 +704,13 @@ function loadSatelliteUrl(url,cacheKey,label){
   probe.onerror=function(){
     if(settled)return;
     settled=true;clearTimeout(imgTimer);
-    // A configured key that fails (bad key, quota, network) still shouldn't
-    // dead-end on an error message — quietly try the free map instead.
+    // A configured key that actually fails to load an image (bad key,
+    // quota, referrer rejection) shouldn't dead-end on an error message —
+    // fall back to the free map. It also shouldn't keep trying Google on
+    // every subsequent pan/zoom for the rest of the session (that's the
+    // retry loop that used to make the map never render at all once Google
+    // started rejecting requests) — mark it blocked once, here.
+    markGoogleMapsBlocked('static map image failed to load');
     enableOsmLatLng(parseFloat(cacheKey.split(',')[0]),parseFloat(cacheKey.split(',')[1]),label);
   };
   probe.src=url;
@@ -675,7 +727,7 @@ function loadOsmMosaic(lat,lng,zoom,label){
   const visual=document.getElementById('map-visual');
   const tiles=document.getElementById('map-tiles');
   const hint=document.getElementById('hint');
-  hint.textContent='⏳ Loading map…';
+  hint.textContent='Loading map…';
   zoom=Math.max(OSM_ZOOM_MIN,Math.min(OSM_ZOOM_MAX,zoom));
   visual.style.transform='none';
   visual.style.backgroundImage='none';
@@ -695,7 +747,34 @@ function loadOsmMosaic(lat,lng,zoom,label){
   const coverage=Math.round(SCALE*800);
   document.getElementById('scale-note').textContent=
     (label||'')+' · zoom '+zoom+' · '+coverage+'m wide · '+(SCALE*GRID).toFixed(1)+'m per grid sq';
-  hint.textContent='Map loaded — tap to trace your first area';
+  // The free map used to claim "Map loaded" the instant the <img> tags were
+  // written to the DOM, with nothing checking whether the tiles actually
+  // came back — if OpenStreetMap's tile server was ALSO unreachable (rare,
+  // but the whole point of this pass is not leaving a customer looking at a
+  // blank box with a message insisting it worked), the hint text lied.
+  // Wait for the real outcome instead.
+  const tileEls=tiles?Array.from(tiles.querySelectorAll('img')):[];
+  let settledTiles=0,failedTiles=0,resolved=false;
+  const finish=()=>{
+    if(resolved)return; resolved=true;
+    if(failedTiles>=tileEls.length&&tileEls.length>0){
+      hint.textContent='Could not load the map — check your connection and try again';
+    }else{
+      hint.textContent='Map loaded — tap to trace your first area';
+    }
+  };
+  if(!tileEls.length){
+    hint.textContent='Could not load the map — check your connection and try again';
+  }else{
+    tileEls.forEach(img=>{
+      img.addEventListener('load',()=>{settledTiles++;if(settledTiles===1)finish();else if(settledTiles>=tileEls.length)finish();});
+      img.addEventListener('error',()=>{settledTiles++;failedTiles++;if(settledTiles>=tileEls.length)finish();});
+    });
+    // Give tiles a moment to resolve, then finalise with whatever's in —
+    // one successful tile is enough to call it "loaded" (edge tiles near
+    // the mosaic border sometimes 404 legitimately with real OSM coverage).
+    setTimeout(finish,4000);
+  }
   const zc=document.getElementById('zoom-ctrl');
   if(zc){zc.style.display='flex';document.getElementById('zoom-val').textContent=zoom;}
   if(typeof reprojectAreas==='function')reprojectAreas();
@@ -703,7 +782,7 @@ function loadOsmMosaic(lat,lng,zoom,label){
 }
 function adjustZoom(delta){
   if(!_lastLat)return;
-  const maxZ=MAPS_KEY?22:OSM_ZOOM_MAX, minZ=MAPS_KEY?17:OSM_ZOOM_MIN; // 22 matches index.html's QE_ZOOM_MAX / Google Static Maps' real ceiling
+  const maxZ=(MAPS_KEY&&!GOOGLE_MAPS_BLOCKED)?22:OSM_ZOOM_MAX, minZ=(MAPS_KEY&&!GOOGLE_MAPS_BLOCKED)?17:OSM_ZOOM_MIN; // 22 matches index.html's QE_ZOOM_MAX / Google Static Maps' real ceiling
   const newZoom=Math.max(minZ,Math.min(maxZ,SAT_ZOOM+delta));
   if(newZoom===SAT_ZOOM)return;
   reloadMapAt(_lastLat,_lastLng,newZoom,_lastLabel);
@@ -711,7 +790,7 @@ function adjustZoom(delta){
 function tryAutoSatellite(){
   const addr=(document.getElementById('addr').value||'').trim();
   if(!addr)return;
-  if(MAPS_KEY)enableSatellite(addr);
+  if(MAPS_KEY&&!GOOGLE_MAPS_BLOCKED)enableSatellite(addr);
   else enableOsm(addr);
 }
 
@@ -975,7 +1054,7 @@ function initWheelZoom(){
       const delta=Math.round(wheelZoomAccum);
       const anchor=wheelZoomAnchor;
       wheelZoomAccum=0;wheelZoomAnchor=null;
-      const maxZ=MAPS_KEY?22:OSM_ZOOM_MAX, minZ=MAPS_KEY?17:OSM_ZOOM_MIN; // 22 matches index.html's QE_ZOOM_MAX / Google Static Maps' real ceiling
+      const maxZ=(MAPS_KEY&&!GOOGLE_MAPS_BLOCKED)?22:OSM_ZOOM_MAX, minZ=(MAPS_KEY&&!GOOGLE_MAPS_BLOCKED)?17:OSM_ZOOM_MIN; // 22 matches index.html's QE_ZOOM_MAX / Google Static Maps' real ceiling
       const newZoom=Math.max(minZ,Math.min(maxZ,SAT_ZOOM+delta));
       if(newZoom===SAT_ZOOM){visual.classList.remove('gesturing');visual.style.transform='none';return;}
       const center=anchor||{lat:_lastLat,lng:_lastLng};
@@ -1037,7 +1116,7 @@ function initMapGestures(){
     if(!mode)return;
     visual.classList.remove('gesturing');
     if(mode==='pinch'&&Math.abs(liveScale-1)>0.03){
-      const maxZ=MAPS_KEY?22:OSM_ZOOM_MAX, minZ=MAPS_KEY?17:OSM_ZOOM_MIN; // 22 matches index.html's QE_ZOOM_MAX / Google Static Maps' real ceiling
+      const maxZ=(MAPS_KEY&&!GOOGLE_MAPS_BLOCKED)?22:OSM_ZOOM_MAX, minZ=(MAPS_KEY&&!GOOGLE_MAPS_BLOCKED)?17:OSM_ZOOM_MIN; // 22 matches index.html's QE_ZOOM_MAX / Google Static Maps' real ceiling
       const newZoom=Math.max(minZ,Math.min(maxZ,SAT_ZOOM+Math.round(Math.log2(liveScale))));
       if(newZoom!==SAT_ZOOM){
         document.getElementById('zoom-val').textContent=newZoom;
@@ -1346,7 +1425,7 @@ function startOver(){
 function locateAddr(){
   const v=document.getElementById('addr').value.trim();
   if(!v){document.getElementById('hint').textContent='Enter an address first';return;}
-  if(MAPS_KEY)enableSatellite(v);
+  if(MAPS_KEY&&!GOOGLE_MAPS_BLOCKED)enableSatellite(v);
   else enableOsm(v);
 }
 function toggleIntegration(){

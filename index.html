@@ -4226,7 +4226,7 @@ function openDetail(id){
         <div class="panel"><h4>Contact <span class="eng-badge">Client</span></h4>
           <div class="contact-rows">
             <a class="contact-row" href="tel:${(r.phone||'').replace(/\s/g,'')}"><span class="ci"></span><div><div class="cl">Phone</div><div class="cv">${r.phone||'—'}</div></div></a>
-            <a class="contact-row" href="mailto:${r.email||''}"><span class="ci">✉️</span><div><div class="cl">Email</div><div class="cv">${r.email||'—'}</div></div></a>
+            <a class="contact-row" href="mailto:${r.email||''}"><span class="ci"></span><div><div class="cl">Email</div><div class="cv">${r.email||'—'}</div></div></a>
             <div class="contact-row"><span class="ci"></span><div><div class="cl">Address</div><div class="cv">${r.address||'—'}${r.suburb?', '+r.suburb:''}</div></div></div>
           </div>
           <div style="display:flex;gap:8px;margin-top:12px">
@@ -4554,7 +4554,7 @@ function renderCustomers(){
           <div class="cc-sub">${[g.address,g.suburb].filter(Boolean).join(', ')||'No address on file'}</div>
           <div class="cc-contact">
             ${g.phone?`<a href="tel:${g.phone.replace(/\s/g,'')}" onclick="event.stopPropagation()">${g.phone}</a>`:''}
-            ${g.email?`<a href="mailto:${g.email}" onclick="event.stopPropagation()">✉️ ${g.email}</a>`:''}
+            ${g.email?`<a href="mailto:${g.email}" onclick="event.stopPropagation()">${g.email}</a>`:''}
           </div>
         </button>`;
       }).join(''):`<div class="empty-state"><div class="big">${q?'No matches':'No customers yet'}</div><div class="sm">${q?'Try a different search.':'They\'ll appear here as soon as you add a lead or one comes in from your booking page.'}</div></div>`}
@@ -6280,7 +6280,7 @@ function openConnections(){
   const icalConns=calendarConnections.filter(c=>c.provider==='ical');
   document.getElementById('conn-body').innerHTML=`
     <div class="conn-card ${emailAccount?'live':''}">
-      <div class="conn-top"><span class="conn-name">✉️ Gmail — inbox &amp; sending</span><span class="conn-badge ${emailAccount?'on':'off'}">${emailAccount?'● CONNECTED':'not connected'}</span></div>
+      <div class="conn-top"><span class="conn-name">Gmail — inbox &amp; sending</span><span class="conn-badge ${emailAccount?'on':'off'}">${emailAccount?'● CONNECTED':'not connected'}</span></div>
       ${emailAccount?
         `<p><b>Connected as ${emailAccount.email_address}.</b> Emails to/from your customers show up in their profile and the Inbox tab. Each teammate connects their own account.</p><button class="btn ghost sm" onclick="disconnectGmailAccount()">Disconnect</button>`:
         `<p>Connect Gmail to send and receive customer emails right inside Turnkey — quotes, invoices, replies, all automatically linked to the right customer.</p><button class="btn accent sm" onclick="connectGmailOAuth()">Connect Gmail</button>`}
