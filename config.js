@@ -14,7 +14,7 @@ window.TURNKEY_CONFIG = window.TURNKEY_CONFIG || {
   backendUrl: 'https://turnkeynova.onrender.com',
   supabaseUrl: 'https://rcighpmdrutnghsqhzlr.supabase.co',
   supabaseAnonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJjaWdocG1kcnV0bmdoc3FoemxyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4NTQ1MzAsImV4cCI6MjA5ODQzMDUzMH0.Pvzvkxqe65SNTS4aRydo-HTkx6EMPglP1PR1ii4wOho',
-  // Set to your Google Maps API key (restrict it by HTTP referrer to your domain), e.g.:
-  // mapsKey: 'AIza...',
-  mapsKey: '',
+  // Google Maps API key — restricted by HTTP referrer to this domain in
+  // Google Cloud Console (Credentials → this key → Application restrictions).
+  mapsKey: 'AIzaSyCzRYUk-xZqDA9okZISf4irn0Ah76P3iVs',
 };
