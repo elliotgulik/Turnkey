@@ -29,6 +29,14 @@ if (!backendUrl || !supabaseUrl || !supabaseAnonKey) {
   process.exit(0)
 }
 
+// Logged (never the value itself) so a build log directly answers "did
+// Netlify actually pass this var through", which is the one thing that
+// can't be diagnosed by reading this file — the most common reason a var
+// set in the Netlify UI doesn't show up in a build is that it's scoped to
+// the wrong deploy context (Production / Deploy Previews / Branch deploys)
+// under Site settings → Environment variables → that variable → Scopes.
+console.log('generate-config.js: TURNKEY_MAPS_KEY present in this build\'s environment?', process.env.TURNKEY_MAPS_KEY ? `yes (${process.env.TURNKEY_MAPS_KEY.length} chars)` : 'no')
+
 let mapsKey = process.env.TURNKEY_MAPS_KEY || ''
 let mapsKeySource = mapsKey ? 'TURNKEY_MAPS_KEY env var' : null
 if (!mapsKey) {
