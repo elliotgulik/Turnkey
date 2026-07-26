@@ -82,11 +82,16 @@
   .svc-btn:hover{background:var(--surface-2)}
 
   .map-stage{position:relative;width:100%;aspect-ratio:4/3;background:#dfe6e3;overflow:hidden;cursor:crosshair;touch-action:none;user-select:none}
+  .map-stage.pan-tool{cursor:grab}
+  .map-stage.pan-tool.panning{cursor:grabbing}
+  .qe-tool-group{display:flex;gap:2px;background:var(--surface-2);border-radius:9px;padding:2px}
+  .qe-tool-group .tool-btn{border-radius:7px;min-height:36px;padding:6px 14px}
+  .qe-tool-group .tool-btn.active{background:var(--teal);color:#fff}
   @media(max-width:560px){.map-stage{aspect-ratio:1/1}}
   .map-stage svg{position:absolute;inset:0;width:100%;height:100%;display:block}
-  /* Pan/pinch live-transform this whole layer (background photo + drawn
-     points move together as one rigid image) — .map-hint sits outside it so
-     the hint text never scales/shifts with the gesture. */
+  /* Pan (Pan tool only) live-transforms this whole layer (background photo +
+     drawn points move together as one rigid image) — .map-hint sits outside
+     it so the hint text never scales/shifts with the gesture. */
   .map-visual{position:absolute;inset:0;background-size:cover;background-position:center;transform-origin:0 0}
   .map-visual.gesturing{transition:none}
   .map-visual:not(.gesturing){transition:transform .22s cubic-bezier(.2,.8,.2,1)}
@@ -99,6 +104,7 @@
   @media(max-width:720px){
     .zoom-btn{width:44px;height:44px}
     .mini-btn,.svc-btn{min-height:44px}
+    .qe-tool-group .tool-btn{min-height:44px}
     input,select,textarea{font-size:16px}
   }
   .zoom-btn:hover{opacity:1}
@@ -280,6 +286,13 @@ function initPlacesAutocomplete(){
       <div class="map-tools">
         <span class="tool-label">Cleaning:</span>
         <div class="svc-pick" id="svc-pick"></div>
+      </div>
+      <div class="map-tools" style="border-top:1px solid var(--line)">
+        <div class="qe-tool-group">
+          <button type="button" class="mini-btn tool-btn active" id="map-tool-select" onclick="setMapTool('select')">Select</button>
+          <button type="button" class="mini-btn tool-btn" id="map-tool-pan" onclick="setMapTool('pan')">Pan</button>
+        </div>
+        <span class="tool-label" style="margin-left:auto">Select: tap to trace an area · Pan: drag to move the map</span>
       </div>
       <div class="map-stage" id="stage">
         <div class="map-visual" id="map-visual">
@@ -566,7 +579,7 @@ function zoomForViewport(ne,sw){
 }
 
 /* ===== Single reload entry point for both map providers — every caller
-   (initial address lookup, +/- zoom buttons, pinch/pan gesture commit) goes
+   (initial address lookup, +/- zoom buttons, pan gesture commit) goes
    through here so there's exactly one place that decides "Google satellite
    or free OSM street map", instead of three separate call sites each
    duplicating that choice and risking drifting out of sync with each other. */
@@ -676,7 +689,7 @@ function loadSatelliteUrl(url,cacheKey,label){
   probe.onload=function(){
     if(settled)return;
     settled=true;clearTimeout(imgTimer);
-    visual.style.transform='none'; // snap the live pan/pinch preview back now that fresh, correctly-scaled imagery has arrived
+    visual.style.transform='none'; // snap the live pan preview back now that fresh, correctly-scaled imagery has arrived
     if(tiles)tiles.innerHTML=''; // clear any OSM tiles from a previous no-key state
     visual.style.backgroundImage='url("'+url+'")';
     document.getElementById('map-svg').querySelectorAll('rect,line').forEach(function(elm){
@@ -720,7 +733,7 @@ function loadSatelliteUrl(url,cacheKey,label){
 // children of #map-tiles (behind the drawing SVG) instead of a single flat
 // background image, since OSM's tile server doesn't allow the canvas
 // compositing a single-image approach would need. #map-visual still moves
-// tiles + SVG together as one rigid layer during pan/pinch either way, since
+// tiles + SVG together as one rigid layer during a pan either way, since
 // the CSS transform applies to the whole subtree regardless of how many
 // child elements are in it.
 function loadOsmMosaic(lat,lng,zoom,label){
@@ -795,6 +808,22 @@ function tryAutoSatellite(){
 }
 
 let activeSvc = 'driveway';
+// Select tool: tap to trace/adjust areas, map never moves. Pan tool: drag
+// moves the map, nothing else. Previously a single-finger drag ALWAYS
+// tried to pan the map (initMapGestures ran unconditionally whenever real
+// imagery was loaded), so a customer's finger wobbling slightly while
+// tapping out a driveway corner could misfire as "move the map" — that's
+// the "overly sensitive dragging" this fixes. Default select — the map
+// never moves from an accidental drag.
+let mapTool='select';
+function setMapTool(tool){
+  mapTool=tool;
+  document.getElementById('map-tool-select').classList.toggle('active',tool==='select');
+  document.getElementById('map-tool-pan').classList.toggle('active',tool==='pan');
+  const stage=document.getElementById('stage');
+  if(stage)stage.classList.toggle('pan-tool',tool==='pan');
+  updateHint();
+}
 let houseStoreys = 1;   // applies a ×1.2 per-storey mult to all housewash areas
 let windowPanes = 0;    // separate window clean count (not drawn on map)
 
@@ -962,6 +991,7 @@ function stageToSvg(clientX,clientY){
 }
 let suppressNextStageClick=false;
 function onStageClick(e){
+  if(mapTool!=='select')return; // pan tool: a tap does nothing, dragging moves the map only
   if(suppressNextStageClick){suppressNextStageClick=false;return;} // just finished dragging a point — don't also add a new one
   const p=stageToSvg(e.clientX,e.clientY);
   // close polygon if near first point and have >=3 pts — only for closed
@@ -995,6 +1025,7 @@ let draggingPointIdx=null;
 function initPointDragHandlers(){
   const stageEl=document.getElementById('stage');
   stageEl.addEventListener('pointerdown',e=>{
+    if(mapTool!=='select')return; // pan tool: point handles don't drag, the map does
     const handle=e.target.closest('.pt-handle');
     if(!handle)return;
     const idx=+handle.dataset.idx;
@@ -1025,106 +1056,55 @@ function initPointDragHandlers(){
     updateHint();
   });
 }
-/* ===== Desktop mouse-wheel / trackpad zoom — the touch pinch/pan above
-   covers mobile, but a desktop customer has no touch surface at all, so
-   without this the +/- buttons were the only way to zoom on a laptop.
-   Same debounced-preview approach as the CRM's own map (qeHandleWheel):
-   each wheel tick only nudges a live CSS scale (instant, no network); the
-   real reload — a fresh, correctly-scaled image — fires once, ~160ms after
-   the gesture settles, so a trackpad's flurry of small-delta events doesn't
-   queue up a burst of overlapping image reloads. */
-let wheelZoomTimer=null, wheelZoomAccum=0, wheelZoomAnchor=null;
+/* ===== Desktop mouse-wheel / trackpad — zoom is button-only now (+/-),
+   so this just stops the page from scrolling when the cursor is over the
+   map; it no longer changes the zoom level itself. */
 function initWheelZoom(){
   const stageEl=document.getElementById('stage');
-  const visual=document.getElementById('map-visual');
   stageEl.addEventListener('wheel',e=>{
-    if(!_lastLat)return; // demo grid mode — nothing to zoom
+    if(!_lastLat)return; // demo grid mode — nothing to scroll-block
     e.preventDefault();
-    if(!wheelZoomAnchor){
-      const p=stageToSvg(e.clientX,e.clientY);
-      wheelZoomAnchor=svgToLatLng(p);
-      const r=stageEl.getBoundingClientRect();
-      visual.classList.add('gesturing');
-      visual.style.transformOrigin=(e.clientX-r.left)+'px '+(e.clientY-r.top)+'px';
-    }
-    wheelZoomAccum+=(e.deltaY<0?1:-1)*Math.min(1,Math.abs(e.deltaY)/60);
-    visual.style.transform='scale('+Math.pow(2,wheelZoomAccum)+')';
-    clearTimeout(wheelZoomTimer);
-    wheelZoomTimer=setTimeout(()=>{
-      const delta=Math.round(wheelZoomAccum);
-      const anchor=wheelZoomAnchor;
-      wheelZoomAccum=0;wheelZoomAnchor=null;
-      const maxZ=(MAPS_KEY&&!GOOGLE_MAPS_BLOCKED)?22:OSM_ZOOM_MAX, minZ=(MAPS_KEY&&!GOOGLE_MAPS_BLOCKED)?17:OSM_ZOOM_MIN; // 22 matches index.html's QE_ZOOM_MAX / Google Static Maps' real ceiling
-      const newZoom=Math.max(minZ,Math.min(maxZ,SAT_ZOOM+delta));
-      if(newZoom===SAT_ZOOM){visual.classList.remove('gesturing');visual.style.transform='none';return;}
-      const center=anchor||{lat:_lastLat,lng:_lastLng};
-      document.getElementById('zoom-val').textContent=newZoom;
-      reloadMapAt(center.lat,center.lng,newZoom,_lastLabel);
-    },160);
   },{passive:false});
 }
-/* ===== Pan + pinch-zoom on the satellite photo, Google-Maps style =====
+/* ===== Pan on the satellite photo (Pan tool only) =====
    Only meaningful once real satellite imagery is loaded (_lastLat set) — in
-   demo/grid mode there's no bigger map behind the canvas to reveal, so
-   gestures are a no-op there and single-finger taps keep placing points
-   exactly as before (zero change to existing behaviour).
+   demo/grid mode there's no bigger map behind the canvas to reveal. Only
+   fires while mapTool==='pan'; in the Select tool a single-finger touch
+   places/drags points instead (zero change to that behaviour). Pinch-zoom
+   has been removed — zoom is button-only (+/-), matching the CRM's own map.
    During the gesture we rigid-transform #map-visual (photo + drawn points
    move together as one image, so nothing drifts relative to anything else);
    on release we snap the transform back and ask Google for a fresh, correctly
-   -scaled image at the new center/zoom, then reprojectAreas() re-derives
-   every point's true pixel position from its stable lat/lng — the same
-   mechanism the +/- zoom buttons already rely on. */
+   -scaled image at the new center, then reprojectAreas() re-derives every
+   point's true pixel position from its stable lat/lng. */
 function initMapGestures(){
   const stageEl=document.getElementById('stage');
   const visual=document.getElementById('map-visual');
-  let mode=null; // null | 'pan' | 'pinch'
-  let startTouches=null, startCenter=null, startDist=0, liveScale=1, liveDx=0, liveDy=0;
-  const dist=(a,b)=>Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY);
-  const mid=(a,b)=>({x:(a.clientX+b.clientX)/2,y:(a.clientY+b.clientY)/2});
+  let panning=false;
+  let startCenter=null, liveDx=0, liveDy=0;
   function beginGesture(touches){
-    if(!_lastLat)return; // demo mode — let normal tap-to-place-point handle it
-    if(touches.length===1&&touches[0].target&&touches[0].target.closest&&touches[0].target.closest('.pt-handle'))return; // point-drag owns this touch
-    startTouches=touches;
-    liveScale=1;liveDx=0;liveDy=0;
+    if(mapTool!=='pan')return; // select tool: taps place/drag points instead
+    if(!_lastLat)return; // demo mode — nothing to pan
+    panning=true;
+    liveDx=0;liveDy=0;
     visual.classList.add('gesturing');
-    if(touches.length>=2){
-      mode='pinch';
-      startDist=dist(touches[0],touches[1]);
-      const m=mid(touches[0],touches[1]);
-      const r=stageEl.getBoundingClientRect();
-      visual.style.transformOrigin=(m.x-r.left)+'px '+(m.y-r.top)+'px';
-    }else{
-      mode='pan';
-      startCenter={x:touches[0].clientX,y:touches[0].clientY};
-    }
+    stageEl.classList.add('panning');
+    startCenter={x:touches[0].clientX,y:touches[0].clientY};
   }
   function updateGesture(touches){
-    if(!mode)return;
-    if(mode==='pinch'&&touches.length>=2){
-      liveScale=dist(touches[0],touches[1])/startDist;
-      visual.style.transform='scale('+liveScale+')';
-    }else if(mode==='pan'&&touches.length>=1){
-      liveDx=touches[0].clientX-startCenter.x;
-      liveDy=touches[0].clientY-startCenter.y;
-      // haven't crossed the tap-vs-drag threshold yet — let it resolve as a click if released now
-      if(Math.hypot(liveDx,liveDy)<10)return;
-      visual.style.transform='translate('+liveDx+'px,'+liveDy+'px)';
-      suppressNextStageClick=true;
-    }
+    if(!panning)return;
+    liveDx=touches[0].clientX-startCenter.x;
+    liveDy=touches[0].clientY-startCenter.y;
+    // haven't crossed the tap-vs-drag threshold yet — let it resolve as a click if released now
+    if(Math.hypot(liveDx,liveDy)<10)return;
+    visual.style.transform='translate('+liveDx+'px,'+liveDy+'px)';
+    suppressNextStageClick=true;
   }
   function endGesture(){
-    if(!mode)return;
+    if(!panning)return;
     visual.classList.remove('gesturing');
-    if(mode==='pinch'&&Math.abs(liveScale-1)>0.03){
-      const maxZ=(MAPS_KEY&&!GOOGLE_MAPS_BLOCKED)?22:OSM_ZOOM_MAX, minZ=(MAPS_KEY&&!GOOGLE_MAPS_BLOCKED)?17:OSM_ZOOM_MIN; // 22 matches index.html's QE_ZOOM_MAX / Google Static Maps' real ceiling
-      const newZoom=Math.max(minZ,Math.min(maxZ,SAT_ZOOM+Math.round(Math.log2(liveScale))));
-      if(newZoom!==SAT_ZOOM){
-        document.getElementById('zoom-val').textContent=newZoom;
-        reloadMapAt(_lastLat,_lastLng,newZoom,_lastLabel);
-      }else{
-        visual.style.transform='none';
-      }
-    }else if(mode==='pan'&&Math.hypot(liveDx,liveDy)>=10){
+    stageEl.classList.remove('panning');
+    if(Math.hypot(liveDx,liveDy)>=10){
       const r=stageEl.getBoundingClientRect();
       const dxSvg=liveDx/r.width*800, dySvg=liveDy/r.height*600;
       const newCenter=svgToLatLng({x:400-dxSvg,y:300-dySvg});
@@ -1136,26 +1116,22 @@ function initMapGestures(){
     }else{
       visual.style.transform='none';
     }
-    mode=null;startTouches=null;
+    panning=false;startCenter=null;
   }
   stageEl.addEventListener('touchstart',e=>{
     if(e.touches.length>=1)beginGesture(Array.from(e.touches));
-    if(mode)e.preventDefault();
+    if(panning)e.preventDefault();
   },{passive:false});
   stageEl.addEventListener('touchmove',e=>{
-    if(!mode)return;
+    if(!panning)return;
     e.preventDefault();
     updateGesture(Array.from(e.touches));
   },{passive:false});
   stageEl.addEventListener('touchend',e=>{
-    if(!mode)return;
-    if(e.touches.length===0)endGesture();
-    else{ // finger count changed mid-gesture — finalize then re-baseline from what's left
-      endGesture();
-      beginGesture(Array.from(e.touches));
-    }
+    if(!panning)return;
+    endGesture();
   });
-  stageEl.addEventListener('touchcancel',()=>{visual.style.transform='none';visual.classList.remove('gesturing');mode=null;});
+  stageEl.addEventListener('touchcancel',()=>{visual.style.transform='none';visual.classList.remove('gesturing');stageEl.classList.remove('panning');panning=false;});
 }
 function commitArea(){
   const minPts=SERVICES[activeSvc].kind==='length'?2:3;
@@ -1232,6 +1208,7 @@ function updateHint(){
   const finishBtn=document.getElementById('finish-line-btn');
   const finishLen=document.getElementById('finish-line-len');
   if(finishBtn)finishBtn.style.display='none';
+  if(mapTool==='pan'){hint.textContent='Drag to move the map — switch to Select to tap or draw areas';return;}
   if(v.kind==='length'){
     // Open line (fence, gutter) — never forced closed. Tap to add points,
     // then either the Finish button or a double-tap ends the section.

@@ -272,6 +272,15 @@
   .field input:focus,.field select:focus,.field textarea:focus{outline:none;border-color:var(--teal);box-shadow:0 0 0 3px var(--teal-wash)}
   .field-row{display:grid;grid-template-columns:1fr 1fr;gap:13px}
 
+  #l-customer-results{display:flex;flex-direction:column;gap:6px;margin-top:8px}
+  .l-cust-result{display:block;width:100%;text-align:left;padding:9px 12px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--surface);min-height:44px}
+  .l-cust-result:hover{background:var(--surface-2);border-color:var(--teal)}
+  .lcr-name{font-size:13.5px;font-weight:600;color:var(--ink)}
+  .lcr-sub{font-size:11.5px;color:var(--ink-faint);margin-top:1px}
+  .l-cust-noresult{font-size:12.5px;color:var(--ink-faint);padding:4px 2px}
+  .l-picked-card{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--teal-wash);border:1px solid #cde8df;border-radius:var(--radius-sm);padding:10px 14px;margin-bottom:16px}
+  .l-picked-card .sm{font-size:11.5px;color:var(--ink-soft);margin-top:2px}
+
   .svc-builder{display:flex;flex-direction:column;gap:10px}
   .svc-line{display:grid;grid-template-columns:1.4fr 80px 1fr auto auto;gap:8px;align-items:center;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--radius-sm);padding:11px 12px}
   .svc-line select,.svc-line input{padding:8px 10px;font-size:13px;background:var(--surface)}
@@ -1007,6 +1016,8 @@
      rest of the app; everything below is new interactive layers within
      that same stage. ===== */
   .qe-toolbar{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:9px}
+  .qe-tool-group{display:flex;gap:2px;background:var(--surface-2);border-radius:9px;padding:2px}
+  .qe-tool-group .btn{border-radius:7px}
   .qe-toolbar .btn.sm{padding:6px 11px;font-size:12px}
   .qe-toolbar .btn.sm.active{background:var(--accent);color:#fff;border-color:var(--accent)}
   .qe-svc-pick{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:9px}
@@ -1019,6 +1030,8 @@
   .qe-tiles{position:absolute;inset:0}
   .qmap-stage{cursor:crosshair;touch-action:none;user-select:none}
   .qmap-stage.qe-select-mode{cursor:default}
+  .qmap-stage.qe-pan-mode{cursor:grab}
+  .qmap-stage.qe-pan-mode.qe-panning{cursor:grabbing}
   .qe-hint{position:absolute;left:50%;top:8px;transform:translateX(-50%);background:rgba(10,28,43,.8);color:#fff;font-size:11px;font-weight:500;padding:5px 12px;border-radius:980px;pointer-events:none;white-space:nowrap;max-width:90%;overflow:hidden;text-overflow:ellipsis;z-index:6}
   .qe-zoom{position:absolute;right:8px;bottom:8px;display:flex;flex-direction:column;gap:5px;z-index:6}
   .qe-zoom button{width:28px;height:28px;border-radius:8px;background:#fff;border:1px solid var(--line);font-size:15px;font-weight:700;color:var(--ink);box-shadow:0 1px 4px rgba(10,28,43,.18);line-height:1}
@@ -1233,6 +1246,12 @@
 <div class="overlay" id="lead-overlay"><div class="modal">
   <div class="modal-head"><div><h3 id="lead-modal-title">New lead</h3><p id="lead-modal-sub">Capture the enquiry — quote comes next.</p></div><button class="x" aria-label="Close" onclick="closeModal('lead-overlay')">×</button></div>
   <div class="modal-body">
+    <div class="field" id="l-customer-search-field">
+      <label>Existing customer?</label>
+      <input id="l-customer-search" placeholder="Search by name, phone, email or address" autocomplete="off" oninput="renderLeadCustomerResults(this.value)">
+      <div id="l-customer-results"></div>
+    </div>
+    <div id="l-picked-customer" style="display:none"></div>
     <div class="field"><label>Customer name</label><input id="l-name" placeholder="e.g. Sarah Thompson" autocomplete="off"></div>
     <div class="field-row"><div class="field"><label>Phone</label><input id="l-phone" placeholder="021 555 0123" autocomplete="off"></div><div class="field"><label>Email</label><input id="l-email" placeholder="sarah@email.com" autocomplete="off"></div></div>
     <div class="field-row"><div class="field"><label>Suburb</label><input id="l-suburb" placeholder="Takapuna" autocomplete="off"></div><div class="field"><label>Property address</label><input id="l-address" placeholder="12 Hurstmere Road" autocomplete="off"></div></div>
@@ -2165,7 +2184,67 @@ function openLeadModal(){
   document.getElementById('lead-modal-sub').textContent='Capture the enquiry — quote comes next.';
   ['l-name','l-phone','l-email','l-suburb','l-address','l-notes'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('l-source').selectedIndex=0;document.getElementById('l-repeat').selectedIndex=0;
-  openModal('lead-overlay');setTimeout(()=>document.getElementById('l-name').focus(),100);
+  document.getElementById('l-customer-search').value='';
+  document.getElementById('l-customer-results').innerHTML='';
+  document.getElementById('l-customer-search-field').style.display='';
+  document.getElementById('l-picked-customer').style.display='none';
+  openModal('lead-overlay');setTimeout(()=>document.getElementById('l-customer-search').focus(),100);
+}
+// Search-as-you-type across every existing customer (groupRecordsByCustomer
+// already dedupes the job-centric records array down to one entry per real
+// customer — this reuses that instead of a second lookup path). Deliberately
+// optional: doing nothing here and just typing straight into the fields
+// below is still exactly the old "New lead" flow, unchanged.
+function renderLeadCustomerResults(query){
+  const box=document.getElementById('l-customer-results');
+  const q=query.trim().toLowerCase();
+  if(!q){box.innerHTML='';return;}
+  const matches=groupRecordsByCustomer()
+    .filter(g=>g.customerId) // a customer only just typed this session and not yet synced has no stable id to reuse — see saveLead
+    .filter(g=>(g.name||'').toLowerCase().includes(q)||(g.phone||'').includes(q)||(g.email||'').toLowerCase().includes(q)||(g.address||'').toLowerCase().includes(q)||(g.suburb||'').toLowerCase().includes(q))
+    .slice(0,6);
+  box.innerHTML=matches.length?matches.map(g=>{
+    const addr=[g.address,g.suburb].filter(Boolean).join(', ')||'No address on file';
+    const contact=[g.phone,g.email].filter(Boolean).join(' · ')||'No phone/email on file';
+    return `<button type="button" class="l-cust-result" onclick="selectLeadCustomer('${g.customerId}')">
+      <div class="lcr-name">${(g.name||'').replace(/</g,'&lt;')}</div>
+      <div class="lcr-sub">${addr.replace(/</g,'&lt;')}</div>
+      <div class="lcr-sub">${contact.replace(/</g,'&lt;')} · ${g.jobs.length} previous job${g.jobs.length===1?'':'s'}</div>
+    </button>`;
+  }).join(''):'<div class="l-cust-noresult">No matching customer — fill in the fields below to add them as new.</div>';
+}
+function selectLeadCustomer(customerId){
+  const existing=records.find(r=>r.customerId===customerId);
+  if(!existing){toast('Could not find that customer');return;}
+  pendingNewJobCustomerId=customerId;
+  document.getElementById('l-name').value=existing.name||'';
+  document.getElementById('l-phone').value=existing.phone||'';
+  document.getElementById('l-email').value=existing.email||'';
+  document.getElementById('l-suburb').value=existing.suburb||'';
+  document.getElementById('l-address').value=existing.address||'';
+  document.getElementById('l-repeat').value='yes';
+  const jobs=records.filter(r=>r.customerId===customerId);
+  const wonJobs=jobs.filter(isWon);
+  const history=jobs.length>1||wonJobs.length
+    ?`${jobs.length} previous job${jobs.length===1?'':'s'}${wonJobs.length?' · '+wonJobs.length+' won':''}`
+    :'First job on file for this customer';
+  document.getElementById('l-picked-customer').style.display='';
+  document.getElementById('l-picked-customer').innerHTML=`<div class="l-picked-card">
+    <div><b>${(existing.name||'').replace(/</g,'&lt;')}</b><div class="sm">${history}</div></div>
+    <button type="button" class="btn ghost sm" onclick="clearLeadCustomerPick()">Change</button>
+  </div>`;
+  document.getElementById('l-customer-search-field').style.display='none';
+}
+function clearLeadCustomerPick(){
+  pendingNewJobCustomerId=null;
+  document.getElementById('l-picked-customer').style.display='none';
+  document.getElementById('l-customer-search-field').style.display='';
+  document.getElementById('l-customer-search').value='';
+  document.getElementById('l-customer-results').innerHTML='';
+  document.getElementById('l-customer-search').focus();
+  // Deliberately leaves name/phone/etc as-is rather than blanking them —
+  // "Change" most often means "wrong match, let me search again", not
+  // "throw away what I already typed."
 }
 // Adds a NEW job for an EXISTING customer — the app's records are job-centric
 // (one row per job), so this is how a repeat customer gets a second job
@@ -2185,6 +2264,10 @@ function openNewJobModal(customerId){
   document.getElementById('l-address').value=existing.address||'';
   document.getElementById('l-notes').value='';
   document.getElementById('l-source').selectedIndex=0;document.getElementById('l-repeat').value='yes';
+  // Customer's already fixed coming in from their profile — no need to
+  // search for them again.
+  document.getElementById('l-customer-search-field').style.display='none';
+  document.getElementById('l-picked-customer').style.display='none';
   openModal('lead-overlay');
 }
 function saveLead(){
@@ -2293,6 +2376,12 @@ function renderQuoteMap(r){
   qe={
     r, areas:qeNormalizeAreas(r), selectedId:null,
     history:[], future:[],
+    // tool is independent of mode: mode is "what am I doing right now"
+    // (select-or-editing vs actively drawing a new shape), tool is "what
+    // does a drag on empty map space do" (select tool: nothing but select/
+    // edit; pan tool: move the map, nothing else). Defaults to select —
+    // the map never moves on its own from an accidental drag.
+    tool:'select',
     mode:'select', drawSvc:'driveway', drawing:[], drawingGeoPts:[],
     lat:null,lng:null,zoom:QE_ZOOM_DEFAULT,scale:0.06,provider:null,
     mapsKey:turnkeyMapsKey(), addr, geoRegion,
@@ -2504,9 +2593,10 @@ function qeRenderAreas(){
     const cy=a.points.reduce((s,p)=>s+p.y,0)/a.points.length;
     // Open lines (fence, gutter) render as a polyline — no fill, no closing
     // segment back to the first point, unlike area/perimeter shapes.
+    const shapeCursor=qe.tool==='pan'?'grab':(qe.mode==='select'?'move':'crosshair');
     out+=isLine
-      ?`<polyline class="qe-area" data-id="${a.id}" points="${pts}" fill="none" stroke="${hex}" stroke-width="${sel?5:4}" stroke-dasharray="${sel?'6 3':'none'}" stroke-linecap="round" stroke-linejoin="round" style="cursor:${qe.mode==='select'?'move':'crosshair'}"/>`
-      :`<polygon class="qe-area" data-id="${a.id}" points="${pts}" fill="${hex}${sel?'55':'33'}" stroke="${hex}" stroke-width="${sel?4:3}" stroke-dasharray="${sel?'6 3':'none'}" stroke-linejoin="round" style="cursor:${qe.mode==='select'?'move':'crosshair'}"/>`;
+      ?`<polyline class="qe-area" data-id="${a.id}" points="${pts}" fill="none" stroke="${hex}" stroke-width="${sel?5:4}" stroke-dasharray="${sel?'6 3':'none'}" stroke-linecap="round" stroke-linejoin="round" style="cursor:${shapeCursor}"/>`
+      :`<polygon class="qe-area" data-id="${a.id}" points="${pts}" fill="${hex}${sel?'55':'33'}" stroke="${hex}" stroke-width="${sel?4:3}" stroke-dasharray="${sel?'6 3':'none'}" stroke-linejoin="round" style="cursor:${shapeCursor}"/>`;
     out+=`<g data-label="${a.id}" style="pointer-events:none"><rect x="${cx-32}" y="${cy-13}" width="64" height="26" rx="13" fill="#fff" opacity=".92"/><text x="${cx}" y="${cy+5}" text-anchor="middle" font-size="12" font-weight="700" fill="${hex}">${a.size}${a.unit}</text></g>`;
     if(sel){
       a.points.forEach((p,i)=>{
@@ -2577,12 +2667,39 @@ function qeLiveUpdateDrawing(cache){
   if(cache.line)cache.line.setAttribute('points',qe.drawing.map(p=>`${p.x},${p.y}`).join(' '));
   if(cache.handles)qe.drawing.forEach((p,i)=>{const h=cache.handles[i];if(h){h.setAttribute('cx',p.x);h.setAttribute('cy',p.y);}});
 }
+// Tool = what a drag on empty map space does. Independent of mode (which
+// tracks "actively drawing a new shape" vs not) — switching tool never
+// interrupts an in-progress drawing or the current selection, it only
+// changes what happens on the NEXT drag. Pan tool also clears any current
+// selection so its vertex handles can't be dragged while "just moving the
+// map" is what a user reasonably expects a drag to do.
+function qeSetTool(tool){
+  qe.tool=tool;
+  if(tool==='pan')qe.selectedId=null;
+  // Switching tool always exits an in-progress drawing — neither tool
+  // makes sense mid-draw (Pan can't place points at all; Select switching
+  // "onto itself" is the same one-tap cancel the old Select button gave,
+  // which matters on mobile with no Escape key). Inlined rather than
+  // calling qeSetMode() separately so this is one render pass, not two.
+  const wasDrawing=qe.mode==='draw';
+  if(wasDrawing){qe.mode='select';qe.drawing=[];qe.drawingGeoPts=[];}
+  const stage=document.getElementById('qe-stage');
+  if(stage){
+    stage.classList.toggle('qe-pan-mode',tool==='pan');
+    if(wasDrawing)stage.classList.add('qe-select-mode');
+  }
+  qeRenderToolbar();qeRenderPanel();qeUpdateHint();
+  if(wasDrawing){qeRenderSvcPicker();qeRenderAreas();}
+}
 function qeRenderToolbar(){
   const el=document.getElementById('qe-toolbar'); if(!el)return;
   const sel=qe.selectedId;
   const satLabel=qe.provider==='google'?(qe.mapType==='satellite'?'Satellite':'Roadmap'):'Satellite';
   el.innerHTML=`
-    <button type="button" class="btn ghost sm ${qe.mode==='select'?'active':''}" onclick="qeSetMode('select')">↖ Select</button>
+    <div class="qe-tool-group">
+      <button type="button" class="btn ghost sm ${qe.tool==='select'?'active':''}" onclick="qeSetTool('select')" title="Select, draw and edit areas">Select</button>
+      <button type="button" class="btn ghost sm ${qe.tool==='pan'?'active':''}" onclick="qeSetTool('pan')" title="Drag to move around the map — nothing else">Pan</button>
+    </div>
     <button type="button" class="btn ghost sm" onclick="qeUndo()" ${qe.history.length?'':'disabled'}>↺ Undo</button>
     <button type="button" class="btn ghost sm" onclick="qeRedo()" ${qe.future.length?'':'disabled'}>↻ Redo</button>
     <button type="button" class="btn ghost sm" onclick="qeDeleteArea('${sel||''}')" ${sel?'':'disabled'}>Delete</button>
@@ -2626,9 +2743,10 @@ function qeUpdateHint(){
   // which is exactly what looked like satellite imagery hanging indefinitely.
   if(qe.provider==='grid'){hint.textContent=qe.addr?'Could not locate that address — drawing on a plain grid (not to scale)':'No address on file — drawing on a plain grid';return;}
   if(!qe.lat){hint.textContent='Loading map…';return;}
+  if(qe.tool==='pan'){hint.textContent='Drag to move the map — switch to Select to tap or draw areas';return;}
   if(qe.selectedId){hint.textContent='Drag points to adjust, or drag the shape to move it';return;}
-  if(!qe.areas.length){hint.textContent='Select a service, then draw the area';return;}
-  hint.textContent=QE_IS_TOUCH?'Tap a shape to select it — use two fingers to move the map':'Tap a shape to select it, or pick a service above to draw a new one';
+  if(!qe.areas.length){hint.textContent='Select a service to draw an area, or use Pan to move the map';return;}
+  hint.textContent='Tap a shape to select it, pick a service above to draw a new one, or use Pan to move the map';
 }
 function qeRenderPanel(){
   const el=document.getElementById('qe-panel'); if(!el)return;
@@ -2691,8 +2809,9 @@ function qeSetMode(mode){
 }
 function qeStartDraw(svc){
   qe.mode='draw';qe.drawSvc=svc;qe.drawing=[];qe.drawingGeoPts=[];qe.selectedId=null;
+  qe.tool='select'; // drawing needs click-to-place, which only does anything in the select tool
   const stage=document.getElementById('qe-stage');
-  if(stage)stage.classList.remove('qe-select-mode');
+  if(stage){stage.classList.remove('qe-select-mode');stage.classList.remove('qe-pan-mode');}
   qeRenderToolbar();qeRenderSvcPicker();qeRenderPanel();qeRenderAreas();qeUpdateHint();
 }
 function qeCommitDrawing(){
@@ -2882,31 +3001,39 @@ function qeAdjustZoom(delta,anchorLatLng){
 }
 
 /* ---------- stage interaction: click (select/draw/insert-vertex), drag
-   (move shape / reshape vertex / pan), wheel (zoom toward cursor), touch
-   pinch (zoom). Listeners are attached once per modal-open — the whole
-   #quote-map-zone is rebuilt fresh by renderQuoteMap() each time the quote
-   modal opens, so there's never a stale-listener buildup to worry about. ---------- */
+   (select tool: reshape a vertex or move the selected shape; pan tool:
+   move the map — never both from the same gesture, see qe.tool). Zoom is
+   the +/- buttons only (qeAdjustZoom), not wheel or pinch. Listeners are
+   attached once per modal-open — the whole #quote-map-zone is rebuilt
+   fresh by renderQuoteMap() each time the quote modal opens, so there's
+   never a stale-listener buildup to worry about. ---------- */
 function qeInitStageEvents(){
   const stage=document.getElementById('qe-stage'); if(!stage)return;
   stage.addEventListener('click',qeHandleClick);
+  // Double-click still finishes an in-progress drawing (that's a draw-mode
+  // gesture, not a zoom one) — but no longer zooms the map. Zoom is only
+  // ever the +/- buttons now, so a double-tap while just looking at the
+  // map can't ever surprise-zoom it.
   stage.addEventListener('dblclick',e=>{
     e.preventDefault();
     if(qe.mode==='draw'){
       const minPts=SERVICES[qe.drawSvc].basis==='length'?2:3;
       if(qe.drawing.length>=minPts){qeCommitDrawing();return;}
     }
-    if(qe.mode==='select'&&!e.target.closest('.qe-area')&&!e.target.closest('.qe-pt-handle')){qeAdjustZoom(1);}
   });
   stage.addEventListener('pointerdown',qeHandlePointerDown);
   stage.addEventListener('pointermove',qeHandlePointerMove);
   stage.addEventListener('pointerup',qeHandlePointerUp);
   stage.addEventListener('pointercancel',qeHandlePointerUp);
-  stage.addEventListener('wheel',qeHandleWheel,{passive:false});
-  qeInitPinch(stage);
+  // Wheel is kept only to stop the page/modal from scrolling when the
+  // cursor is over the map — it no longer zooms. Pinch-zoom is gone
+  // entirely (qeInitPinch is no longer called): zoom is the +/- buttons,
+  // full stop, so it can never fire mid-drawing or mid-drag by accident.
+  stage.addEventListener('wheel',e=>{e.preventDefault();},{passive:false});
 }
 function qeHandleClick(e){
   if(qeSuppressClick){qeSuppressClick=false;return;}
-  const midHandle=e.target.closest('.qe-mid-handle');
+  const midHandle=qe.tool==='select'?e.target.closest('.qe-mid-handle'):null;
   if(midHandle){
     qePushHistory();
     const area=qe.areas.find(a=>a.id===midHandle.dataset.area);
@@ -2939,11 +3066,21 @@ function qeHandleClick(e){
     qeRenderAreas();qeUpdateHint();qeRenderPanel();
     return;
   }
+  if(qe.tool!=='select')return; // pan tool: a click does nothing — moving the map is the only thing a drag does
   const areaEl=e.target.closest('.qe-area');
   if(areaEl)qeSelectArea(areaEl.dataset.id);
   else if(!e.target.closest('.qe-pt-handle'))qeSelectArea(null);
 }
 function qeHandlePointerDown(e){
+  // Pan tool: a drag ONLY ever moves the map — never a vertex, never a
+  // shape, never a selection. This is the whole point of having a separate
+  // tool instead of one mode where a drag's target decided what happened,
+  // which is exactly what made dragging feel "overly sensitive" (a drag
+  // meant to pan that happened to start on a shape moved the shape instead).
+  if(qe.tool==='pan'){
+    qe.panStart={x:e.clientX,y:e.clientY};
+    return;
+  }
   const vertexHandle=e.target.closest('.qe-pt-handle');
   if(vertexHandle){
     const isDraft=vertexHandle.classList.contains('qe-draw-handle');
@@ -2964,7 +3101,7 @@ function qeHandlePointerDown(e){
     return;
   }
   const areaEl=e.target.closest('.qe-area');
-  if(qe.mode==='select'&&areaEl&&areaEl.dataset.id===qe.selectedId){
+  if(areaEl&&areaEl.dataset.id===qe.selectedId){
     qePushHistory();
     qe.draggingAreaId=areaEl.dataset.id;
     qe.dragStart=qeStageToSvg(e.clientX,e.clientY);
@@ -2972,16 +3109,9 @@ function qeHandlePointerDown(e){
     e.stopPropagation();
     return;
   }
-  // Single-finger pan (mouse drag OR touch drag — Pointer Events unify both,
-  // so no touch-specific code is needed here). This used to explicitly
-  // exclude touch (`e.pointerType!=='touch'`), which combined with
-  // touch-action:none on the stage meant a one-finger drag on the map did
-  // nothing at all on a phone. Two-finger pinch-zoom is handled separately
-  // by qeInitPinch's native touch listeners, which only ever activate for
-  // 2+ simultaneous touches, so there's no conflict with single-finger pan.
-  if(qe.mode==='select'){
-    qe.panStart={x:e.clientX,y:e.clientY};
-  }
+  // Select tool + empty space: does nothing on pointerdown — no more
+  // "well it wasn't on a shape, so it must be a pan" fallback. Switch to
+  // the Pan tool to move the map.
 }
 function qeHandlePointerMove(e){
   if(qe.draggingVertex){
@@ -3015,6 +3145,8 @@ function qeHandlePointerMove(e){
     if(Math.hypot(dx,dy)<4)return;
     const visual=document.getElementById('qe-visual');
     if(visual){visual.classList.add('gesturing');visual.style.transform=`translate(${dx}px,${dy}px)`;}
+    const stage=document.getElementById('qe-stage');
+    if(stage)stage.classList.add('qe-panning');
   }
 }
 function qeHandlePointerUp(e){
@@ -3032,9 +3164,10 @@ function qeHandlePointerUp(e){
   if(qe.panStart){
     const dx=e.clientX-qe.panStart.x, dy=e.clientY-qe.panStart.y;
     const visual=document.getElementById('qe-visual');
+    const stage=document.getElementById('qe-stage');
+    if(stage)stage.classList.remove('qe-panning');
     if(Math.hypot(dx,dy)>=4&&qe.lat){
       qeSuppressClick=true;
-      const stage=document.getElementById('qe-stage');
       const r=stage.getBoundingClientRect();
       const dxSvg=dx/r.width*800, dySvg=dy/r.height*600;
       const newCenter=qeSvgToLatLng({x:400-dxSvg,y:300-dySvg});
@@ -3047,73 +3180,11 @@ function qeHandlePointerUp(e){
     if(visual){visual.classList.remove('gesturing');visual.style.transform='none';}
   }
 }
-// Mouse wheel AND trackpad zoom both land here as 'wheel' events, but a
-// trackpad emits dozens of small-delta events per gesture where a mouse
-// wheel emits a few large-delta ones. Previously every single event fired
-// an immediate full map reload (a real network request) — a trackpad
-// scroll could queue up a dozen overlapping requests, each repainting the
-// map as it landed, which is exactly what "laggy"/"jumpy" zoom looks like.
-// Now each event only nudges a live CSS scale preview (instant, no
-// network); the real reload fires once, ~160ms after the gesture settles.
-let qeWheelTimer=null, qeWheelAccum=0, qeWheelAnchor=null;
-function qeHandleWheel(e){
-  if(!qe.lat)return;
-  e.preventDefault();
-  const visual=document.getElementById('qe-visual'); if(!visual)return;
-  if(!qeWheelAnchor){
-    const p=qeStageToSvg(e.clientX,e.clientY);
-    qeWheelAnchor=qeSvgToLatLng(p);
-    const stage=document.getElementById('qe-stage');
-    const r=stage.getBoundingClientRect();
-    visual.classList.add('gesturing');
-    visual.style.transformOrigin=(e.clientX-r.left)+'px '+(e.clientY-r.top)+'px';
-  }
-  // Normalize: a mouse wheel's deltaY is typically ~100+ per notch, a
-  // trackpad's is often single digits per event — without this a trackpad
-  // scroll would need dozens of events to register as one zoom level.
-  qeWheelAccum+=(e.deltaY<0?1:-1)*Math.min(1,Math.abs(e.deltaY)/60);
-  visual.style.transform='scale('+Math.pow(2,qeWheelAccum)+')';
-  clearTimeout(qeWheelTimer);
-  qeWheelTimer=setTimeout(()=>{
-    const delta=Math.round(qeWheelAccum);
-    const anchor=qeWheelAnchor;
-    qeWheelAccum=0;qeWheelAnchor=null;
-    qeAdjustZoom(delta,anchor); // resets/clears the preview transform either way, see qeAdjustZoom
-  },160);
-}
-function qeInitPinch(stageEl){
-  let active=false,startDist=0;
-  const dist=(a,b)=>Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY);
-  stageEl.addEventListener('touchstart',e=>{
-    const visual=document.getElementById('qe-visual'); if(!visual)return;
-    if(e.touches.length>=2&&qe.lat){
-      active=true;startDist=dist(e.touches[0],e.touches[1]);
-      visual.classList.add('gesturing');
-      const r=stageEl.getBoundingClientRect();
-      const mx=(e.touches[0].clientX+e.touches[1].clientX)/2-r.left;
-      const my=(e.touches[0].clientY+e.touches[1].clientY)/2-r.top;
-      visual.style.transformOrigin=mx+'px '+my+'px';
-      e.preventDefault();
-    }
-  },{passive:false});
-  stageEl.addEventListener('touchmove',e=>{
-    if(!active||e.touches.length<2)return;
-    e.preventDefault();
-    const scale=dist(e.touches[0],e.touches[1])/startDist;
-    const visual=document.getElementById('qe-visual');
-    if(visual)visual.style.transform='scale('+scale+')';
-  },{passive:false});
-  stageEl.addEventListener('touchend',e=>{
-    if(!active||e.touches.length>=2)return;
-    active=false;
-    const visual=document.getElementById('qe-visual'); if(!visual)return;
-    visual.classList.remove('gesturing');
-    const m=(visual.style.transform||'').match(/scale\(([\d.]+)\)/);
-    const s=m?parseFloat(m[1]):1;
-    if(Math.abs(s-1)>0.03)qeAdjustZoom(Math.round(Math.log2(s)));
-    else visual.style.transform='none';
-  });
-}
+// Wheel-accumulated zoom and two-finger pinch-zoom used to live here.
+// Removed per the simplified control model: zoom is the +/- buttons only
+// (qeAdjustZoom, wired in the toolbar and the qe-zoom control), so it can
+// never fire mid-drawing, mid-drag, or as a surprise from a trackpad
+// gesture — one predictable way to zoom, not three.
 /* ---------- keyboard shortcuts — only while the quote modal is open and
    focus isn't inside a text field ---------- */
 document.addEventListener('keydown',function(e){
@@ -4466,13 +4537,36 @@ function cardFlag(r){
   if(r.stage==='quoted' && r.quoteSentAt && (now-r.quoteSentAt)>2*D) return {tone:'warn',label:'Going quiet'};
   return null;
 }
+let lastLoggedOpenValue=null; // dedupes the Open-pipeline debug log below — see render()
 function render(){
   autoFollowUp();
   if(typeof saveState==='function')saveState();
   const leads=records.filter(r=>r.stage==='new');
   document.getElementById('cnt-leads').textContent=leads.length;
+  // Open pipeline = still-selling stages only (new/quoted/followup), via the
+  // same isOpenSale() the "N in sales" sub-label next to it already uses.
+  // Previously this summed every stage EXCEPT 'paid' — which let cancelled
+  // jobs (stage 'cancelled' !== 'paid') keep counting toward Open pipeline
+  // forever, and also double-counted won/scheduled/completed revenue that's
+  // already shown separately in the Won/Awaiting-payment cards. Deriving
+  // the dollar total from the exact same array as the count next to it
+  // means the two numbers can never describe different sets of records again.
   const openSale=records.filter(isOpenSale);
-  const openValue=records.filter(r=>r.stage!=='paid').reduce((s,r)=>s+r.total,0);
+  const openValue=openSale.reduce((s,r)=>s+(r.total||0),0);
+  // render() fires after most mutations app-wide, not just on Pipeline —
+  // logging only when the figure actually changes (rather than every call)
+  // keeps this useful for verifying the fix without flooding the console
+  // during ordinary use.
+  if(openValue!==lastLoggedOpenValue&&typeof console!=='undefined'&&console.table){
+    lastLoggedOpenValue=openValue;
+    console.log('[Pipeline] Open pipeline recalculated:',openSale.length,'record(s), total',money(openValue));
+    console.table(openSale.map(r=>({id:r.id,name:r.name,stage:r.stage,total:r.total||0})));
+    const excludedButNonPaid=records.filter(r=>!isOpenSale(r)&&r.stage!=='paid');
+    if(excludedButNonPaid.length){
+      console.log('[Pipeline] Excluded from Open pipeline (won/scheduled/completed/cancelled — not a sales-stage record):');
+      console.table(excludedButNonPaid.map(r=>({id:r.id,name:r.name,stage:r.stage,total:r.total||0})));
+    }
+  }
   const wonValue=records.filter(isWon).reduce((s,r)=>s+r.total,0);
   const paidValue=records.filter(isPaid).reduce((s,r)=>s+r.total,0);
   const awaitingPay=records.filter(r=>r.stage==='completed').reduce((s,r)=>s+r.total,0);
