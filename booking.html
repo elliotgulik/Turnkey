@@ -40,8 +40,13 @@
      page already has its own header/branding, so drop ours and tighten the
      top margin instead of showing two headers stacked in a Wix iframe. */
   html.embedded header{display:none}
-  html.embedded .wrap{padding-top:14px}
-  html.embedded .hero{margin-top:0}
+  html.embedded .wrap{padding-top:10px}
+  /* The embed starts directly on the quote form — the marketing headline
+     and blurb are redundant once this is already sitting inside the
+     business's own Wix page, and every pixel counts in an iframe. */
+  html.embedded .hero{display:none}
+  html.embedded .steps{margin:0 0 8px}
+  html.embedded .builder{margin:14px 0 30px}
   .head-in{max-width:1080px;margin:0 auto;padding:14px 18px;display:flex;align-items:center;justify-content:space-between;gap:12px}
   .brand{display:flex;align-items:center;gap:11px}
   .brand svg{display:block}
@@ -67,7 +72,11 @@
 
   /* layout */
   .builder{display:grid;grid-template-columns:1fr 340px;gap:18px;margin:18px 0 50px;align-items:start}
-  @media(max-width:840px){.builder{grid-template-columns:1fr}}
+  /* Grid tracks default to min-width:auto — once stacked to a single column,
+     a wide flex row deep inside .side (e.g. .win-row's label+counter+hint)
+     could force that 1fr column past the viewport instead of shrinking,
+     causing horizontal scroll. min-width:0 lets it actually shrink to fit. */
+  @media(max-width:840px){.builder{grid-template-columns:1fr}.builder>*{min-width:0}}
 
   .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
   .card-pad{padding:18px 20px}
@@ -116,7 +125,7 @@
 
   /* address bar over map */
   .addr-bar{display:flex;gap:8px;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--surface-2)}
-  .addr-bar input{flex:1;padding:10px 13px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--surface)}
+  .addr-bar input{flex:1;min-width:0;padding:10px 13px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--surface)}
   .addr-bar input:focus{outline:none;border-color:var(--teal);box-shadow:0 0 0 3px var(--teal-wash)}
   .addr-go{font-size:13px;font-weight:600;padding:0 16px;border-radius:var(--radius-sm);background:var(--ink);color:#fff}
 
@@ -131,8 +140,8 @@
   .storey-btn.sel{background:#138a72;border-color:#138a72;color:#fff}
   .storey-mult{font-size:11px;color:#1f5d50;font-weight:600}
   /* window counter */
-  .win-row{display:flex;align-items:center;gap:10px;background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:9px 13px;margin-bottom:8px}
-  .win-label{font-size:12.5px;font-weight:600;color:var(--ink);flex:1}
+  .win-row{display:flex;flex-wrap:wrap;align-items:center;gap:10px;background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:9px 13px;margin-bottom:8px}
+  .win-label{font-size:12.5px;font-weight:600;color:var(--ink);flex:1;min-width:0}
   .win-ctrl{display:flex;align-items:center;gap:8px}
   .win-btn{width:30px;height:30px;border-radius:50%;border:1.5px solid var(--line);font-size:18px;font-weight:700;color:var(--ink);background:var(--surface);line-height:1}
   .win-btn:hover{border-color:#4a6b8a;color:#4a6b8a}
@@ -498,6 +507,10 @@ let BIZ_REGION=''; // set once the business profile fetch below resolves; used a
 // your website) — switches to a tighter layout with no redundant header bar.
 let EMBED_MODE=false;
 try{const u=new URL(location.href);EMBED_MODE=u.searchParams.get('embed')==='1';}catch(e){}
+// True for a direct/standalone visit (customer's own booking link, or the
+// CRM's "preview" tab) — false inside a Wix/website iframe. Gates the "want
+// this on your own site?" banner, which only makes sense outside an embed.
+let standalone=!EMBED_MODE;
 
 /* ===== Business profile: name/logo/phone/region, loaded per ?biz= id from the
    public.businesses table (public-read RLS — see schema-business-profile.sql).
@@ -1412,10 +1425,53 @@ function toggleIntegration(){
 }
 
 // Embedded mode: ?embed=1 (used by the CRM's generated iframe code) switches to a
-// tighter layout that drops the redundant header bar — the business's own site
-// already has one. The "For business owners" explainer stays hidden either way;
-// it's just a pointer to the CRM now, not something a customer needs to see.
+// tighter layout that drops the redundant header bar and marketing hero — the
+// business's own Wix page already has those. The "For business owners"
+// explainer only makes sense on a standalone visit (see `standalone` above).
 if(EMBED_MODE)document.documentElement.classList.add('embedded');
+
+// ===== Wix/iframe embed height sync =====
+// The CRM's generated embed snippet (Connections → Embed on your website)
+// used to hardcode a fixed iframe height, so any step taller than that got
+// clipped (buttons cut off, "scroll inside scroll") and any step shorter
+// left dead space. This posts the page's real content height to whatever
+// embedded it, on every layout change — new step, map image loading in,
+// a validation message appearing, photos added — so the matching listener
+// in that embed snippet (see index.html's embed-code generator) can resize
+// the <iframe> to match. No-op when visited directly: there's no parent
+// listening, and the message just goes nowhere.
+if(EMBED_MODE){
+  let lastReportedEmbedHeight=0;
+  function reportEmbedHeight(){
+    // Neither getBoundingClientRect().height NOR scrollHeight on html/body
+    // works here: html,body{height:100%} (above) pins their own box to
+    // whatever height the iframe currently has, and since nothing clips
+    // overflow, scrollHeight never reports SHORTER than the tallest height
+    // this ever grew to — a one-way ratchet (fine for a step that adds
+    // content, wrong for going back to a shorter one: it would leave dead
+    // space forever). <footer> is the last element on the page and has no
+    // height of its own, so its bottom edge is a true, ratchet-free measure
+    // of the real content height regardless of what html/body are pinned to.
+    const footer=document.querySelector('footer');
+    const h=Math.ceil(footer?footer.getBoundingClientRect().bottom:document.documentElement.scrollHeight);
+    if(Math.abs(h-lastReportedEmbedHeight)<2)return; // ignore sub-pixel noise so this can't loop
+    lastReportedEmbedHeight=h;
+    try{window.parent.postMessage({type:'turnkey:embed-resize',height:h},'*');}catch(e){}
+  }
+  // Watch .wrap (and footer) themselves, not documentElement/body — those
+  // are the ones pinned by height:100%, so their OWN box never shrinks back
+  // down and a ResizeObserver on them would miss a step getting shorter.
+  // .wrap has no explicit height, so it genuinely grows/shrinks with its
+  // content, which is exactly the signal a resize needs to fire on.
+  if(window.ResizeObserver){
+    const ro=new ResizeObserver(reportEmbedHeight);
+    const wrap=document.querySelector('.wrap'),footerEl=document.querySelector('footer');
+    if(wrap)ro.observe(wrap);
+    if(footerEl)ro.observe(footerEl);
+  }
+  window.addEventListener('load',reportEmbedHeight);
+  reportEmbedHeight();
+}
 
 // pointer handling
 const stage=document.getElementById('stage');

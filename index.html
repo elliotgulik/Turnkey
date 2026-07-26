@@ -198,6 +198,7 @@
   .pill.paused{background:var(--amber-wash);color:var(--amber)}
   .pill.invoiced{background:var(--m-insight-wash);color:var(--m-insight)}
   .pill.overdue{background:var(--coral-wash);color:var(--coral)}
+  .pill.partial{background:var(--amber-wash);color:var(--amber)}
 
   /* buttons — pill, restrained */
   .btn{display:inline-flex;align-items:center;gap:7px;justify-content:center;font-size:14px;font-weight:500;padding:11px 20px;border-radius:980px;transition:background .15s,border-color .15s,opacity .15s,transform .1s;letter-spacing:-.01em}
@@ -548,7 +549,16 @@
     main{padding:20px 16px 90px}
     .view-head h2{font-size:25px}
     .field-row{grid-template-columns:1fr}
+    /* Grid tracks default to min-width:auto, so a <select> with a long
+       option label (e.g. "2 storeys (×1.35)") was forcing its 1fr column
+       wider than the modal, clipped invisibly since the modal itself hides
+       overflow — min-width:0 lets the track actually shrink, and width:100%
+       makes the control fill that (now-correct) width instead of sizing to
+       its own content. */
     .svc-line{grid-template-columns:1fr 1fr}.svc-line .sub{text-align:right}
+    .svc-line>*{min-width:0}
+    .svc-line>select,.svc-line>input{width:100%;box-sizing:border-box}
+    .sl-windows{flex-wrap:wrap}
     .col-body .card{width:100%}.stat-row{grid-template-columns:1fr 1fr}
     .ops-grid,.detail-grid{grid-template-columns:1fr}
   }
@@ -1419,6 +1429,21 @@
   <div class="modal-foot"><button class="btn ghost" onclick="closeModal('cancel-job-overlay')">Never mind</button><button class="btn primary" style="background:var(--coral);border-color:var(--coral)" onclick="confirmCancelJob()">Cancel job</button></div>
 </div></div>
 
+<div class="overlay" id="payment-overlay"><div class="modal">
+  <div class="modal-head"><div><h3>Record payment</h3><p id="pay-modal-sub">—</p></div><button class="x" aria-label="Close" onclick="closeModal('payment-overlay')">×</button></div>
+  <div class="modal-body">
+    <div id="pay-summary" style="margin-bottom:14px"></div>
+    <div class="field"><label>Amount</label><input type="number" id="pay-amount" min="1" step="1" placeholder="0"></div>
+    <div class="field-row">
+      <div class="field"><label>Date</label><input type="date" id="pay-date"></div>
+      <div class="field"><label>Method</label><select id="pay-method"><option>Cash</option><option>Bank transfer</option><option>Card</option><option>Other</option></select></div>
+    </div>
+    <div class="field"><label>Notes / reference</label><input type="text" id="pay-notes" placeholder="e.g. cheque #1234, receipt ref"></div>
+    <div id="pay-history"></div>
+  </div>
+  <div class="modal-foot"><button class="btn ghost" onclick="closeModal('payment-overlay')">Cancel</button><button class="btn primary" onclick="confirmRecordPayment()">Record payment</button></div>
+</div></div>
+
 <div class="overlay" id="signature-overlay"><div class="modal">
   <div class="modal-head"><div><h3>Customer sign-off</h3><p>Optional — have the customer sign on this device.</p></div><button class="x" aria-label="Close" onclick="closeModal('signature-overlay')">×</button></div>
   <div class="modal-body">
@@ -1601,12 +1626,14 @@ const JOB_STATUS_META = {
   cancelled:      {label:'Cancelled',      cls:'cancelled'},
   invoiced:       {label:'Invoiced',       cls:'invoiced'},
   paid:           {label:'Paid',           cls:'paid'},
+  partial:        {label:'Partially Paid', cls:'partial'},
   overdue:        {label:'Overdue',        cls:'overdue'}
 };
 function jobStatusKeyOf(r){
   if(r.stage==='cancelled')return 'cancelled';
   if(invoiceDisplayStatus(r)==='overdue')return 'overdue';
   if(r.stage==='paid')return 'paid';
+  if(invoiceDisplayStatus(r)==='partial')return 'partial';
   if(r.paymentStatus==='sent')return 'invoiced';
   if(r.stage==='completed')return 'completed';
   if(r.jobStatus==='paused')return 'paused';
@@ -2079,7 +2106,7 @@ function newRecord(d){return Object.assign({
   tech:'Unassigned',gps:'pending',scheduledDate:null,scheduledIdx:null,scheduledDateISO:null,createdAt:Date.now(),follows:[],
   quoteSentAt:null,clientResponded:false,paidAt:null,approvedAt:null,lastServiceDaysAgo:null,assumptions:null,areaPolys:null,selfPriced:false,
   hasCustomerPhoto:false,customerPhotoPath:null,quoteAttachments:[],assignedStaffId:null,
-  paymentStatus:'draft',paymentMethod:null,dueDate:null,
+  paymentStatus:'draft',paymentMethod:null,dueDate:null,payments:[],
   jobStatus:null,statusHistory:[],jobNotes:null,weatherSnapshot:null
 },d)}
 
@@ -3957,6 +3984,7 @@ function openDocPreview(mode,id){
   foot.innerHTML=`
     <button class="btn ghost" onclick="openTemplateEditor()">✎ Edit template</button>
     <div style="flex:1"></div>
+    ${mode==='invoice'&&r.stage!=='paid'?`<button class="btn ghost" onclick="openPaymentModal(${id})">${(r.payments&&r.payments.length)?'Record another payment':'Record payment'}</button>`:''}
     <button class="btn ghost" onclick="closeDocPreview()">Close</button>
     <button class="btn primary" onclick="${sendFn}">${sendLabel}</button>`;
   openModal('doc-preview-overlay');
@@ -4310,6 +4338,11 @@ function openDetail(id){
           ${r.stage==='new'||r.services.length===0?`<button class="btn primary block" style="margin-top:14px" onclick="openQuoteModal(${id})">Build quote</button>`:`<button class="btn ghost block" style="margin-top:14px" onclick="openQuoteModal(${id})">Edit quote</button>`}
           ${r.selfPriced&&r.stage==='new'?`<button class="btn accent block" style="margin-top:9px" onclick="openQuoteModal(${id})">Review &amp; send quote</button>`:''}
           ${(r.stage==='completed'||r.stage==='paid')?`<button class="btn accent block" style="margin-top:9px" onclick="previewInvoice(${id})">${r.stage==='paid'?'View invoice':'Preview &amp; send invoice'}</button>`:''}
+          ${(r.stage==='completed'||r.stage==='paid'||(r.payments&&r.payments.length))?`
+          <div class="kv" style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line)"><span class="k">Paid so far</span><span class="v">${money(paymentsTotal(r))}</span></div>
+          <div class="kv"><span class="k" style="font-weight:600;color:var(--ink)">Balance owing</span><span class="v" style="font-weight:600;color:${paymentBalance(r)>0?'var(--coral)':'var(--teal)'}">${money(paymentBalance(r))}</span></div>
+          ${r.stage!=='paid'?`<button class="btn ghost block" style="margin-top:9px" onclick="openPaymentModal(${id})">Record payment</button>`:(r.payments&&r.payments.length?`<button class="btn ghost block" style="margin-top:9px" onclick="openPaymentModal(${id})">View ${r.payments.length} payment${r.payments.length>1?'s':''}</button>`:'')}
+          `:''}
         </div>
         <div class="panel"><h4>Follow-up sequence <span class="eng-badge">Sales</span></h4>${followHtml}</div>
         <div class="panel"><h4>Lead source</h4>
@@ -4831,8 +4864,10 @@ function renderCustomerProfile(){
         <div class="panel" style="margin-bottom:14px"><h4>Invoices</h4>
           ${jobs.filter(r=>r.invoiceId).length?jobs.filter(r=>r.invoiceId).map(r=>{
             const ds=invoiceDisplayStatus(r);
-            const pillCls=ds==='paid'?'paid':(ds==='overdue'?'bad':'');
-            return `<div class="kv"><span class="k">${r.name} job${r.scheduledDate?' · '+r.scheduledDate:''}${r.dueDate?' · due '+isoToLabel(r.dueDate):''}${r.paymentLinkUrl?' · <a href="'+r.paymentLinkUrl+'" target="_blank" style="color:var(--teal)">payment link</a>':''}</span><span class="v">${money(r.total||0)} · <span class="pill ${pillCls}">${ds.charAt(0).toUpperCase()+ds.slice(1)}</span>${ds!=='paid'?`<select style="margin-left:6px;font-size:11px" onchange="setPaymentMethod(${r.id},this.value)"><option value="">Method…</option>${['Cash','Bank transfer','Card','Other'].map(m=>`<option ${r.paymentMethod===m?'selected':''}>${m}</option>`).join('')}</select> <button class="btn ghost sm" style="padding:2px 8px;font-size:11px" onclick="sendPaymentLink(${r.id})">${r.paymentLinkUrl?'New link':'Payment link'}</button>`:(r.paymentMethod?` · ${r.paymentMethod}`:'')}</span></div>`;
+            const pillCls=ds==='paid'?'paid':(ds==='overdue'?'bad':(ds==='partial'?'partial':''));
+            const pillLabel=ds==='partial'?'Partially Paid':ds.charAt(0).toUpperCase()+ds.slice(1);
+            const balance=paymentBalance(r);
+            return `<div class="kv"><span class="k">${r.name} job${r.scheduledDate?' · '+r.scheduledDate:''}${r.dueDate?' · due '+isoToLabel(r.dueDate):''}${ds==='partial'?' · '+money(balance)+' owing':''}${r.paymentLinkUrl?' · <a href="'+r.paymentLinkUrl+'" target="_blank" style="color:var(--teal)">payment link</a>':''}</span><span class="v">${money(r.total||0)} · <span class="pill ${pillCls}">${pillLabel}</span>${ds!=='paid'?` <button class="btn accent sm" style="padding:2px 10px;font-size:11px" onclick="openPaymentModal(${r.id})">Record payment</button><select style="margin-left:6px;font-size:11px" onchange="setPaymentMethod(${r.id},this.value)"><option value="">Method…</option>${['Cash','Bank transfer','Card','Other'].map(m=>`<option ${r.paymentMethod===m?'selected':''}>${m}</option>`).join('')}</select> <button class="btn ghost sm" style="padding:2px 8px;font-size:11px" onclick="sendPaymentLink(${r.id})">${r.paymentLinkUrl?'New link':'Payment link'}</button>`:(r.paymentMethod?` · ${r.paymentMethod}`:'')}${(r.payments&&r.payments.length)?` · <button class="btn ghost sm" style="padding:2px 8px;font-size:11px" onclick="openPaymentModal(${r.id})">${r.payments.length} payment${r.payments.length>1?'s':''}</button>`:''}</span></div>`;
           }).join(''):'<div class="empty-state" style="padding:16px"><div class="sm">No invoices yet.</div></div>'}
         </div>
         <div class="panel" style="margin-bottom:14px"><h4>Before / after photos</h4>
@@ -5270,7 +5305,7 @@ function dashboardAlerts(){
   });
   const todayIso=todayISO(), weekAhead=addDaysISO(todayIso,7);
   staff.forEach(t=>{
-    const hasWork=records.some(r=>r.assignedStaffId===t.id&&r.scheduledDateISO&&r.scheduledDateISO>=todayIso&&r.scheduledDateISO<=weekAhead);
+    const hasWork=records.some(r=>r.assignedStaffId===t.id&&r.stage!=='cancelled'&&r.scheduledDateISO&&r.scheduledDateISO>=todayIso&&r.scheduledDateISO<=weekAhead);
     if(!hasWork)alerts.push({tone:'warn',text:`${t.name||t.email||'One technician'} has no work scheduled this week.`,onclick:"switchView('ops')"});
   });
   const wonUnscheduled=records.filter(r=>r.stage==='won').length;
@@ -5530,6 +5565,65 @@ function renderJobsFlow(){
 // workflow transition helpers
 function markWon(id){const r=records.find(x=>x.id===id);if(!r.services.length){toast('Build a quote first');openQuoteModal(id);return;}r.stage='won';r.clientResponded=true;render();renderAll();openSchedule(id);notifyOwner('quote_accepted','Quote accepted — '+r.name,r.name+' accepted their quote for '+money(r.total||0)+'. Time to book it in.');}
 function markPaid(id,method){const r=records.find(x=>x.id===id);r.stage='paid';r.paidAt=Date.now();r.paymentStatus='paid';r.paymentMethod=method||r.paymentMethod||'Not specified';render();renderAll();if(document.getElementById('view-jobsflow').classList.contains('active'))renderJobsFlow();toast(`${r.name} marked paid ✓`);sendLifecycleEmail(r,'review_request');notifyOwner('payment_received','Payment received — '+money(r.total||0),r.name+' paid '+money(r.total||0)+' ('+(method||'method not specified')+').');}
+
+/* ===== Payments ledger — supports partial/multiple payments per job.
+   Stored as r.payments (a plain array) rather than a new Supabase table:
+   syncRecordToSupabase() already serializes every record field except a
+   short delete-list into the job's `details` JSONB column, so this array
+   rides along for free on every existing save and reload — no schema
+   migration, no new sync path, and it round-trips through
+   loadFromSupabase() the same way r.services/r.follows already do. ===== */
+function paymentsTotal(r){return (r.payments||[]).reduce((s,p)=>s+(parseFloat(p.amount)||0),0);}
+function paymentBalance(r){return Math.max(0,Math.round((r.total||0)-paymentsTotal(r)));}
+// invoiceDisplayStatus(r) is the canonical Unpaid/Partially Paid/Paid signal:
+// it already returns 'partial' once any payment exists but the balance isn't
+// clear, and 'paid' once it is — everything else it returns (draft/sent/
+// overdue) is functionally "unpaid", just with the extra detail the rest of
+// the app's badges already rely on, so there's no separate status function here.
+let pendingPaymentJobId=null;
+function openPaymentModal(id){
+  const r=records.find(x=>x.id===id);if(!r)return;
+  pendingPaymentJobId=id;
+  const paid=paymentsTotal(r),balance=paymentBalance(r);
+  document.getElementById('pay-modal-sub').textContent=r.name+(r.suburb?' · '+r.suburb:'');
+  document.getElementById('pay-summary').innerHTML=`<div class="kv"><span class="k">Invoice total</span><span class="v">${money(r.total||0)}</span></div><div class="kv"><span class="k">Paid so far</span><span class="v">${money(paid)}</span></div><div class="kv"><span class="k" style="font-weight:600;color:var(--ink)">Balance owing</span><span class="v" style="font-weight:600;color:${balance>0?'var(--coral)':'var(--teal)'}">${money(balance)}</span></div>`;
+  document.getElementById('pay-amount').value=balance>0?balance:'';
+  document.getElementById('pay-date').value=todayISO();
+  document.getElementById('pay-method').value=r.paymentMethod&&['Cash','Bank transfer','Card','Other'].includes(r.paymentMethod)?r.paymentMethod:'Cash';
+  document.getElementById('pay-notes').value='';
+  const hist=document.getElementById('pay-history');
+  const payments=(r.payments||[]).slice().sort((a,b)=>b.recordedAt-a.recordedAt);
+  hist.innerHTML=payments.length?'<div class="sm" style="font-weight:600;margin:14px 0 6px;color:var(--ink-soft)">Payment history</div>'+payments.map(p=>`<div class="kv"><span class="k">${isoToLabel(p.date)} · ${p.method}${p.notes?' · '+p.notes.replace(/</g,'&lt;'):''}</span><span class="v">${money(p.amount)}</span></div>`).join(''):'';
+  openModal('payment-overlay');
+}
+function confirmRecordPayment(){
+  const id=pendingPaymentJobId;const r=records.find(x=>x.id===id);if(!r)return;
+  const amount=parseFloat(document.getElementById('pay-amount').value)||0;
+  if(amount<=0){toast('Enter a payment amount');return;}
+  const date=document.getElementById('pay-date').value||todayISO();
+  const method=document.getElementById('pay-method').value||'Other';
+  const notes=(document.getElementById('pay-notes').value||'').trim();
+  closeModal('payment-overlay');
+  recordPayment(id,amount,date,method,notes);
+}
+function recordPayment(id,amount,date,method,notes){
+  const r=records.find(x=>x.id===id);if(!r)return;
+  amount=parseFloat(amount)||0;if(amount<=0)return;
+  if(!r.payments)r.payments=[];
+  r.payments.push({id:'pay_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),amount,date:date||todayISO(),method:method||'Other',notes:notes||'',recordedAt:Date.now(),recordedBy:currentUserId||null});
+  const balance=paymentBalance(r);
+  const summary=(balance<=0?'Payment received in full: ':'Payment recorded: ')+money(amount)+' via '+(method||'Other')+(notes?' — '+notes:'')+(balance>0?' · '+money(balance)+' remaining':'');
+  if(r.customerId)logActivity(r.customerId,r.jobId||null,balance<=0?'invoice_paid':'note',summary,{amount,method,date,balance,notes});
+  if(balance<=0&&r.stage!=='paid'){
+    markPaid(id,method); // reuses the existing paid-stage side effects: dashboard revenue, pipeline stage, review-request email, owner notify
+  }else{
+    render();renderAll();
+    toast('Payment recorded — '+money(balance)+' remaining');
+  }
+  renderCustomerProfile(); // no-op unless the Customer Profile modal is the active context
+  if(document.getElementById('view-detail').classList.contains('active'))openDetail(id);
+  if(docPreview.recordId===id&&document.getElementById('doc-preview-overlay').classList.contains('open'))openDocPreview(docPreview.mode,id);
+}
 // Cancelled jobs leave the active Pipeline board (it isn't one of STAGES'
 // board columns) but keep their full history — reachable from the customer
 // profile and dashboard the same as any other job, just visually distinct.
@@ -5776,6 +5870,7 @@ async function sendPaymentLink(id){
 // Honest overdue check: only meaningful once an invoice's been sent with a due date.
 function invoiceDisplayStatus(r){
   if(r.stage==='paid')return 'paid';
+  if(paymentsTotal(r)>0)return 'partial';
   if(r.paymentStatus==='sent'&&r.dueDate&&r.dueDate<todayISO())return 'overdue';
   return r.paymentStatus||'draft';
 }
@@ -5820,15 +5915,15 @@ function weatherAlerts(){
    innerHTML on its container, since renderCalendar() can be called more than once per
    visit — e.g. when live weather finishes loading while the tab is already open). */
 let fcCalendarInstance=null;
-// Calendar-eligible = "was actually booked for a date, ever" — broader than
-// isBooked() (scheduled/completed only), which on purpose excludes paid and
-// cancelled jobs since those don't belong in Operations' "today's active
-// work" list. The calendar needs the opposite: a paid or cancelled job still
-// happened (or was meant to) on the date it was scheduled for, so it should
-// keep showing there in its own colour — previously it just vanished the
-// moment a job was marked paid or cancelled, which is why Red/Purple/Dark
-// Green never actually appeared on the calendar.
-function isCalendarJob(r){return !!r.scheduledDateISO;}
+// Calendar-eligible = "was actually booked for a date, and is still an
+// active/completed booking" — broader than isBooked() (scheduled/completed
+// only, which on purpose excludes paid jobs too) so a paid job still shows on
+// the date it happened, in its own colour. Cancelled jobs are excluded on
+// purpose: a cancelled job never happened, so it shouldn't render as a
+// booking, inflate a day's "N Booked" count, or count toward upcoming-job
+// totals — its history is still reachable from Pipeline/Customer Profile,
+// it's just not shown as if it were active work.
+function isCalendarJob(r){return !!r.scheduledDateISO&&r.stage!=='cancelled';}
 // Matches the 6 colours requested for the calendar specifically. Keyed off
 // jobStatusKeyOf() — the same canonical status function every badge in the
 // app already uses — instead of the old hand-rolled key calc here, which had
@@ -6060,7 +6155,7 @@ function renderCalendar(){
     document.getElementById('view-calendar').innerHTML=`
       <div class="view-head"><div><h2>Calendar</h2><p>Unlimited future scheduling — drag a job to reschedule, click any date to book, click a job to open it. Weather-aware where data exists.</p></div><span class="eng-badge">Scheduling</span></div>
       <div class="info-strip" id="cal-info-strip"></div>
-      <div class="cal-legend">${Object.entries({scheduled:'Scheduled',in_progress:'In Progress',completed:'Completed',cancelled:'Cancelled',invoiced:'Invoiced',paid:'Paid'}).map(([k,label])=>`<span><i style="background:${JOB_STATUS_CAL_COLOR[k]}"></i>${label}</span>`).join('')}</div>
+      <div class="cal-legend">${Object.entries({scheduled:'Scheduled',in_progress:'In Progress',completed:'Completed',invoiced:'Invoiced',paid:'Paid'}).map(([k,label])=>`<span><i style="background:${JOB_STATUS_CAL_COLOR[k]}"></i>${label}</span>`).join('')}</div>
       <div class="fc-wrap"><div id="fc-calendar"></div></div>
       <div class="panel" style="margin-top:18px"><h4>Live forecast${currentBusinessProfile&&currentBusinessProfile.region?' — '+currentBusinessProfile.region:''}</h4>
         <div class="wx-row" id="cal-wx-strip"></div>
@@ -6275,7 +6370,13 @@ function settingsRow(label,sub,onclick){
 }
 function openSettings(){
   const bookingLink=currentBusinessId?`${location.origin}/booking.html?biz=${currentBusinessId}`:'';
-  const embedCode=bookingLink?`<iframe\n  src="${location.origin}/booking.html?biz=${currentBusinessId}&embed=1"\n  width="100%"\n  height="900"\n  frameborder="0">\n</iframe>`:'';
+  // The iframe starts at a sensible guess (800) and then resizes itself to
+  // fit whatever step/content is actually showing — booking.html posts its
+  // real height on every layout change (map loading, a step change, a
+  // validation message...) via postMessage, and this listener applies it.
+  // Without this, a fixed height either clips the taller steps (cut-off
+  // submit button) or leaves dead space on the shorter ones.
+  const embedCode=bookingLink?`<iframe\n  id="tk-embed"\n  src="${location.origin}/booking.html?biz=${currentBusinessId}&embed=1"\n  width="100%"\n  height="800"\n  frameborder="0"\n  style="border:0;display:block">\n</iframe>\n<script>\n  window.addEventListener('message',function(e){\n    if(!e.data||e.data.type!=='turnkey:embed-resize')return;\n    var f=document.getElementById('tk-embed');\n    if(f&&e.data.height)f.style.height=e.data.height+'px';\n  });\n<`+`/script>`:'';
   const canEditBusiness=currentUserRole==='owner'||currentUserRole==='manager';
   const biz=currentBusinessProfile||{};
   const mapsKey=turnkeyMapsKey();

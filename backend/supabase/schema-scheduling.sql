@@ -18,7 +18,6 @@
 --                                   column is text. No FK constraint exists;
 --                                   see the note below before adding one.
 -- assigned_to   uuid            -- references users(id) (schema-team.sql)
--- status        text            -- 'new'|'quoted'|'won'|'scheduled'|'completed'|'paid'|'cancelled' — no CHECK constraint
 -- scheduled_date date           -- date only, no time-of-day column exists
 -- details       jsonb           -- flexible per-job data (tech name, recurrence,
 --                                   day-of status lifecycle, Google Calendar
