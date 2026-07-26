@@ -1,6 +1,6 @@
 {
-  "name": "Turnkey — Service Business OS",
-  "short_name": "Turnkey",
+  "name": "TurnKey — Service Business CRM",
+  "short_name": "TurnKey",
   "description": "The operating system for service businesses. Pipeline, quoting, scheduling, invoicing — in one app.",
   "start_url": "./index.html",
   "scope": "./",

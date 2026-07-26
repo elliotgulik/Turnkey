@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Turnkey</title>
+<title>TurnKey | Service Business CRM</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
@@ -11,13 +11,26 @@
 <script src="pricing-engine.js"></script>
 <script src="cost-engine.js"></script>
 <script src="map-snapshot.js"></script>
+<!-- OneSignal Web Push SDK — harmless to load even when onesignalAppId is
+     unset (initOneSignal() below just never calls OneSignal.init() in that
+     case), so this stays a plain unconditional tag like every other CDN
+     dependency above rather than something injected at runtime. -->
+<script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#138a72">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="Turnkey">
-<link rel="apple-touch-icon" href="icon-192.png">
-<link rel="icon" type="image/png" href="icon-192.png">
+<meta name="apple-mobile-web-app-title" content="TurnKey">
+<!-- Multiple sizes/formats so every browser/OS picks a crisp one instead of
+     scaling one large PNG down — favicon.ico also exists as a real file at
+     the publish root specifically so netlify.toml's catch-all "/*  ->
+     /index.html" SPA redirect never intercepts it (Netlify serves real
+     files before falling through to redirects), which is what made the tab
+     icon unreliable before this. -->
+<link rel="icon" href="favicon.ico" sizes="32x32">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="favicon-16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
 <style>
   :root{
     /* cool, restrained navy/teal system */
@@ -127,6 +140,18 @@
 
   /* view headers — large, quiet, Apple-style */
   .view-head{margin-bottom:30px;display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap}
+  .bell-btn{position:relative;width:44px;height:44px;border-radius:12px;background:var(--surface);border:1px solid var(--line);color:var(--ink-soft);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .bell-btn:hover{background:var(--surface-2);color:var(--ink)}
+  .bell-badge{position:absolute;top:-4px;right:-4px;min-width:18px;height:18px;padding:0 4px;border-radius:980px;background:var(--coral);color:#fff;font-size:10.5px;font-weight:700;display:flex;align-items:center;justify-content:center;border:2px solid var(--paper)}
+  .notif-row{display:flex;gap:11px;align-items:flex-start;padding:13px 4px;border-bottom:1px solid var(--line-soft);cursor:pointer}
+  .notif-row:hover{background:var(--surface-2)}
+  .notif-row:last-child{border-bottom:none}
+  .notif-dot{width:8px;height:8px;border-radius:50%;background:transparent;margin-top:6px;flex-shrink:0}
+  .notif-row.unread .notif-dot{background:var(--teal)}
+  .notif-title{font-size:13.5px;font-weight:600;color:var(--ink)}
+  .notif-row.unread .notif-title{font-weight:700}
+  .notif-msg{font-size:12.5px;color:var(--ink-soft);margin-top:2px}
+  .notif-when{font-size:11px;color:var(--ink-faint);margin-top:4px}
   .view-head h2{font-size:30px;font-weight:600;letter-spacing:-.03em;color:var(--ink)}
   .view-head p{font-size:15px;color:var(--ink-soft);margin-top:6px;max-width:580px;letter-spacing:-.01em}
   /* engine badges — neutralised to a single quiet style */
@@ -1144,6 +1169,8 @@
   .dp-label{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#9aa7b1;margin-bottom:5px}
   .dp-name{font-size:14px;font-weight:600}
   .dp-line{font-size:12px;color:#5b6b78;margin-top:2px}
+  .doc-map{padding-bottom:22px}
+  .doc-map img{width:100%;aspect-ratio:640/400;object-fit:cover;border-radius:9px;border:1px solid #e9edf1;display:block}
   .doc-table{width:100%;border-collapse:collapse;margin:6px 0}
   .doc-table th{text-align:left;font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#9aa7b1;padding:8px 0;border-bottom:1px solid #e9edf1}
   .doc-table th.r{text-align:right}
@@ -1442,6 +1469,12 @@
     <div id="pay-history"></div>
   </div>
   <div class="modal-foot"><button class="btn ghost" onclick="closeModal('payment-overlay')">Cancel</button><button class="btn primary" onclick="confirmRecordPayment()">Record payment</button></div>
+</div></div>
+
+<div class="overlay" id="notif-overlay"><div class="modal">
+  <div class="modal-head"><div><h3>Notifications</h3><p>New enquiries, quote activity, payments — everything TurnKey has alerted you to.</p></div><button class="x" aria-label="Close" onclick="closeModal('notif-overlay')">×</button></div>
+  <div class="modal-body"><div id="notif-list"></div></div>
+  <div class="modal-foot"><button class="btn ghost" onclick="clearAllNotifications()">Clear all</button><button class="btn primary" onclick="markAllNotificationsRead()">Mark all read</button></div>
 </div></div>
 
 <div class="overlay" id="signature-overlay"><div class="modal">
@@ -1899,6 +1932,11 @@ function goalProgress(g){
 }
 
 let records=[], seq=1, draftLines=[], activeLeadId=null;
+// Business Settings → Workflows — all default off (optional/helpful tools,
+// never a hard gate), loaded from businesses.workflow_config (see
+// applyWorkflowConfig/saveWorkflowConfig near savePricingConfig, same
+// jsonb-column-on-businesses pattern) and re-applied on every login.
+let workflowConfig={requireChecklist:false,requirePhotos:false,requireSignoff:false};
 let pipelineMobileStage='new'; // which Pipeline column shows on a phone (desktop always shows all 7)
 function selectPipelineStage(key){pipelineMobileStage=key;render();}
 
@@ -2055,6 +2093,7 @@ async function sendLifecycleEmail(r,key){
    flip email_enabled-style columns live once a provider is added later). */
 const NOTIFICATION_EVENTS=[
   {key:'new_lead',label:'New lead arrives'},
+  {key:'quote_viewed',label:'Quote viewed'},
   {key:'quote_accepted',label:'Quote accepted'},
   {key:'job_booked',label:'Job booked'},
   {key:'job_tomorrow',label:"Job scheduled for tomorrow"},
@@ -2084,12 +2123,29 @@ function notifyOwner(event,subject,bodyText){
   const bodyHtml=`<div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;max-width:520px;margin:0 auto;color:#1a1a1a;line-height:1.6"><p>${bodyText.replace(/\n/g,'<br>')}</p></div>`;
   sendEmailViaBackend({to,subject,bodyText,bodyHtml});
 }
+// Push counterpart to notifyOwner() — same "convenience layer, never a
+// blocker" principle: fire-and-forget, never awaited by its caller, and
+// the backend route itself never throws (services/notifications.js logs
+// and swallows). type matches a notification_preferences.event key so
+// Settings → Notifications' per-event Push checkbox is respected.
+function triggerPush({type,title,message,url}){
+  const backend=backendUrl();
+  if(!backend||!sb)return;
+  sb.auth.getSession().then(({data:{session}})=>{
+    if(!session)return;
+    fetch(`${backend}/api/notifications/send`,{
+      method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.access_token},
+      body:JSON.stringify({type,title,message,url})
+    }).catch(e=>console.error('triggerPush failed',type,e));
+  });
+}
 async function saveNotificationPrefs(){
   if(!sb||!currentBusinessId){toast('Something went wrong — try refreshing the page');return;}
   const notifyEmail=document.getElementById('notif-email').value.trim();
   for(const ev of NOTIFICATION_EVENTS){
     const enabled=document.getElementById(`notif-${ev.key}`).checked;
-    const payload={business_id:currentBusinessId,event:ev.key,email_enabled:enabled,notify_email:notifyEmail||null};
+    const pushEl=document.getElementById(`notif-push-${ev.key}`);
+    const payload={business_id:currentBusinessId,event:ev.key,email_enabled:enabled,push_enabled:pushEl?pushEl.checked:true,notify_email:notifyEmail||null};
     const {data,error}=await sb.from('notification_preferences').upsert(payload,{onConflict:'business_id,event'}).select('*').maybeSingle();
     if(error)console.error('Save notification preference failed',ev.key,error);
     else notificationPrefs[ev.key]=data;
@@ -2097,11 +2153,160 @@ async function saveNotificationPrefs(){
   toast('Notification preferences saved');
 }
 
+/* ===== Push notifications (OneSignal Web Push) =====
+   pushSubscribed tracks whether THIS browser/device currently has push
+   enabled — a browser-level permission grant, so it's tracked separately
+   from notificationPrefs (which is which EVENT TYPES a business wants,
+   business-wide). initOneSignal() runs once per session (handleAuthedSession);
+   it's a no-op wherever onesignalAppId isn't configured, same "quietly does
+   nothing until set up" convention as Stripe/Google Calendar/Gmail. */
+let pushSubscribed=false;
+function initOneSignal(){
+  const appId=(window.TURNKEY_CONFIG&&window.TURNKEY_CONFIG.onesignalAppId)||'';
+  if(!appId||typeof OneSignalDeferred==='undefined')return;
+  OneSignalDeferred.push(async function(OneSignal){
+    try{
+      // serviceWorkerPath/serviceWorkerParam point OneSignal at this app's
+      // OWN sw.js (which already imports OneSignal's worker script — see
+      // sw.js's importScripts line) instead of its default expectation of a
+      // separate OneSignalSDKWorker.js file at the root. Confirmed against
+      // OneSignal's "combine with an existing service worker" docs —
+      // omitting this is the difference between push silently failing to
+      // register and actually working, since this repo already has its own
+      // sw.js controlling the root scope for offline caching.
+      await OneSignal.init({appId,serviceWorkerPath:'sw.js',serviceWorkerParam:{scope:'/'}});
+      pushSubscribed=!!(OneSignal.User.PushSubscription.id);
+      if(pushSubscribed)syncPushSubscription(OneSignal.User.PushSubscription.id);
+      OneSignal.User.PushSubscription.addEventListener('change',(event)=>{
+        const id=event&&event.current&&event.current.id;
+        pushSubscribed=!!id;
+        if(id)syncPushSubscription(id);
+      });
+    }catch(e){console.error('OneSignal init failed',e);}
+  });
+}
+async function syncPushSubscription(subscriptionId){
+  if(!sb||!currentBusinessId||!currentUserId||!subscriptionId)return;
+  const {error}=await sb.from('notification_subscriptions').upsert({
+    business_id:currentBusinessId,user_id:currentUserId,onesignal_subscription_id:subscriptionId,
+    device_type:'web',enabled:true,updated_at:new Date().toISOString()
+  },{onConflict:'onesignal_subscription_id'});
+  if(error)console.error('Save push subscription failed',error);
+}
+async function enablePushNotifications(){
+  const appId=(window.TURNKEY_CONFIG&&window.TURNKEY_CONFIG.onesignalAppId)||'';
+  if(!appId){toast('Push notifications aren’t set up for this TurnKey yet — ask your admin to configure OneSignal');return;}
+  if(typeof OneSignal==='undefined'||!OneSignal.User){toast('Still loading — try again in a moment');return;}
+  try{
+    await OneSignal.User.PushSubscription.optIn();
+    const id=OneSignal.User.PushSubscription.id;
+    if(id){await syncPushSubscription(id);pushSubscribed=true;toast('Push notifications enabled ✓');}
+    else toast('Permission not granted — check your browser’s notification settings for this site');
+  }catch(e){console.error('Enable push failed',e);toast('Could not enable push notifications: '+e.message);}
+  openSettings();
+}
+/* ===== In-app notification centre (Phase 5) — reads the `notifications`
+   table sendNotification() (backend) writes to on every event, independent
+   of whether push itself is enabled/permitted, so this is always a
+   complete history even for a user who's never turned push on. ===== */
+let notificationCentre={items:[],unread:0};
+async function loadNotificationCentre(){
+  if(!sb||!currentBusinessId)return;
+  const {data,error}=await sb.from('notifications').select('*').eq('business_id',currentBusinessId).order('created_at',{ascending:false}).limit(50);
+  if(error){console.error('Load notifications failed',error);return;}
+  notificationCentre.items=data||[];
+  notificationCentre.unread=notificationCentre.items.filter(n=>!n.read).length;
+  if(document.getElementById('view-dashboard').classList.contains('active'))renderDashboard();
+  subscribeNotificationsRealtime();
+}
+// Live badge/list updates the instant a push fires server-side — same
+// realtime-channel pattern as handleActivityRealtimeEvent (quote approved
+// toasts), scoped to this business by the notifications table's own RLS.
+let notificationsRealtimeChannel=null;
+function subscribeNotificationsRealtime(){
+  if(notificationsRealtimeChannel||!sb||!currentBusinessId)return;
+  notificationsRealtimeChannel=sb.channel('notifications-'+currentBusinessId)
+    .on('postgres_changes',{event:'INSERT',schema:'public',table:'notifications',filter:'business_id=eq.'+currentBusinessId},(payload)=>{
+      if(!payload||!payload.new)return;
+      notificationCentre.items.unshift(payload.new);
+      notificationCentre.unread++;
+      if(document.getElementById('view-dashboard').classList.contains('active'))renderDashboard();
+      if(document.getElementById('notif-overlay').classList.contains('open'))renderNotificationList();
+    })
+    .subscribe();
+}
+// Where a notification of this type should take the operator — the Phase 6
+// "click opens the correct page" requirement. Deliberately routes to the
+// relevant VIEW (Pipeline for quote/lead/payment activity, Calendar for a
+// newly-booked job) rather than a specific job's detail modal — there's no
+// existing deep-link-to-one-job URL scheme in this app to hook into
+// without building a new one, so this is the honest, currently-achievable
+// scope: the right page, not (yet) the right record within it.
+function notificationTypeToView(type){
+  if(type==='job_booked')return 'calendar';
+  return 'pipeline';
+}
+function openNotificationCentre(){renderNotificationList();openModal('notif-overlay');}
+function renderNotificationList(){
+  const el=document.getElementById('notif-list');if(!el)return;
+  const items=notificationCentre.items;
+  el.innerHTML=items.length?items.map(n=>`
+    <div class="notif-row ${n.read?'':'unread'}" onclick="clickNotification('${n.id}')">
+      <div class="notif-dot"></div>
+      <div class="notif-body"><div class="notif-title">${n.title}</div><div class="notif-msg">${n.message}</div><div class="notif-when">${timeAgo(new Date(n.created_at).getTime())}</div></div>
+    </div>`).join(''):'<div class="empty-state" style="padding:20px"><div class="sm">No notifications yet.</div></div>';
+}
+async function clickNotification(id){
+  const n=notificationCentre.items.find(x=>x.id===id);if(!n)return;
+  if(!n.read){
+    n.read=true;notificationCentre.unread=Math.max(0,notificationCentre.unread-1);
+    renderNotificationList();
+    if(sb)await sb.from('notifications').update({read:true}).eq('id',id);
+    if(document.getElementById('view-dashboard').classList.contains('active'))renderDashboard();
+  }
+  closeModal('notif-overlay');
+  switchView(notificationTypeToView(n.type));
+}
+async function markAllNotificationsRead(){
+  if(!sb||!currentBusinessId)return;
+  notificationCentre.items.forEach(n=>n.read=true);
+  notificationCentre.unread=0;
+  renderNotificationList();
+  if(document.getElementById('view-dashboard').classList.contains('active'))renderDashboard();
+  const {error}=await sb.from('notifications').update({read:true}).eq('business_id',currentBusinessId).eq('read',false);
+  if(error)console.error('Mark all read failed',error);
+}
+async function clearAllNotifications(){
+  if(!sb||!currentBusinessId)return;
+  if(!confirm('Clear all notifications? This can\'t be undone.'))return;
+  notificationCentre.items=[];notificationCentre.unread=0;
+  renderNotificationList();
+  if(document.getElementById('view-dashboard').classList.contains('active'))renderDashboard();
+  const {error}=await sb.from('notifications').delete().eq('business_id',currentBusinessId);
+  if(error)console.error('Clear notifications failed',error);
+}
+async function disablePushNotifications(){
+  if(typeof OneSignal==='undefined'||!OneSignal.User)return;
+  try{
+    const id=OneSignal.User.PushSubscription.id;
+    await OneSignal.User.PushSubscription.optOut();
+    if(id&&sb)await sb.from('notification_subscriptions').update({enabled:false,updated_at:new Date().toISOString()}).eq('onesignal_subscription_id',id);
+    pushSubscribed=false;
+    toast('Push notifications disabled');
+  }catch(e){console.error('Disable push failed',e);toast('Could not disable push notifications: '+e.message);}
+  openSettings();
+}
+
 function money(n){const v=Math.round(n||0);return (v<0?'-$':'$')+Math.abs(v).toLocaleString('en-NZ');}
 function segOf(t){return t>=1200?'Large':t>=500?'Mid':'Small'}
 
 function newRecord(d){return Object.assign({
   id:seq++,stage:'new',services:[],total:0,sop:[],
+  // A business that hasn't turned on "Require job checklist completion"
+  // (Settings → Workflows, default off) gets new jobs pre-set to skip it —
+  // same per-job flag/UI a tech could already toggle manually, just seeded
+  // from the business default instead of always starting required.
+  skipChecklist:!workflowConfig.requireChecklist,
   photoBefore:false,photoAfter:false,startedAt:null,repeat:'no',callback:false,email:'',
   tech:'Unassigned',gps:'pending',scheduledDate:null,scheduledIdx:null,scheduledDateISO:null,createdAt:Date.now(),follows:[],
   quoteSentAt:null,clientResponded:false,paidAt:null,approvedAt:null,lastServiceDaysAgo:null,assumptions:null,areaPolys:null,selfPriced:false,
@@ -3617,10 +3822,13 @@ async function generateAndSendDoc(mode,r){
     toast('Could not save this '+mode+' before sending — check your connection and try again.');
     return;
   }
-  // Usually already resolved by now (confirmQuoteSend fires this the
-  // moment the quote is built, well before the operator gets to Send) —
-  // this just covers the case where Send happens first.
-  if(mode==='quote'&&r._mapSnapshotDataUrl===undefined)await preloadMapSnapshot(r);
+  // Usually already resolved by now for quotes (confirmQuoteSend fires this
+  // the moment the quote is built, well before the operator gets to Send) —
+  // this covers the case where Send happens first, and is the ONLY trigger
+  // for invoices (there's no earlier "invoice built" moment to preload from,
+  // since an invoice is generated straight from the completed job's already-
+  // final property outline — same geometry the quote was drawn with).
+  if(r._mapSnapshotDataUrl===undefined)await preloadMapSnapshot(r);
   // Preferred path: Gmail connected → compose + send inside TurnKey, no
   // download required — recipient is editable in the composer, so a missing
   // email on file no longer blocks this path, just leaves it blank to fill in.
@@ -3857,17 +4065,22 @@ function buildDocPDF(mode,r,outputType){
   y+=12;
 
   // property map snapshot — shows exactly what was measured, so the scope
-  // of work isn't just a line-item list. Best-effort only: preloadMapSnapshot()
+  // of work isn't just a line-item list. Same image for quote AND invoice:
+  // the invoice reuses the job's areaPolys/geoPts as they stood at
+  // completion, which — per qeReprojectAreas/reprojectAreas — is the exact
+  // same outline the quote was approved against, just re-rendered at
+  // whatever zoom/center happens to produce this snapshot; the underlying
+  // geographic anchor never moves. Best-effort only: preloadMapSnapshot()
   // fetches this ahead of time (see confirmQuoteSend/generateAndSendDoc); if
-  // it hasn't resolved yet, or this quote has no georeferenced areas at all
-  // (older quotes, or ones drawn on a plain non-geo grid), the PDF simply
+  // it hasn't resolved yet, or this record has no georeferenced areas at all
+  // (older records, or ones drawn on a plain non-geo grid), the PDF simply
   // omits this section rather than blocking or erroring.
-  if(mode==='quote'&&r._mapSnapshotDataUrl){
+  if(r._mapSnapshotDataUrl){
     const imgW=TW, imgH=TW*400/640;
     if(y+imgH>265){doc.addPage();y=20;}
     try{
       doc.setFont('helvetica','bold');doc.setFontSize(7);doc.setTextColor(120,130,140);
-      doc.text('PROPERTY MAP',ML,y);y+=4;
+      doc.text('PROPERTY AREA',ML,y);y+=4;
       const mfmt=/data:image\/(\w+)/.exec(r._mapSnapshotDataUrl);
       doc.addImage(r._mapSnapshotDataUrl,(mfmt&&mfmt[1]?mfmt[1]:'PNG').toUpperCase(),ML,y,imgW,imgH);
       y+=imgH+8;
@@ -3927,6 +4140,19 @@ function docNumber(mode,r){
   const p=mode==='quote'?'Q':'INV';
   return p+'-'+String(1000+r.id).slice(-4);
 }
+// Shared by both quote and invoice documents — same drawn outline, same
+// stable geographic coordinates (see qeSvgToLatLng/reprojectAreas), so an
+// invoice generated long after the quote was approved still shows exactly
+// what was outlined then, regardless of how many times the map's been
+// zoomed/panned/reloaded since. TK_MAP_SNAPSHOT (map-snapshot.js) bakes the
+// polygon directly onto a Google Static Maps image via `path=` params — no
+// client-side SVG reprojection needed for a flat, non-interactive document.
+function docMapSectionHtml(r){
+  const mapsKey=(window.TURNKEY_CONFIG&&window.TURNKEY_CONFIG.mapsKey)||'';
+  const url=window.TK_MAP_SNAPSHOT&&r.areaPolys&&r.areaPolys.length?TK_MAP_SNAPSHOT.buildUrl(r.areaPolys,mapsKey,{size:'640x400',scale:2}):null;
+  if(!url)return '';
+  return `<div class="doc-map"><div class="dp-label">Property area</div><img src="${url}" alt="Property outline" loading="lazy"></div>`;
+}
 function renderDocHTML(mode,r){
   const t=docTemplate;
   const today=new Date().toLocaleDateString('en-NZ',{day:'numeric',month:'short',year:'numeric'});
@@ -3964,6 +4190,7 @@ function renderDocHTML(mode,r){
       <div><div class="dp-label">From</div><div class="dp-name">${bizName}</div>${fromContact?`<div class="dp-line">${fromContact}</div>`:''}${t.gstNo?`<div class="dp-line">GST ${t.gstNo}</div>`:''}</div>
       <div><div class="dp-label">${mode==='quote'?'Prepared for':'Billed to'}</div><div class="dp-name">${r.name}</div><div class="dp-line">${r.address||''}${r.suburb?', '+r.suburb:''}</div>${toContact?`<div class="dp-line">${toContact}</div>`:''}</div>
     </div>
+    ${docMapSectionHtml(r)}
     <table class="doc-table"><thead><tr><th>Service</th><th class="r">Amount</th></tr></thead><tbody>${rows}</tbody></table>
     <div class="doc-totals">
       <div class="dt-row"><span>Subtotal (excl. GST)</span><span>${money(subtotal-gst)}</span></div>
@@ -4265,6 +4492,10 @@ function confirmSchedule(){
   else toast(`Booked: ${r.name} on ${r.scheduledDate}`);
   logActivity(r.customerId,r.jobId,'job_scheduled',r.name+(wasBooked?' rescheduled to ':' booked for ')+r.scheduledDate+(r.tech!=='Unassigned'?' · '+r.tech:''));
   if(!wasBooked&&typeof sendLifecycleEmail==='function')sendLifecycleEmail(r,'job_booked');
+  if(!wasBooked){
+    const svcLabel=(r.services&&r.services[0]&&SERVICES[r.services[0].svc])?SERVICES[r.services[0].svc].label:'job';
+    triggerPush({type:'job_booked',title:'New job booked',message:r.name+' booked a '+svcLabel,url:'/index.html?open=calendar'});
+  }
   pushJobToGoogleCalendar(r);
 }
 
@@ -4276,14 +4507,23 @@ function openDetail(id){
   const lastIdx=checklist.steps.length-1;
   const done=r.sop.filter(Boolean).length;
   const pct=checklist.steps.length?Math.round(done/checklist.steps.length*100):0;
-  const allDone=r.skipChecklist?(r.photoBefore&&r.photoAfter):(lastIdx>=0&&r.sop.slice(0,lastIdx).every(Boolean)&&r.photoBefore&&r.photoAfter);
+  // Both checklist and photos are only actually REQUIRED for "ready to
+  // approve" when this business has turned that on (Settings → Workflows,
+  // both default off) — otherwise they're optional helpers and approval
+  // is never held up waiting on them.
+  const checklistOk=r.skipChecklist?true:(lastIdx>=0&&r.sop.slice(0,lastIdx).every(Boolean));
+  const photosOk=workflowConfig.requirePhotos?(r.photoBefore&&r.photoAfter):true;
+  const allDone=checklistOk&&photosOk;
   const approved=lastIdx>=0&&r.sop[lastIdx];
   const svcRows=r.services.map(s=>{const svc=SERVICES[s.svc];const note=lineVariantNote(s);return `<div class="kv"><span class="k">${svc.label} · ${s.qty}${svc.unit}${note?' · '+note:''}</span><span class="v">${money(lineSubtotal(s))}</span></div>`}).join('')||'<div class="kv"><span class="k">No services yet</span><span class="v">—</span></div>';
   const sopHtml=checklist.steps.map((step,i)=>{const checked=r.sop[i];const locked=i===lastIdx&&!allDone;return `<div class="sop-step ${checked?'checked':''} ${locked?'locked':''}"><button class="sop-check" onclick="toggleSop(${id},${i})" ${locked?'disabled':''}>${checked?'✓':''}</button><span class="sop-num">${i+1}</span><span class="sop-label">${step.t}${step.s?`<small>${step.s}</small>`:''}</span></div>`}).join('');
   let approvalHtml;
+  const lockedReasons=[];
+  if(!checklistOk)lockedReasons.push('finish the checklist steps');
+  if(!photosOk)lockedReasons.push('capture both photos');
   if(approved)approvalHtml=`<div class="approval-box approved"><div class="approved-stamp">✓ Customer approved — job closed</div></div>`;
-  else if(allDone)approvalHtml=`<div class="approval-box ready"><div class="ttl">Ready for customer approval</div><div class="sub">All steps done and photos captured.</div><button class="btn primary" onclick="approve(${id})">Mark customer approved</button></div>`;
-  else approvalHtml=`<div class="approval-box"><div class="ttl">Approval locked</div><div class="sub">Finish steps 1–5 and capture both photos first.</div></div>`;
+  else if(allDone)approvalHtml=`<div class="approval-box ready"><div class="ttl">Ready for customer approval</div><div class="sub">${r.skipChecklist&&!workflowConfig.requirePhotos?'Approve any time — checklist and photos are optional for this job.':'All required steps done.'}</div><button class="btn primary" onclick="approve(${id})">Mark customer approved</button></div>`;
+  else approvalHtml=`<div class="approval-box"><div class="ttl">Approval locked</div><div class="sub">First, ${lockedReasons.join(' and ')}.</div></div>`;
   const jobToolbarHtml=renderJobToolbar(r);
   const jobScheduleCardHtml=renderJobScheduleCard(r);
   const followHtml=(r.follows&&r.follows.length)?r.follows.map((f,i)=>`
@@ -4366,6 +4606,7 @@ function openDetail(id){
           <div class="progress-wrap"><div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div><div class="progress-txt">${pct}% — every step logs to the record</div></div>
           <div class="sop">${sopHtml}</div>
           <p style="font-size:11px;color:var(--ink-faint);margin:8px 0 0"><a href="#" onclick="toggleSkipChecklist(${id});return false" style="color:var(--ink-faint)">Skip the checklist for this job</a></p>`}
+          ${!workflowConfig.requirePhotos?`<p style="font-size:11px;color:var(--ink-faint);margin:-4px 0 8px">Photos are optional — add them if you'd like, or skip straight to completing the job.</p>`:''}
           <div class="photo-row" style="margin-top:14px"><div class="photo-slot ${r.photoBefore?'filled':''}" onclick="pickJobPhoto(${id},'before')"><span style="font-size:18px">${r.photoBefore?'✓':'+'}</span><span>Before</span></div><div class="photo-slot ${r.photoAfter?'filled':''}" onclick="pickJobPhoto(${id},'after')"><span style="font-size:18px">${r.photoAfter?'✓':'+'}</span><span>After</span></div></div>
           ${approvalHtml}
         </div>`:`
@@ -4451,8 +4692,12 @@ async function completeJob(id,skipConfirm){
   render();renderAll();
   openDetail(id);
   toast('Job completed ✓'+(r.durationMin?' — '+fmtDur(r.durationMin)+' on site':''));
-  if(!r.photoAfter&&confirm('Add an after photo now?'))pickJobPhoto(id,'after');
-  if(confirm("Get the customer's signature now? (optional)"))openSignaturePad(id);
+  // Both prompts only fire when the business actually wants that step
+  // (Settings → Workflows) — a business that's turned these off shouldn't
+  // be nagged for something they've explicitly said isn't part of how
+  // they work, even as a skippable confirm().
+  if(workflowConfig.requirePhotos&&!r.photoAfter&&confirm('Add an after photo now?'))pickJobPhoto(id,'after');
+  if(workflowConfig.requireSignoff&&confirm("Get the customer's signature now? (optional)"))openSignaturePad(id);
   if(emailAccount&&r.email&&confirm('Send the completion email to '+r.name+' now?'))sendLifecycleEmail(r,'job_completed');
   if(confirm('Create the invoice now?'))previewInvoice(id);
 }
@@ -4847,11 +5092,11 @@ function renderCustomerProfile(){
           <div class="field-row"><div class="field"><label>Phone</label><input id="cp-phone" value="${(c.phone||'').replace(/"/g,'&quot;')}"></div><div class="field"><label>Email</label><input id="cp-email" value="${(c.email||'').replace(/"/g,'&quot;')}"></div></div>
           <div class="field"><label>Address</label><input id="cp-address" value="${(c.address||'').replace(/"/g,'&quot;')}"></div>
           <div class="field"><label>Suburb</label><input id="cp-suburb" value="${(c.suburb||'').replace(/"/g,'&quot;')}"></div>
-          <button class="btn accent sm" onclick="saveCustomerContact()">Save</button>
+          <button class="btn accent sm" onclick="saveCustomerContact(this)">Save</button>
         </div>
         <div class="panel" style="margin-bottom:14px"><h4>Notes</h4>
           <textarea id="cp-notes" rows="4" placeholder="Access instructions, gate codes, dog on site, preferences…">${(c.notes||'').replace(/</g,'&lt;')}</textarea>
-          <button class="btn accent sm" style="margin-top:8px" onclick="saveCustomerNotes()">Save notes</button>
+          <button class="btn accent sm" style="margin-top:8px" onclick="saveCustomerNotes(this)">Save notes</button>
         </div>
         <div class="panel" style="margin-bottom:14px"><h4>Service history <span class="demo-tag">${jobs.length}</span></h4>
           ${jobs.map(r=>`<div class="kv" style="cursor:pointer" onclick="closeCustomerProfile();openDetail(${r.id})"><span class="k">${r.scheduledDate||'Not scheduled'}${r.tech&&r.tech!=='Unassigned'?' · '+r.tech:''}</span><span class="v">${jobStatusBadge(r)} ${r.total?money(r.total):''}</span></div>`).join('')}
@@ -4889,7 +5134,7 @@ function renderCustomerProfile(){
       </div>
     </div>`;
 }
-async function saveCustomerContact(){
+async function saveCustomerContact(btn){
   const ctx=customerProfileCtx;if(!ctx||!sb)return;
   const payload={
     name:document.getElementById('cp-name').value.trim(),
@@ -4899,21 +5144,25 @@ async function saveCustomerContact(){
     suburb:document.getElementById('cp-suburb').value.trim()
   };
   if(!payload.name){toast('Name is required');return;}
+  if(btn){if(btn.disabled)return;btn.disabled=true;btn.textContent='Saving…';} // guards against a double-click firing two concurrent writes
   const {error}=await sb.from('customers').update(payload).eq('id',ctx.customerId);
-  if(error){console.error('Save customer failed',error);toast('Could not save — try again');return;}
+  if(btn){btn.disabled=false;btn.textContent='Save';}
+  if(error){console.error('Save customer failed',error);toast('Could not save: '+error.message);return;}
   records.filter(r=>r.customerId===ctx.customerId).forEach(r=>Object.assign(r,payload));
   saveState();render();renderAll();renderCustomerProfile();
-  toast('Contact details saved');
+  toast('Contact details saved ✓');
 }
-async function saveCustomerNotes(){
+async function saveCustomerNotes(btn){
   const ctx=customerProfileCtx;if(!ctx||!sb)return;
   const notes=document.getElementById('cp-notes').value;
+  if(btn){if(btn.disabled)return;btn.disabled=true;btn.textContent='Saving…';}
   const {error}=await sb.from('customers').update({notes}).eq('id',ctx.customerId);
-  if(error){console.error('Save notes failed',error);toast('Could not save — try again');return;}
+  if(btn){btn.disabled=false;btn.textContent='Save notes';}
+  if(error){console.error('Save notes failed',error);toast('Could not save: '+error.message);return;}
   records.filter(r=>r.customerId===ctx.customerId).forEach(r=>r.notes=notes);
   saveState();
   logActivity(ctx.customerId,null,'note','Note updated');
-  toast('Notes saved');
+  toast('Notes saved ✓');
 }
 async function iwLoadCustomerPhotos(){
   const ctx=customerProfileCtx;if(!ctx||!sb)return;
@@ -5289,6 +5538,21 @@ function applyPricingConfig(config){
   if(config.costInputs)Object.assign(COST_INPUTS,config.costInputs);
 }
 
+function toggleWorkflowSetting(key){workflowConfig[key]=!workflowConfig[key];openSettings();}
+async function saveWorkflowConfig(btn){
+  if(!sb||!currentBusinessId){toast('Something went wrong — try refreshing the page');return;}
+  const label=btn?btn.textContent:'';
+  if(btn){btn.disabled=true;btn.textContent='Saving…';}
+  const {error}=await sb.from('businesses').upsert({id:currentBusinessId,workflow_config:workflowConfig});
+  if(btn){btn.disabled=false;btn.textContent=label;}
+  if(error){console.error('Save workflow config failed',error);toast('Could not save: '+error.message);return;}
+  toast('Workflow settings saved ✓');
+}
+function applyWorkflowConfig(config){
+  if(!config)return;
+  workflowConfig=Object.assign({requireChecklist:false,requirePhotos:false,requireSignoff:false},config);
+}
+
 /* ---------- D. DASHBOARD ---------- */
 // "Today's priorities" — the stuff an owner actually needs to act on, ranked
 // by urgency (bad > warn > good), pulled from data that's already loaded.
@@ -5339,8 +5603,10 @@ function renderDashboard(){
   // revenue per crew per day (won value / distinct techs / ~working days)
   const techs=[...new Set(won.map(r=>r.tech))].filter(t=>t&&t!=='Unassigned');
   const revPerCrewDay=techs.length?Math.round(wonValue/techs.length/5):0;
-  // technician efficiency: avg sop completion across active+done
-  const allJobs=records.filter(r=>r.stage!=='new');
+  // technician efficiency: avg sop completion across active+done — jobs
+  // with the checklist turned off don't count (they'd read as 0% and
+  // misleadingly drag the average down for a business that just doesn't use it)
+  const allJobs=records.filter(r=>r.stage!=='new'&&!r.skipChecklist);
   const eff=allJobs.length?Math.round(allJobs.reduce((s,r)=>{const n=checklistForRecord(r).steps.length;return s+(n?r.sop.filter(Boolean).length/n:0);},0)/allJobs.length*100):0;
   // revenue by tech bar chart
   const byTech=techs.map(t=>({t,v:won.filter(r=>r.tech===t).reduce((s,r)=>s+r.total,0)}));
@@ -5380,7 +5646,22 @@ function renderDashboard(){
   const maxSource=Math.max(1,...sourceRows.map(s=>s[1]));
 
   document.getElementById('view-dashboard').innerHTML=`
-    <div class="view-head"><div><h2>Dashboard</h2><p>The health of the business at a glance — the numbers you normally only find out at tax time, live instead.</p></div></div>
+    <div class="view-head"><div><h2>Dashboard</h2><p>The health of the business at a glance — the numbers you normally only find out at tax time, live instead.</p></div>
+      <button class="bell-btn" onclick="openNotificationCentre()" aria-label="Notifications" title="Notifications">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+        ${notificationCentre.unread>0?`<span class="bell-badge">${notificationCentre.unread>9?'9+':notificationCentre.unread}</span>`:''}
+      </button>
+    </div>
+    ${(records.length===0&&!localStorage.getItem('turnkey-import-banner-dismissed'))?`
+    <div class="panel" style="margin-bottom:18px;background:var(--teal-wash);border-color:#cfe9e1">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap">
+        <div><h4 style="margin-bottom:3px">Import your existing customers</h4><p style="font-size:12.5px;color:var(--ink-soft)">Bring your customer list over from a spreadsheet or another CRM — takes a few minutes.</p></div>
+        <div style="display:flex;gap:8px;flex-shrink:0">
+          <button class="btn ghost sm" onclick="dismissImportBanner()">Skip for now</button>
+          <button class="btn accent sm" onclick="openImportWizard()">Import CSV →</button>
+        </div>
+      </div>
+    </div>`:''}
     <div class="panel" style="margin-bottom:18px"><h4>Today's priorities</h4>
       ${alerts.length?alerts.map(a=>`<button class="wx-alert-btn" onclick="${a.onclick}"><div class="wx-alert ${a.tone}">
           <div class="wx-alert-ico"></div>
@@ -5525,7 +5806,7 @@ function renderJobsFlow(){
     if(i===0)return `Enquiry from ${r.source||'—'}. ${r.jobNotes?('“'+r.jobNotes+'”'):''}`;
     if(i===1)return r.services.length?`${r.services.map(s=>SERVICES[s.svc].label.split(' ')[0]+' '+s.qty+SERVICES[s.svc].unit).join(', ')} · ${money(r.total)}`:'No quote built yet.';
     if(i===2){const label=r.scheduledDate||isoToLabel(r.scheduledDateISO);return label?`Booked ${label} · ${r.tech}`:(r.stage==='won'?'Won — needs a date.':'Not booked yet.');}
-    if(i===3){const done=r.sop.filter(Boolean).length;const total=checklistForRecord(r).steps.length;return isJob(r)?`Checklist ${done}/${total} · ${r.photoBefore?'before ✓':'before ·'} ${r.photoAfter?'after ✓':'after ·'}`:'Starts once booked.';}
+    if(i===3){const done=r.sop.filter(Boolean).length;const total=checklistForRecord(r).steps.length;const checklistBit=r.skipChecklist?'Checklist off':`Checklist ${done}/${total}`;return isJob(r)?`${checklistBit} · ${r.photoBefore?'before ✓':'before ·'} ${r.photoAfter?'after ✓':'after ·'}`:'Starts once booked.';}
     if(i===4)return r.stage==='paid'?`Paid ${r.paidAt?timeAgo(r.paidAt):''}`:(r.stage==='completed'?'Job done — send the invoice.':'After the job is completed.');
     return '';
   };
@@ -5563,8 +5844,8 @@ function renderJobsFlow(){
     </div>`;
 }
 // workflow transition helpers
-function markWon(id){const r=records.find(x=>x.id===id);if(!r.services.length){toast('Build a quote first');openQuoteModal(id);return;}r.stage='won';r.clientResponded=true;render();renderAll();openSchedule(id);notifyOwner('quote_accepted','Quote accepted — '+r.name,r.name+' accepted their quote for '+money(r.total||0)+'. Time to book it in.');}
-function markPaid(id,method){const r=records.find(x=>x.id===id);r.stage='paid';r.paidAt=Date.now();r.paymentStatus='paid';r.paymentMethod=method||r.paymentMethod||'Not specified';render();renderAll();if(document.getElementById('view-jobsflow').classList.contains('active'))renderJobsFlow();toast(`${r.name} marked paid ✓`);sendLifecycleEmail(r,'review_request');notifyOwner('payment_received','Payment received — '+money(r.total||0),r.name+' paid '+money(r.total||0)+' ('+(method||'method not specified')+').');}
+function markWon(id){const r=records.find(x=>x.id===id);if(!r.services.length){toast('Build a quote first');openQuoteModal(id);return;}r.stage='won';r.clientResponded=true;render();renderAll();openSchedule(id);notifyOwner('quote_accepted','Quote accepted — '+r.name,r.name+' accepted their quote for '+money(r.total||0)+'. Time to book it in.');triggerPush({type:'quote_accepted',title:'Quote approved',message:r.name+' approved your quote',url:'/index.html?open=pipeline'});}
+function markPaid(id,method){const r=records.find(x=>x.id===id);r.stage='paid';r.paidAt=Date.now();r.paymentStatus='paid';r.paymentMethod=method||r.paymentMethod||'Not specified';render();renderAll();if(document.getElementById('view-jobsflow').classList.contains('active'))renderJobsFlow();toast(`${r.name} marked paid ✓`);sendLifecycleEmail(r,'review_request');notifyOwner('payment_received','Payment received — '+money(r.total||0),r.name+' paid '+money(r.total||0)+' ('+(method||'method not specified')+').');triggerPush({type:'payment_received',title:'Payment received',message:'Payment received from '+r.name,url:'/index.html?open=pipeline'});}
 
 /* ===== Payments ledger — supports partial/multiple payments per job.
    Stored as r.payments (a plain array) rather than a new Supabase table:
@@ -6412,17 +6693,35 @@ function openSettings(){
     ${settingsGroup('Team',settingsRow('Team &amp; roles',null,"closeModal('settings-overlay');openTeam()"))}
     ${settingsGroup('Templates',settingsRow('Email &amp; document templates',null,"closeModal('settings-overlay');openTemplateEditor()"))}
     ${settingsGroup('Pricing',settingsRow('Rates, chemical costs &amp; margins',null,"closeModal('settings-overlay');switchView('pricing')"))}
-    ${settingsGroup('Notifications',`
+    ${settingsGroup('Workflows',`
     <div class="conn-card">
-      <p>Get told when something needs you — sent to the address below by email. SMS and push are on the roadmap.</p>
+      <p>Off by default — the checklist, photos and sign-off are always available as helpful tools, but none of them are required to complete a job, invoice it, or record payment unless you turn them on here.</p>
+      <div class="kv"><span class="k">Require job checklist completion</span><span class="v"><button class="toggle ${workflowConfig.requireChecklist?'on':''}" onclick="toggleWorkflowSetting('requireChecklist')"><span class="toggle-dot"></span></button></span></div>
+      <div class="kv"><span class="k">Require after photos</span><span class="v"><button class="toggle ${workflowConfig.requirePhotos?'on':''}" onclick="toggleWorkflowSetting('requirePhotos')"><span class="toggle-dot"></span></button></span></div>
+      <div class="kv"><span class="k">Require customer sign-off</span><span class="v"><button class="toggle ${workflowConfig.requireSignoff?'on':''}" onclick="toggleWorkflowSetting('requireSignoff')"><span class="toggle-dot"></span></button></span></div>
+      <button class="btn accent sm" style="margin-top:10px" onclick="saveWorkflowConfig(this)">Save workflow settings</button>
+    </div>`)}
+    ${settingsGroup('Notifications',`
+    <div class="conn-card ${pushSubscribed?'live':''}" style="margin-bottom:10px">
+      <div class="conn-top"><span class="conn-name">Push notifications</span><span class="conn-badge ${pushSubscribed?'on':'off'}">${pushSubscribed?'● ENABLED — this device':'off — this device'}</span></div>
+      <p>Get a notification on your phone or laptop even when TurnKey isn’t open — new enquiries, quote approvals, payments. This is a per-device setting: enable it on every phone/computer you want alerts on.</p>
+      ${window.TURNKEY_CONFIG&&window.TURNKEY_CONFIG.onesignalAppId
+        ?(pushSubscribed
+          ?`<button class="btn ghost sm" onclick="disablePushNotifications()">Disable on this device</button>`
+          :`<button class="btn accent sm" onclick="enablePushNotifications()">Enable notifications</button>`)
+        :`<p style="font-size:12px;color:var(--ink-faint)">Not set up yet — an admin needs to configure OneSignal for this TurnKey (see .env.example).</p>`}
+    </div>
+    <div class="conn-card">
+      <p>Choose which events notify you, and where — sent to the address below by email, or as a push to any device you’ve enabled above. SMS is on the roadmap.</p>
       <div class="field"><label>Send notifications to</label><input id="notif-email" type="email" placeholder="${(biz.email||'your email')}" value="${(NOTIFICATION_EVENTS.map(e=>notificationPrefs[e.key]&&notificationPrefs[e.key].notify_email).find(Boolean)||'').replace(/"/g,'&quot;')}"></div>
       ${NOTIFICATION_EVENTS.map(ev=>{
         const pref=notificationPrefs[ev.key];
         const emailOn=!pref||pref.email_enabled!==false;
+        const pushOn=!pref||pref.push_enabled!==false;
         return `<div class="kv"><span class="k">${ev.label}</span><span class="v" style="display:flex;gap:10px;align-items:center">
           <label style="display:flex;align-items:center;gap:4px;font-size:12px"><input type="checkbox" id="notif-${ev.key}" ${emailOn?'checked':''}> Email</label>
           <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--ink-faint)"><input type="checkbox" disabled title="Coming soon"> SMS</label>
-          <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--ink-faint)"><input type="checkbox" disabled title="Coming soon"> Push</label>
+          <label style="display:flex;align-items:center;gap:4px;font-size:12px"><input type="checkbox" id="notif-push-${ev.key}" ${pushOn?'checked':''}> Push</label>
         </span></div>`;
       }).join('')}
       <button class="btn accent sm" style="margin-top:10px" onclick="saveNotificationPrefs()">Save notification preferences</button>
@@ -6528,6 +6827,21 @@ async function loadEmailAccountStatus(){
   const {data,error}=await sb.from('email_accounts_status').select('*').eq('user_id',currentUserId).eq('provider','gmail').maybeSingle();
   if(!error)emailAccount=data||null;
 }
+// A fetch() to /api/*/oauth/start can fail for two very different reasons
+// that both land in the same catch block: (1) the request never reached the
+// server at all (real network/DNS/CORS failure — "check your internet" is
+// actually accurate), or (2) it reached the server but the server crashed
+// before returning JSON (Express's default error page is HTML), so
+// `await res.json()` throws its own SyntaxError trying to parse it — that's
+// a backend bug, and blaming the customer's internet connection is wrong
+// and hides the real problem. Distinguishing them here means the message
+// shown is actually true, and the console always has the real error either way.
+function describeConnectError(e){
+  console.error('OAuth connect failed',e);
+  return e instanceof SyntaxError
+    ? 'Server error starting the connection — the backend didn’t respond correctly (see server logs)'
+    : 'Couldn’t reach the server — check your internet connection and try again';
+}
 async function connectGmailOAuth(){
   const url=backendUrl();
   if(!url){toast('Something went wrong — try again shortly');return;}
@@ -6538,7 +6852,7 @@ async function connectGmailOAuth(){
     const j=await res.json();
     if(!res.ok||!j.url){toast(j.error||'Could not start Gmail connection');return;}
     window.location.href=j.url; // full-page redirect through Google's consent screen, then back here
-  }catch(e){console.error('Gmail connect failed',e);toast('Couldn’t connect — check your internet connection and try again');}
+  }catch(e){toast(describeConnectError(e));}
 }
 async function disconnectGmailAccount(){
   if(!confirm('Disconnect Gmail? You can reconnect anytime — nothing already synced is deleted.'))return;
@@ -6602,7 +6916,7 @@ async function connectGoogleCalendarOAuth(){
     const j=await res.json();
     if(!res.ok||!j.url){toast(j.error||'Could not start Google Calendar connection');return;}
     window.location.href=j.url;
-  }catch(e){console.error('Google Calendar connect failed',e);toast('Couldn’t connect — check your internet connection and try again');}
+  }catch(e){toast(describeConnectError(e));}
 }
 async function disconnectGoogleCalendar(){
   if(!confirm('Disconnect Google Calendar? You can reconnect anytime.'))return;
@@ -6902,6 +7216,14 @@ async function handleAuthedSession(session){
   seedDocTemplateFromProfile();
   preloadLogoDataUrl();
   if(currentUserRole==='technician')switchView('jobsflow');
+  // A push notification's url (e.g. /index.html?open=pipeline — see
+  // sendNotification() call sites) lands here when the app was closed and
+  // the OS notification click opened it fresh — takes priority over the
+  // technician default above since it's a more specific, just-expressed intent.
+  try{
+    const openView=new URLSearchParams(location.search).get('open');
+    if(openView&&document.getElementById('view-'+openView))switchView(openView);
+  }catch(e){}
   fetchLiveWeather();
   fetchClimateNormals();
   loadChecklistTemplates();
@@ -6915,6 +7237,8 @@ async function handleAuthedSession(session){
   loadNotificationPrefs();
   loadStripeStatus();
   retryPendingPhotos();
+  initOneSignal();
+  loadNotificationCentre();
 }
 
 /* ===== Team: staff list, invites, roles =====
@@ -7015,7 +7339,7 @@ async function loadBusinessProfile(){
   if(!sb||!currentBusinessId)return;
   const {data,error}=await sb.from('businesses').select('*').eq('id',currentBusinessId).maybeSingle();
   if(error){console.error('Load business profile failed',error);return;}
-  if(data){currentBusinessProfile=data;applyPricingConfig(data.pricing_config);return;}
+  if(data){currentBusinessProfile=data;applyPricingConfig(data.pricing_config);applyWorkflowConfig(data.workflow_config);return;}
   const {data:created,error:cErr}=await sb.from('businesses').upsert({id:currentBusinessId}).select('*').maybeSingle();
   if(cErr){console.error('Backfill business profile failed',cErr);return;} // e.g. schema not migrated yet
   currentBusinessProfile=created;
@@ -7285,6 +7609,29 @@ function cleanPaid(v){
   if(v==null||v==='')return false;
   return /^(y|yes|true|paid|1)$/i.test(String(v).trim());
 }
+// Non-ServiceM8 sources (Jobber/Housecall Pro/Tradify/Fergus/Generic) each
+// export job status as free text in their own vocabulary ("In Progress",
+// "Booked", "Done"...), but the CRM's pipeline only recognises a closed set
+// of exact tokens (new/quoted/won/scheduled/completed/cancelled/paid) — an
+// unmapped value used to get written straight into jobs.status and every
+// imported job from these sources would silently render as "Lead"
+// regardless of its real status. Best-effort maps common phrasing to a
+// known token; returns null (not a guess) for anything unrecognised so
+// run_import()'s own 'new' fallback applies — the untouched original is
+// still kept in raw_status/details.originalStatus either way, so nothing
+// imported this way is ever lost, just conservatively bucketed as New.
+function cleanStatus(v){
+  const s=(v||'').trim().toLowerCase();
+  if(!s)return null;
+  if(/won|approved|accepted|confirmed/.test(s))return 'won';
+  if(/quot|estimat|pending/.test(s))return 'quoted';
+  if(/schedul|book|upcoming|assign|dispatch|progress|on.?site|active|working/.test(s))return 'scheduled';
+  if(/complet|done|finish/.test(s))return 'completed';
+  if(/cancel|lost|declin|void/.test(s))return 'cancelled';
+  if(/paid|invoiced/.test(s))return 'paid';
+  if(/^(new|lead|open)$/.test(s))return 'new';
+  return null;
+}
 
 /* =====================================================================
    SERVICEM8 PROVIDER — a dedicated importer built around ServiceM8's real
@@ -7527,6 +7874,11 @@ async function openImportWizard(){
   openModal('import-overlay');
 }
 function closeImportWizard(){closeModal('import-overlay');}
+// Dashboard's "Import your existing customers" banner — only shown to a
+// business with zero records at all (a reasonable first-run signal without
+// needing a separate onboarding-state column), dismissed permanently once
+// skipped or once they actually have customers so it never nags twice.
+function dismissImportBanner(){localStorage.setItem('turnkey-import-banner-dismissed','1');renderDashboard();}
 async function iwLoadHistory(){
   if(!sb||!currentBusinessId)return;
   const {data,error}=await sb.from('import_batches').select('*').order('created_at',{ascending:false}).limit(10);
@@ -7640,9 +7992,11 @@ function iwRenderUpload(){
     ${rows}
     <div class="iw-foot"><button class="btn ghost" onclick="iwGoStep(2)">← Back</button><button class="btn primary" ${ready?'':'disabled'} onclick="iwGoStep(4)">Continue →</button></div>`;
 }
+const IW_MAX_FILE_BYTES=25*1024*1024; // 25MB — comfortably above any realistic customer/job export, guards against reader.readAsText() hanging the tab on a wrong/huge file
 function iwFileChosen(key,el){
   const file=el.files&&el.files[0];
   if(!file)return;
+  if(file.size>IW_MAX_FILE_BYTES){toast('That file is too large ('+Math.round(file.size/1024/1024)+'MB) — split it into smaller files under 25MB and import separately');el.value='';return;}
   const reader=new FileReader();
   reader.onload=()=>{
     try{
@@ -7672,9 +8026,15 @@ function sm8RenderUpload(){
     <div class="iw-foot"><button class="btn ghost" onclick="iwGoStep(2)">← Back</button><button class="btn primary" ${c?'':'disabled'} onclick="sm8Validate();iwGoStep(4)">Continue →</button></div>`;
 }
 function sm8FilesChosen(el){
-  const files=Array.from(el.files||[]);
+  let files=Array.from(el.files||[]);
   if(!files.length)return;
   importWizard.sm8UploadWarnings=[];
+  const oversized=files.filter(f=>f.size>IW_MAX_FILE_BYTES);
+  if(oversized.length){
+    importWizard.sm8UploadWarnings.push(...oversized.map(f=>`"${f.name}" is too large (${Math.round(f.size/1024/1024)}MB) — split it into smaller files under 25MB.`));
+    files=files.filter(f=>f.size<=IW_MAX_FILE_BYTES);
+  }
+  if(!files.length){renderImportWizard();return;}
   let pending=files.length;
   files.forEach(file=>{
     const reader=new FileReader();
@@ -7788,7 +8148,7 @@ function iwBuildRows(entityKey){
       out.name=get('name');out.email=get('email');out.phone=get('phone');
       out.address=get('address');out.suburb=get('suburb');out.notes=get('notes');out.source=get('source');
     }else if(entityKey==='jobs'){
-      out.customer_ref=get('customer_ref');out.status=get('status');out.raw_status=get('status');
+      out.customer_ref=get('customer_ref');out.status=cleanStatus(get('status'));out.raw_status=get('status');
       out.scheduled_date=cleanDate(get('scheduled_date'));out.total=cleanAmount(get('total'));
       out.notes=get('notes');out.customer_name=get('customer_ref');
     }else if(entityKey==='quotes'){
@@ -7807,14 +8167,20 @@ function iwRenderPreview(){
     const rows=iwBuildRows(key);
     const requiredFields=ent.fields.filter(fl=>fl.required);
     const missing=rows.filter(r=>requiredFields.some(fl=>!r[fl.key]));
+    // Only jobs carry a raw_status alongside the cleaned status — an
+    // unrecognised value (cleanStatus() returned null) still imports fine,
+    // it just lands as "New" rather than whatever the source file actually
+    // said, so flag it here rather than let it surprise someone later.
+    const unmappedStatus=key==='jobs'?rows.filter(r=>r.raw_status&&!r.status):[];
     const sample=rows.slice(0,5);
     const sampleCols=ent.fields.filter(fl=>importWizard.mapping[key][fl.key]);
-    return {key,ent,rows,missing,sample,sampleCols};
+    return {key,ent,rows,missing,unmappedStatus,sample,sampleCols};
   });
-  const body=summaries.map(({ent,rows,missing,sample,sampleCols})=>`
+  const body=summaries.map(({ent,rows,missing,unmappedStatus,sample,sampleCols})=>`
     <div class="panel" style="margin-bottom:14px">
       <h4>${ent.label} <span class="demo-tag">${rows.length} row${rows.length!==1?'s':''}</span></h4>
       ${missing.length?`<p style="font-size:12.5px;color:var(--coral);margin-bottom:8px">${missing.length} row(s) are missing a required field and will be skipped with an error — you'll see exactly which after importing.</p>`:''}
+      ${unmappedStatus.length?`<p style="font-size:12.5px;color:var(--amber);margin-bottom:8px">${unmappedStatus.length} row(s) have a status TurnKey doesn't recognise (e.g. "${unmappedStatus[0].raw_status}") — they'll import as <b>New</b>; the original value is kept and you can update the stage manually after.</p>`:''}
       <div style="overflow-x:auto"><table class="contact-table" style="min-width:480px">
         <thead><tr>${sampleCols.map(fl=>`<th>${fl.label}</th>`).join('')}</tr></thead>
         <tbody>${sample.map(r=>`<tr>${sampleCols.map(fl=>`<td>${(r[fl.key]??'').toString().slice(0,40)}</td>`).join('')}</tr>`).join('')}</tbody>

@@ -6,6 +6,10 @@
 <script src="pricing-engine.js"></script>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>Your quote</title>
+<link rel="icon" href="favicon.ico" sizes="32x32">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="favicon-16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
 <style>
   :root{
     --ink:#0a1c2b; --ink-soft:#5b6b78; --ink-faint:#9aa7b1;
@@ -128,6 +132,18 @@ function money(n){const v=Math.round(n||0);return (v<0?'-$':'$')+Math.abs(v).toL
 function fmtDur(min){if(!min)return '';const h=Math.floor(min/60),m=Math.round(min%60);return h?(h+'h'+(m?' '+m+'m':'')):(m+'m');}
 function fmtDate(iso){try{return new Date(iso).toLocaleDateString('en-NZ',{day:'numeric',month:'short',year:'numeric'});}catch(e){return '';}}
 function getToken(){try{return new URL(location.href).searchParams.get('t')||'';}catch(e){return '';}}
+// Fire-and-forget push trigger — this customer-facing page has no Supabase
+// session (get_public_quote/respond_to_public_quote are anon RPCs), so it
+// can't call the authenticated /api/notifications/send route index.html
+// uses; these two routes are scoped by the quote's own unguessable token
+// instead, same trust boundary as the RPCs above. Never blocks/affects the
+// customer's own flow — a failed push here should never look like a
+// failed quote approval.
+function notifyBackend(path,body){
+  const cfg=window.TURNKEY_CONFIG;
+  if(!cfg||!cfg.backendUrl)return;
+  fetch(`${cfg.backendUrl}${path}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).catch(()=>{});
+}
 async function callRpc(name,args){
   const cfg=window.TURNKEY_CONFIG;
   if(!cfg||!cfg.supabaseUrl||!cfg.supabaseAnonKey)throw new Error('not configured');
@@ -416,6 +432,7 @@ async function respond(action,message){
     }else{
       currentQuote.status=result.status;
       renderQuote(currentQuote);
+      if(action==='accept')notifyBackend('/api/notifications/quote-responded',{token,action});
     }
   }catch(e){
     if(btn&&action==='accept')btn.disabled=false;
@@ -428,6 +445,7 @@ async function boot(){
     const q=await callRpc('get_public_quote',{p_token:token});
     if(!q||q.error){renderState(STATE_ICONS.search,'Quote not found','This link may have expired or been mistyped — contact the business for a fresh one.');return;}
     renderQuote(q);
+    notifyBackend('/api/notifications/quote-viewed',{token});
   }catch(e){
     renderState(STATE_ICONS.warn,'Could not load your quote','Check your connection and try refreshing this page.');
   }

@@ -52,14 +52,32 @@ if (!mapsKey) {
   }
 }
 
+// Same carry-forward treatment as mapsKey — OneSignal's App ID is meant to
+// be public (it's sent to the browser either way, to initialize the Web
+// SDK; only the REST API key, used solely by the backend, is secret), so
+// there's no security reason to gate it behind the three required vars,
+// and no reason a build missing this one var should blank out a
+// previously-working push setup.
+let onesignalAppId = process.env.TURNKEY_ONESIGNAL_APP_ID || ''
+if (!onesignalAppId) {
+  try {
+    const existing = fs.readFileSync('config.js', 'utf8')
+    const match = existing.match(/onesignalAppId:\s*(['"])((?:(?!\1).)*)\1/)
+    if (match && match[2]) onesignalAppId = match[2]
+  } catch {
+    // no existing config.js to read from — nothing to preserve, onesignalAppId stays ''
+  }
+}
+
 const content = `// Auto-generated at build time — do not edit on Netlify deploys.
 window.TURNKEY_CONFIG = window.TURNKEY_CONFIG || {
   backendUrl: ${JSON.stringify(backendUrl)},
   supabaseUrl: ${JSON.stringify(supabaseUrl)},
   supabaseAnonKey: ${JSON.stringify(supabaseAnonKey)},
   mapsKey: ${JSON.stringify(mapsKey)},
+  onesignalAppId: ${JSON.stringify(onesignalAppId)},
 };
 `
 
 fs.writeFileSync('config.js', content)
-console.log(`Wrote config.js (backend: ${backendUrl}) (supabase configured)`, mapsKey ? `(maps configured — ${mapsKeySource})` : '(no maps key set anywhere — Google Maps will stay off until TURNKEY_MAPS_KEY is set in Netlify)')
+console.log(`Wrote config.js (backend: ${backendUrl}) (supabase configured)`, mapsKey ? `(maps configured — ${mapsKeySource})` : '(no maps key set anywhere — Google Maps will stay off until TURNKEY_MAPS_KEY is set in Netlify)', onesignalAppId ? '(OneSignal configured)' : '(no OneSignal App ID set — push notifications will stay off until TURNKEY_ONESIGNAL_APP_ID is set in Netlify)')

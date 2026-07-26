@@ -11,6 +11,7 @@ import { encryptToken, decryptToken } from './crypto.js'
 import * as gmail from './providers/gmail.js'
 import * as googleCalendar from './providers/googleCalendar.js'
 import { fetchIcs } from './ical.js'
+import { sendNotification } from './services/notifications.js'
 
 const PORT = Number(process.env.PORT || 3001)
 const STORAGE = (process.env.STORAGE || 'file').toLowerCase()
@@ -40,6 +41,20 @@ const authClient = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY,
   { auth: { persistSession: false, autoRefreshToken: false } }
 )
+
+// Secret used to HMAC-sign the OAuth `state` param (see signState/verifyState
+// below) so it can't be tampered with in transit through the user's browser.
+// Falls back to SUPABASE_SERVICE_ROLE_KEY — already required and validated
+// above — so this works out of the box without a new required env var;
+// set OAUTH_STATE_SECRET explicitly on Render for a cleaner separation of
+// secrets. (This used to be named SYNC_KEY, reusing the old shared-API-key
+// variable from a since-removed route — that declaration was deleted when
+// that route was removed, but signState/verifyState kept referencing the
+// bare `SYNC_KEY` identifier, which had gone undeclared. That's a
+// ReferenceError on every single call, i.e. every "Connect Google"/"Connect
+// Gmail" click — see the OAuth start routes' try/catch for how that used to
+// surface as a generic, misleading "check your internet" error.)
+const OAUTH_STATE_SECRET = process.env.OAUTH_STATE_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY
 
 async function resolveBusiness(accessToken) {
   const { data: userData, error: userErr } = await authClient.auth.getUser(accessToken)
@@ -101,6 +116,10 @@ function rateLimit({ windowMs, max }) {
   }
 }
 const leadsRateLimit = rateLimit({ windowMs: 10 * 60 * 1000, max: 12 })
+// Higher ceiling than leads — a single quote page visit fires at most one
+// quote-viewed and one quote-responded call, but many customers can share
+// an office/mobile-carrier NAT IP visiting different quotes in the same window.
+const notifyRateLimit = rateLimit({ windowMs: 10 * 60 * 1000, max: 40 })
 
 
 async function requireBusiness(req, res, next) {
@@ -188,6 +207,21 @@ app.post('/api/leads', leadsRateLimit, async (req, res) => {
 
     const lead = await storage.addLead(payload)
 
+    // Server-side, unlike the existing notifyOwner('new_lead',...) email
+    // alert (index.html) which only fires while a CRM tab is open polling
+    // /api/leads/pending — this fires the instant the booking form is
+    // submitted, reaching the owner's phone even with TurnKey closed.
+    // Fire-and-forget: a push failure must never fail the lead submission
+    // itself (sendNotification already never throws, but the lead response
+    // below doesn't wait on it either way).
+    sendNotification(authClient, {
+      business_id: payload.business_id,
+      type: 'new_lead',
+      title: 'New enquiry received',
+      message: 'New customer enquiry from ' + (payload.customer.name || 'a customer'),
+      url: '/index.html?open=pipeline'
+    }).catch((err) => console.error('new_lead notification failed', err))
+
     res.status(201).json({
       ok: true,
       id: lead.id
@@ -202,6 +236,96 @@ app.post('/api/leads', leadsRateLimit, async (req, res) => {
   }
 })
 
+/* =====================================================================
+   PUSH NOTIFICATIONS (OneSignal) — one authenticated trigger for events
+   that originate from a signed-in CRM action (job booked, quote marked
+   won/accepted by staff, payment recorded manually), plus two
+   unauthenticated-but-token-scoped triggers for events that originate from
+   the public quote page (quote.html has no Supabase session). The actual
+   OneSignal REST call and the in-app notification-history log both live in
+   services/notifications.js — every route below just resolves the right
+   business_id/title/message and calls the same sendNotification().
+   ===================================================================== */
+
+// Generic trigger for any CRM-originated event. The frontend already knows
+// which of the 6 event types just happened and what the message should say
+// (same string-building logic notifyOwner()'s email path already has) — this
+// just needs req.businessId (from the caller's own session, never trusted
+// from the request body) to resolve subscriptions and to scope the
+// in-app-history row correctly.
+app.post('/api/notifications/send', requireBusiness, async (req, res) => {
+  const { type, title, message, url } = req.body || {}
+  if (!title || !message) return res.status(400).json({ error: 'title and message are required' })
+  try {
+    const result = await sendNotification(authClient, { business_id: req.businessId, type, title, message, url })
+    res.json(result)
+  } catch (err) {
+    console.error('POST /api/notifications/send', err)
+    res.status(500).json({ error: 'Could not send notification' })
+  }
+})
+
+// Called once by quote.html right after it successfully loads a quote via
+// get_public_quote (that RPC stays a pure read, as documented in
+// schema-public-quote.sql — this route does the one-time write instead).
+// Looked up by the same unguessable public_token as the RPC, never by id —
+// a client can't cause a push for a quote it doesn't hold the link to.
+app.post('/api/notifications/quote-viewed', notifyRateLimit, async (req, res) => {
+  const token = req.body?.token
+  if (!token) return res.status(400).json({ error: 'Missing token' })
+  try {
+    const { data: quote, error: qErr } = await authClient
+      .from('quotes').select('id, business_id, lead_id, viewed_at').eq('public_token', token).maybeSingle()
+    if (qErr) throw qErr
+    if (!quote) return res.status(404).json({ error: 'Quote not found' })
+    if (quote.viewed_at) return res.json({ ok: true, alreadyViewed: true }) // one push per quote, not one per reload
+
+    await authClient.from('quotes').update({ viewed_at: new Date().toISOString() }).eq('id', quote.id)
+    const { data: customer } = await authClient.from('customers').select('name').eq('id', quote.lead_id).maybeSingle()
+    await authClient.from('activity_log').insert({
+      business_id: quote.business_id, customer_id: quote.lead_id, type: 'quote_viewed',
+      summary: (customer?.name || 'A customer') + ' viewed their quote online.'
+    })
+    const result = await sendNotification(authClient, {
+      business_id: quote.business_id, type: 'quote_viewed',
+      title: 'Quote viewed',
+      message: (customer?.name || 'A customer') + ' viewed your quote',
+      url: '/index.html?open=pipeline'
+    })
+    res.json(result)
+  } catch (err) {
+    console.error('POST /api/notifications/quote-viewed', err)
+    res.status(500).json({ error: 'Could not record quote view' })
+  }
+})
+
+// Called by quote.html right after respond_to_public_quote('accept'/'decline')
+// succeeds — that RPC already did the real state change (quotes.status,
+// jobs.status, the activity_log row); this just fires the push, re-deriving
+// the customer/amount from the DB by token rather than trusting whatever
+// the client claims, so a tampered request can't fabricate a notification
+// about a different business.
+app.post('/api/notifications/quote-responded', notifyRateLimit, async (req, res) => {
+  const { token, action } = req.body || {}
+  if (!token || action !== 'accept') return res.json({ ok: true, skipped: 'not_an_acceptance' }) // only "approved" is a push event per the spec — decline/question aren't
+  try {
+    const { data: quote, error: qErr } = await authClient
+      .from('quotes').select('id, business_id, lead_id').eq('public_token', token).maybeSingle()
+    if (qErr) throw qErr
+    if (!quote) return res.status(404).json({ error: 'Quote not found' })
+    const { data: customer } = await authClient.from('customers').select('name').eq('id', quote.lead_id).maybeSingle()
+    const result = await sendNotification(authClient, {
+      business_id: quote.business_id, type: 'quote_accepted',
+      title: 'Quote approved',
+      message: (customer?.name || 'A customer') + ' approved your quote',
+      url: '/index.html?open=pipeline'
+    })
+    res.json(result)
+  } catch (err) {
+    console.error('POST /api/notifications/quote-responded', err)
+    res.status(500).json({ error: 'Could not send notification' })
+  }
+})
 
 app.get('/api/leads/pending', requireBusiness, async (req, res) => {
   try {
@@ -260,19 +384,19 @@ app.post('/api/leads/ack', requireBusiness, async (req, res) => {
    ===================================================================== */
 const PROVIDERS = { gmail }
 
-// Signs {businessId, userId, provider, nonce} with SYNC_KEY (already a long
-// random secret every deployment sets) so a tampered state param is
-// rejected — state travels through the user's own browser during the OAuth
-// redirect, so it must be tamper-evident, not just opaque.
+// Signs {businessId, userId, provider, nonce} with OAUTH_STATE_SECRET so a
+// tampered state param is rejected — state travels through the user's own
+// browser during the OAuth redirect, so it must be tamper-evident, not just
+// opaque.
 function signState(payload) {
   const b64 = Buffer.from(JSON.stringify(payload)).toString('base64url')
-  const sig = crypto.createHmac('sha256', SYNC_KEY).update(b64).digest('base64url')
+  const sig = crypto.createHmac('sha256', OAUTH_STATE_SECRET).update(b64).digest('base64url')
   return `${b64}.${sig}`
 }
 function verifyState(state) {
   const [b64, sig] = String(state || '').split('.')
   if (!b64 || !sig) return null
-  const expected = crypto.createHmac('sha256', SYNC_KEY).update(b64).digest('base64url')
+  const expected = crypto.createHmac('sha256', OAUTH_STATE_SECRET).update(b64).digest('base64url')
   const a = Buffer.from(sig), b = Buffer.from(expected)
   if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null
   try { return JSON.parse(Buffer.from(b64, 'base64url').toString('utf8')) } catch { return null }
@@ -297,21 +421,34 @@ async function getValidAccessToken(businessId, userId, providerName) {
 }
 
 app.get('/api/email/oauth/start', requireBusiness, (req, res) => {
-  const providerName = req.query.provider === 'microsoft' ? 'microsoft' : 'gmail'
-  const provider = PROVIDERS[providerName]
-  if (!provider || !provider.isConfigured()) {
-    return res.status(503).json({ error: providerName + ' is not configured on this server yet' })
+  // Every code path below MUST end in a JSON response — an uncaught throw
+  // here falls through to Express's default HTML error page, which the
+  // frontend's `await res.json()` can't parse, throwing its own SyntaxError
+  // and landing in a generic "check your internet" message that has nothing
+  // to do with the real (server-side) failure. This is exactly how the
+  // undeclared-SYNC_KEY bug above used to surface — wrapping in try/catch
+  // and always returning JSON means any FUTURE bug here fails loudly and
+  // specifically instead of the same way.
+  try {
+    const providerName = req.query.provider === 'microsoft' ? 'microsoft' : 'gmail'
+    const provider = PROVIDERS[providerName]
+    if (!provider || !provider.isConfigured()) {
+      return res.status(503).json({ error: providerName + ' is not configured on this server yet' })
+    }
+    // The frontend's own origin travels inside the signed state (rather than a
+    // fixed TURNKEY_FRONTEND_URL env var) so this works correctly regardless of
+    // which domain the CRM is served from — and can't be tampered with in transit.
+    const origin = String(req.query.origin || '').slice(0, 200)
+    if (!/^https?:\/\/[a-zA-Z0-9.-]+(:\d+)?$/.test(origin)) {
+      return res.status(400).json({ error: 'Missing or invalid origin' })
+    }
+    const redirectUri = `https://${req.get('host')}/api/email/oauth/callback/${providerName}`
+    const state = signState({ businessId: req.businessId, userId: req.userId, provider: providerName, origin, nonce: crypto.randomUUID() })
+    res.json({ url: provider.getAuthUrl(redirectUri, state) })
+  } catch (err) {
+    console.error('Email OAuth start failed', { provider: req.query.provider, businessId: req.businessId, error: err.message, stack: err.stack })
+    res.status(500).json({ error: 'Could not start the connection: ' + err.message })
   }
-  // The frontend's own origin travels inside the signed state (rather than a
-  // fixed TURNKEY_FRONTEND_URL env var) so this works correctly regardless of
-  // which domain the CRM is served from — and can't be tampered with in transit.
-  const origin = String(req.query.origin || '').slice(0, 200)
-  if (!/^https?:\/\/[a-zA-Z0-9.-]+(:\d+)?$/.test(origin)) {
-    return res.status(400).json({ error: 'Missing or invalid origin' })
-  }
-  const redirectUri = `https://${req.get('host')}/api/email/oauth/callback/${providerName}`
-  const state = signState({ businessId: req.businessId, userId: req.userId, provider: providerName, origin, nonce: crypto.randomUUID() })
-  res.json({ url: provider.getAuthUrl(redirectUri, state) })
 })
 
 app.get('/api/email/oauth/callback/:provider', async (req, res) => {
@@ -479,12 +616,21 @@ app.get('/api/calendar/connections', requireBusiness, async (req, res) => {
 })
 
 app.get('/api/calendar/oauth/start', requireBusiness, (req, res) => {
-  if (!googleCalendar.isConfigured()) return res.status(503).json({ error: 'Google Calendar is not configured on this server yet' })
-  const origin = String(req.query.origin || '').slice(0, 200)
-  if (!/^https?:\/\/[a-zA-Z0-9.-]+(:\d+)?$/.test(origin)) return res.status(400).json({ error: 'Missing or invalid origin' })
-  const redirectUri = `https://${req.get('host')}/api/calendar/oauth/callback/google`
-  const state = signState({ businessId: req.businessId, userId: req.userId, provider: 'google', origin, nonce: crypto.randomUUID() })
-  res.json({ url: googleCalendar.getAuthUrl(redirectUri, state) })
+  // See the matching comment on /api/email/oauth/start — every path here
+  // must return JSON, never let a throw fall through to Express's default
+  // HTML error page (that's what made the undeclared-SYNC_KEY bug surface
+  // client-side as a generic, misleading "check your internet" error).
+  try {
+    if (!googleCalendar.isConfigured()) return res.status(503).json({ error: 'Google Calendar is not configured on this server yet' })
+    const origin = String(req.query.origin || '').slice(0, 200)
+    if (!/^https?:\/\/[a-zA-Z0-9.-]+(:\d+)?$/.test(origin)) return res.status(400).json({ error: 'Missing or invalid origin' })
+    const redirectUri = `https://${req.get('host')}/api/calendar/oauth/callback/google`
+    const state = signState({ businessId: req.businessId, userId: req.userId, provider: 'google', origin, nonce: crypto.randomUUID() })
+    res.json({ url: googleCalendar.getAuthUrl(redirectUri, state) })
+  } catch (err) {
+    console.error('Calendar OAuth start failed', { businessId: req.businessId, error: err.message, stack: err.stack })
+    res.status(500).json({ error: 'Could not start the connection: ' + err.message })
+  }
 })
 
 app.get('/api/calendar/oauth/callback/google', async (req, res) => {
@@ -715,6 +861,25 @@ app.post('/api/automations/run-due', async (req, res) => {
         const { data: job } = await authClient.from('jobs').select('*').eq('id', inv.job_id).maybeSingle()
         if (!job) continue
         if (await sendAutomationEmail(job.business_id, job, 'invoice_overdue', inv)) results.invoice_overdue++
+        // Owner-facing push, separate from the customer-facing reminder
+        // email just above — this is the only one of the 6 events with no
+        // real-time trigger to hook (nothing "happens" when an invoice
+        // becomes overdue, it just is, as of today's date), so it rides on
+        // this same daily sweep. overdue_push_log gives it its own
+        // once-ever dedupe key (invoice_id) independent of
+        // lifecycle_email_log's job_id+key key, since the two are logically
+        // separate notifications that could legitimately have different
+        // enabled/disabled states later.
+        const { data: alreadyPushed } = await authClient.from('overdue_push_log').select('id').eq('invoice_id', inv.id).maybeSingle()
+        if (!alreadyPushed) {
+          await sendNotification(authClient, {
+            business_id: job.business_id, type: 'invoice_overdue',
+            title: 'Invoice overdue',
+            message: 'Invoice requires attention',
+            url: '/index.html?open=pipeline'
+          })
+          await authClient.from('overdue_push_log').insert({ invoice_id: inv.id })
+        }
       } catch (e) { console.error('invoice_overdue failed for invoice', inv.id, e); results.errors++ }
     }
     res.json({ ok: true, results })
@@ -836,6 +1001,30 @@ app.post('/api/payments/webhook', async (req, res) => {
             }).eq('id', invoice.id)
             if (invoice.job_id) {
               await authClient.from('jobs').update({ status: 'paid' }).eq('id', invoice.job_id)
+            }
+            // This Stripe path bypasses markPaid() (index.html) entirely —
+            // that's the only place the existing email notifyOwner(
+            // 'payment_received',...) call lives, so without this a
+            // Stripe-paid invoice got no owner alert of any kind. amount
+            // comes from the invoice row itself (session.amount_total is in
+            // cents and Stripe-specific; the invoice's own NZD amount is
+            // what the rest of the app already displays everywhere else).
+            const { data: invRow } = await authClient.from('invoices').select('business_id, amount').eq('id', invoice.id).maybeSingle()
+            if (invRow) {
+              let customerName = 'A customer'
+              if (invoice.job_id) {
+                const { data: job } = await authClient.from('jobs').select('customer_id, details').eq('id', invoice.job_id).maybeSingle()
+                if (job?.customer_id) {
+                  const { data: cust } = await authClient.from('customers').select('name').eq('id', job.customer_id).maybeSingle()
+                  customerName = cust?.name || job.details?.name || customerName
+                }
+              }
+              sendNotification(authClient, {
+                business_id: invRow.business_id, type: 'payment_received',
+                title: 'Payment received',
+                message: 'Payment received from ' + customerName,
+                url: '/index.html?open=pipeline'
+              }).catch((e) => console.error('payment_received notification failed', e))
             }
           } else {
             console.error('Stripe webhook: no invoice found for id', invoiceId)

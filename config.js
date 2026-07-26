@@ -17,4 +17,7 @@ window.TURNKEY_CONFIG = window.TURNKEY_CONFIG || {
   // Google Maps API key — restricted by HTTP referrer to this domain in
   // Google Cloud Console (Credentials → this key → Application restrictions).
   mapsKey: 'AIzaSyCzRYUk-xZqDA9okZISf4irn0Ah76P3iVs',
+  // OneSignal App ID (public — only the REST API key, held server-side in
+  // Render's env, is secret). Push notifications stay off until this is set.
+  onesignalAppId: '17d3597c-ddfc-4cc6-9b2d-5877bb7d55b9',
 };
