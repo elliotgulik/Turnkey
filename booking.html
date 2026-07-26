@@ -187,6 +187,22 @@
   .field label{display:block;font-size:13px;font-weight:500;color:var(--ink-soft);margin-bottom:6px}
   .field input,.field textarea,.field select{width:100%;padding:12px 13px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--surface)}
   .field input:focus,.field textarea:focus,.field select:focus{outline:none;border-color:var(--teal);box-shadow:0 0 0 3px var(--teal-wash)}
+  .details-submit-bar{margin-top:18px}
+  @media(max-width:720px){
+    /* Pin the submit action to the bottom of the screen so it's always
+       reachable on a form this long, instead of making the customer
+       scroll all the way back down to send it — the classic mobile
+       checkout pattern. Extra bottom padding on #details keeps the last
+       field (and the Back link) from ever sitting underneath the bar. */
+    #details{padding-bottom:104px}
+    .details-submit-bar{
+      position:fixed;left:0;right:0;bottom:0;z-index:30;margin-top:0;
+      background:var(--surface);border-top:1px solid var(--line);
+      padding:12px 16px max(12px,env(safe-area-inset-bottom));
+      box-shadow:0 -6px 20px rgba(10,28,43,.08);
+    }
+    .details-submit-bar .btn{width:100%}
+  }
 
   .hidden{display:none!important}
 
@@ -388,11 +404,17 @@ function initPlacesAutocomplete(){
       <div class="field"><label>How did you find us?</label><select id="c-source"><option>Google search</option><option>Facebook</option><option>Referral</option><option>Repeat customer</option><option>Other</option></select></div>
       <div class="field"><label>Preferred date <span style="color:var(--ink-faint);font-weight:400">(optional)</span></label><input type="date" id="c-date"></div>
       <div class="field"><label>Preferred time of day</label><select id="c-window"><option>Anytime</option><option>Morning</option><option>Afternoon</option><option>Evening</option></select></div>
-      <div class="field full"><label>Photos <span style="color:var(--ink-faint);font-weight:400">(optional, up to 6)</span></label><input type="file" id="c-photos" accept="image/*" multiple onchange="onPhotosChosen(this)"><div id="c-photos-status" style="font-size:12.5px;color:var(--ink-soft);margin-top:6px"></div></div>
+      <div class="field full"><label>Photos <span style="color:var(--ink-faint);font-weight:400">(optional, up to 6)</span></label><input type="file" id="c-photos" accept="image/*" capture="environment" multiple onchange="onPhotosChosen(this)"><div id="c-photos-status" style="font-size:12.5px;color:var(--ink-soft);margin-top:6px"></div></div>
     </div>
-    <button class="btn primary" onclick="submitRequest()">Send my quote request</button>
+    <!-- On mobile this bar pins to the bottom of the screen (see
+         .details-submit-bar in the mobile media query) so the submit
+         action stays reachable without scrolling back down past a form
+         this long; on desktop it's just the button in normal flow. -->
+    <div class="details-submit-bar">
+      <button class="btn primary" onclick="submitRequest()">Send my quote request</button>
+      <div id="submit-status" style="font-size:13px;color:#b3413a;margin-top:10px"></div>
+    </div>
     <button class="btn ghost" style="margin-top:9px" onclick="backToMap()">← Back to map</button>
-    <div id="submit-status" style="font-size:13px;color:#b3413a;margin-top:10px"></div>
   </div>
 
   <!-- SUCCESS -->
@@ -572,6 +594,17 @@ let SAT_ZOOM=SAT_ZOOM_DEFAULT;  // may be overridden per-property based on geoco
 let SAT_LAT=-36.8;              // updated to actual property lat after geocoding
 let SAT_ADDRESS=null;
 let _lastLat=null,_lastLng=null,_lastLabel=null;
+// Bumped on every reloadMapAt() call — the Google satellite image request is
+// async (an Image() load), so a customer clicking +/- twice in quick
+// succession (ordinary behaviour, especially "it didn't seem to zoom, let
+// me click again") can have two requests in flight at once. Without this,
+// whichever response happens to arrive LAST wins regardless of which zoom
+// it was actually FOR, applying its image against the (by-then-newer)
+// SCALE/SAT_ZOOM globals — a real mismatch that visibly drifts every drawn
+// area off the property. Only the request matching the current token is
+// allowed to apply its result. Mirrors qe.loadToken in index.html, which
+// solves the exact same race on the staff-side map.
+let mapLoadToken=0;
 function satScale(){
   // metres per SVG unit at current zoom and actual property latitude
   const mPerPx=156543.03392*Math.cos(SAT_LAT*Math.PI/180)/Math.pow(2,SAT_ZOOM);
@@ -599,14 +632,15 @@ function zoomForViewport(ne,sw){
 function reloadMapAt(lat,lng,zoom,label){
   _lastLat=lat;_lastLng=lng;_lastLabel=label||_lastLabel;
   SAT_ZOOM=zoom;
+  const token=++mapLoadToken;
   if(MAPS_KEY&&!GOOGLE_MAPS_BLOCKED){
     SAT_LAT=lat;
     const cacheKey=lat+','+lng+','+zoom;
     const url='https://maps.googleapis.com/maps/api/staticmap?center='+lat+','+lng+
       '&zoom='+zoom+'&size=640x480&scale=2&maptype=satellite&key='+encodeURIComponent(MAPS_KEY);
-    loadSatelliteUrl(url,cacheKey,_lastLabel);
+    loadSatelliteUrl(url,cacheKey,_lastLabel,token);
   }else{
-    loadOsmMosaic(lat,lng,zoom,_lastLabel);
+    loadOsmMosaic(lat,lng,zoom,_lastLabel,token);
   }
 }
 
@@ -684,7 +718,7 @@ function enableOsm(address){
     }).catch(()=>{hint.textContent='Could not load the map — check your connection';});
   return true;
 }
-function loadSatelliteUrl(url,cacheKey,label){
+function loadSatelliteUrl(url,cacheKey,label,token){
   const visual=document.getElementById('map-visual');
   const tiles=document.getElementById('map-tiles');
   const hint=document.getElementById('hint');
@@ -695,13 +729,14 @@ function loadSatelliteUrl(url,cacheKey,label){
   // (no response at all), neither fires and the map is stuck on "Loading
   // map…" indefinitely. This gives it 8s before falling back to OSM itself.
   const imgTimer=setTimeout(function(){
-    if(settled)return;
+    if(settled||token!==mapLoadToken)return; // a newer zoom/pan superseded this request
     settled=true;
     enableOsmLatLng(parseFloat(cacheKey.split(',')[0]),parseFloat(cacheKey.split(',')[1]),label);
   },8000);
   probe.onload=function(){
     if(settled)return;
     settled=true;clearTimeout(imgTimer);
+    if(token!==mapLoadToken)return; // superseded by a newer request — drop this result, don't let it overwrite fresher state
     visual.style.transform='none'; // snap the live pan preview back now that fresh, correctly-scaled imagery has arrived
     if(tiles)tiles.innerHTML=''; // clear any OSM tiles from a previous no-key state
     visual.style.backgroundImage='url("'+url+'")';
@@ -730,6 +765,7 @@ function loadSatelliteUrl(url,cacheKey,label){
   probe.onerror=function(){
     if(settled)return;
     settled=true;clearTimeout(imgTimer);
+    if(token!==mapLoadToken)return; // superseded — don't fall back to OSM on behalf of a stale request
     // A configured key that actually fails to load an image (bad key,
     // quota, referrer rejection) shouldn't dead-end on an error message —
     // fall back to the free map. It also shouldn't keep trying Google on
@@ -749,7 +785,7 @@ function loadSatelliteUrl(url,cacheKey,label){
 // tiles + SVG together as one rigid layer during a pan either way, since
 // the CSS transform applies to the whole subtree regardless of how many
 // child elements are in it.
-function loadOsmMosaic(lat,lng,zoom,label){
+function loadOsmMosaic(lat,lng,zoom,label,token){
   const visual=document.getElementById('map-visual');
   const tiles=document.getElementById('map-tiles');
   const hint=document.getElementById('hint');
@@ -782,7 +818,8 @@ function loadOsmMosaic(lat,lng,zoom,label){
   const tileEls=tiles?Array.from(tiles.querySelectorAll('img')):[];
   let settledTiles=0,failedTiles=0,resolved=false;
   const finish=()=>{
-    if(resolved)return; resolved=true;
+    if(resolved||(token!==undefined&&token!==mapLoadToken))return; // superseded by a newer request
+    resolved=true;
     if(failedTiles>=tileEls.length&&tileEls.length>0){
       hint.textContent='Could not load the map — check your connection and try again';
     }else{
