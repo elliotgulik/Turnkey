@@ -8578,7 +8578,11 @@ function ingestQuoteRequest(payload){
   // Lands as a NEW LEAD with the customer's self-priced total attached.
   // The operator reviews and sends before it becomes "Quote Sent".
   rec.stage='new';
-  rec.selfPriced=true;
+  // Only a mapped quote actually has a customer-computed price to review —
+  // quick-quote/windows-request leads have total:0/no services at all, so
+  // they should show the normal "Build quote" CTA, not "Review & send"
+  // (which would misleadingly imply a price already exists).
+  rec.selfPriced=payload.requestType==='map'&&total>0;
   if(sid)rec._submittedAt=sid;
   records.unshift(rec);
   render();renderAll();
@@ -8586,10 +8590,12 @@ function ingestQuoteRequest(payload){
   toast('New online quote request: '+rec.name);
   // flash a banner if present
   const fb=document.getElementById('intake-flash');
-  if(fb){fb.textContent='✓ New lead from '+rec.name+' ('+services.length+' areas · '+money(total)+' — ready to review & send)';fb.classList.add('show');setTimeout(()=>fb.classList.remove('show'),5000);}
+  const flashDetail=rec.selfPriced?services.length+' areas · '+money(total)+' — ready to review & send':(payload.requestType==='windows'?'windows quote requested':'quick quote request')+' — build a quote when ready';
+  if(fb){fb.textContent='✓ New lead from '+rec.name+' ('+flashDetail+')';fb.classList.add('show');setTimeout(()=>fb.classList.remove('show'),5000);}
   if(rec.pendingPhotos.length)flushPendingPhotos(rec); // fire-and-forget — don't block ingest on uploads
   sendLifecycleEmail(rec,'new_lead');
-  notifyOwner('new_lead','New lead — '+rec.name,rec.name+' requested a quote for '+(rec.suburb||rec.address||'an address you’ll want to check')+' ('+services.length+' area'+(services.length!==1?'s':'')+', '+money(total)+' self-estimated).');
+  const notifyDetail=rec.selfPriced?'('+services.length+' area'+(services.length!==1?'s':'')+', '+money(total)+' self-estimated).':(payload.requestType==='windows'?'(windows quote — no price yet, prepare one manually).':'(quick quote request — no price yet, prepare one manually).');
+  notifyOwner('new_lead','New lead — '+rec.name,rec.name+' requested a quote for '+(rec.suburb||rec.address||'an address you’ll want to check')+' '+notifyDetail);
 }
 
 /* ===== Upload photos that arrived with a lead (public booking page can't

@@ -14,8 +14,15 @@ window.TK_PRICING = (function(){
   // still a closed polygon) so callers never have to string-match basis
   // values to answer "does this close back to its first point".
   const SERVICES = {
-    driveway: {label:'Driveway / concrete',   unit:'m²', rate:4,   basis:'area',      shape:'closed', color:'#c2683a', kw:['driveway','concrete','path','mossy','moss']},
-    housewash:{label:'House wash',            unit:'m',  rate:5,   basis:'perimeter', shape:'closed', color:'#2f7d8f', kw:['house wash','house','wall','exterior','siding','cladding']},
+    // Labels here are customer-facing copy (shown on invoices/quotes and in
+    // the booking widget's service picker, not just internal CRM text), so
+    // they're kept in the polished, title-cased wording the public-facing
+    // pages use — driveway's now explicitly covers patio too (see the
+    // customer picker's merged "Driveway / Patio Cleaning" button below;
+    // patio itself stays defined, just not customer-selectable, so
+    // existing/historical jobs that used it still price and display correctly).
+    driveway: {label:'Driveway / Patio Cleaning', unit:'m²', rate:4,   basis:'area',      shape:'closed', color:'#c2683a', kw:['driveway','concrete','path','mossy','moss','patio']},
+    housewash:{label:'House Wash',            unit:'m',  rate:5,   basis:'perimeter', shape:'closed', color:'#2f7d8f', kw:['house wash','house','wall','exterior','siding','cladding']},
     // Was $9/m² — that priced a typical roof (150-250m² footprint) at
     // $1,350-$2,250, a ~73% margin against the app's own cost model at
     // COST_INPUTS.targetMargin (55%) — well above every other service's
@@ -24,10 +31,15 @@ window.TK_PRICING = (function(){
     // matching patio's rate rather than sitting 50% above it for no
     // modelled reason (height/access risk is still covered separately by
     // ACCESS_OPTS when the operator marks a job as difficult access).
-    roof:     {label:'Roof treatment',        unit:'m²', rate:6,   basis:'roof type', shape:'closed', color:'#7a5bbf', kw:['roof','tiles','treatment']},
-    gutter:   {label:'Gutter clean',          unit:'m',  rate:3.5, basis:'length',    shape:'open',   color:'#b08a1e', kw:['gutter','gutters','blocked','downpipe']},
-    fence:    {label:'Fence / wall wash',     unit:'m',  rate:4,   basis:'length',    shape:'open',   color:'#6b7a3a', kw:['fence','wall','boundary','palings']},
-    patio:    {label:'Patio / deck',          unit:'m²', rate:6,   basis:'area',      shape:'closed', color:'#0f7d6b', kw:['patio','deck','courtyard','tiles']},
+    roof:     {label:'Roof Treatment',        unit:'m²', rate:6,   basis:'roof type', shape:'closed', color:'#7a5bbf', kw:['roof','tiles','treatment']},
+    gutter:   {label:'Gutter Cleaning',       unit:'m',  rate:3.5, basis:'length',    shape:'open',   color:'#b08a1e', kw:['gutter','gutters','blocked','downpipe']},
+    fence:    {label:'Fence Cleaning',        unit:'m',  rate:4,   basis:'length',    shape:'open',   color:'#6b7a3a', kw:['fence','wall','boundary','palings']},
+    // Kept for existing/historical jobs that used the old combined "patio /
+    // deck" concept — no longer offered as its own button in the customer
+    // picker now that deck is its own service below, but still a valid,
+    // fully-priced line the CRM's own quote builder can select.
+    patio:    {label:'Patio',                 unit:'m²', rate:6,   basis:'area',      shape:'closed', color:'#0f7d6b', kw:['patio','courtyard','tiles']},
+    deck:     {label:'Deck Cleaning',         unit:'m²', rate:6,   basis:'area',      shape:'closed', color:'#8a6f3f', kw:['deck','decking','timber']},
     windows:  {label:'Window clean',          unit:'panes', rate:4, basis:'count',   shape:'none',   color:'#4a6b8a', kw:['window','windows','pane','glass','glazing']}
   };
   const ROOF_TYPES = {

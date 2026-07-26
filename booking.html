@@ -28,7 +28,7 @@
     --shadow:0 1px 1px rgba(10,28,43,.03),0 6px 20px rgba(10,28,43,.05);
     --shadow-lg:0 10px 40px rgba(10,28,43,.12);
     /* per-service colours for drawn areas */
-    --c-driveway:#c2683a; --c-housewash:#2f7d8f; --c-roof:#7a5bbf; --c-gutter:#b08a1e; --c-patio:#0f7d6b; --c-fence:#6b7a3a; --c-windows:#4a6b8a;
+    --c-driveway:#c2683a; --c-housewash:#2f7d8f; --c-roof:#7a5bbf; --c-gutter:#b08a1e; --c-patio:#0f7d6b; --c-deck:#8a6f3f; --c-fence:#6b7a3a; --c-windows:#4a6b8a;
   }
   *{box-sizing:border-box;margin:0;padding:0}
   html,body{height:100%}
@@ -65,6 +65,18 @@
   .hero p{font-size:16px;color:var(--ink-soft);margin-top:10px;max-width:520px;margin-left:auto;margin-right:auto}
   @media(min-width:640px){.hero h1{font-size:38px}}
 
+  /* initial choice — asked before either flow starts, always shown even in
+     an embed (it's a functional decision, not marketing copy, unlike .hero) */
+  .mode-choice{max-width:640px;margin:32px auto 8px;padding:0 4px;text-align:center}
+  html.embedded .mode-choice{margin-top:14px}
+  .mc-title{font-size:20px;font-weight:700;letter-spacing:-.02em;margin-bottom:16px}
+  .mc-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media(max-width:560px){.mc-grid{grid-template-columns:1fr}}
+  .mc-card{text-align:left;background:var(--surface);border:1.5px solid var(--line);border-radius:var(--radius);padding:18px;min-height:44px;transition:border-color .15s,box-shadow .15s}
+  .mc-card:hover{border-color:var(--teal);box-shadow:var(--shadow)}
+  .mc-card-title{font-size:15.5px;font-weight:700;color:var(--ink);margin-bottom:4px}
+  .mc-card-desc{font-size:13px;color:var(--ink-soft)}
+
   /* stepper */
   .steps{display:flex;align-items:center;justify-content:center;gap:8px;margin:22px 0 8px}
   .step{display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;color:var(--ink-faint)}
@@ -77,9 +89,9 @@
   /* layout */
   .builder{display:grid;grid-template-columns:1fr 340px;gap:18px;margin:18px 0 50px;align-items:start}
   /* Grid tracks default to min-width:auto — once stacked to a single column,
-     a wide flex row deep inside .side (e.g. .win-row's label+counter+hint)
-     could force that 1fr column past the viewport instead of shrinking,
-     causing horizontal scroll. min-width:0 lets it actually shrink to fit. */
+     a wide flex row deep inside .side could force that 1fr column past the
+     viewport instead of shrinking, causing horizontal scroll. min-width:0
+     lets it actually shrink to fit. */
   @media(max-width:840px){.builder{grid-template-columns:1fr}.builder>*{min-width:0}}
 
   .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
@@ -119,6 +131,13 @@
     .mini-btn,.svc-btn{min-height:44px}
     .qe-tool-group .tool-btn{min-height:44px}
     input,select,textarea{font-size:16px}
+    /* Service picker: compact 2-column grid instead of desktop's wrapping
+       pill row — fewer, shorter rows to scroll past before reaching the
+       map. Desktop is untouched (still .svc-pick{display:flex} below). */
+    .map-tools-svc{flex-direction:column;align-items:stretch;gap:10px}
+    .svc-pick{display:grid;grid-template-columns:1fr 1fr;gap:8px;width:100%}
+    .svc-btn{padding:10px 12px;font-size:12px;border-radius:10px;justify-content:flex-start;text-align:left;line-height:1.25}
+    .svc-btn.windows-request{grid-column:1/-1;justify-content:center;text-align:center;background:var(--surface-2);border-style:dashed}
   }
   .zoom-btn:hover{opacity:1}
   .map-note{font-size:11.5px;color:var(--ink-faint)}
@@ -143,18 +162,6 @@
   .storey-btn{width:34px;height:34px;border-radius:50%;border:2px solid #cfe9e1;font-size:14px;font-weight:700;color:#1f5d50;background:#fff}
   .storey-btn.sel{background:#138a72;border-color:#138a72;color:#fff}
   .storey-mult{font-size:11px;color:#1f5d50;font-weight:600}
-  /* window counter */
-  .win-row{display:flex;flex-wrap:wrap;align-items:center;gap:10px;background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:9px 13px;margin-bottom:8px}
-  .win-label{font-size:12.5px;font-weight:600;color:var(--ink);flex:1;min-width:0}
-  .win-ctrl{display:flex;align-items:center;gap:8px}
-  .win-btn{width:30px;height:30px;border-radius:50%;border:1.5px solid var(--line);font-size:18px;font-weight:700;color:var(--ink);background:var(--surface);line-height:1}
-  .win-btn:hover{border-color:#4a6b8a;color:#4a6b8a}
-  .win-count{font-size:16px;font-weight:700;color:var(--ink);min-width:24px;text-align:center}
-  .win-input{width:52px;text-align:center;font-size:16px;font-weight:700;color:var(--ink);border:1.5px solid var(--line);border-radius:8px;padding:4px 6px;background:var(--surface);}
-  .win-input:focus{outline:none;border-color:#4a6b8a;}
-  .win-hint{font-size:12px;color:var(--ink-soft)}
-  .win-note{font-size:11px;color:var(--ink-faint);padding:0 13px 8px;margin-top:-4px}
-  .est-win-note{font-size:10.5px;color:var(--ink-faint);margin-top:3px}
   .area-item{display:flex;align-items:center;gap:11px;padding:11px 12px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--surface)}
   .area-sw{width:16px;height:16px;border-radius:5px;flex-shrink:0}
   .area-info{flex:1;min-width:0}
@@ -292,12 +299,32 @@ function initPlacesAutocomplete(){
 </header>
 
 <div class="wrap">
-  <div class="hero">
+  <!-- Asked first, before anything else — a customer who just wants to send
+       their details shouldn't have to enter the map builder at all just to
+       find an exit. flowMode (see chooseFlow()) drives every branch below:
+       'map' reveals the existing hero/steps/builder flow unchanged, 'quick'
+       and 'windows' both skip straight to the details form (below), just
+       with different fields shown and a different source tag on submit. -->
+  <div class="mode-choice" id="mode-choice">
+    <h2 class="mc-title">How would you like to request your quote?</h2>
+    <div class="mc-grid">
+      <button type="button" class="mc-card" onclick="chooseFlow('map')">
+        <div class="mc-card-title">Map your property</div>
+        <div class="mc-card-desc">Outline areas for a faster estimate</div>
+      </button>
+      <button type="button" class="mc-card" onclick="chooseFlow('quick')">
+        <div class="mc-card-title">Quick quote request</div>
+        <div class="mc-card-desc">Send your details and we’ll prepare your quote</div>
+      </button>
+    </div>
+  </div>
+
+  <div class="hero hidden">
     <h1>Get an instant wash quote</h1>
     <p>Outline the areas you want cleaned on the map, pick a service for each, and we'll send your quote. No site visit needed.</p>
   </div>
 
-  <div class="steps">
+  <div class="steps hidden">
     <div class="step active" id="step-1"><span class="sdot">1</span>Map areas</div>
     <div class="step-line"></div>
     <div class="step" id="step-2"><span class="sdot">2</span>Review</div>
@@ -306,13 +333,13 @@ function initPlacesAutocomplete(){
   </div>
 
   <!-- BUILDER (steps 1 & 2) -->
-  <div class="builder" id="builder">
+  <div class="builder hidden" id="builder">
     <div class="card">
       <div class="addr-bar">
         <input id="addr" placeholder="Start typing your address..." autocomplete="off">
         <button class="addr-go" onclick="locateAddr()">Find</button>
       </div>
-      <div class="map-tools">
+      <div class="map-tools map-tools-svc">
         <span class="tool-label">Cleaning:</span>
         <div class="svc-pick" id="svc-pick"></div>
       </div>
@@ -362,20 +389,6 @@ function initPlacesAutocomplete(){
           <span class="storey-mult" id="storey-mult"></span>
         </div>
 
-        <!-- Window pane counter — always visible, hidden until interacted -->
-        <div class="win-row" id="win-row">
-          <span class="win-label">Window clean</span>
-          <div class="win-ctrl">
-            <button class="win-btn" onclick="addWindows(-1)" aria-label="Remove a window pane">−</button>
-            <input class="win-input" id="win-count" type="number" min="0" step="1" value="0"
-              oninput="setWindows(+this.value||0)"
-              onfocus="if(this.value==='0')this.value=''"
-              onblur="if(this.value==='')this.value='0'">
-            <button class="win-btn" onclick="addWindows(1)" aria-label="Add a window pane">+</button>
-          </div>
-          <span class="win-hint">panes &nbsp;·&nbsp; $<span id="win-price">0</span></span>
-        </div>
-        <div class="win-note" id="win-note" style="display:none">inside+outside = 2 panes per window</div>
 
         <div class="area-list" id="area-list">
           <div class="empty-areas">No areas yet. Pick a service above, then trace an area on the map.</div>
@@ -396,18 +409,33 @@ function initPlacesAutocomplete(){
 
   <!-- STEP 3: details -->
   <div class="card card-pad hidden" id="details" style="max-width:560px;margin:18px auto 50px">
-    <h3 style="font-size:19px;margin-bottom:4px">Almost done — where do we send the quote?</h3>
-    <p style="font-size:13.5px;color:var(--ink-soft);margin-bottom:18px">We'll review your mapped areas and send a firm quote, usually same day.</p>
+    <h3 id="details-heading" style="font-size:19px;margin-bottom:4px">Almost done — where do we send the quote?</h3>
+    <p id="details-sub" style="font-size:13.5px;color:var(--ink-soft);margin-bottom:18px">We'll review your mapped areas and send a firm quote, usually same day.</p>
     <div class="form-grid">
       <div class="field"><label>Full name *</label><input id="c-name" placeholder="Sarah Thompson"></div>
       <div class="field"><label>Phone *</label><input id="c-phone" type="tel" placeholder="021 555 0123"></div>
       <div class="field full"><label>Email *</label><input id="c-email" type="email" placeholder="sarah@email.com"></div>
       <div class="field full"><label>Property address *</label><input id="c-addr" placeholder="12 Hurstmere Road, Takapuna"></div>
+      <!-- Quick-quote only — the map flow already knows the service(s) from
+           what was drawn, and the windows-request flow implies it. -->
+      <div class="field full hidden" id="c-service-field">
+        <label>Service required *</label>
+        <select id="c-service">
+          <option value="">Select a service…</option>
+          <option value="driveway">Driveway / Patio Cleaning</option>
+          <option value="housewash">House Wash</option>
+          <option value="roof">Roof Treatment</option>
+          <option value="deck">Deck Cleaning</option>
+          <option value="fence">Fence Cleaning</option>
+          <option value="gutter">Gutter Cleaning</option>
+          <option value="windows">Windows</option>
+        </select>
+      </div>
       <div class="field full"><label>Anything we should know? <span style="color:var(--ink-faint);font-weight:400">(optional)</span></label><textarea id="c-notes" rows="2" placeholder="e.g. heavy moss on the south side, dog in the yard"></textarea></div>
-      <div class="field"><label>Preferred timing</label><select id="c-timing"><option>As soon as possible</option><option>Within 2 weeks</option><option>This month</option><option>Just getting a price</option></select></div>
-      <div class="field"><label>How did you find us?</label><select id="c-source"><option>Google search</option><option>Facebook</option><option>Referral</option><option>Repeat customer</option><option>Other</option></select></div>
-      <div class="field"><label>Preferred date <span style="color:var(--ink-faint);font-weight:400">(optional)</span></label><input type="date" id="c-date"></div>
-      <div class="field"><label>Preferred time of day</label><select id="c-window"><option>Anytime</option><option>Morning</option><option>Afternoon</option><option>Evening</option></select></div>
+      <div class="field map-only-field"><label>Preferred timing</label><select id="c-timing"><option>As soon as possible</option><option>Within 2 weeks</option><option>This month</option><option>Just getting a price</option></select></div>
+      <div class="field map-only-field"><label>How did you find us?</label><select id="c-source"><option>Google search</option><option>Facebook</option><option>Referral</option><option>Repeat customer</option><option>Other</option></select></div>
+      <div class="field map-only-field"><label>Preferred date <span style="color:var(--ink-faint);font-weight:400">(optional)</span></label><input type="date" id="c-date"></div>
+      <div class="field map-only-field"><label>Preferred time of day</label><select id="c-window"><option>Anytime</option><option>Morning</option><option>Afternoon</option><option>Evening</option></select></div>
       <div class="field full"><label>Photos <span style="color:var(--ink-faint);font-weight:400">(optional, up to 6)</span></label><input type="file" id="c-photos" accept="image/*" capture="environment" multiple onchange="onPhotosChosen(this)"><div id="c-photos-status" style="font-size:12.5px;color:var(--ink-soft);margin-top:6px"></div></div>
     </div>
     <!-- On mobile this bar pins to the bottom of the screen (see
@@ -418,7 +446,7 @@ function initPlacesAutocomplete(){
       <button class="btn primary" onclick="submitRequest()">Send my quote request</button>
       <div id="submit-status" style="font-size:13px;color:#b3413a;margin-top:10px"></div>
     </div>
-    <button class="btn ghost" style="margin-top:9px" onclick="backToMap()">← Back to map</button>
+    <button class="btn ghost" id="details-back-btn" style="margin-top:9px" onclick="backToMap()">← Back to map</button>
   </div>
 
   <!-- SUCCESS -->
@@ -471,14 +499,21 @@ if(!window.TURNKEY_CONFIG){
 // numbers index.html's quote builder and PDFs use — so this preliminary
 // estimate is never built off a stale, hand-copied rate. `kind`/`color`/
 // `hex` are presentation-only and stay local to this page.
+// patio was dropped as its own customer-selectable button (merged into
+// driveway's "Driveway / Patio Cleaning") and windows is no longer an
+// instant-priced map service at all — "Request Windows Quote" (see
+// requestWindowsQuote()) skips pricing/drawing entirely and goes straight
+// to a lead. Both stay defined in the shared TK_PRICING.SERVICES (CRM/
+// historical jobs still use them); windows.hex/.label are kept here only
+// for the Request Windows Quote button's styling.
 const SERVICES = {
-  driveway: {label:'Driveway / concrete',   unit:'m²', rate:TK_PRICING.SERVICES.driveway.rate,  kind:'area',      color:'var(--c-driveway)', hex:'#c2683a'},
-  housewash:{label:'House wash (perimeter)', unit:'m', rate:TK_PRICING.SERVICES.housewash.rate, kind:'perimeter', color:'var(--c-housewash)', hex:'#2f7d8f'},
-  roof:     {label:'Roof treatment',         unit:'m²', rate:TK_PRICING.SERVICES.roof.rate,      kind:'area',      color:'var(--c-roof)',      hex:'#7a5bbf'},
-  patio:    {label:'Patio / deck',            unit:'m²', rate:TK_PRICING.SERVICES.patio.rate,    kind:'area',      color:'var(--c-patio)',     hex:'#0f7d6b'},
-  gutter:   {label:'Gutter clean',            unit:'m',  rate:TK_PRICING.SERVICES.gutter.rate,   kind:'length',    color:'var(--c-gutter)',    hex:'#b08a1e'},
-  fence:    {label:'Fence / wall wash',       unit:'m',  rate:TK_PRICING.SERVICES.fence.rate,    kind:'length',    color:'var(--c-fence)',     hex:'#6b7a3a'},
-  windows:  {label:'Window clean',             unit:'panes', rate:TK_PRICING.SERVICES.windows.rate, kind:'count',  color:'var(--c-windows)',  hex:'#4a6b8a'}
+  driveway: {label:'Driveway / Patio Cleaning', unit:'m²', rate:TK_PRICING.SERVICES.driveway.rate,  kind:'area',      color:'var(--c-driveway)', hex:'#c2683a'},
+  housewash:{label:'House Wash',             unit:'m',  rate:TK_PRICING.SERVICES.housewash.rate, kind:'perimeter', color:'var(--c-housewash)', hex:'#2f7d8f'},
+  roof:     {label:'Roof Treatment',         unit:'m²', rate:TK_PRICING.SERVICES.roof.rate,      kind:'area',      color:'var(--c-roof)',      hex:'#7a5bbf'},
+  deck:     {label:'Deck Cleaning',          unit:'m²', rate:TK_PRICING.SERVICES.deck.rate,      kind:'area',      color:'var(--c-deck)',      hex:'#8a6f3f'},
+  gutter:   {label:'Gutter Cleaning',        unit:'m',  rate:TK_PRICING.SERVICES.gutter.rate,    kind:'length',    color:'var(--c-gutter)',    hex:'#b08a1e'},
+  fence:    {label:'Fence Cleaning',         unit:'m',  rate:TK_PRICING.SERVICES.fence.rate,     kind:'length',    color:'var(--c-fence)',     hex:'#6b7a3a'},
+  windows:  {label:'Window Cleaning',        unit:'panes', rate:TK_PRICING.SERVICES.windows.rate, kind:'count',    color:'var(--c-windows)',  hex:'#4a6b8a'}
 };
 // metres per SVG pixel — the map "scale". Demo value; with real satellite imagery this comes from the map zoom level.
 const M_PER_PX = 0.06; // 1px ≈ 6cm at this demo zoom → grid square (40px) ≈ 2.4m... tuned below
@@ -861,6 +896,57 @@ function tryAutoSatellite(){
   else enableOsm(addr);
 }
 
+/* ===== initial choice: map vs quick quote vs (from inside the map flow's
+   service picker) a windows request — see #mode-choice above. Every
+   submission path funnels through the same buildPayload()/submitRequest()
+   so it lands in the CRM the same way a mapped quote always has; only the
+   fields shown and the customer.source tag differ per mode. ===== */
+let flowMode = null; // null | 'map' | 'quick' | 'windows'
+function chooseFlow(mode){
+  flowMode=mode;
+  document.getElementById('mode-choice').classList.add('hidden');
+  if(mode==='map'){
+    document.querySelector('.hero').classList.remove('hidden');
+    document.querySelector('.steps').classList.remove('hidden');
+    document.getElementById('builder').classList.remove('hidden');
+    if(standalone)document.getElementById('integration').classList.remove('hidden');
+  }else{
+    showQuickDetails('Tell us what you need','Send your details and we’ll prepare your quote — usually same day.',true);
+  }
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+// windows is reachable from INSIDE the map flow's service picker (it's
+// presented alongside the real services there, not a 3rd top-level choice)
+// but behaves exactly like quick-quote once picked: no drawing, no
+// instant price — straight to a lead.
+function requestWindowsQuote(){
+  flowMode='windows';
+  document.getElementById('mode-choice').classList.add('hidden');
+  document.querySelector('.hero').classList.add('hidden');
+  document.querySelector('.steps').classList.add('hidden');
+  document.getElementById('builder').classList.add('hidden');
+  document.getElementById('integration').classList.add('hidden');
+  showQuickDetails('Request a windows quote','Tell us a bit about the job and we’ll prepare your quote — usually same day.',false);
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+// Shared by both non-map modes — only whether the Service field is asked
+// differs (windows already implies its own service, quick-quote doesn't).
+function showQuickDetails(heading,sub,showServiceField){
+  document.getElementById('details').classList.remove('hidden');
+  document.getElementById('c-service-field').classList.toggle('hidden',!showServiceField);
+  document.querySelectorAll('.map-only-field').forEach(el=>el.classList.add('hidden'));
+  document.getElementById('details-heading').textContent=heading;
+  document.getElementById('details-sub').textContent=sub;
+  const backBtn=document.getElementById('details-back-btn');
+  if(backBtn){backBtn.textContent='← Back';backBtn.onclick=backToChoice;}
+}
+function backToChoice(){
+  document.getElementById('details').classList.add('hidden');
+  document.getElementById('mode-choice').classList.remove('hidden');
+  flowMode=null;
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+
 let activeSvc = 'driveway';
 // Select tool: tap to trace/adjust areas, map never moves. Pan tool: drag
 // moves the map, nothing else. Previously a single-finger drag ALWAYS
@@ -879,7 +965,6 @@ function setMapTool(tool){
   updateHint();
 }
 let houseStoreys = 1;   // applies a ×1.2 per-storey mult to all housewash areas
-let windowPanes = 0;    // separate window clean count (not drawn on map)
 
 function setStoreys(n){
   houseStoreys=n;
@@ -889,20 +974,6 @@ function setStoreys(n){
   // recalculate any existing housewash areas
   areas.forEach(a=>{if(a.svc==='housewash'){a.storeys=houseStoreys;a.size=sizeOf(a);}});
   renderAreas();renderList();updateEstimate();
-}
-function setWindows(n){
-  windowPanes=Math.max(0,Math.round(n)||0);
-  const el=document.getElementById('win-count');
-  if(el&&el.tagName==='INPUT'&&document.activeElement!==el)el.value=windowPanes;
-  const price=Math.round(windowPanes*SERVICES.windows.rate);
-  document.getElementById('win-price').textContent=price.toLocaleString();
-  document.getElementById('win-note').style.display=windowPanes>0?'block':'none';
-  updateEstimate();
-}
-function addWindows(delta){
-  setWindows(windowPanes+delta);
-  const el=document.getElementById('win-count');
-  if(el&&el.tagName==='INPUT')el.value=windowPanes;
 }
 function showStoreyRow(){
   const hasHw=areas.some(a=>a.svc==='housewash');
@@ -944,10 +1015,15 @@ function buildMap(){
 function buildSvcPicker(){
   const wrap=document.getElementById('svc-pick');
   wrap.innerHTML=Object.entries(SERVICES)
-    .filter(([k])=>k!=='windows') // windows uses the counter in the side panel, not map tracing
+    .filter(([k])=>k!=='windows') // windows is never drawn/instant-priced — see the dedicated button appended below
     .map(([k,v])=>
       `<button class="svc-btn ${k===activeSvc?'sel':''}" style="color:${v.hex}" data-svc="${k}" onclick="pickSvc('${k}')"><span class="sw" style="background:${v.hex}"></span>${v.label}</button>`
-    ).join('');
+    ).join('')
+    // Deliberately not a normal svc-btn: it doesn't set activeSvc or enable
+    // drawing at all, it jumps straight to a lead request (requestWindowsQuote()) —
+    // styled as its own full-width row so it doesn't look like just another
+    // instant-quote option sitting in the grid.
+    +`<button class="svc-btn windows-request" style="color:${SERVICES.windows.hex}" onclick="requestWindowsQuote()"><span class="sw" style="background:${SERVICES.windows.hex}"></span>Request Windows Quote</button>`;
 }
 function pickSvc(k){
   if(k==='windows')return; // safety: never make windows the active draw service
@@ -1233,9 +1309,7 @@ function renderList(){
 }
 function removeArea(id){areas=areas.filter(a=>a.id!==id);renderAreas();renderList();updateEstimate();updateHint();showStoreyRow();}
 function rawTotal(){
-  const mapTotal=areas.reduce((s,a)=>s+a.size*effectiveRate(a),0);
-  const winTotal=windowPanes*SERVICES.windows.rate;
-  return mapTotal+winTotal;
+  return areas.reduce((s,a)=>s+a.size*effectiveRate(a),0);
 }
 function updateEstimate(){
   const card=document.getElementById('est-card');
@@ -1247,8 +1321,7 @@ function updateEstimate(){
   document.getElementById('est-breakdown').innerHTML=areas.map(a=>{
     const v=SERVICES[a.svc];const price=Math.round(a.size*effectiveRate(a));
     return `<div class="est-line"><span class="est-line-l"><span class="est-dot" style="background:${v.hex}"></span>${v.label}${a.storeys&&a.storeys>1?' ('+STOREY_TYPES[a.storeys].label+')':''}</span><span class="est-line-v">$${price.toLocaleString()}</span></div>`;
-  }).join('')+(windowPanes>0?`<div class="est-line"><span class="est-line-l"><span class="est-dot" style="background:${SERVICES.windows.hex}"></span>Window clean (${windowPanes} panes)</span><span class="est-line-v">$${Math.round(windowPanes*SERVICES.windows.rate).toLocaleString()}</span></div>`:'')+
-  (windowPanes>0?'<div class="est-win-note">inside + outside counted separately</div>':'');
+  }).join('');
   document.getElementById('est-total').textContent='$'+base.toLocaleString();
   // present as a RANGE, with a sensible minimum call-out fee
   const min=Math.max(120,Math.round(base*0.85/5)*5);
@@ -1301,9 +1374,16 @@ function updateStep(n){
 }
 function goDetails(){
   if(!areas.length)return;
+  flowMode='map';
   document.getElementById('builder').classList.add('hidden');
   document.getElementById('details').classList.remove('hidden');
   document.getElementById('integration').classList.add('hidden');
+  document.getElementById('c-service-field').classList.add('hidden');
+  document.querySelectorAll('.map-only-field').forEach(el=>el.classList.remove('hidden'));
+  document.getElementById('details-heading').textContent='Almost done — where do we send the quote?';
+  document.getElementById('details-sub').textContent="We'll review your mapped areas and send a firm quote, usually same day.";
+  const backBtn=document.getElementById('details-back-btn');
+  if(backBtn){backBtn.textContent='← Back to map';backBtn.onclick=backToMap;}
   // prefill address from map bar
   document.getElementById('c-addr').value=document.getElementById('addr').value;
   updateStep(3);window.scrollTo({top:0,behavior:'smooth'});
@@ -1354,20 +1434,33 @@ async function onPhotosChosen(input){
 
 /* ===== submission — posts to webhook / parent site ===== */
 function buildPayload(){
-  const base=rawTotal();
-  const min=Math.max(120,Math.round(base*0.85/5)*5);
-  const max=Math.max(min+40,Math.round(base*1.15/5)*5);
+  const isMapped=flowMode==='map';
+  const base=isMapped?rawTotal():0;
+  const min=isMapped?Math.max(120,Math.round(base*0.85/5)*5):0;
+  const max=isMapped?Math.max(min+40,Math.round(base*1.15/5)*5):0;
+  const svcSel=document.getElementById('c-service');
+  const selectedSvc=svcSel?svcSel.value:'';
+  const selectedSvcLabel=selectedSvc?(SERVICES[selectedSvc]?SERVICES[selectedSvc].label:'Windows'):'';
+  // customer.source doubles as the CRM's "how did you find us" field for a
+  // mapped quote (unchanged), but for quick-quote/windows it's repurposed
+  // to a plain, filterable tag identifying the flow itself — those two
+  // forms don't ask "how did you find us" at all (see .map-only-field),
+  // so there's nothing else to put there.
+  let sourceTag=document.getElementById('c-source').value, notesPrefix='';
+  if(flowMode==='quick'){sourceTag='quick_quote';notesPrefix=selectedSvcLabel?('Service requested: '+selectedSvcLabel+'. '):'';}
+  else if(flowMode==='windows'){sourceTag='windows_request';notesPrefix='Windows quote requested. ';}
   return {
     source:'Turnkey quote widget',
     business_id:TURNKEY_BUSINESS_ID,
+    requestType:flowMode, // 'map' | 'quick' | 'windows' — so the CRM can label/handle the lead without having to infer it from which fields are empty
     customer:{
       name:document.getElementById('c-name').value.trim(),
       phone:document.getElementById('c-phone').value.trim(),
       email:document.getElementById('c-email').value.trim(),
       address:document.getElementById('c-addr').value.trim(),
-      timing:document.getElementById('c-timing').value,
-      source:document.getElementById('c-source').value,
-      notes:document.getElementById('c-notes').value.trim()
+      timing:isMapped?document.getElementById('c-timing').value:'As soon as possible',
+      source:sourceTag,
+      notes:notesPrefix+document.getElementById('c-notes').value.trim()
     },
     // geoPts (real lat/lng per point) is what lets the business reopen this
     // quote later and have the areas land in the right place on a freshly
@@ -1375,13 +1468,13 @@ function buildPayload(){
     // are only valid for the exact pan/zoom state of THIS drawing session.
     // If the customer panned/zoomed while drawing, replaying bare pixel
     // coordinates onto a independently-recentred business-side map could
-    // put the polygon in visibly the wrong spot.
-    areas:areas.map(a=>({service:a.svc,label:SERVICES[a.svc].label,size:a.size,unit:SERVICES[a.svc].unit,rate:effectiveRate(a),price:Math.round(a.size*effectiveRate(a)),storeys:a.storeys||null,points:a.pts,geoPts:a.geoPts||null})),
-    mapCenter:(_lastLat&&_lastLng)?{lat:_lastLat,lng:_lastLng,zoom:SAT_ZOOM}:null,
-    windows:windowPanes>0?{panes:windowPanes,rate:SERVICES.windows.rate,price:Math.round(windowPanes*SERVICES.windows.rate)}:null,
-    estimateRange:{min,max,total:base,currency:'NZD'},
+    // put the polygon in visibly the wrong spot. Empty for quick/windows —
+    // there's nothing drawn to send, the business prices those manually.
+    areas:isMapped?areas.map(a=>({service:a.svc,label:SERVICES[a.svc].label,size:a.size,unit:SERVICES[a.svc].unit,rate:effectiveRate(a),price:Math.round(a.size*effectiveRate(a)),storeys:a.storeys||null,points:a.pts,geoPts:a.geoPts||null})):[],
+    mapCenter:(isMapped&&_lastLat&&_lastLng)?{lat:_lastLat,lng:_lastLng,zoom:SAT_ZOOM}:null,
+    estimateRange:isMapped?{min,max,total:base,currency:'NZD'}:null,
     preferredDate:document.getElementById('c-date').value||null,
-    preferredWindow:document.getElementById('c-window').value,
+    preferredWindow:isMapped?document.getElementById('c-window').value:'Anytime',
     photos:selectedPhotos,
     submittedAt:new Date().toISOString()
   };
@@ -1396,6 +1489,7 @@ async function submitRequest(){
   if(!email){alert('Please add an email so we can send your quote');return;}
   if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){alert('That email address doesn’t look right — please check it');return;}
   if(!addr){alert('Please add the property address');return;}
+  if(flowMode==='quick'&&!document.getElementById('c-service').value){alert('Please choose the service you need');return;}
   if(window.TURNKEY_WEBHOOK&&!TURNKEY_BUSINESS_ID){alert('This booking link looks incomplete — please ask the business for their correct booking link.');return;}
   const payload=buildPayload();
   const status=document.getElementById('submit-status');
@@ -1428,25 +1522,36 @@ async function submitRequest(){
 function showSuccess(p){
   document.getElementById('details').classList.add('hidden');
   document.getElementById('builder').classList.add('hidden');
+  document.getElementById('mode-choice').classList.add('hidden');
   document.getElementById('integration').classList.add('hidden');
   document.querySelector('.steps').classList.add('hidden');
   document.querySelector('.hero').classList.add('hidden');
   const s=document.getElementById('success');s.classList.remove('hidden');
-  const rows=p.areas.map(a=>`<div class="rrow"><span class="rk">${a.label} · ${a.size}${a.unit}</span><span>$${(a.price||0).toLocaleString()}</span></div>`).join('');
-  document.getElementById('recap').innerHTML=rows+
-    `<div class="rrow"><span class="rk">Estimated range</span><span style="font-weight:600">$${p.estimateRange.min.toLocaleString()}–$${p.estimateRange.max.toLocaleString()}</span></div>`+
-    `<div class="rrow"><span class="rk">We'll contact</span><span>${p.customer.phone||p.customer.email}</span></div>`;
-  document.getElementById('success-msg').textContent=`Thanks ${p.customer.name.split(' ')[0]||''}! Your mapped areas are on their way. We'll send a firm quote ${p.customer.timing==='As soon as possible'?'shortly':'soon'}.`;
+  if(p.areas&&p.areas.length){
+    const rows=p.areas.map(a=>`<div class="rrow"><span class="rk">${a.label} · ${a.size}${a.unit}</span><span>$${(a.price||0).toLocaleString()}</span></div>`).join('');
+    document.getElementById('recap').innerHTML=rows+
+      `<div class="rrow"><span class="rk">Estimated range</span><span style="font-weight:600">$${p.estimateRange.min.toLocaleString()}–$${p.estimateRange.max.toLocaleString()}</span></div>`+
+      `<div class="rrow"><span class="rk">We'll contact</span><span>${p.customer.phone||p.customer.email}</span></div>`;
+    document.getElementById('success-msg').textContent=`Thanks ${p.customer.name.split(' ')[0]||''}! Your mapped areas are on their way. We'll send a firm quote ${p.customer.timing==='As soon as possible'?'shortly':'soon'}.`;
+  }else{
+    // quick-quote / windows-request — nothing measured, no estimate to recap.
+    document.getElementById('recap').innerHTML=`<div class="rrow"><span class="rk">We'll contact</span><span>${p.customer.phone||p.customer.email}</span></div>`;
+    document.getElementById('success-msg').textContent=`Thanks ${p.customer.name.split(' ')[0]||''}! We've got your request and will prepare your quote shortly.`;
+  }
   window.scrollTo({top:0,behavior:'smooth'});
 }
 function startOver(){
   clearAll();
+  flowMode=null;
   document.getElementById('success').classList.add('hidden');
-  document.querySelector('.steps').classList.remove('hidden');
-  document.querySelector('.hero').classList.remove('hidden');
-  document.getElementById('builder').classList.remove('hidden');
-  if(standalone)document.getElementById('integration').classList.remove('hidden');
+  document.getElementById('mode-choice').classList.remove('hidden');
+  document.querySelector('.steps').classList.add('hidden');
+  document.querySelector('.hero').classList.add('hidden');
+  document.getElementById('builder').classList.add('hidden');
+  document.getElementById('details').classList.add('hidden');
+  document.getElementById('integration').classList.add('hidden');
   ['c-name','c-phone','c-email','c-notes','c-date','c-photos'].forEach(id=>document.getElementById(id).value='');
+  const svcSel=document.getElementById('c-service');if(svcSel)svcSel.value='';
   selectedPhotos=[];
   const ps=document.getElementById('c-photos-status');if(ps)ps.textContent='';
   updateStep(1);window.scrollTo({top:0,behavior:'smooth'});
