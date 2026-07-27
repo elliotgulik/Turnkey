@@ -1198,7 +1198,7 @@
   .conn-card p{font-size:12.5px;color:var(--ink-soft);line-height:1.55}
   .conn-card p b{color:var(--ink)}
   .conn-keyrow{display:flex;gap:8px;margin-top:10px}
-  .conn-keyrow input{flex:1;padding:9px 12px;border:1px solid var(--line);border-radius:9px;font-size:13px;font-family:ui-monospace,Menlo,monospace}
+  .conn-keyrow input{flex:1;min-width:0;padding:9px 12px;border:1px solid var(--line);border-radius:9px;font-size:13px;font-family:ui-monospace,Menlo,monospace}
   .conn-keyrow input:focus{outline:none;border-color:var(--accent)}
   .conn-note{font-size:12px;color:var(--ink-faint);text-align:center;padding:8px 4px 2px}
 
@@ -2157,53 +2157,117 @@ async function saveNotificationPrefs(){
    pushSubscribed tracks whether THIS browser/device currently has push
    enabled — a browser-level permission grant, so it's tracked separately
    from notificationPrefs (which is which EVENT TYPES a business wants,
-   business-wide). initOneSignal() runs once per session (handleAuthedSession);
-   it's a no-op wherever onesignalAppId isn't configured, same "quietly does
-   nothing until set up" convention as Stripe/Google Calendar/Gmail. */
+   business-wide). initOneSignal() is safe to call repeatedly — it caches
+   its promise in oneSignalReadyPromise so OneSignal.init() only ever runs
+   once per page load no matter how many times it's called (once from
+   handleAuthedSession() on login, and again defensively from
+   enablePushNotifications() in case the user opens Settings before that
+   first call has finished) — same "quietly does nothing until set up"
+   convention as Stripe/Google Calendar/Gmail when onesignalAppId is unset. */
 let pushSubscribed=false;
+let pushBusy=false;
+let oneSignalReadyPromise=null;
 function initOneSignal(){
   const appId=(window.TURNKEY_CONFIG&&window.TURNKEY_CONFIG.onesignalAppId)||'';
-  if(!appId||typeof OneSignalDeferred==='undefined')return;
-  OneSignalDeferred.push(async function(OneSignal){
-    try{
-      // serviceWorkerPath/serviceWorkerParam point OneSignal at this app's
-      // OWN sw.js (which already imports OneSignal's worker script — see
-      // sw.js's importScripts line) instead of its default expectation of a
-      // separate OneSignalSDKWorker.js file at the root. Confirmed against
-      // OneSignal's "combine with an existing service worker" docs —
-      // omitting this is the difference between push silently failing to
-      // register and actually working, since this repo already has its own
-      // sw.js controlling the root scope for offline caching.
-      await OneSignal.init({appId,serviceWorkerPath:'sw.js',serviceWorkerParam:{scope:'/'}});
-      pushSubscribed=!!(OneSignal.User.PushSubscription.id);
-      if(pushSubscribed)syncPushSubscription(OneSignal.User.PushSubscription.id);
-      OneSignal.User.PushSubscription.addEventListener('change',(event)=>{
-        const id=event&&event.current&&event.current.id;
-        pushSubscribed=!!id;
-        if(id)syncPushSubscription(id);
-      });
-    }catch(e){console.error('OneSignal init failed',e);}
+  if(!appId||typeof OneSignalDeferred==='undefined')return Promise.resolve(false);
+  if(oneSignalReadyPromise)return oneSignalReadyPromise;
+  oneSignalReadyPromise=new Promise((resolve)=>{
+    OneSignalDeferred.push(async function(OneSignal){
+      try{
+        // serviceWorkerPath/serviceWorkerParam point OneSignal at this app's
+        // OWN sw.js (which already imports OneSignal's worker script — see
+        // sw.js's importScripts line) instead of its default expectation of a
+        // separate OneSignalSDKWorker.js file at the root. Confirmed against
+        // OneSignal's "combine with an existing service worker" docs —
+        // omitting this is the difference between push silently failing to
+        // register and actually working, since this repo already has its own
+        // sw.js controlling the root scope for offline caching.
+        await OneSignal.init({appId,serviceWorkerPath:'sw.js',serviceWorkerParam:{scope:'/'}});
+        pushSubscribed=!!(OneSignal.User.PushSubscription.id);
+        if(pushSubscribed)syncPushSubscription(OneSignal.User.PushSubscription.id);
+        OneSignal.User.PushSubscription.addEventListener('change',(event)=>{
+          const id=event&&event.current&&event.current.id;
+          pushSubscribed=!!id;
+          if(id)syncPushSubscription(id);
+          // The id is often still null right when enablePushNotifications()'s
+          // own optIn() call resolves (OneSignal assigns it asynchronously,
+          // after this listener already exists) — if Settings is still open
+          // when that late id finally arrives, reflect it instead of leaving
+          // the toggle stuck showing OFF for a subscription that did work.
+          const overlay=document.getElementById('settings-overlay');
+          if(overlay&&overlay.classList.contains('open'))openSettings();
+        });
+        resolve(true);
+      }catch(e){console.error('OneSignal init failed',e);resolve(false);}
+    });
+  });
+  return oneSignalReadyPromise;
+}
+// Resolves once OneSignal.User.PushSubscription.id is actually populated, or
+// null after timeoutMs. Needed because optIn()'s promise can resolve before
+// OneSignal finishes assigning a subscription id server-side — reading .id
+// synchronously right after optIn() is a well-known race that reads null
+// even though the subscribe just succeeded, which was the root cause of the
+// toggle never turning on.
+function waitForPushSubscriptionId(timeoutMs){
+  return new Promise((resolve)=>{
+    if(typeof OneSignal==='undefined'||!OneSignal.User)return resolve(null);
+    const existing=OneSignal.User.PushSubscription.id;
+    if(existing)return resolve(existing);
+    const onChange=(event)=>{
+      const id=event&&event.current&&event.current.id;
+      if(id){clearTimeout(timer);OneSignal.User.PushSubscription.removeEventListener('change',onChange);resolve(id);}
+    };
+    const timer=setTimeout(()=>{
+      OneSignal.User.PushSubscription.removeEventListener('change',onChange);
+      resolve(OneSignal.User.PushSubscription.id||null);
+    },timeoutMs);
+    OneSignal.User.PushSubscription.addEventListener('change',onChange);
   });
 }
+// Returns true/false instead of swallowing the error — callers that need to
+// tell the user "Could not save notification settings." (rather than
+// silently reporting success) depend on knowing whether this actually wrote.
 async function syncPushSubscription(subscriptionId){
-  if(!sb||!currentBusinessId||!currentUserId||!subscriptionId)return;
+  if(!sb||!currentBusinessId||!currentUserId||!subscriptionId)return false;
   const {error}=await sb.from('notification_subscriptions').upsert({
     business_id:currentBusinessId,user_id:currentUserId,onesignal_subscription_id:subscriptionId,
     device_type:'web',enabled:true,updated_at:new Date().toISOString()
   },{onConflict:'onesignal_subscription_id'});
-  if(error)console.error('Save push subscription failed',error);
+  if(error){console.error('Save push subscription failed',error);return false;}
+  return true;
 }
-async function enablePushNotifications(){
+async function enablePushNotifications(btn){
+  if(pushBusy)return;
   const appId=(window.TURNKEY_CONFIG&&window.TURNKEY_CONFIG.onesignalAppId)||'';
   if(!appId){toast('Push notifications aren’t set up for this TurnKey yet — ask your admin to configure OneSignal');return;}
-  if(typeof OneSignal==='undefined'||!OneSignal.User){toast('Still loading — try again in a moment');return;}
+  if(!('Notification' in window)){toast('Notifications aren’t supported in this browser');return;}
+  if(Notification.permission==='denied'){toast('Notifications are blocked in your browser settings.');return;}
+  pushBusy=true;
+  if(btn){btn.disabled=true;btn.textContent='Enabling…';}
   try{
+    const ready=await initOneSignal();
+    if(!ready||typeof OneSignal==='undefined'||!OneSignal.User){toast('Unable to connect notifications. Try again.');return;}
     await OneSignal.User.PushSubscription.optIn();
-    const id=OneSignal.User.PushSubscription.id;
-    if(id){await syncPushSubscription(id);pushSubscribed=true;toast('Push notifications enabled ✓');}
-    else toast('Permission not granted — check your browser’s notification settings for this site');
-  }catch(e){console.error('Enable push failed',e);toast('Could not enable push notifications: '+e.message);}
-  openSettings();
+    const id=await waitForPushSubscriptionId(8000);
+    if(!id){
+      // optIn() completed but no id ever arrived — most commonly because the
+      // permission prompt was dismissed/denied (browsers don't reject the
+      // promise for that, they just never grant a subscription).
+      toast(Notification.permission==='denied'?'Notifications are blocked in your browser settings.':'Unable to connect notifications. Try again.');
+      return;
+    }
+    const saved=await syncPushSubscription(id);
+    if(!saved){toast('Could not save notification settings.');return;}
+    pushSubscribed=true;
+    toast('Push notifications enabled ✓');
+  }catch(e){
+    console.error('Enable push failed',e);
+    toast('Unable to connect notifications. Try again.');
+  }finally{
+    pushBusy=false;
+    openSettings();
+  }
 }
 /* ===== In-app notification centre (Phase 5) — reads the `notifications`
    table sendNotification() (backend) writes to on every event, independent
@@ -2285,16 +2349,29 @@ async function clearAllNotifications(){
   const {error}=await sb.from('notifications').delete().eq('business_id',currentBusinessId);
   if(error)console.error('Clear notifications failed',error);
 }
-async function disablePushNotifications(){
-  if(typeof OneSignal==='undefined'||!OneSignal.User)return;
+async function disablePushNotifications(btn){
+  if(pushBusy)return;
+  if(typeof OneSignal==='undefined'||!OneSignal.User){toast('Unable to connect notifications. Try again.');return;}
+  pushBusy=true;
+  if(btn){btn.disabled=true;btn.textContent='Disabling…';}
   try{
     const id=OneSignal.User.PushSubscription.id;
     await OneSignal.User.PushSubscription.optOut();
-    if(id&&sb)await sb.from('notification_subscriptions').update({enabled:false,updated_at:new Date().toISOString()}).eq('onesignal_subscription_id',id);
+    // Row is UPDATEd to enabled:false, never deleted — keeps subscription
+    // history (device_type, when it was first created) intact for support/debugging.
+    if(id&&sb){
+      const {error}=await sb.from('notification_subscriptions').update({enabled:false,updated_at:new Date().toISOString()}).eq('onesignal_subscription_id',id);
+      if(error){console.error('Disable push failed',error);toast('Could not save notification settings.');return;}
+    }
     pushSubscribed=false;
     toast('Push notifications disabled');
-  }catch(e){console.error('Disable push failed',e);toast('Could not disable push notifications: '+e.message);}
-  openSettings();
+  }catch(e){
+    console.error('Disable push failed',e);
+    toast('Unable to connect notifications. Try again.');
+  }finally{
+    pushBusy=false;
+    openSettings();
+  }
 }
 
 function money(n){const v=Math.round(n||0);return (v<0?'-$':'$')+Math.abs(v).toLocaleString('en-NZ');}
@@ -2309,7 +2386,7 @@ function newRecord(d){return Object.assign({
   skipChecklist:!workflowConfig.requireChecklist,
   photoBefore:false,photoAfter:false,startedAt:null,repeat:'no',callback:false,email:'',
   tech:'Unassigned',gps:'pending',scheduledDate:null,scheduledIdx:null,scheduledDateISO:null,createdAt:Date.now(),follows:[],
-  quoteSentAt:null,clientResponded:false,paidAt:null,approvedAt:null,lastServiceDaysAgo:null,assumptions:null,areaPolys:null,selfPriced:false,
+  quoteSentAt:null,clientResponded:false,paidAt:null,approvedAt:null,lastServiceDaysAgo:null,assumptions:null,areaPolys:null,selfPriced:false,windowsRequested:false,
   hasCustomerPhoto:false,customerPhotoPath:null,quoteAttachments:[],assignedStaffId:null,
   paymentStatus:'draft',paymentMethod:null,dueDate:null,payments:[],
   jobStatus:null,statusHistory:[],jobNotes:null,weatherSnapshot:null
@@ -4574,6 +4651,7 @@ function openDetail(id){
           </div>
         </div>
         <div class="panel"><h4>Quote <span class="eng-badge">Pricing</span></h4>${svcRows}
+          ${r.windowsRequested?`<div class="kv" style="background:var(--teal-wash);border-radius:8px;padding:8px 10px;margin-top:6px"><span class="k" style="color:#1f5d50">Additional request<br><span style="font-weight:600">Windows quote requested</span></span><span class="v" style="color:#1f5d50;font-weight:600">Pending assessment</span></div>`:''}
           <div class="kv" style="border-top:1px solid var(--line);margin-top:6px;padding-top:10px"><span class="k" style="font-weight:600;color:var(--ink)">Total <span class="seg">${segOf(r.total)} job</span></span><span class="v" style="font-size:18px;color:var(--teal)">${money(r.total)}</span></div>
           ${r.stage==='new'||r.services.length===0?`<button class="btn primary block" style="margin-top:14px" onclick="openQuoteModal(${id})">Build quote</button>`:`<button class="btn ghost block" style="margin-top:14px" onclick="openQuoteModal(${id})">Edit quote</button>`}
           ${r.selfPriced&&r.stage==='new'?`<button class="btn accent block" style="margin-top:9px" onclick="openQuoteModal(${id})">Review &amp; send quote</button>`:''}
@@ -6657,7 +6735,16 @@ function openSettings(){
   // validation message...) via postMessage, and this listener applies it.
   // Without this, a fixed height either clips the taller steps (cut-off
   // submit button) or leaves dead space on the shorter ones.
-  const embedCode=bookingLink?`<iframe\n  id="tk-embed"\n  src="${location.origin}/booking.html?biz=${currentBusinessId}&embed=1"\n  width="100%"\n  height="800"\n  frameborder="0"\n  style="border:0;display:block">\n</iframe>\n<script>\n  window.addEventListener('message',function(e){\n    if(!e.data||e.data.type!=='turnkey:embed-resize')return;\n    var f=document.getElementById('tk-embed');\n    if(f&&e.data.height)f.style.height=e.data.height+'px';\n  });\n<`+`/script>`:'';
+  const embedCode=bookingLink?buildBookingEmbedSnippet(bookingLink):'';
+  // Two dedicated deep links so a business whose own site already has
+  // separate "Instant quote" / "Request a quote" buttons can point each one
+  // straight at the matching flow — mode=map/mode=services skip
+  // booking.html's own #mode-choice landing screen entirely (see
+  // booking.html's URL-mode dispatch, right after EMBED_MODE is read).
+  // bookingLink (no mode param) stays the 3rd option: the quote-type
+  // selector page itself, for a business that wants ONE link/button.
+  const mapModeUrl=currentBusinessId?`${location.origin}/booking.html?biz=${currentBusinessId}&mode=map`:'';
+  const servicesModeUrl=currentBusinessId?`${location.origin}/booking.html?biz=${currentBusinessId}&mode=services`:'';
   const canEditBusiness=currentUserRole==='owner'||currentUserRole==='manager';
   const biz=currentBusinessProfile||{};
   const mapsKey=turnkeyMapsKey();
@@ -6703,12 +6790,12 @@ function openSettings(){
     </div>`)}
     ${settingsGroup('Notifications',`
     <div class="conn-card ${pushSubscribed?'live':''}" style="margin-bottom:10px">
-      <div class="conn-top"><span class="conn-name">Push notifications</span><span class="conn-badge ${pushSubscribed?'on':'off'}">${pushSubscribed?'● ENABLED — this device':'off — this device'}</span></div>
+      <div class="conn-top"><span class="conn-name">Push notifications</span><span class="conn-badge ${pushSubscribed?'on':'off'}">${pushSubscribed?'● Notifications Enabled — this device':'Notifications Off — this device'}</span></div>
       <p>Get a notification on your phone or laptop even when TurnKey isn’t open — new enquiries, quote approvals, payments. This is a per-device setting: enable it on every phone/computer you want alerts on.</p>
       ${window.TURNKEY_CONFIG&&window.TURNKEY_CONFIG.onesignalAppId
         ?(pushSubscribed
-          ?`<button class="btn ghost sm" onclick="disablePushNotifications()">Disable on this device</button>`
-          :`<button class="btn accent sm" onclick="enablePushNotifications()">Enable notifications</button>`)
+          ?`<button class="btn ghost sm" ${pushBusy?'disabled':''} onclick="disablePushNotifications(this)">Disable on this device</button>`
+          :`<button class="btn accent sm" ${pushBusy?'disabled':''} onclick="enablePushNotifications(this)">Enable notifications</button>`)
         :`<p style="font-size:12px;color:var(--ink-faint)">Not set up yet — an admin needs to configure OneSignal for this TurnKey (see .env.example).</p>`}
     </div>
     <div class="conn-card">
@@ -6726,16 +6813,18 @@ function openSettings(){
       }).join('')}
       <button class="btn accent sm" style="margin-top:10px" onclick="saveNotificationPrefs()">Save notification preferences</button>
     </div>`)}
-    ${settingsGroup('Calendar',`
+    ${settingsGroup('Quote embeds',`
+    ${renderQuoteEmbedCard('conn-map','Instant Map Quote','Opens straight into the satellite map — no selection screen first. Use this if your own site already has a dedicated "Get an instant quote" button.',mapModeUrl)}
+    ${renderQuoteEmbedCard('conn-services','Select Services Quote','Skips the map entirely — the customer picks from a list of services and sends their details. Good for a simple "Request a quote" button.',servicesModeUrl)}
     <div class="conn-card ${bookingLink?'live':''}">
-      <div class="conn-top"><span class="conn-name">Booking page</span><span class="conn-badge ${bookingLink?'on':'off'}">${bookingLink?'● READY TO SHARE':'sign in first'}</span></div>
-      <p>Share this with customers — every quote request they submit lands straight in your Pipeline.</p>
-      ${bookingLink?`<div class="conn-keyrow"><input id="conn-booking-link" readonly value="${bookingLink}" onclick="this.select()"><button class="btn accent sm" onclick="copyBookingLink()" id="copy-booking-btn">Copy link</button></div>
-      <p style="font-size:12px;color:var(--ink-faint);margin-top:12px">Want it directly on your own website instead? Copy the code below into Wix, Squarespace or WordPress.</p>
+      <div class="conn-top"><span class="conn-name">Quote type selector</span><span class="conn-badge ${bookingLink?'on':'off'}">${bookingLink?'● READY TO SHARE':'sign in first'}</span></div>
+      <p>Lets the customer choose Map or Services themselves first — share this one link if you don't already have separate buttons for each.</p>
+      ${bookingLink?`<div class="conn-keyrow"><input id="conn-booking-link" readonly value="${bookingLink}" onclick="this.select()"><button class="btn ghost sm" onclick="window.open('${bookingLink}','_blank')">Preview</button><button class="btn accent sm" onclick="copyEmbedField('conn-booking-link','copy-booking-btn','Copy link')" id="copy-booking-btn">Copy link</button></div>
+      <p style="font-size:12px;color:var(--ink-faint);margin-top:12px">Or embed it directly — copy the code below into Wix, Squarespace or WordPress.</p>
       <textarea id="conn-embed-code" readonly onclick="this.select()" style="width:100%;min-height:80px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;padding:10px 12px;border:1px solid var(--line);border-radius:var(--radius-sm);resize:vertical;color:var(--ink)">${embedCode}</textarea>
-      <button class="btn accent sm" style="margin-top:8px" onclick="copyEmbedCode()" id="copy-embed-btn">Copy embed code</button>`:''}
-    </div>
-    ${settingsRow('Calendar sync',calConnected?'Connected — avoids double-booking':'Connect Google Calendar or iCloud',"closeModal('settings-overlay');openConnections()")}`)}
+      <button class="btn accent sm" style="margin-top:8px" onclick="copyEmbedField('conn-embed-code','copy-embed-btn','Copy embed code')" id="copy-embed-btn">Copy embed code</button>`:''}
+    </div>`)}
+    ${settingsGroup('Calendar',settingsRow('Calendar sync',calConnected?'Connected — avoids double-booking':'Connect Google Calendar or iCloud',"closeModal('settings-overlay');openConnections()"))}
     ${settingsGroup('Email',settingsRow('Gmail — inbox &amp; sending',emailAccount?`Connected as ${emailAccount.email_address}`:'Not connected',"closeModal('settings-overlay');openConnections()"))}
     ${settingsGroup('Integrations',`
     ${settingsRow('Card payments (Stripe)',stripeStatus.configured?'Connected — customers can pay invoices by card':'Not set up yet',"closeModal('settings-overlay');openConnections()")}
@@ -6799,17 +6888,42 @@ function openConnections(){
     <div class="conn-note">${emailAccount?"You're fully connected. Nice.":"Connect Gmail to send quotes and invoices straight from Turnkey."}</div>`;
   openModal('conn-overlay');
 }
-function copyBookingLink(){
-  const input=document.getElementById('conn-booking-link');if(!input)return;
+// Generic copy-to-clipboard for any of the booking-link/embed-code readonly
+// fields in Settings — one function backing the booking link, the generic
+// (quote-type-selector) embed, and the Instant Map / Select Services embeds
+// below, instead of a near-identical copy* function per field.
+function copyEmbedField(inputId,btnId,defaultLabel){
+  const input=document.getElementById(inputId);if(!input)return;
   navigator.clipboard?.writeText(input.value).then(()=>{
-    const b=document.getElementById('copy-booking-btn');if(b){b.textContent='Copied ✓';setTimeout(()=>b.textContent='Copy link',1600);}
+    const b=document.getElementById(btnId);if(b){b.textContent='Copied ✓';setTimeout(()=>b.textContent=defaultLabel,1600);}
   });
 }
-function copyEmbedCode(){
-  const input=document.getElementById('conn-embed-code');if(!input)return;
-  navigator.clipboard?.writeText(input.value).then(()=>{
-    const b=document.getElementById('copy-embed-btn');if(b){b.textContent='Copied ✓';setTimeout(()=>b.textContent='Copy code',1600);}
-  });
+// Shared iframe+resize-listener snippet builder — used by the generic
+// (quote-type-selector) embed and the two mode-specific embeds below, so
+// there's exactly one place that knows the resize-postMessage contract
+// booking.html's own listener expects (see booking.html's "Wix/iframe embed
+// height sync" comment).
+function buildBookingEmbedSnippet(url){
+  return `<iframe\n  id="tk-embed"\n  src="${url}&embed=1"\n  width="100%"\n  height="800"\n  frameborder="0"\n  style="border:0;display:block">\n</iframe>\n<script>\n  window.addEventListener('message',function(e){\n    if(!e.data||e.data.type!=='turnkey:embed-resize')return;\n    var f=document.getElementById('tk-embed');\n    if(f&&e.data.height)f.style.height=e.data.height+'px';\n  });\n<`+`/script>`;
+}
+// Renders one "Instant Map Quote" / "Select Services Quote" embed card —
+// URL, Preview (opens the live page), Copy link, and a copyable iframe
+// snippet. idPrefix keeps each card's input/button ids unique so both can
+// sit on the page (and be copied independently) at once.
+function renderQuoteEmbedCard(idPrefix,name,desc,url){
+  if(!url)return `<div class="conn-card"><div class="conn-top"><span class="conn-name">${name}</span><span class="conn-badge off">sign in first</span></div><p>${desc}</p></div>`;
+  const embedCode=buildBookingEmbedSnippet(url);
+  return `<div class="conn-card live" style="margin-bottom:10px">
+    <div class="conn-top"><span class="conn-name">${name}</span><span class="conn-badge on">● READY TO SHARE</span></div>
+    <p>${desc}</p>
+    <div class="conn-keyrow"><input id="${idPrefix}-link" readonly value="${url}" onclick="this.select()">
+      <button class="btn ghost sm" onclick="window.open('${url}','_blank')">Preview</button>
+      <button class="btn accent sm" onclick="copyEmbedField('${idPrefix}-link','${idPrefix}-link-btn','Copy link')" id="${idPrefix}-link-btn">Copy link</button>
+    </div>
+    <p style="font-size:12px;color:var(--ink-faint);margin-top:12px">Or embed it directly on your site — copy the code below into Wix, Squarespace or WordPress.</p>
+    <textarea id="${idPrefix}-embed" readonly onclick="this.select()" style="width:100%;min-height:80px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;padding:10px 12px;border:1px solid var(--line);border-radius:var(--radius-sm);resize:vertical;color:var(--ink)">${embedCode}</textarea>
+    <button class="btn accent sm" style="margin-top:8px" onclick="copyEmbedField('${idPrefix}-embed','${idPrefix}-embed-btn','Copy embed code')" id="${idPrefix}-embed-btn">Copy embed code</button>
+  </div>`;
 }
 function onBizLogoChosen(el){
   const file=el.files&&el.files[0];
@@ -8542,13 +8656,15 @@ function ingestQuoteRequest(payload){
     qty:a.size,
     storeys:a.storeys||null
   })).filter(s=>s.svc&&SERVICES[s.svc]);
-  // windows come through as a separate payload field
-  if(payload.windows&&payload.windows.panes>0){
-    services.push({svc:'windows',qty:payload.windows.panes});
-  }
-  const total=(payload.areas||[]).reduce((s,a)=>s+(a.price||0),0)+
-    (payload.windows?payload.windows.price||0:0);
+  const total=(payload.areas||[]).reduce((s,a)=>s+(a.price||0),0);
   const sub=(c.address||'').split(',').slice(-1)[0].trim();
+  // windowsRequested is a stand-alone add-on request now (can ride alongside
+  // real mapped services, or arrive completely on its own) — never turned
+  // into a priced service line (see booking.html's buildPayload — there's
+  // no measurement to price it from), just this exact, single-source-of-
+  // truth note appended so every windows request reads identically
+  // regardless of which flow it came from.
+  const windowsNote=payload.windowsRequested?'Customer requested a separate window cleaning quote.':'';
   const rec=newRecord({
     name:c.name||'Website enquiry',
     phone:c.phone||'',
@@ -8556,7 +8672,7 @@ function ingestQuoteRequest(payload){
     address:(c.address||'').split(',')[0].trim(),
     suburb:sub||'',
     source:c.source||'Website',
-    notes:(c.notes? c.notes+' · ':'')+'Submitted via online quote tool'+(c.timing?' · timing: '+c.timing:''),
+    notes:[c.notes,windowsNote,'Submitted via online quote tool'+(c.timing?' · timing: '+c.timing:'')].filter(Boolean).join(' · '),
     services,
     total
   });
@@ -8583,6 +8699,11 @@ function ingestQuoteRequest(payload){
   // they should show the normal "Build quote" CTA, not "Review & send"
   // (which would misleadingly imply a price already exists).
   rec.selfPriced=payload.requestType==='map'&&total>0;
+  // Dedicated field (not just prose in notes) so the lead detail view can
+  // show this as its own "Additional request" line with a "Pending
+  // assessment" price — never folded into the priced services list/total
+  // above, since there's no measurement to price it from either way.
+  rec.windowsRequested=!!payload.windowsRequested;
   if(sid)rec._submittedAt=sid;
   records.unshift(rec);
   render();renderAll();
@@ -8590,11 +8711,15 @@ function ingestQuoteRequest(payload){
   toast('New online quote request: '+rec.name);
   // flash a banner if present
   const fb=document.getElementById('intake-flash');
-  const flashDetail=rec.selfPriced?services.length+' areas · '+money(total)+' — ready to review & send':(payload.requestType==='windows'?'windows quote requested':'quick quote request')+' — build a quote when ready';
+  const flashDetail=rec.selfPriced
+    ?services.length+' area'+(services.length!==1?'s':'')+' · '+money(total)+(payload.windowsRequested?' + windows requested':'')+' — ready to review & send'
+    :(payload.windowsRequested?'windows quote requested':'quick quote request')+' — build a quote when ready';
   if(fb){fb.textContent='✓ New lead from '+rec.name+' ('+flashDetail+')';fb.classList.add('show');setTimeout(()=>fb.classList.remove('show'),5000);}
   if(rec.pendingPhotos.length)flushPendingPhotos(rec); // fire-and-forget — don't block ingest on uploads
   sendLifecycleEmail(rec,'new_lead');
-  const notifyDetail=rec.selfPriced?'('+services.length+' area'+(services.length!==1?'s':'')+', '+money(total)+' self-estimated).':(payload.requestType==='windows'?'(windows quote — no price yet, prepare one manually).':'(quick quote request — no price yet, prepare one manually).');
+  const notifyDetail=rec.selfPriced
+    ?'('+services.length+' area'+(services.length!==1?'s':'')+', '+money(total)+' self-estimated'+(payload.windowsRequested?' + windows requested':'')+').'
+    :(payload.windowsRequested?'(windows quote — no price yet, prepare one manually).':'(quick quote request — no price yet, prepare one manually).');
   notifyOwner('new_lead','New lead — '+rec.name,rec.name+' requested a quote for '+(rec.suburb||rec.address||'an address you’ll want to check')+' '+notifyDetail);
 }
 

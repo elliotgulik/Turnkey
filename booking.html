@@ -65,17 +65,25 @@
   .hero p{font-size:16px;color:var(--ink-soft);margin-top:10px;max-width:520px;margin-left:auto;margin-right:auto}
   @media(min-width:640px){.hero h1{font-size:38px}}
 
-  /* initial choice — asked before either flow starts, always shown even in
-     an embed (it's a functional decision, not marketing copy, unlike .hero) */
-  .mode-choice{max-width:640px;margin:32px auto 8px;padding:0 4px;text-align:center}
-  html.embedded .mode-choice{margin-top:14px}
-  .mc-title{font-size:20px;font-weight:700;letter-spacing:-.02em;margin-bottom:16px}
-  .mc-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  /* initial choice — the premium landing screen shown before either flow
+     starts, always shown even in an embed (it's a functional decision, not
+     marketing copy, unlike .hero — though its own headline/subtext IS the
+     marketing moment now, so it gets a lighter touch than .hero in embed
+     mode, see html.embedded rules below, rather than being hidden outright). */
+  .mode-choice{max-width:640px;margin:40px auto 8px;padding:0 4px;text-align:center}
+  html.embedded .mode-choice{margin-top:18px}
+  html.embedded .mc-head{margin-bottom:22px}
+  .mc-head{margin-bottom:30px}
+  .mc-head h1{font-size:28px;font-weight:700;letter-spacing:-.03em;line-height:1.15}
+  @media(min-width:640px){.mc-head h1{font-size:34px}}
+  .mc-head p{font-size:15.5px;color:var(--ink-soft);margin-top:10px;max-width:440px;margin-left:auto;margin-right:auto}
+  .mc-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
   @media(max-width:560px){.mc-grid{grid-template-columns:1fr}}
-  .mc-card{text-align:left;background:var(--surface);border:1.5px solid var(--line);border-radius:var(--radius);padding:18px;min-height:44px;transition:border-color .15s,box-shadow .15s}
-  .mc-card:hover{border-color:var(--teal);box-shadow:var(--shadow)}
-  .mc-card-title{font-size:15.5px;font-weight:700;color:var(--ink);margin-bottom:4px}
-  .mc-card-desc{font-size:13px;color:var(--ink-soft)}
+  .mc-card{text-align:left;background:var(--surface);border:1.5px solid var(--line);border-radius:var(--radius);padding:22px;min-height:44px;transition:border-color .15s,box-shadow .15s,transform .1s}
+  .mc-card:hover{border-color:var(--teal);box-shadow:var(--shadow-lg);transform:translateY(-1px)}
+  .mc-card:active{transform:translateY(0)}
+  .mc-card-title{font-size:16.5px;font-weight:700;color:var(--ink);margin-bottom:6px;letter-spacing:-.01em}
+  .mc-card-desc{font-size:13.5px;color:var(--ink-soft);line-height:1.45}
 
   /* stepper */
   .steps{display:flex;align-items:center;justify-content:center;gap:8px;margin:22px 0 8px}
@@ -105,13 +113,32 @@
   .svc-btn .sw{width:11px;height:11px;border-radius:3px}
   .svc-btn.sel{border-color:currentColor}
   .svc-btn:hover{background:var(--surface-2)}
+  /* Request Windows Quote as an add-on toggle (map flow's picker) — stays a
+     button in the same row, but ticks on/off like a selection instead of
+     navigating away, so mapped areas are never lost by tapping it. */
+  .svc-btn.windows-addon.sel{background:var(--teal-wash);color:var(--teal);border-color:var(--teal)}
+
+  /* Multi-select service grid — quick enquiry form. Reuses .svc-pick/.svc-btn's
+     exact look (incl. the mobile 2-column rules below) so services read as
+     the same visual language everywhere on the page, not a second component. */
+  #c-service-picker.svc-pick{margin-top:2px}
+
+  /* premium, roomy checkbox rows — replaces bare browser-default checkboxes
+     (illegible at default ~13px and a poor touch target) without losing a
+     real, accessible <input type=checkbox> underneath. */
+  .check-row{display:flex;align-items:flex-start;gap:12px;padding:13px 14px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--surface-2);margin-bottom:10px;cursor:pointer}
+  .check-row input[type=checkbox]{width:20px;height:20px;flex-shrink:0;margin-top:1px;accent-color:var(--teal)}
+  .check-row span{font-size:13px;color:var(--ink-soft);line-height:1.5}
+  .check-row a{color:var(--teal);text-decoration:underline}
 
   .map-stage{position:relative;width:100%;aspect-ratio:4/3;background:#dfe6e3;overflow:hidden;cursor:crosshair;touch-action:none;user-select:none}
   .map-stage.pan-tool{cursor:grab}
   .map-stage.pan-tool.panning{cursor:grabbing}
-  .qe-tool-group{display:flex;gap:2px;background:var(--surface-2);border-radius:9px;padding:2px}
-  .qe-tool-group .tool-btn{border-radius:7px;min-height:36px;padding:6px 14px}
-  .qe-tool-group .tool-btn.active{background:var(--teal);color:#fff}
+  /* Single Select/Move toggle button (see toggleMapTool()) — mobile map
+     controls are deliberately just this plus the two zoom buttons below,
+     not a bigger toolbar. */
+  .tool-btn{border-radius:7px;min-height:36px;padding:6px 14px}
+  .tool-btn.active{background:var(--teal);color:#fff}
   @media(max-width:560px){.map-stage{aspect-ratio:1/1}}
   .map-stage svg{position:absolute;inset:0;width:100%;height:100%;display:block}
   /* Pan (Pan tool only) live-transforms this whole layer (background photo +
@@ -129,7 +156,7 @@
   @media(max-width:720px){
     .zoom-btn{width:44px;height:44px}
     .mini-btn,.svc-btn{min-height:44px}
-    .qe-tool-group .tool-btn{min-height:44px}
+    .tool-btn{min-height:44px}
     input,select,textarea{font-size:16px}
     /* Service picker: compact 2-column grid instead of desktop's wrapping
        pill row — fewer, shorter rows to scroll past before reaching the
@@ -303,18 +330,23 @@ function initPlacesAutocomplete(){
        their details shouldn't have to enter the map builder at all just to
        find an exit. flowMode (see chooseFlow()) drives every branch below:
        'map' reveals the existing hero/steps/builder flow unchanged, 'quick'
-       and 'windows' both skip straight to the details form (below), just
-       with different fields shown and a different source tag on submit. -->
+       skips straight to the details form (below), just with different
+       fields shown and a different source tag on submit. Windows is no
+       longer a 3rd top-level choice here — it's an add-on toggle reachable
+       from inside either flow (see toggleWindowsAddon()/QUICK_SERVICES). -->
   <div class="mode-choice" id="mode-choice">
-    <h2 class="mc-title">How would you like to request your quote?</h2>
+    <div class="mc-head">
+      <h1>Get your quote in minutes</h1>
+      <p>Tell us about your property and we’ll prepare your quote.</p>
+    </div>
     <div class="mc-grid">
       <button type="button" class="mc-card" onclick="chooseFlow('map')">
         <div class="mc-card-title">Map your property</div>
-        <div class="mc-card-desc">Outline areas for a faster estimate</div>
+        <div class="mc-card-desc">Draw areas on your property for a more accurate quote.</div>
       </button>
       <button type="button" class="mc-card" onclick="chooseFlow('quick')">
-        <div class="mc-card-title">Quick quote request</div>
-        <div class="mc-card-desc">Send your details and we’ll prepare your quote</div>
+        <div class="mc-card-title">Quick enquiry</div>
+        <div class="mc-card-desc">Prefer not to map? Fill out a simple request form.</div>
       </button>
     </div>
   </div>
@@ -344,11 +376,12 @@ function initPlacesAutocomplete(){
         <div class="svc-pick" id="svc-pick"></div>
       </div>
       <div class="map-tools" style="border-top:1px solid var(--line)">
-        <div class="qe-tool-group">
-          <button type="button" class="mini-btn tool-btn active" id="map-tool-select" onclick="setMapTool('select')">Select</button>
-          <button type="button" class="mini-btn tool-btn" id="map-tool-pan" onclick="setMapTool('pan')">Pan</button>
-        </div>
-        <span class="tool-label" style="margin-left:auto">Select: tap to trace an area · Pan: drag to move the map</span>
+        <!-- One toggle button, not two side-by-side ones — mobile map
+             controls are meant to be exactly: zoom +, zoom −, and this
+             single Select/Move toggle. Tap to switch modes; the label and
+             hint text both reflect whichever mode is currently active. -->
+        <button type="button" class="mini-btn tool-btn active" id="map-tool-toggle" onclick="toggleMapTool()">Select</button>
+        <span class="tool-label" id="map-tool-label" style="margin-left:auto">Tap to trace an area · switch to Move to drag the map</span>
       </div>
       <div class="map-stage" id="stage">
         <div class="map-visual" id="map-visual">
@@ -394,6 +427,16 @@ function initPlacesAutocomplete(){
           <div class="empty-areas">No areas yet. Pick a service above, then trace an area on the map.</div>
         </div>
 
+        <!-- Visible confirmation that Request Windows Quote is toggled on —
+             it no longer navigates away (see toggleWindowsAddon()), so
+             without this the only feedback is the button's own .sel state,
+             easy to miss once you've scrolled down to the areas list. -->
+        <div class="area-item hidden" id="windows-addon-note" style="border-style:dashed;border-color:var(--teal);background:var(--teal-wash)">
+          <span class="area-sw" style="background:var(--c-windows)"></span>
+          <div class="area-info"><div class="area-svc">Windows</div><div class="area-size">Quote requested — no price yet</div></div>
+          <button class="area-rm" onclick="toggleWindowsAddon()" title="Remove windows quote request">×</button>
+        </div>
+
         <div class="est-card" id="est-card" style="display:none">
           <div class="est-breakdown" id="est-breakdown"></div>
           <div class="est-total-row"><span>Estimated total</span><span id="est-total">$0</span></div>
@@ -412,32 +455,26 @@ function initPlacesAutocomplete(){
     <h3 id="details-heading" style="font-size:19px;margin-bottom:4px">Almost done — where do we send the quote?</h3>
     <p id="details-sub" style="font-size:13.5px;color:var(--ink-soft);margin-bottom:18px">We'll review your mapped areas and send a firm quote, usually same day.</p>
     <div class="form-grid">
-      <div class="field"><label>Full name *</label><input id="c-name" placeholder="Sarah Thompson"></div>
+      <div class="field"><label>First name *</label><input id="c-first-name" placeholder="Sarah"></div>
+      <div class="field"><label>Last name *</label><input id="c-last-name" placeholder="Thompson"></div>
+      <div class="field"><label>Email *</label><input id="c-email" type="email" placeholder="sarah@email.com"></div>
       <div class="field"><label>Phone *</label><input id="c-phone" type="tel" placeholder="021 555 0123"></div>
-      <div class="field full"><label>Email *</label><input id="c-email" type="email" placeholder="sarah@email.com"></div>
-      <div class="field full"><label>Property address *</label><input id="c-addr" placeholder="12 Hurstmere Road, Takapuna"></div>
-      <!-- Quick-quote only — the map flow already knows the service(s) from
-           what was drawn, and the windows-request flow implies it. -->
+      <div class="field full"><label>Job address *</label><input id="c-addr" placeholder="12 Hurstmere Road, Takapuna"></div>
+      <!-- Quick-enquiry only — the map flow already knows the service(s)
+           from what was drawn (plus the windows add-on toggle alongside it). -->
       <div class="field full hidden" id="c-service-field">
-        <label>Service required *</label>
-        <select id="c-service">
-          <option value="">Select a service…</option>
-          <option value="driveway">Driveway / Patio Cleaning</option>
-          <option value="housewash">House Wash</option>
-          <option value="roof">Roof Treatment</option>
-          <option value="deck">Deck Cleaning</option>
-          <option value="fence">Fence Cleaning</option>
-          <option value="gutter">Gutter Cleaning</option>
-          <option value="windows">Windows</option>
-        </select>
+        <label>Services required * <span style="color:var(--ink-faint);font-weight:400">(select all that apply)</span></label>
+        <div class="svc-pick" id="c-service-picker"></div>
       </div>
-      <div class="field full"><label>Anything we should know? <span style="color:var(--ink-faint);font-weight:400">(optional)</span></label><textarea id="c-notes" rows="2" placeholder="e.g. heavy moss on the south side, dog in the yard"></textarea></div>
+      <div class="field full"><label>Anything else you want us to know? <span style="color:var(--ink-faint);font-weight:400">(optional)</span></label><textarea id="c-notes" rows="2" placeholder="e.g. heavy moss on the south side, dog in the yard"></textarea></div>
       <div class="field map-only-field"><label>Preferred timing</label><select id="c-timing"><option>As soon as possible</option><option>Within 2 weeks</option><option>This month</option><option>Just getting a price</option></select></div>
-      <div class="field map-only-field"><label>How did you find us?</label><select id="c-source"><option>Google search</option><option>Facebook</option><option>Referral</option><option>Repeat customer</option><option>Other</option></select></div>
+      <div class="field"><label>How did you find us? *</label><select id="c-source"><option value="">Select…</option><option>Google search</option><option>Facebook</option><option>Referral</option><option>Repeat customer</option><option>Other</option></select></div>
       <div class="field map-only-field"><label>Preferred date <span style="color:var(--ink-faint);font-weight:400">(optional)</span></label><input type="date" id="c-date"></div>
       <div class="field map-only-field"><label>Preferred time of day</label><select id="c-window"><option>Anytime</option><option>Morning</option><option>Afternoon</option><option>Evening</option></select></div>
       <div class="field full"><label>Photos <span style="color:var(--ink-faint);font-weight:400">(optional, up to 6)</span></label><input type="file" id="c-photos" accept="image/*" capture="environment" multiple onchange="onPhotosChosen(this)"><div id="c-photos-status" style="font-size:12.5px;color:var(--ink-soft);margin-top:6px"></div></div>
     </div>
+    <label class="check-row"><input type="checkbox" id="c-terms"><span>I agree to Turnkey's <a href="#" onclick="event.stopPropagation()">Terms &amp; Conditions</a> for this quote request. *</span></label>
+    <label class="check-row"><input type="checkbox" id="c-important"><span>I understand this is a preliminary request — final pricing is confirmed after a review of my property. *</span></label>
     <!-- On mobile this bar pins to the bottom of the screen (see
          .details-submit-bar in the mobile media query) so the submit
          action stays reachable without scrolling back down past a form
@@ -502,10 +539,10 @@ if(!window.TURNKEY_CONFIG){
 // patio was dropped as its own customer-selectable button (merged into
 // driveway's "Driveway / Patio Cleaning") and windows is no longer an
 // instant-priced map service at all — "Request Windows Quote" (see
-// requestWindowsQuote()) skips pricing/drawing entirely and goes straight
-// to a lead. Both stay defined in the shared TK_PRICING.SERVICES (CRM/
-// historical jobs still use them); windows.hex/.label are kept here only
-// for the Request Windows Quote button's styling.
+// toggleWindowsAddon()) is a request add-on, never drawn/priced. Both stay
+// defined in the shared TK_PRICING.SERVICES (CRM/historical jobs still use
+// them); windows.hex/.label are kept here only for the Request Windows
+// Quote button's styling.
 const SERVICES = {
   driveway: {label:'Driveway / Patio Cleaning', unit:'m²', rate:TK_PRICING.SERVICES.driveway.rate,  kind:'area',      color:'var(--c-driveway)', hex:'#c2683a'},
   housewash:{label:'House Wash',             unit:'m',  rate:TK_PRICING.SERVICES.housewash.rate, kind:'perimeter', color:'var(--c-housewash)', hex:'#2f7d8f'},
@@ -572,6 +609,17 @@ try{const u=new URL(location.href);EMBED_MODE=u.searchParams.get('embed')==='1';
 // CRM's "preview" tab) — false inside a Wix/website iframe. Gates the "want
 // this on your own site?" banner, which only makes sense outside an embed.
 let standalone=!EMBED_MODE;
+// ?mode=map / ?mode=services lets a business skip #mode-choice entirely and
+// deep-link straight into one flow — for a business that already has its
+// own separate "Instant quote" / "Request a quote" buttons on their site,
+// forcing every visitor through the picker first would be a redundant extra
+// click (and a mismatch with whichever button they actually clicked). No
+// mode param (or ?mode=select) falls through to the existing picker
+// unchanged — see the URL_MODE dispatch beside the init calls at the
+// bottom of this script. Any other/unrecognised value is also treated as
+// "show the picker" rather than silently breaking.
+let URL_MODE='';
+try{const u=new URL(location.href);const m=u.searchParams.get('mode');if(m==='map'||m==='services')URL_MODE=m;}catch(e){}
 
 /* ===== Business profile: name/logo/phone/region, loaded per ?biz= id from the
    public.businesses table (public-read RLS — see schema-business-profile.sql).
@@ -896,12 +944,22 @@ function tryAutoSatellite(){
   else enableOsm(addr);
 }
 
-/* ===== initial choice: map vs quick quote vs (from inside the map flow's
-   service picker) a windows request — see #mode-choice above. Every
-   submission path funnels through the same buildPayload()/submitRequest()
-   so it lands in the CRM the same way a mapped quote always has; only the
-   fields shown and the customer.source tag differ per mode. ===== */
-let flowMode = null; // null | 'map' | 'quick' | 'windows'
+/* ===== initial choice: map your property vs quick enquiry — see
+   #mode-choice above. Every submission path funnels through the same
+   buildPayload()/submitRequest() so it lands in the CRM the same way a
+   mapped quote always has; only the fields shown differ per mode. Windows
+   is NOT a 3rd top-level choice — it's an add-on toggle reachable from
+   inside either flow (toggleWindowsAddon() in the map picker, or just one
+   more selectable button in the quick-enquiry grid, see QUICK_SERVICES),
+   so a customer can request a windows quote ON TOP OF mapped/quick
+   services instead of it being a mutually-exclusive alternate path. ===== */
+let flowMode = null; // null | 'map' | 'quick'
+// Set from the map flow's "Request Windows Quote" toggle (see
+// toggleWindowsAddon()) OR implied when 'windows' is one of the quick
+// flow's selected QUICK_SERVICES — buildPayload() reads this single flag
+// either way, so downstream code (success recap, CRM note) never needs to
+// care which flow it came from.
+let windowsRequested = false;
 function chooseFlow(mode){
   flowMode=mode;
   document.getElementById('mode-choice').classList.add('hidden');
@@ -915,25 +973,23 @@ function chooseFlow(mode){
   }
   window.scrollTo({top:0,behavior:'smooth'});
 }
-// windows is reachable from INSIDE the map flow's service picker (it's
-// presented alongside the real services there, not a 3rd top-level choice)
-// but behaves exactly like quick-quote once picked: no drawing, no
-// instant price — straight to a lead.
-function requestWindowsQuote(){
-  flowMode='windows';
-  document.getElementById('mode-choice').classList.add('hidden');
-  document.querySelector('.hero').classList.add('hidden');
-  document.querySelector('.steps').classList.add('hidden');
-  document.getElementById('builder').classList.add('hidden');
-  document.getElementById('integration').classList.add('hidden');
-  showQuickDetails('Request a windows quote','Tell us a bit about the job and we’ll prepare your quote — usually same day.',false);
-  window.scrollTo({top:0,behavior:'smooth'});
+// Toggled from the map flow's service picker — an add-on the customer can
+// stack on top of whatever they've mapped (or map nothing at all and just
+// request this), NOT a navigation away from the map. See the dashed
+// "Windows" row in #area-list (windows-addon-note) for the on-map confirmation.
+function toggleWindowsAddon(){
+  windowsRequested=!windowsRequested;
+  buildSvcPicker();
+  const note=document.getElementById('windows-addon-note');
+  if(note)note.classList.toggle('hidden',!windowsRequested);
+  updateEstimate();
 }
-// Shared by both non-map modes — only whether the Service field is asked
-// differs (windows already implies its own service, quick-quote doesn't).
+// Shared by the quick-enquiry flow — builds/refreshes its multi-select
+// service grid every time it's shown.
 function showQuickDetails(heading,sub,showServiceField){
   document.getElementById('details').classList.remove('hidden');
   document.getElementById('c-service-field').classList.toggle('hidden',!showServiceField);
+  if(showServiceField)buildQuickServicePicker();
   document.querySelectorAll('.map-only-field').forEach(el=>el.classList.add('hidden'));
   document.getElementById('details-heading').textContent=heading;
   document.getElementById('details-sub').textContent=sub;
@@ -945,6 +1001,41 @@ function backToChoice(){
   document.getElementById('mode-choice').classList.remove('hidden');
   flowMode=null;
   window.scrollTo({top:0,behavior:'smooth'});
+}
+/* ===== quick-enquiry multi-select services — deliberately a separate,
+   plain-label list from the map flow's SERVICES (which carries real rates
+   for polygon-based pricing). None of these are ever auto-priced: the
+   quick-enquiry flow has no measurements to price from regardless of which
+   services are picked, so there's nothing to gain (and a real risk of
+   fabricating numbers) from inventing rates for solar/pavers/spider just to
+   reuse the priced SERVICES shape. Selections are captured as plain
+   requested-service tags for the business to quote manually — same
+   treatment "Request Windows Quote" already got before this rework. ===== */
+const QUICK_SERVICES=[
+  {key:'housewash',label:'Exterior House Wash'},
+  {key:'roof',label:'Roof Treatment'},
+  {key:'solar',label:'Solar Panel Clean'},
+  {key:'driveway',label:'Driveway Clean'},
+  {key:'pavers',label:'Pavers Clean'},
+  {key:'fence',label:'Fence Clean'},
+  {key:'deck',label:'Deck Clean'},
+  {key:'gutter',label:'Gutter Clean'},
+  {key:'spider',label:'Spider Treatment'},
+  {key:'other',label:'Other'},
+  {key:'windows',label:'Request Windows Quote'}
+];
+let quickSelectedServices=new Set();
+function buildQuickServicePicker(){
+  const wrap=document.getElementById('c-service-picker');
+  if(!wrap)return;
+  wrap.innerHTML=QUICK_SERVICES.map(s=>
+    `<button type="button" class="svc-btn ${quickSelectedServices.has(s.key)?'sel':''}" data-qsvc="${s.key}" onclick="toggleQuickService('${s.key}')">${s.label}</button>`
+  ).join('');
+}
+function toggleQuickService(key){
+  if(quickSelectedServices.has(key))quickSelectedServices.delete(key);
+  else quickSelectedServices.add(key);
+  buildQuickServicePicker();
 }
 
 let activeSvc = 'driveway';
@@ -958,12 +1049,16 @@ let activeSvc = 'driveway';
 let mapTool='select';
 function setMapTool(tool){
   mapTool=tool;
-  document.getElementById('map-tool-select').classList.toggle('active',tool==='select');
-  document.getElementById('map-tool-pan').classList.toggle('active',tool==='pan');
+  const btn=document.getElementById('map-tool-toggle');
+  if(btn){btn.textContent=tool==='select'?'Select':'Move';btn.classList.add('active');}
+  const label=document.getElementById('map-tool-label');
+  if(label)label.textContent=tool==='select'?'Tap to trace an area · switch to Move to drag the map':'Drag to move the map · switch to Select to trace an area';
   const stage=document.getElementById('stage');
   if(stage)stage.classList.toggle('pan-tool',tool==='pan');
   updateHint();
 }
+// One button, not two — toggles between the map's only two modes each tap.
+function toggleMapTool(){setMapTool(mapTool==='select'?'pan':'select');}
 let houseStoreys = 1;   // applies a ×1.2 per-storey mult to all housewash areas
 
 function setStoreys(n){
@@ -1015,15 +1110,16 @@ function buildMap(){
 function buildSvcPicker(){
   const wrap=document.getElementById('svc-pick');
   wrap.innerHTML=Object.entries(SERVICES)
-    .filter(([k])=>k!=='windows') // windows is never drawn/instant-priced — see the dedicated button appended below
+    .filter(([k])=>k!=='windows') // windows is never drawn/instant-priced — see the dedicated toggle appended below
     .map(([k,v])=>
       `<button class="svc-btn ${k===activeSvc?'sel':''}" style="color:${v.hex}" data-svc="${k}" onclick="pickSvc('${k}')"><span class="sw" style="background:${v.hex}"></span>${v.label}</button>`
     ).join('')
     // Deliberately not a normal svc-btn: it doesn't set activeSvc or enable
-    // drawing at all, it jumps straight to a lead request (requestWindowsQuote()) —
-    // styled as its own full-width row so it doesn't look like just another
+    // drawing at all, and it doesn't navigate away either — toggleWindowsAddon()
+    // just flips a flag that rides alongside whatever's mapped, styled as its
+    // own full-width dashed row so it doesn't look like just another
     // instant-quote option sitting in the grid.
-    +`<button class="svc-btn windows-request" style="color:${SERVICES.windows.hex}" onclick="requestWindowsQuote()"><span class="sw" style="background:${SERVICES.windows.hex}"></span>Request Windows Quote</button>`;
+    +`<button class="svc-btn windows-request windows-addon ${windowsRequested?'sel':''}" style="color:${SERVICES.windows.hex}" onclick="toggleWindowsAddon()"><span class="sw" style="background:${SERVICES.windows.hex}"></span>Request Windows Quote${windowsRequested?' ✓':''}</button>`;
 }
 function pickSvc(k){
   if(k==='windows')return; // safety: never make windows the active draw service
@@ -1314,8 +1410,13 @@ function rawTotal(){
 function updateEstimate(){
   const card=document.getElementById('est-card');
   const next=document.getElementById('next-btn');
-  if(!areas.length){card.style.display='none';next.disabled=true;return;}
-  card.style.display='block';next.disabled=false;
+  // Continue is enabled once there's SOMETHING to submit — either a real
+  // mapped/priced area, or just the windows add-on toggled on with nothing
+  // else mapped (a customer who only wants a windows quote can still use
+  // the map entry point without being forced to draw anything first).
+  next.disabled=!(areas.length||windowsRequested);
+  if(!areas.length){card.style.display='none';return;}
+  card.style.display='block';
   const base=rawTotal();
   // per-area breakdown
   document.getElementById('est-breakdown').innerHTML=areas.map(a=>{
@@ -1373,7 +1474,7 @@ function updateStep(n){
   }
 }
 function goDetails(){
-  if(!areas.length)return;
+  if(!areas.length&&!windowsRequested)return;
   flowMode='map';
   document.getElementById('builder').classList.add('hidden');
   document.getElementById('details').classList.remove('hidden');
@@ -1438,28 +1539,42 @@ function buildPayload(){
   const base=isMapped?rawTotal():0;
   const min=isMapped?Math.max(120,Math.round(base*0.85/5)*5):0;
   const max=isMapped?Math.max(min+40,Math.round(base*1.15/5)*5):0;
-  const svcSel=document.getElementById('c-service');
-  const selectedSvc=svcSel?svcSel.value:'';
-  const selectedSvcLabel=selectedSvc?(SERVICES[selectedSvc]?SERVICES[selectedSvc].label:'Windows'):'';
-  // customer.source doubles as the CRM's "how did you find us" field for a
-  // mapped quote (unchanged), but for quick-quote/windows it's repurposed
-  // to a plain, filterable tag identifying the flow itself — those two
-  // forms don't ask "how did you find us" at all (see .map-only-field),
-  // so there's nothing else to put there.
-  let sourceTag=document.getElementById('c-source').value, notesPrefix='';
-  if(flowMode==='quick'){sourceTag='quick_quote';notesPrefix=selectedSvcLabel?('Service requested: '+selectedSvcLabel+'. '):'';}
-  else if(flowMode==='windows'){sourceTag='windows_request';notesPrefix='Windows quote requested. ';}
+  // Quick-enquiry's selected services (labels only — never priced, see
+  // QUICK_SERVICES's header comment) become a plain notes prefix so the
+  // business sees exactly what was requested without the CRM needing a new
+  // "requested services" concept of its own. windows is a request tag
+  // either way (see windowsRequested), not a QUICK_SERVICES label here, so
+  // it's excluded from this line and folded into the single windowsRequested
+  // flag below instead of being duplicated in two different places.
+  const quickLabels=flowMode==='quick'
+    ?QUICK_SERVICES.filter(s=>s.key!=='windows'&&quickSelectedServices.has(s.key)).map(s=>s.label)
+    :[];
+  const notesPrefix=quickLabels.length?('Services requested: '+quickLabels.join(', ')+'. '):'';
+  // windowsRequested is a single flag regardless of which flow it came from
+  // — toggled directly in the map flow, or implied by 'windows' being one
+  // of quick-enquiry's selected services. The CRM appends its own canonical
+  // "Customer requested a separate window cleaning quote." note from this
+  // flag (see ingestQuoteRequest in index.html) rather than booking.html
+  // composing that sentence itself, so there's exactly one place that owns
+  // its exact wording.
+  const windowsFlag=windowsRequested||(flowMode==='quick'&&quickSelectedServices.has('windows'));
   return {
     source:'Turnkey quote widget',
     business_id:TURNKEY_BUSINESS_ID,
-    requestType:flowMode, // 'map' | 'quick' | 'windows' — so the CRM can label/handle the lead without having to infer it from which fields are empty
+    requestType:flowMode, // 'map' | 'quick' — so the CRM can label/handle the lead without having to infer it from which fields are empty
+    windowsRequested:windowsFlag,
     customer:{
-      name:document.getElementById('c-name').value.trim(),
+      name:(document.getElementById('c-first-name').value.trim()+' '+document.getElementById('c-last-name').value.trim()).trim(),
+      firstName:document.getElementById('c-first-name').value.trim(),
+      lastName:document.getElementById('c-last-name').value.trim(),
       phone:document.getElementById('c-phone').value.trim(),
       email:document.getElementById('c-email').value.trim(),
       address:document.getElementById('c-addr').value.trim(),
       timing:isMapped?document.getElementById('c-timing').value:'As soon as possible',
-      source:sourceTag,
+      // "How did you find us?" is asked (and required) in both flows now,
+      // so this always carries the customer's real answer — it's no longer
+      // overloaded as a flow-identifying tag (requestType covers that).
+      source:document.getElementById('c-source').value,
       notes:notesPrefix+document.getElementById('c-notes').value.trim()
     },
     // geoPts (real lat/lng per point) is what lets the business reopen this
@@ -1468,8 +1583,8 @@ function buildPayload(){
     // are only valid for the exact pan/zoom state of THIS drawing session.
     // If the customer panned/zoomed while drawing, replaying bare pixel
     // coordinates onto a independently-recentred business-side map could
-    // put the polygon in visibly the wrong spot. Empty for quick/windows —
-    // there's nothing drawn to send, the business prices those manually.
+    // put the polygon in visibly the wrong spot. Empty for quick — there's
+    // nothing drawn to send, the business prices those manually.
     areas:isMapped?areas.map(a=>({service:a.svc,label:SERVICES[a.svc].label,size:a.size,unit:SERVICES[a.svc].unit,rate:effectiveRate(a),price:Math.round(a.size*effectiveRate(a)),storeys:a.storeys||null,points:a.pts,geoPts:a.geoPts||null})):[],
     mapCenter:(isMapped&&_lastLat&&_lastLng)?{lat:_lastLat,lng:_lastLng,zoom:SAT_ZOOM}:null,
     estimateRange:isMapped?{min,max,total:base,currency:'NZD'}:null,
@@ -1480,16 +1595,22 @@ function buildPayload(){
   };
 }
 async function submitRequest(){
-  const name=document.getElementById('c-name').value.trim();
+  const firstName=document.getElementById('c-first-name').value.trim();
+  const lastName=document.getElementById('c-last-name').value.trim();
   const phone=document.getElementById('c-phone').value.trim();
   const email=document.getElementById('c-email').value.trim();
   const addr=document.getElementById('c-addr').value.trim();
-  if(!name){alert('Please add your name');return;}
+  const source=document.getElementById('c-source').value;
+  if(!firstName){alert('Please add your first name');return;}
+  if(!lastName){alert('Please add your last name');return;}
   if(!phone){alert('Please add a phone number so we can reach you');return;}
   if(!email){alert('Please add an email so we can send your quote');return;}
   if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){alert('That email address doesn’t look right — please check it');return;}
   if(!addr){alert('Please add the property address');return;}
-  if(flowMode==='quick'&&!document.getElementById('c-service').value){alert('Please choose the service you need');return;}
+  if(!source){alert('Please let us know how you found us');return;}
+  if(flowMode==='quick'&&!quickSelectedServices.size){alert('Please choose at least one service you need');return;}
+  if(!document.getElementById('c-terms').checked){alert('Please accept the Terms & Conditions to continue');return;}
+  if(!document.getElementById('c-important').checked){alert('Please confirm you\'ve read the important information to continue');return;}
   if(window.TURNKEY_WEBHOOK&&!TURNKEY_BUSINESS_ID){alert('This booking link looks incomplete — please ask the business for their correct booking link.');return;}
   const payload=buildPayload();
   const status=document.getElementById('submit-status');
@@ -1527,15 +1648,20 @@ function showSuccess(p){
   document.querySelector('.steps').classList.add('hidden');
   document.querySelector('.hero').classList.add('hidden');
   const s=document.getElementById('success');s.classList.remove('hidden');
+  // Windows never gets a fake price whichever flow it rode in on — always
+  // its own "no price yet" line, separate from any real mapped total.
+  const windowsRow=p.windowsRequested?`<div class="rrow"><span class="rk">Additional request</span><span>Window cleaning — pending assessment</span></div>`:'';
   if(p.areas&&p.areas.length){
     const rows=p.areas.map(a=>`<div class="rrow"><span class="rk">${a.label} · ${a.size}${a.unit}</span><span>$${(a.price||0).toLocaleString()}</span></div>`).join('');
     document.getElementById('recap').innerHTML=rows+
       `<div class="rrow"><span class="rk">Estimated range</span><span style="font-weight:600">$${p.estimateRange.min.toLocaleString()}–$${p.estimateRange.max.toLocaleString()}</span></div>`+
+      windowsRow+
       `<div class="rrow"><span class="rk">We'll contact</span><span>${p.customer.phone||p.customer.email}</span></div>`;
     document.getElementById('success-msg').textContent=`Thanks ${p.customer.name.split(' ')[0]||''}! Your mapped areas are on their way. We'll send a firm quote ${p.customer.timing==='As soon as possible'?'shortly':'soon'}.`;
   }else{
-    // quick-quote / windows-request — nothing measured, no estimate to recap.
-    document.getElementById('recap').innerHTML=`<div class="rrow"><span class="rk">We'll contact</span><span>${p.customer.phone||p.customer.email}</span></div>`;
+    // quick enquiry (or a map-flow visit that only toggled windows, nothing
+    // drawn) — nothing measured, no estimate to recap.
+    document.getElementById('recap').innerHTML=windowsRow+`<div class="rrow"><span class="rk">We'll contact</span><span>${p.customer.phone||p.customer.email}</span></div>`;
     document.getElementById('success-msg').textContent=`Thanks ${p.customer.name.split(' ')[0]||''}! We've got your request and will prepare your quote shortly.`;
   }
   window.scrollTo({top:0,behavior:'smooth'});
@@ -1543,6 +1669,9 @@ function showSuccess(p){
 function startOver(){
   clearAll();
   flowMode=null;
+  windowsRequested=false;
+  quickSelectedServices=new Set();
+  const addonNote=document.getElementById('windows-addon-note');if(addonNote)addonNote.classList.add('hidden');
   document.getElementById('success').classList.add('hidden');
   document.getElementById('mode-choice').classList.remove('hidden');
   document.querySelector('.steps').classList.add('hidden');
@@ -1550,8 +1679,10 @@ function startOver(){
   document.getElementById('builder').classList.add('hidden');
   document.getElementById('details').classList.add('hidden');
   document.getElementById('integration').classList.add('hidden');
-  ['c-name','c-phone','c-email','c-notes','c-date','c-photos'].forEach(id=>document.getElementById(id).value='');
-  const svcSel=document.getElementById('c-service');if(svcSel)svcSel.value='';
+  ['c-first-name','c-last-name','c-phone','c-email','c-notes','c-date','c-photos'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('c-source').value='';
+  document.getElementById('c-terms').checked=false;
+  document.getElementById('c-important').checked=false;
   selectedPhotos=[];
   const ps=document.getElementById('c-photos-status');if(ps)ps.textContent='';
   updateStep(1);window.scrollTo({top:0,behavior:'smooth'});
@@ -1629,6 +1760,11 @@ stage.addEventListener('dblclick',e=>{e.preventDefault();const minPts=SERVICES[a
 buildMap();buildSvcPicker();updateHint();initPointDragHandlers();initMapGestures();initWheelZoom();
 // On load: if we already have a key and an address, drop satellite immediately.
 setTimeout(tryAutoSatellite,60);
+// ?mode=map / ?mode=services deep link — skip #mode-choice and jump
+// straight into the matching flow, same as if the customer had just
+// clicked that card themselves. Runs after the init calls above so the map
+// (buildMap/buildSvcPicker) and the details form are both already wired.
+if(URL_MODE)chooseFlow(URL_MODE==='map'?'map':'quick');
 </script>
 </body>
 </html>
