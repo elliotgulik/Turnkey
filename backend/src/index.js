@@ -214,13 +214,31 @@ app.post('/api/leads', leadsRateLimit, async (req, res) => {
     // Fire-and-forget: a push failure must never fail the lead submission
     // itself (sendNotification already never throws, but the lead response
     // below doesn't wait on it either way).
-    sendNotification(authClient, {
-      business_id: payload.business_id,
-      type: 'new_lead',
-      title: 'New enquiry received',
-      message: 'New customer enquiry from ' + (payload.customer.name || 'a customer'),
-      url: '/index.html?open=pipeline'
-    }).catch((err) => console.error('new_lead notification failed', err))
+    //
+    // Message includes the service(s) requested and address where available
+    // — requestedServices/windowsRequested/customer.address are all fields
+    // booking.html's buildPayload() already sends (see its own comments),
+    // not new payload shape here. Kept short (push notifications truncate),
+    // so only the first requested service is named plus a "+N more" count
+    // rather than listing everything.
+    {
+      const services = Array.isArray(payload.requestedServices) ? payload.requestedServices : []
+      let serviceText = services.length
+        ? services[0] + (services.length > 1 ? ' +' + (services.length - 1) + ' more' : '')
+        : (payload.windowsRequested ? 'windows quote' : null)
+      if (!serviceText && payload.windowsRequested) serviceText = 'windows quote'
+      else if (serviceText && payload.windowsRequested && services.length) serviceText += ' + windows'
+      const parts = [payload.customer.name || 'A customer']
+      if (serviceText) parts.push('requested ' + serviceText)
+      if (payload.customer.address) parts.push('at ' + payload.customer.address)
+      sendNotification(authClient, {
+        business_id: payload.business_id,
+        type: 'new_lead',
+        title: 'New quote request received',
+        message: parts.join(' — '),
+        url: '/index.html?open=pipeline'
+      }).catch((err) => console.error('new_lead notification failed', err))
+    }
 
     res.status(201).json({
       ok: true,
@@ -254,10 +272,17 @@ app.post('/api/leads', leadsRateLimit, async (req, res) => {
 // from the request body) to resolve subscriptions and to scope the
 // in-app-history row correctly.
 app.post('/api/notifications/send', requireBusiness, async (req, res) => {
-  const { type, title, message, url } = req.body || {}
+  const { type, title, message, url, user_id } = req.body || {}
   if (!title || !message) return res.status(400).json({ error: 'title and message are required' })
   try {
-    const result = await sendNotification(authClient, { business_id: req.businessId, type, title, message, url })
+    // user_id (job_assigned) is taken from the request body, but it can
+    // never target another business's staff member — sendNotification's
+    // subscription lookup ANDs business_id (req.businessId, from the
+    // caller's own verified session, never trusted from the body) with
+    // user_id, and a foreign user's subscription is never tagged with this
+    // caller's business_id, so at worst a wrong/foreign id just matches zero
+    // devices rather than reaching someone outside the caller's business.
+    const result = await sendNotification(authClient, { business_id: req.businessId, type, title, message, url, user_id: user_id || undefined })
     res.json(result)
   } catch (err) {
     console.error('POST /api/notifications/send', err)
@@ -306,20 +331,51 @@ app.post('/api/notifications/quote-viewed', notifyRateLimit, async (req, res) =>
 // the client claims, so a tampered request can't fabricate a notification
 // about a different business.
 app.post('/api/notifications/quote-responded', notifyRateLimit, async (req, res) => {
-  const { token, action } = req.body || {}
-  if (!token || action !== 'accept') return res.json({ ok: true, skipped: 'not_an_acceptance' }) // only "approved" is a push event per the spec — decline/question aren't
+  const { token, action, message } = req.body || {}
+  // accept/decline/question all push now — the RPC (respond_to_public_quote)
+  // already writes the real state change and activity_log row for each;
+  // this only ever fires the notification on top, re-deriving the
+  // customer/business from the DB by token rather than trusting the
+  // request body, so a tampered request can't fabricate a notification for
+  // a different business.
+  if (!token || (action !== 'accept' && action !== 'decline' && action !== 'question')) {
+    return res.json({ ok: true, skipped: 'not_a_notifiable_action' })
+  }
   try {
     const { data: quote, error: qErr } = await authClient
       .from('quotes').select('id, business_id, lead_id').eq('public_token', token).maybeSingle()
     if (qErr) throw qErr
     if (!quote) return res.status(404).json({ error: 'Quote not found' })
     const { data: customer } = await authClient.from('customers').select('name').eq('id', quote.lead_id).maybeSingle()
-    const result = await sendNotification(authClient, {
-      business_id: quote.business_id, type: 'quote_accepted',
-      title: 'Quote approved',
-      message: (customer?.name || 'A customer') + ' approved your quote',
-      url: '/index.html?open=pipeline'
-    })
+    const name = customer?.name || 'A customer'
+    let result
+    if (action === 'accept') {
+      result = await sendNotification(authClient, {
+        business_id: quote.business_id, type: 'quote_accepted',
+        title: 'Quote approved',
+        message: name + ' approved your quote',
+        url: '/index.html?open=pipeline'
+      })
+    } else if (action === 'decline') {
+      result = await sendNotification(authClient, {
+        business_id: quote.business_id, type: 'quote_declined',
+        title: 'Quote declined',
+        message: name + ' declined your quote',
+        url: '/index.html?open=pipeline'
+      })
+    } else {
+      // question — genuine customer-activity event (Phase 7): a message
+      // typed on the public quote page with no other alert path today, so
+      // without this an operator would only find out by happening to open
+      // the customer's profile and noticing the activity_log entry.
+      const trimmed = typeof message === 'string' ? message.trim().slice(0, 200) : ''
+      result = await sendNotification(authClient, {
+        business_id: quote.business_id, type: 'customer_question',
+        title: 'Customer asked a question',
+        message: name + (trimmed ? ': "' + trimmed + '"' : ' asked a question about their quote'),
+        url: '/index.html?open=pipeline'
+      })
+    }
     res.json(result)
   } catch (err) {
     console.error('POST /api/notifications/quote-responded', err)
@@ -798,6 +854,22 @@ const AUTOMATION_LIFECYCLE_DEFAULTS = {
 function fillAutomationTemplate(str, vars) {
   return (str || '').replace(/\{\{\s*([a-z_]+)\s*\}\}/gi, (m, k) => (vars[k] != null ? vars[k] : m))
 }
+// Owner-facing push counterpart to sendAutomationEmail() above, for the two
+// events that (like invoice_overdue) have no real-time trigger to hook —
+// "tomorrow" and "today" are just true as of the date, not something that
+// "happens" — so both ride this same daily sweep instead. Reuses
+// lifecycle_email_log for dedup (same table sendAutomationEmail() already
+// checks, just a distinct key namespace: '..._push' vs the plain email
+// key) rather than a new table, since the check-then-insert pattern it
+// already provides is exactly what's needed here too.
+async function sendJobOwnerPushOnce(businessId, job, pushKey, notifyOpts) {
+  const { data: already } = await authClient.from('lifecycle_email_log').select('id')
+    .eq('business_id', businessId).eq('job_id', job.id).eq('key', pushKey).maybeSingle()
+  if (already) return false
+  await sendNotification(authClient, { business_id: businessId, ...notifyOpts })
+  await authClient.from('lifecycle_email_log').insert({ business_id: businessId, job_id: job.id, key: pushKey })
+  return true
+}
 async function sendAutomationEmail(businessId, job, key, invoice) {
   const { data: already } = await authClient.from('lifecycle_email_log').select('id')
     .eq('business_id', businessId).eq('job_id', job.id).eq('key', key).maybeSingle()
@@ -843,7 +915,7 @@ app.post('/api/automations/run-due', async (req, res) => {
   const provided = req.get('X-Automation-Key') || req.query.key
   if (provided !== cronKey) return res.status(401).json({ error: 'Invalid automation key' })
   try {
-    const results = { day_before_reminder: 0, invoice_overdue: 0, errors: 0 }
+    const results = { day_before_reminder: 0, job_tomorrow_push: 0, job_today_push: 0, invoice_overdue: 0, errors: 0 }
     const today = new Date(); today.setUTCHours(0, 0, 0, 0)
     const tomorrow = new Date(today); tomorrow.setUTCDate(tomorrow.getUTCDate() + 1)
     const tomorrowISO = tomorrow.toISOString().slice(0, 10)
@@ -853,6 +925,26 @@ app.post('/api/automations/run-due', async (req, res) => {
     for (const job of jobs || []) {
       try { if (await sendAutomationEmail(job.business_id, job, 'day_before_reminder')) results.day_before_reminder++ }
       catch (e) { console.error('day_before_reminder failed for job', job.id, e); results.errors++ }
+      try {
+        const { data: customer } = await authClient.from('customers').select('name').eq('id', job.customer_id).maybeSingle()
+        if (await sendJobOwnerPushOnce(job.business_id, job, 'job_tomorrow_push', {
+          type: 'job_tomorrow', title: 'Job scheduled for tomorrow',
+          message: (customer && customer.name ? customer.name : 'A customer') + "'s job is scheduled for tomorrow",
+          url: '/index.html?open=calendar'
+        })) results.job_tomorrow_push++
+      } catch (e) { console.error('job_tomorrow push failed for job', job.id, e); results.errors++ }
+    }
+
+    const { data: todayJobs } = await authClient.from('jobs').select('*').eq('scheduled_date', todayISO).eq('status', 'scheduled')
+    for (const job of todayJobs || []) {
+      try {
+        const { data: customer } = await authClient.from('customers').select('name').eq('id', job.customer_id).maybeSingle()
+        if (await sendJobOwnerPushOnce(job.business_id, job, 'job_today_push', {
+          type: 'job_today', title: "Today's job reminder",
+          message: (customer && customer.name ? customer.name : 'A customer') + "'s job is scheduled for today",
+          url: '/index.html?open=calendar'
+        })) results.job_today_push++
+      } catch (e) { console.error('job_today push failed for job', job.id, e); results.errors++ }
     }
 
     const { data: invoices } = await authClient.from('invoices').select('*').eq('paid', false).lt('due_date', todayISO)

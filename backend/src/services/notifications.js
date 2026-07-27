@@ -53,9 +53,13 @@ async function pushToOneSignal(subscriptionIds, { title, message, url }) {
 //   })
 export async function sendNotification(supabase, { business_id, type, title, message, url, user_id }) {
   if (!business_id || !title || !message) {
-    console.error('sendNotification: missing required field(s)', { business_id, title, message })
+    console.error('[Notify] missing required field(s)', { business_id, type, title, message })
     return { ok: false, error: 'missing_required_field' }
   }
+
+  // "recipient" for logging purposes below — the whole business, or one
+  // specific staff member if user_id is scoped (see job_assigned).
+  const recipient = user_id ? `business ${business_id}, user ${user_id}` : `business ${business_id}`
 
   // Always log to the in-app notification centre (Phase 5), independent of
   // whether push actually goes out — a business that's never turned on
@@ -63,9 +67,12 @@ export async function sendNotification(supabase, { business_id, type, title, mes
   const { error: logErr } = await supabase.from('notifications').insert({
     business_id, user_id: user_id || null, type: type || 'general', title, message, url: url || null
   })
-  if (logErr) console.error('sendNotification: failed to log notification', type, logErr)
+  if (logErr) console.error('[Notify] failed to write in-app notification row', { type, recipient, error: logErr })
 
-  if (!isConfigured()) return { ok: true, skipped: 'onesignal_not_configured' }
+  if (!isConfigured()) {
+    console.log('[Notify]', type || 'general', '→', recipient, '— skipped: OneSignal not configured (in-app row still written)')
+    return { ok: true, skipped: 'onesignal_not_configured' }
+  }
 
   try {
     // Settings → Notifications lets a business turn push off for one
@@ -76,7 +83,10 @@ export async function sendNotification(supabase, { business_id, type, title, mes
     if (type) {
       const { data: pref } = await supabase.from('notification_preferences')
         .select('push_enabled').eq('business_id', business_id).eq('event', type).maybeSingle()
-      if (pref && pref.push_enabled === false) return { ok: true, skipped: 'push_disabled_for_event' }
+      if (pref && pref.push_enabled === false) {
+        console.log('[Notify]', type, '→', recipient, '— skipped: push disabled for this event in Settings')
+        return { ok: true, skipped: 'push_disabled_for_event' }
+      }
     }
 
     let q = supabase.from('notification_subscriptions').select('onesignal_subscription_id').eq('business_id', business_id).eq('enabled', true)
@@ -84,10 +94,19 @@ export async function sendNotification(supabase, { business_id, type, title, mes
     const { data: subs, error: subErr } = await q
     if (subErr) throw subErr
     const ids = (subs || []).map(s => s.onesignal_subscription_id)
+    if (!ids.length) {
+      console.log('[Notify]', type || 'general', '→', recipient, '— no enabled device subscriptions found, nothing to push to (in-app row still written)')
+      return { ok: true, skipped: 'no_subscriptions' }
+    }
     const result = await pushToOneSignal(ids, { title, message, url })
+    // "OneSignal response" — logged in full so a push that OneSignal
+    // accepted but silently dropped (e.g. 0 recipients on their end due to
+    // an invalid/stale subscription id) is visible here instead of only
+    // showing as a false "success".
+    console.log('[Notify]', type || 'general', '→', recipient, `(${ids.length} device${ids.length === 1 ? '' : 's'}) — OneSignal response:`, JSON.stringify(result))
     return { ok: true, sentTo: ids.length, result }
   } catch (err) {
-    console.error('sendNotification: OneSignal push failed', type, business_id, err.message)
+    console.error('[Notify] OneSignal push FAILED', { type, recipient, error: err.message })
     return { ok: false, error: err.message }
   }
 }

@@ -429,10 +429,14 @@ async function respond(action,message){
       if(msgEl){msgEl.textContent='Question sent — '+((currentQuote&&currentQuote.business&&currentQuote.business.name)||'the team')+' will be in touch.';msgEl.className='msg ok';}
       document.getElementById('question-box').classList.remove('open');
       document.getElementById('question-text').value='';
+      notifyBackend('/api/notifications/quote-responded',{token,action,message});
     }else{
       currentQuote.status=result.status;
       renderQuote(currentQuote);
-      if(action==='accept')notifyBackend('/api/notifications/quote-responded',{token,action});
+      // Previously only 'accept' notified the business at all — a customer
+      // declining got no push whatsoever, the same silent-gap class of bug
+      // as the "question" case above.
+      notifyBackend('/api/notifications/quote-responded',{token,action});
     }
   }catch(e){
     if(btn&&action==='accept')btn.disabled=false;
