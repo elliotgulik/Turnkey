@@ -2,7 +2,22 @@
   command = "node scripts/generate-config.js"
   publish = "."
 
-# Real files (index.html, booking.html) are served directly.
+# Real files (index.html, booking.html) are served directly — Netlify
+# always serves an existing file before falling through to a redirect rule,
+# so this happens automatically. OneSignalSDKWorker.js is called out
+# explicitly anyway (rather than relying on that implicit behaviour alone)
+# because getting this wrong has a specific, easy-to-reintroduce failure
+# mode: if this file is ever accidentally removed/renamed, the catch-all
+# below silently starts serving index.html's HTML at this URL instead of a
+# 404 — which is exactly what happened before this file existed. OneSignal
+# then fails with "unsupported MIME type ('text/html')" instead of a
+# clear 404, so this explicit passthrough makes the intent unmistakable
+# instead of depending entirely on redirect-ordering behaviour.
+[[redirects]]
+  from = "/OneSignalSDKWorker.js"
+  to = "/OneSignalSDKWorker.js"
+  status = 200
+
 # Unknown paths fall back to the CRM app.
 [[redirects]]
   from = "/*"

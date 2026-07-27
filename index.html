@@ -218,6 +218,11 @@
   .pill.bad{background:var(--coral-wash);color:var(--coral)}
   .pill.cancelled{background:#f0f0f0;color:#6b6b6b}
   .pill.travelling{background:var(--m-money-wash);color:var(--m-money)}
+  .pill.joined{background:var(--teal-wash);color:var(--teal)}
+  .pill.active-now{background:#e7f5f1;color:#0f8a78}
+  .pill.recent-active{background:var(--amber-wash);color:var(--amber)}
+  .pill.offline-status{background:var(--surface-2);color:var(--ink-faint)}
+  .pill.invite-pending{background:var(--amber-wash);color:var(--amber)}
   .pill.on_site{background:var(--m-cal-wash);color:var(--m-cal)}
   .pill.in_progress{background:var(--m-ops-wash);color:var(--m-ops)}
   .pill.paused{background:var(--amber-wash);color:var(--amber)}
@@ -306,6 +311,18 @@
   .l-cust-noresult{font-size:12.5px;color:var(--ink-faint);padding:4px 2px}
   .l-picked-card{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--teal-wash);border:1px solid #cde8df;border-radius:var(--radius-sm);padding:10px 14px;margin-bottom:16px}
   .l-picked-card .sm{font-size:11.5px;color:var(--ink-soft);margin-top:2px}
+
+  /* Requested services — the customer's raw ask, shown above the editable
+     quote line builder so staff can see what was asked for and convert any
+     of it into a real priced line with one click. */
+  .req-svc-panel{background:var(--teal-wash);border:1px solid #cde8df;border-radius:var(--radius-sm);padding:12px 14px;margin-bottom:14px}
+  .req-svc-title{font-size:11px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:#1f5d50;margin-bottom:9px}
+  .req-svc-chips{display:flex;flex-wrap:wrap;gap:7px}
+  .req-svc-chip{display:inline-flex;align-items:center;gap:7px;background:var(--surface);border:1px solid #cde8df;border-radius:980px;padding:5px 6px 5px 12px;font-size:12.5px;font-weight:600;color:var(--ink)}
+  .req-svc-chip button{font-size:11.5px;font-weight:700;color:#fff;background:var(--teal);border-radius:980px;padding:4px 10px}
+  .req-svc-chip button:hover{background:var(--teal-bright,var(--teal))}
+  .req-svc-added{font-size:11px;font-weight:700;color:var(--teal);padding:4px 6px}
+  .req-svc-windows{font-size:12px;color:#1f5d50;margin-top:10px;padding-top:10px;border-top:1px solid #cde8df}
 
   .svc-builder{display:flex;flex-direction:column;gap:10px}
   .svc-line{display:grid;grid-template-columns:1.4fr 80px 1fr auto auto;gap:8px;align-items:center;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--radius-sm);padding:11px 12px}
@@ -1305,6 +1322,7 @@
   <div class="modal-head"><div><h3>Build quote</h3><p id="q-for">—</p></div><button class="x" aria-label="Close" onclick="closeModal('quote-overlay')">×</button></div>
   <div class="modal-body">
     <div id="quote-map-zone"></div>
+    <div id="req-services-zone"></div>
     <div class="svc-builder" id="svc-builder"></div>
     <button class="add-svc" onclick="addSvcLine()">+ Add service line</button>
     <div id="assumptions-zone"></div>
@@ -2167,13 +2185,32 @@ async function saveNotificationPrefs(){
 let pushSubscribed=false;
 let pushBusy=false;
 let oneSignalReadyPromise=null;
+// initOneSignal() resolves {ok:true} or {ok:false,reason,error} — never a
+// bare boolean — so enablePushNotifications() can show the ACTUAL failure
+// reason instead of one generic "unable to connect" message for every
+// possible cause. Every step logs to console (prefixed [Push]) since the
+// most common real-world causes here (a broken sw.js deploy, an OneSignal
+// dashboard site-URL mismatch, an RLS policy blocking the Supabase write)
+// are otherwise invisible — see the equally-detailed logging throughout
+// enablePushNotifications() below.
 function initOneSignal(){
   const appId=(window.TURNKEY_CONFIG&&window.TURNKEY_CONFIG.onesignalAppId)||'';
-  if(!appId||typeof OneSignalDeferred==='undefined')return Promise.resolve(false);
+  console.log('[Push] initOneSignal() — onesignalAppId from TURNKEY_CONFIG:',appId||'(none configured)');
+  if(!appId)return Promise.resolve({ok:false,reason:'onesignalAppId is not set in config.js/TURNKEY_CONFIG'});
+  if(typeof OneSignalDeferred==='undefined')return Promise.resolve({ok:false,reason:'OneSignal SDK script (OneSignalSDK.page.js) never loaded — check the network tab for a blocked/failed request'});
   if(oneSignalReadyPromise)return oneSignalReadyPromise;
   oneSignalReadyPromise=new Promise((resolve)=>{
     OneSignalDeferred.push(async function(OneSignal){
       try{
+        // Diagnostic only — OneSignal.init() below (serviceWorkerPath:'sw.js')
+        // depends on this exact file being registrable at scope '/', same as
+        // the CRM's own PWA registration a few hundred lines down. If THAT
+        // registration failed (see its own now-unswallowed .catch()), this
+        // init is very likely to fail the same way for the same reason.
+        if('serviceWorker' in navigator){
+          const existing=await navigator.serviceWorker.getRegistration('/');
+          console.log('[Push] sw.js registration state before OneSignal.init():',existing?{scope:existing.scope,hasActiveWorker:!!existing.active,scriptURL:existing.active&&existing.active.scriptURL}:'no registration found at scope /');
+        }
         // serviceWorkerPath/serviceWorkerParam point OneSignal at this app's
         // OWN sw.js (which already imports OneSignal's worker script — see
         // sw.js's importScripts line) instead of its default expectation of a
@@ -2182,11 +2219,14 @@ function initOneSignal(){
         // omitting this is the difference between push silently failing to
         // register and actually working, since this repo already has its own
         // sw.js controlling the root scope for offline caching.
+        console.log('[Push] calling OneSignal.init({appId, serviceWorkerPath:"sw.js", serviceWorkerParam:{scope:"/"}})…');
         await OneSignal.init({appId,serviceWorkerPath:'sw.js',serviceWorkerParam:{scope:'/'}});
+        console.log('[Push] OneSignal.init() resolved OK. Current subscription id:',OneSignal.User.PushSubscription.id||'(none yet)','optedIn:',OneSignal.User.PushSubscription.optedIn);
         pushSubscribed=!!(OneSignal.User.PushSubscription.id);
         if(pushSubscribed)syncPushSubscription(OneSignal.User.PushSubscription.id);
         OneSignal.User.PushSubscription.addEventListener('change',(event)=>{
           const id=event&&event.current&&event.current.id;
+          console.log('[Push] PushSubscription "change" event — id:',id||'(none)','optedIn:',event&&event.current&&event.current.optedIn);
           pushSubscribed=!!id;
           if(id)syncPushSubscription(id);
           // The id is often still null right when enablePushNotifications()'s
@@ -2197,8 +2237,16 @@ function initOneSignal(){
           const overlay=document.getElementById('settings-overlay');
           if(overlay&&overlay.classList.contains('open'))openSettings();
         });
-        resolve(true);
-      }catch(e){console.error('OneSignal init failed',e);resolve(false);}
+        resolve({ok:true});
+      }catch(e){
+        // THIS is the exact failure point behind a generic "Unable to
+        // connect notifications" — OneSignal.init() itself rejected. Common
+        // real causes: the site URL registered in the OneSignal dashboard
+        // doesn't match this origin, sw.js failed to register (see the log
+        // above), or the App ID belongs to a different/deleted OneSignal app.
+        console.error('[Push] OneSignal.init() THREW — this is the root cause, see the error object below:',e);
+        resolve({ok:false,reason:'OneSignal.init() failed',error:e});
+      }
     });
   });
   return oneSignalReadyPromise;
@@ -2228,42 +2276,73 @@ function waitForPushSubscriptionId(timeoutMs){
 // Returns true/false instead of swallowing the error — callers that need to
 // tell the user "Could not save notification settings." (rather than
 // silently reporting success) depend on knowing whether this actually wrote.
+// Logs the full Supabase error (code/message/hint) since an RLS policy
+// blocking this write is otherwise indistinguishable from any other failure.
 async function syncPushSubscription(subscriptionId){
-  if(!sb||!currentBusinessId||!currentUserId||!subscriptionId)return false;
+  if(!sb||!currentBusinessId||!currentUserId||!subscriptionId){
+    console.warn('[Push] syncPushSubscription() skipped — missing a prerequisite:',{hasSupabaseClient:!!sb,currentBusinessId,currentUserId,subscriptionId});
+    return false;
+  }
   const {error}=await sb.from('notification_subscriptions').upsert({
     business_id:currentBusinessId,user_id:currentUserId,onesignal_subscription_id:subscriptionId,
     device_type:'web',enabled:true,updated_at:new Date().toISOString()
   },{onConflict:'onesignal_subscription_id'});
-  if(error){console.error('Save push subscription failed',error);return false;}
+  if(error){console.error('[Push] Supabase upsert to notification_subscriptions FAILED — if this is a permission/policy error, the RLS policy on that table needs to allow an authenticated user to write their own row:',error);return false;}
+  console.log('[Push] Supabase upsert to notification_subscriptions OK — subscription id',subscriptionId,'business',currentBusinessId,'user',currentUserId);
   return true;
 }
 async function enablePushNotifications(btn){
   if(pushBusy)return;
   const appId=(window.TURNKEY_CONFIG&&window.TURNKEY_CONFIG.onesignalAppId)||'';
+  const permission=('Notification' in window)?Notification.permission:'(no Notification API)';
+  console.log('[Push] Enable clicked — appId:',appId||'(none)','Notification.permission:',permission);
   if(!appId){toast('Push notifications aren’t set up for this TurnKey yet — ask your admin to configure OneSignal');return;}
   if(!('Notification' in window)){toast('Notifications aren’t supported in this browser');return;}
   if(Notification.permission==='denied'){toast('Notifications are blocked in your browser settings.');return;}
   pushBusy=true;
   if(btn){btn.disabled=true;btn.textContent='Enabling…';}
   try{
-    const ready=await initOneSignal();
-    if(!ready||typeof OneSignal==='undefined'||!OneSignal.User){toast('Unable to connect notifications. Try again.');return;}
-    await OneSignal.User.PushSubscription.optIn();
-    const id=await waitForPushSubscriptionId(8000);
-    if(!id){
-      // optIn() completed but no id ever arrived — most commonly because the
-      // permission prompt was dismissed/denied (browsers don't reject the
-      // promise for that, they just never grant a subscription).
-      toast(Notification.permission==='denied'?'Notifications are blocked in your browser settings.':'Unable to connect notifications. Try again.');
+    const initResult=await initOneSignal();
+    console.log('[Push] initOneSignal() returned:',initResult);
+    if(!initResult.ok){
+      const detail=(initResult.error&&initResult.error.message)||initResult.reason||'unknown error';
+      toast('Unable to connect notifications: '+detail);
       return;
     }
+    if(typeof OneSignal==='undefined'||!OneSignal.User){
+      console.error('[Push] initOneSignal() reported ok:true but window.OneSignal/.User is missing — unexpected SDK state');
+      toast('Unable to connect notifications: OneSignal SDK unavailable after init.');
+      return;
+    }
+    console.log('[Push] calling PushSubscription.optIn()…');
+    await OneSignal.User.PushSubscription.optIn();
+    console.log('[Push] optIn() resolved. id right now:',OneSignal.User.PushSubscription.id||'(none yet — waiting up to 8s)');
+    const id=await waitForPushSubscriptionId(8000);
+    console.log('[Push] waitForPushSubscriptionId() resolved:',id||'(still null after 8s)');
+    if(!id){
+      // optIn() completed but no id ever arrived. Distinguish WHY: the
+      // permission prompt itself is the most common cause (dismissed/denied
+      // — browsers don't reject the optIn() promise for that, they just
+      // never grant a subscription), but if permission genuinely IS
+      // 'granted' and there's still no id, the browser subscribed but
+      // OneSignal never got/returned an id for it — that points at sw.js
+      // (see the registration log above) or an OneSignal dashboard/site
+      // config issue, not a permission problem.
+      const permNow=Notification.permission;
+      console.warn('[Push] No subscription id after optIn()+8s wait. Notification.permission is now:',permNow);
+      if(permNow==='denied')toast('Notifications are blocked in your browser settings.');
+      else if(permNow!=='granted')toast('Please allow notifications when your browser asks, then try again.');
+      else toast('Unable to connect notifications: permission was granted but no subscription id came back — check that /sw.js is loading correctly (see console).');
+      return;
+    }
+    console.log('[Push] Got subscription id — saving to Supabase:',id);
     const saved=await syncPushSubscription(id);
     if(!saved){toast('Could not save notification settings.');return;}
     pushSubscribed=true;
     toast('Push notifications enabled ✓');
   }catch(e){
-    console.error('Enable push failed',e);
-    toast('Unable to connect notifications. Try again.');
+    console.error('[Push] Enable push failed — uncaught exception:',e);
+    toast('Unable to connect notifications: '+(e&&e.message?e.message:'unknown error — see console'));
   }finally{
     pushBusy=false;
     openSettings();
@@ -2351,23 +2430,26 @@ async function clearAllNotifications(){
 }
 async function disablePushNotifications(btn){
   if(pushBusy)return;
-  if(typeof OneSignal==='undefined'||!OneSignal.User){toast('Unable to connect notifications. Try again.');return;}
+  console.log('[Push] Disable clicked. OneSignal available?',typeof OneSignal!=='undefined','.User available?',typeof OneSignal!=='undefined'&&!!OneSignal.User);
+  if(typeof OneSignal==='undefined'||!OneSignal.User){toast('Unable to connect notifications: OneSignal SDK not available.');return;}
   pushBusy=true;
   if(btn){btn.disabled=true;btn.textContent='Disabling…';}
   try{
     const id=OneSignal.User.PushSubscription.id;
+    console.log('[Push] Opting out subscription id:',id||'(none)');
     await OneSignal.User.PushSubscription.optOut();
     // Row is UPDATEd to enabled:false, never deleted — keeps subscription
     // history (device_type, when it was first created) intact for support/debugging.
     if(id&&sb){
       const {error}=await sb.from('notification_subscriptions').update({enabled:false,updated_at:new Date().toISOString()}).eq('onesignal_subscription_id',id);
-      if(error){console.error('Disable push failed',error);toast('Could not save notification settings.');return;}
+      if(error){console.error('[Push] Disable — Supabase update FAILED:',error);toast('Could not save notification settings.');return;}
+      console.log('[Push] Supabase row set enabled:false for',id);
     }
     pushSubscribed=false;
     toast('Push notifications disabled');
   }catch(e){
-    console.error('Disable push failed',e);
-    toast('Unable to connect notifications. Try again.');
+    console.error('[Push] Disable push failed — uncaught exception:',e);
+    toast('Unable to connect notifications: '+(e&&e.message?e.message:'unknown error — see console'));
   }finally{
     pushBusy=false;
     openSettings();
@@ -2386,7 +2468,7 @@ function newRecord(d){return Object.assign({
   skipChecklist:!workflowConfig.requireChecklist,
   photoBefore:false,photoAfter:false,startedAt:null,repeat:'no',callback:false,email:'',
   tech:'Unassigned',gps:'pending',scheduledDate:null,scheduledIdx:null,scheduledDateISO:null,createdAt:Date.now(),follows:[],
-  quoteSentAt:null,clientResponded:false,paidAt:null,approvedAt:null,lastServiceDaysAgo:null,assumptions:null,areaPolys:null,selfPriced:false,windowsRequested:false,
+  quoteSentAt:null,clientResponded:false,paidAt:null,approvedAt:null,lastServiceDaysAgo:null,assumptions:null,areaPolys:null,selfPriced:false,windowsRequested:false,requestedServices:[],
   hasCustomerPhoto:false,customerPhotoPath:null,quoteAttachments:[],assignedStaffId:null,
   paymentStatus:'draft',paymentMethod:null,dueDate:null,payments:[],
   jobStatus:null,statusHistory:[],jobNotes:null,weatherSnapshot:null
@@ -2619,7 +2701,59 @@ function openQuoteModal(id){
   renderQuoteMap(r);
 
   if(!draftLines.length)draftLines=[{svc:'driveway',qty:''}];
-  renderSvcLines();renderQuoteAttachList();openModal('quote-overlay');
+  renderSvcLines();renderRequestedServicesZone();renderQuoteAttachList();openModal('quote-overlay');
+}
+// The customer's raw ask (getRequestedServices()) vs draftLines (the
+// operator's actual priced quote lines) are deliberately two separate
+// things — this panel is a checklist over the top of the line builder
+// below, not a second copy of it. "+ Add to quote" converts one requested
+// item into a real draftLines entry; a mapped quote's areas already flow
+// into draftLines automatically (see the polygon-aggregation code near
+// renderQuoteMap()), so this mainly matters for quick-enquiry leads that
+// have no measurements to auto-populate from.
+function renderRequestedServicesZone(){
+  const zone=document.getElementById('req-services-zone');if(!zone)return;
+  const r=records.find(x=>x.id===activeLeadId);
+  if(!r){zone.innerHTML='';return;}
+  const rs=getRequestedServices(r);
+  if(!rs.length&&!r.windowsRequested){zone.innerHTML='';return;}
+  const chips=rs.map((s,i)=>{
+    // Existence, not a filled-in qty — addRequestedServiceToQuote() deliberately
+    // leaves qty blank for the operator to fill in, so requiring qty>0 here
+    // would show "+ Add to quote" again immediately after converting it.
+    const already=s.service_id&&draftLines.some(l=>l.svc===s.service_id);
+    return `<span class="req-svc-chip"><span style="color:var(--teal)">✓</span>${(s.name||'').replace(/</g,'&lt;')}${
+      already?'<span class="req-svc-added">Added</span>':`<button type="button" onclick="addRequestedServiceToQuote(${i})">+ Add to quote</button>`
+    }</span>`;
+  }).join('');
+  // Windows is never converted to a priced line — Phase 6 of the booking-
+  // flow spec: no automatic pricing for it, ever.
+  const windowsLine=r.windowsRequested?`<div class="req-svc-windows">Additional request: <strong>Windows quote requested</strong> — no automatic pricing, prepare separately.</div>`:'';
+  zone.innerHTML=`<div class="req-svc-panel"><div class="req-svc-title">Customer requested</div><div class="req-svc-chips">${chips}</div>${windowsLine}</div>`;
+}
+// Converts one requested-service entry into a real draftLines entry. When
+// its service_id maps to a real pricing-engine service, that service is
+// pre-selected; when it doesn't (solar/pavers/spider/other have no priced
+// equivalent), it adds a blank line for the operator to price manually,
+// same as clicking "+ Add service line" — this never fabricates a rate for
+// something the app has no cost model for.
+function addRequestedServiceToQuote(i){
+  const r=records.find(x=>x.id===activeLeadId);if(!r)return;
+  const rs=getRequestedServices(r);
+  const s=rs[i];if(!s)return;
+  const svcKey=s.service_id&&SERVICES[s.service_id]?s.service_id:null;
+  const line=svcKey?{svc:svcKey,qty:''}:{svc:'driveway',qty:''};
+  // Replace the single still-untouched default placeholder line (addSvcLine/
+  // openQuoteModal's own default) instead of leaving it sitting empty
+  // alongside the real one being added.
+  if(draftLines.length===1&&draftLines[0].svc==='driveway'&&!(parseFloat(draftLines[0].qty)>0)&&draftLines[0].fixedPrice==null){
+    draftLines[0]=line;
+  }else{
+    draftLines.push(line);
+  }
+  if(!svcKey)toast('Added a blank line — choose the closest matching service for “'+s.name+'” and set its price');
+  renderSvcLines();
+  renderRequestedServicesZone();
 }
 function pickQuoteAttachment(){document.getElementById('quote-attach-input').click();}
 async function onQuoteAttachChosen(input){
@@ -3605,6 +3739,11 @@ function renderSvcLines(){
     wrap.appendChild(el);
   });
   updateQuoteTotal();
+  // Keep the requested-services chips' Added/+ state in sync with whatever
+  // staff just changed here (picked a different service, removed a line,
+  // etc.) — not hooked into every keystroke (qty/price inputs call
+  // updateQuoteTotal() directly, not this), just every structural change.
+  if(typeof renderRequestedServicesZone==='function')renderRequestedServicesZone();
 }
 function toggleFixedPrice(i){
   const line=draftLines[i];
@@ -4650,7 +4789,20 @@ function openDetail(id){
             ${r.hasCustomerPhoto?`<button class="btn ghost sm" onclick="viewCustomerPhoto(${id})">View</button>`:''}
           </div>
         </div>
-        <div class="panel"><h4>Quote <span class="eng-badge">Pricing</span></h4>${svcRows}
+        <div class="panel"><h4>Quote <span class="eng-badge">Pricing</span></h4>
+          <!-- Only shown when there's nothing priced yet — a mapped lead's
+               svcRows below already lists every requested service with real
+               measurements/pricing, so this would just repeat the same names.
+               A quick-enquiry lead has no priced lines at all, so this is the
+               only place its requested services are visible without opening
+               notes — "do not rely only on notes" per the booking-flow spec.
+               getRequestedServices() also self-heals leads created before
+               this field existed, by parsing the legacy notes sentence. -->
+          ${(()=>{const rs=r.services.length===0?getRequestedServices(r):[];return rs.length?`<div style="background:var(--surface-2);border-radius:8px;padding:10px 12px;margin-bottom:10px">
+            <div style="font-weight:600;color:var(--ink);font-size:12.5px;margin-bottom:8px">Requested services</div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px">${rs.map(s=>`<span style="display:inline-flex;align-items:center;gap:4px;background:var(--surface);border:1px solid var(--line);border-radius:980px;padding:4px 10px;font-size:12.5px;font-weight:600;color:var(--ink)"><span style="color:var(--teal)">✓</span>${(s.name||'').replace(/</g,'&lt;')}</span>`).join('')}</div>
+          </div>`:'';})()}
+          ${svcRows}
           ${r.windowsRequested?`<div class="kv" style="background:var(--teal-wash);border-radius:8px;padding:8px 10px;margin-top:6px"><span class="k" style="color:#1f5d50">Additional request<br><span style="font-weight:600">Windows quote requested</span></span><span class="v" style="color:#1f5d50;font-weight:600">Pending assessment</span></div>`:''}
           <div class="kv" style="border-top:1px solid var(--line);margin-top:6px;padding-top:10px"><span class="k" style="font-weight:600;color:var(--ink)">Total <span class="seg">${segOf(r.total)} job</span></span><span class="v" style="font-size:18px;color:var(--teal)">${money(r.total)}</span></div>
           ${r.stage==='new'||r.services.length===0?`<button class="btn primary block" style="margin-top:14px" onclick="openQuoteModal(${id})">Build quote</button>`:`<button class="btn ghost block" style="margin-top:14px" onclick="openQuoteModal(${id})">Edit quote</button>`}
@@ -5270,7 +5422,9 @@ async function renderInbox(){
   }
   zone.innerHTML=`<div class="view-head"><div><h2>Inbox</h2><p>Connected as ${emailAccount.email_address}</p></div><button class="btn accent sm" onclick="openComposeModal()">✎ Compose</button></div>
     <div id="inbox-body"><div class="empty-state"><div class="sm">Loading…</div></div></div>`;
-  const {data,error}=await sb.from('emails').select('*').order('sent_at',{ascending:false}).limit(200);
+  // Explicit business_id filter as defense-in-depth alongside RLS — same
+  // reasoning as loadFromSupabase()'s customers/jobs/invoices fix.
+  const {data,error}=await sb.from('emails').select('*').eq('business_id',currentBusinessId).order('sent_at',{ascending:false}).limit(200);
   if(error){document.getElementById('inbox-body').innerHTML='<div class="empty-state"><div class="sm">Could not load emails — try again, or contact support if it keeps happening.</div></div>';console.error('Load emails failed',error);return;}
   const byThread={};
   (data||[]).forEach(e=>{const key=e.thread_id||e.id;if(!byThread[key])byThread[key]=[];byThread[key].push(e);});
@@ -5853,7 +6007,10 @@ function flowStepIndex(stage){
 // Technicians see only jobs assigned to them — client-side scoping to match
 // the Worker permission tier ("assigned jobs only"). This is UI-level, same
 // caveat as applyRoleVisibility(): real enforcement is Supabase RLS, which
-// today only isolates by business, not by assignment within it.
+// today only isolates by business, not by assignment within it — reviewed
+// and accepted as-is for now (staff are trusted operators, not the general
+// public); revisit with a real per-assignment RLS policy if that trust
+// model ever changes.
 function jobsFlowScope(){
   if(currentUserRole!=='technician')return records;
   return records.filter(r=>r.assignedStaffId===currentUserId);
@@ -7277,8 +7434,13 @@ async function handleForgotPassword(){
   setAuthMsg('Sending a reset link…');
   const {error}=await sb.auth.resetPasswordForEmail(email,{redirectTo:window.location.origin+window.location.pathname});
   setAuthBusy(false);
+  // resetPasswordForEmail() itself never reveals whether the email exists
+  // — Supabase returns success either way; an error here means something
+  // actually went wrong (rate limit, malformed address, the project's email
+  // sending being down), not "no such account". The success copy is worded
+  // the same way regardless, so this stays true even if that changes.
   if(error){setAuthMsg(friendlyAuthError(error.message));return;}
-  setAuthMsg('Check your email for a link to reset your password.',true);
+  setAuthMsg('If an account exists with this email, a password reset link has been sent.',true);
 }
 async function handlePasswordRecoverySubmit(){
   if(!sb)return;
@@ -7287,10 +7449,29 @@ async function handlePasswordRecoverySubmit(){
   document.getElementById('auth-recovery-btn').disabled=true;
   setRecoveryMsg('Saving…');
   const {error}=await sb.auth.updateUser({password});
+  if(error){
+    document.getElementById('auth-recovery-btn').disabled=false;
+    setRecoveryMsg(friendlyAuthError(error.message));
+    return;
+  }
+  setRecoveryMsg('Password updated — signing you in…',true);
+  // The session this recovery flow already has is a real, valid one —
+  // Supabase's PASSWORD_RECOVERY event just labels it differently, and that
+  // event handler deliberately skips handleAuthedSession() so the recovery
+  // form shows instead of the app. Nothing ever called it afterward either,
+  // so a successful reset previously just hid the recovery card and left a
+  // blank overlay with no path back into the app — this is the actual
+  // fix, not just the message.
+  const {data:{session}}=await sb.auth.getSession();
   document.getElementById('auth-recovery-btn').disabled=false;
-  if(error){setRecoveryMsg(friendlyAuthError(error.message));return;}
-  setRecoveryMsg('Password updated — you\u2019re signed in.',true);
-  setTimeout(()=>{ document.getElementById('auth-card-recovery').style.display='none'; },900);
+  if(session){
+    setTimeout(()=>{ document.getElementById('auth-card-recovery').style.display='none'; handleAuthedSession(session); },700);
+  }else{
+    // No session for some reason (expired recovery link, etc.) — fall
+    // back to a normal sign-in screen with the new password already usable,
+    // rather than leaving the user stuck on a blank overlay.
+    setTimeout(()=>{ showAuth(); setAuthMsg('Password updated — sign in with your new password.',true); },700);
+  }
 }
 async function handleSignUp(){
   if(!sb){setAuthMsg('Turnkey isn\u2019t finished setting up yet \u2014 contact support');return;}
@@ -7353,6 +7534,30 @@ async function handleAuthedSession(session){
   retryPendingPhotos();
   initOneSignal();
   loadNotificationCentre();
+  startLastSeenHeartbeat();
+}
+// Real "last active in the app" tracking for the Team page's Active now/
+// Recently active/Offline status — auth.users.last_sign_in_at exists but
+// isn't reachable from the frontend and only reflects login time, not
+// current activity (a long-lived session would show as offline for hours
+// even while genuinely in use). This pings on session start and every 4
+// minutes after, only while the tab is visible — no point writing "still
+// here" from a backgrounded/closed tab. Stopped on sign-out so a stale
+// timer doesn't keep firing writes for a session that no longer exists.
+let lastSeenTimer=null;
+async function pingLastSeen(){
+  if(!sb||!currentUserId||document.visibilityState==='hidden')return;
+  const {error}=await sb.from('users').update({last_seen_at:new Date().toISOString()}).eq('id',currentUserId);
+  if(error)console.error('pingLastSeen failed',error);
+}
+function startLastSeenHeartbeat(){
+  if(lastSeenTimer)return;
+  pingLastSeen();
+  lastSeenTimer=setInterval(pingLastSeen,4*60*1000);
+  document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible')pingLastSeen(); });
+}
+function stopLastSeenHeartbeat(){
+  if(lastSeenTimer){clearInterval(lastSeenTimer);lastSeenTimer=null;}
 }
 
 /* ===== Team: staff list, invites, roles =====
@@ -7374,10 +7579,12 @@ let staff=[];
 let pendingInvites=[];
 async function loadStaffAndInvites(){
   if(!sb||!currentBusinessId)return;
-  const {data:s,error:se}=await sb.from('users').select('*').order('created_at',{ascending:true});
+  // Explicit business_id filter as defense-in-depth alongside RLS — same
+  // reasoning as loadFromSupabase()'s customers/jobs/invoices fix.
+  const {data:s,error:se}=await sb.from('users').select('*').eq('business_id',currentBusinessId).order('created_at',{ascending:true});
   if(!se)staff=s||[];
   if(currentUserRole==='owner'||currentUserRole==='manager'){
-    const {data:inv,error:ie}=await sb.from('invites').select('*').is('accepted_at',null).order('created_at',{ascending:true});
+    const {data:inv,error:ie}=await sb.from('invites').select('*').eq('business_id',currentBusinessId).is('accepted_at',null).order('created_at',{ascending:true});
     if(!ie)pendingInvites=inv||[];
   }else pendingInvites=[];
 }
@@ -7387,21 +7594,47 @@ async function openTeam(){
   renderTeam();
   openModal('team-overlay');
 }
+// Buckets real activity data into the three states the Team page shows —
+// never a guess: null/undefined last_seen_at (no heartbeat has ever landed
+// for this account, e.g. it predates this column, or they've genuinely
+// never opened the app since) is honestly "Offline", not "Active now".
+function activityStatus(lastSeenAt){
+  if(!lastSeenAt)return{label:'Offline',cls:'offline-status'};
+  const minsAgo=(Date.now()-new Date(lastSeenAt).getTime())/60000;
+  if(minsAgo<5)return{label:'Active now',cls:'active-now'};
+  if(minsAgo<60*24)return{label:'Recently active',cls:'recent-active'};
+  return{label:'Offline',cls:'offline-status'};
+}
 function renderTeam(){
   const canManage=currentUserRole==='owner';
   const canInvite=currentUserRole==='owner'||currentUserRole==='manager';
   const roleLabel=r=>r.charAt(0).toUpperCase()+r.slice(1);
   const roleOptions=current=>['owner','manager','technician'].map(r=>`<option value="${r}" ${r===current?'selected':''}>${roleLabel(r)}</option>`).join('');
-  const staffRows=staff.map(u=>`
-    <div class="kv">
-      <span class="k">${(u.name||u.email||'—').replace(/</g,'&lt;')}${u.id===currentUserId?' (you)':''}<br><span style="font-size:11px;color:var(--ink-faint)">${(u.email||'').replace(/</g,'&lt;')}</span></span>
+  const staffRows=staff.map(u=>{
+    const activity=activityStatus(u.last_seen_at);
+    return `
+    <div class="kv" style="align-items:flex-start">
+      <span class="k">
+        ${(u.name||u.email||'—').replace(/</g,'&lt;')}${u.id===currentUserId?' (you)':''}<br>
+        <span style="font-size:11px;color:var(--ink-faint)">${(u.email||'').replace(/</g,'&lt;')}</span><br>
+        <span class="pill joined" style="margin-top:5px;display:inline-block">Joined</span>
+        <span class="pill ${activity.cls}" style="margin-top:5px;display:inline-block">${activity.label}</span>
+      </span>
       <span class="v" style="display:flex;align-items:center;gap:8px">
         ${canManage&&u.id!==currentUserId?`<select onchange="changeStaffRole('${u.id}',this.value)">${roleOptions(u.role)}</select>`:`<span class="pill">${roleLabel(u.role||'owner')}</span>`}
         ${canManage&&u.id!==currentUserId?`<button class="btn ghost sm" onclick="removeStaff('${u.id}')">Remove</button>`:''}
       </span>
-    </div>`).join('')||'<div class="empty-state" style="padding:20px"><div class="sm">No staff yet.</div></div>';
+    </div>`;
+  }).join('')||'<div class="empty-state" style="padding:20px"><div class="sm">No staff yet.</div></div>';
   const inviteRows=pendingInvites.map(i=>`
-    <div class="kv"><span class="k">${(i.email||'').replace(/</g,'&lt;')} <span class="seg">${roleLabel(i.role)}</span></span><span class="v"><button class="btn ghost sm" onclick="cancelInvite('${i.id}')">Cancel</button></span></div>`).join('')||'<div class="empty-state" style="padding:14px"><div class="sm">No pending invites.</div></div>';
+    <div class="kv">
+      <span class="k">
+        ${(i.email||'').replace(/</g,'&lt;')}<br>
+        <span class="pill invite-pending" style="margin-top:5px;display:inline-block">Invite sent</span>
+        <span class="pill" style="margin-top:5px;display:inline-block">Waiting for signup</span>
+      </span>
+      <span class="v"><span class="seg">${roleLabel(i.role)}</span><button class="btn ghost sm" onclick="cancelInvite('${i.id}')">Cancel</button></span>
+    </div>`).join('')||'<div class="empty-state" style="padding:14px"><div class="sm">No pending invites.</div></div>';
   const inviteRoleOptions=currentUserRole==='owner'
     ?'<option value="technician">Technician</option><option value="manager">Manager</option><option value="owner">Owner</option>'
     :'<option value="technician">Technician</option>';
@@ -7995,7 +8228,9 @@ function closeImportWizard(){closeModal('import-overlay');}
 function dismissImportBanner(){localStorage.setItem('turnkey-import-banner-dismissed','1');renderDashboard();}
 async function iwLoadHistory(){
   if(!sb||!currentBusinessId)return;
-  const {data,error}=await sb.from('import_batches').select('*').order('created_at',{ascending:false}).limit(10);
+  // Explicit business_id filter as defense-in-depth alongside RLS — same
+  // reasoning as loadFromSupabase()'s customers/jobs/invoices fix.
+  const {data,error}=await sb.from('import_batches').select('*').eq('business_id',currentBusinessId).order('created_at',{ascending:false}).limit(10);
   if(!error)importWizard.history=data||[];
 }
 function iwGoStep(n){importWizard.step=n;renderImportWizard();}
@@ -8390,10 +8625,16 @@ async function iwUndoBatch(batchId){
 async function loadFromSupabase(){
   if(!sb||!currentBusinessId)return;
   try{
+    // Explicit business_id filter on all three, even though RLS already
+    // scopes these — defense-in-depth so a gap in one RLS policy can't
+    // silently merge another business's customers/jobs/invoices into this
+    // session; every other query in this file that reads business data
+    // already does the same (checklist_templates, notifications, etc.),
+    // these three were the exceptions.
     const [{data:customers,error:ce},{data:jobs,error:je},{data:invoices,error:ie}]=await Promise.all([
-      sb.from('customers').select('*'),
-      sb.from('jobs').select('*'),
-      sb.from('invoices').select('*')
+      sb.from('customers').select('*').eq('business_id',currentBusinessId),
+      sb.from('jobs').select('*').eq('business_id',currentBusinessId),
+      sb.from('invoices').select('*').eq('business_id',currentBusinessId)
     ]);
     if(ce)throw ce; if(je)throw je; if(ie)throw ie;
     const custById=Object.fromEntries((customers||[]).map(c=>[c.id,c]));
@@ -8632,15 +8873,83 @@ if(sb){
   sb.auth.onAuthStateChange((event,session)=>{
     if(event==='PASSWORD_RECOVERY'){showPasswordRecovery();return;}
     if(event==='SIGNED_IN'&&session)handleAuthedSession(session);
-    if(event==='SIGNED_OUT'){unsubscribeRealtime();records=[];currentBusinessId=null;currentUserId=null;currentUserRole='owner';staff=[];pendingInvites=[];render();renderAll();showAuth();}
+    if(event==='SIGNED_OUT'){unsubscribeRealtime();stopLastSeenHeartbeat();records=[];currentBusinessId=null;currentUserId=null;currentUserRole='owner';staff=[];pendingInvites=[];render();renderAll();showAuth();}
   });
 }else{
   setAuthMsg('Turnkey isn\u2019t finished setting up yet \u2014 contact support');
 }
 
 // Install as an app when hosted (PWA) — no-op when opened as a plain file.
+// This registration is also the ONE service worker OneSignal's push setup
+// depends on (initOneSignal() below points serviceWorkerPath at this exact
+// same 'sw.js') — if it fails to register (404, bad MIME type from a
+// hosting misconfig, a broken deploy), push notifications fail downstream
+// with no visible cause. Previously .catch(()=>{}) swallowed that
+// completely; log it instead so a failure here is diagnosable.
 if('serviceWorker' in navigator && (location.protocol==='https:'||location.hostname==='localhost')){
-  navigator.serviceWorker.register('sw.js').catch(()=>{});
+  navigator.serviceWorker.register('sw.js')
+    .then(reg=>console.log('[SW] sw.js registered — scope:',reg.scope))
+    .catch(e=>console.error('[SW] sw.js registration FAILED — push notifications and offline support will not work until this is fixed:',e));
+}
+
+/* ===== Requested services — the customer's raw "what I asked for" list,
+   distinct from `services` (the operator's priced quote line items). Stored
+   as rec.requestedServices: [{name, service_id}]. service_id maps back to a
+   real pricing-engine SERVICES key where one exists (so "convert to quote
+   line" in the quote builder can pre-select it); it's null for quick-
+   enquiry-only categories (solar/pavers/spider/other) that have no priced
+   equivalent — the operator picks a comparable real service manually for
+   those, same as building a quote line from scratch. ===== */
+// booking.html sends slightly different label wording for the same service
+// depending on which flow it came from (its own QUICK_SERVICES list vs the
+// map picker's SERVICES labels) — normalized here so both resolve to the
+// same service_id rather than needing two copies of every entry.
+const REQ_SVC_LABEL_TO_ID={
+  'exterior house wash':'housewash','house wash':'housewash',
+  'roof treatment':'roof',
+  'solar panel clean':'solar',
+  'driveway clean':'driveway','driveway / patio cleaning':'driveway','driveway patio cleaning':'driveway',
+  'pavers clean':'pavers',
+  'fence clean':'fence','fence cleaning':'fence',
+  'deck clean':'deck','deck cleaning':'deck',
+  'gutter clean':'gutter','gutter cleaning':'gutter',
+  'spider treatment':'spider'
+};
+function labelToServiceId(label){
+  return REQ_SVC_LABEL_TO_ID[(label||'').toLowerCase().trim()]||null;
+}
+// Accepts either the current {name,service_id} shape or a bare string (the
+// format this field briefly held before this change, and still what
+// booking.html's payload sends today — normalized here rather than forcing
+// a matching rewrite there, since the payload shape itself was already
+// tested and working) — always returns {name,service_id}.
+function normalizeReqSvc(x){
+  if(x&&typeof x==='object')return{name:x.name||'',service_id:x.service_id||labelToServiceId(x.name)};
+  const name=String(x||'');
+  return{name,service_id:labelToServiceId(name)};
+}
+// Migration for leads created before requestedServices existed at all —
+// those only ever got a "Services requested: A, B, C." sentence prepended
+// to notes (see booking.html buildPayload's notesPrefix). Parses that exact
+// sentence back out. Never mutates or removes anything from notes itself —
+// this only reads it to reconstruct structured data alongside it.
+function extractServicesFromNotes(notes){
+  const m=/Services requested:\s*([^.]+)\./.exec(notes||'');
+  if(!m)return[];
+  return m[1].split(',').map(s=>s.trim()).filter(Boolean).map(name=>({name,service_id:labelToServiceId(name)}));
+}
+// The one accessor everything else should call — never read
+// r.requestedServices directly. Self-heals old records the first time
+// they're viewed: if the field is empty but notes contain the legacy
+// sentence, extracts it and backfills the real field in memory so it
+// behaves as a normal field from then on (persisted the next time this
+// record saves normally, same as any other in-memory edit — no separate
+// migration pass or forced write needed).
+function getRequestedServices(r){
+  if(r.requestedServices&&r.requestedServices.length)return r.requestedServices.map(normalizeReqSvc);
+  const extracted=extractServicesFromNotes(r.notes||r.jobNotes);
+  if(extracted.length)r.requestedServices=extracted;
+  return extracted;
 }
 
 /* ===== Live intake: accept quote requests from the customer booking widget ===== */
@@ -8704,6 +9013,16 @@ function ingestQuoteRequest(payload){
   // assessment" price — never folded into the priced services list/total
   // above, since there's no measurement to price it from either way.
   rec.windowsRequested=!!payload.windowsRequested;
+  // Structured "what did they actually ask for" list — populated for both
+  // flows (booking.html's buildPayload always sends it), normalized here to
+  // {name,service_id} so the quote builder can offer a real "add to quote"
+  // action per item (see getRequestedServices()/normalizeReqSvc() above).
+  // Only shown as its own CRM block when `services` above is empty (a
+  // quick-enquiry lead has no priced service lines to display instead — see
+  // openDetail()'s Quote panel). For a mapped lead this duplicates what
+  // svcRows already shows with real measurements/pricing, so the UI doesn't
+  // repeat it there.
+  rec.requestedServices=(Array.isArray(payload.requestedServices)?payload.requestedServices:[]).map(normalizeReqSvc);
   if(sid)rec._submittedAt=sid;
   records.unshift(rec);
   render();renderAll();

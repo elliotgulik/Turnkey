@@ -118,10 +118,44 @@
      navigating away, so mapped areas are never lost by tapping it. */
   .svc-btn.windows-addon.sel{background:var(--teal-wash);color:var(--teal);border-color:var(--teal)}
 
-  /* Multi-select service grid — quick enquiry form. Reuses .svc-pick/.svc-btn's
-     exact look (incl. the mobile 2-column rules below) so services read as
-     the same visual language everywhere on the page, not a second component. */
-  #c-service-picker.svc-pick{margin-top:2px}
+  /* Multi-select service grid — quick enquiry form. Reuses .svc-pick's grid
+     behaviour (incl. the mobile 2-column rules below) so the responsive
+     layout is one shared component, but each button is its own .qsvc-card
+     modifier — a taller card with a name + short description, not the map
+     picker's compact colour-swatch pill (that one's a single-select
+     "which colour am I drawing with" tool, a different job entirely, so it
+     keeps its existing compact style unchanged). */
+  #c-service-picker.svc-pick{margin-top:2px;gap:9px}
+  .qsvc-card{flex:1 1 200px;flex-direction:column;align-items:flex-start;gap:0;text-align:left;padding:13px 14px;border-radius:12px;min-height:64px}
+  .qsvc-card .qsvc-title{display:flex;align-items:center;gap:7px;font-size:13.5px;font-weight:700;color:var(--ink)}
+  .qsvc-card .qsvc-check{width:16px;height:16px;border-radius:50%;border:1.5px solid var(--line);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;transition:all .15s}
+  .qsvc-card.sel{background:var(--teal-wash);border-color:var(--teal)}
+  .qsvc-card.sel .qsvc-check{background:var(--teal);border-color:var(--teal)}
+  .qsvc-card .qsvc-desc{font-size:11.5px;color:var(--ink-faint);margin-top:3px;line-height:1.4;font-weight:400}
+
+  /* Live "Your selected services" recap — shared by the quick-enquiry form
+     (#quick-sel-summary) and the map builder's side panel (#map-sel-summary). */
+  .sel-summary{margin-top:10px;padding:12px 14px;border-radius:12px;background:var(--surface-2);border:1px solid var(--line)}
+  .sel-summary-title{font-size:11px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:7px}
+  .sel-summary-list{display:flex;flex-direction:column;gap:5px}
+  .sel-summary-item{font-size:13px;font-weight:600;color:var(--ink);display:flex;align-items:center;gap:7px}
+  .sel-summary-item::before{content:'✓';color:var(--teal);font-weight:700}
+  .sel-summary-item.addon{color:var(--teal)}
+  .sel-summary-empty{font-size:12.5px;color:var(--ink-faint);font-style:italic}
+
+  /* Review screen (step 4, between details and submission) */
+  .review-section{margin-bottom:20px;padding-bottom:18px;border-bottom:1px solid var(--line-soft)}
+  .review-section:last-of-type{border-bottom:none;margin-bottom:8px;padding-bottom:0}
+  .review-heading{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--teal);margin-bottom:10px}
+  .review-kv{display:flex;justify-content:space-between;gap:12px;font-size:14px;padding:5px 0}
+  .review-kv span:first-child{color:var(--ink-soft)}
+  .review-kv span:last-child{font-weight:600;text-align:right}
+  .review-list{list-style:none;display:flex;flex-direction:column;gap:7px}
+  .review-list li{font-size:14px;font-weight:600;color:var(--ink);padding-left:22px;position:relative;line-height:1.4}
+  .review-list li::before{content:'✓';position:absolute;left:0;top:0;color:var(--teal);font-weight:700}
+  .review-list.plain li{font-weight:500}
+  .review-list .review-empty{color:var(--ink-faint);font-weight:400}
+  .review-list .review-empty::before{content:''}
 
   /* premium, roomy checkbox rows — replaces bare browser-default checkboxes
      (illegible at default ~13px and a poor touch target) without losing a
@@ -410,6 +444,11 @@ function initPlacesAutocomplete(){
     <div class="side">
       <div class="card card-pad">
         <h3>Your areas</h3>
+        <!-- Distinct-services recap (deduped from areas[]/windowsRequested) —
+             the detailed priced breakdown below already lists every drawn
+             area, this is just the quick "here's what you've selected so
+             far" confirmation. Populated by renderSelectedServicesSummary(). -->
+        <div class="sel-summary" id="map-sel-summary"></div>
 
         <!-- Storey selector — shown when housewash is in the areas list -->
         <div class="storey-row" id="storey-row" style="display:none">
@@ -465,6 +504,11 @@ function initPlacesAutocomplete(){
       <div class="field full hidden" id="c-service-field">
         <label>Services required * <span style="color:var(--ink-faint);font-weight:400">(select all that apply)</span></label>
         <div class="svc-pick" id="c-service-picker"></div>
+        <!-- Live-updating recap of what's been picked so far — kept right
+             under the picker so a customer scrolling down the form still
+             sees confirmation of their choices without scrolling back up.
+             Populated by renderSelectedServicesSummary(). -->
+        <div class="sel-summary" id="quick-sel-summary"></div>
       </div>
       <div class="field full"><label>Anything else you want us to know? <span style="color:var(--ink-faint);font-weight:400">(optional)</span></label><textarea id="c-notes" rows="2" placeholder="e.g. heavy moss on the south side, dog in the yard"></textarea></div>
       <div class="field map-only-field"><label>Preferred timing</label><select id="c-timing"><option>As soon as possible</option><option>Within 2 weeks</option><option>This month</option><option>Just getting a price</option></select></div>
@@ -480,10 +524,54 @@ function initPlacesAutocomplete(){
          action stays reachable without scrolling back down past a form
          this long; on desktop it's just the button in normal flow. -->
     <div class="details-submit-bar">
-      <button class="btn primary" onclick="submitRequest()">Send my quote request</button>
+      <button class="btn primary" onclick="goReview()">Review my request</button>
       <div id="submit-status" style="font-size:13px;color:#b3413a;margin-top:10px"></div>
     </div>
     <button class="btn ghost" id="details-back-btn" style="margin-top:9px" onclick="backToMap()">← Back to map</button>
+  </div>
+
+  <!-- STEP 4: review — a confirmation screen between the details form and
+       actual submission, so the customer sees exactly what's about to be
+       sent before it's sent. Populated by renderReview(), which reads
+       straight from buildPayload()'s own output — it can never show
+       something different from what actually gets submitted, since it's
+       not a second, separately-maintained copy of the data. "Edit details"
+       just goes back to the (still-filled-in) details form; nothing here
+       is directly editable. -->
+  <div class="card card-pad hidden" id="review" style="max-width:560px;margin:18px auto 50px">
+    <h3 style="font-size:19px;margin-bottom:4px">Review your request</h3>
+    <p style="font-size:13.5px;color:var(--ink-soft);margin-bottom:18px">Check everything below is right before you send it.</p>
+
+    <div class="review-section">
+      <div class="review-heading">Customer details</div>
+      <div class="review-kv"><span>Name</span><span id="review-name"></span></div>
+      <div class="review-kv"><span>Phone</span><span id="review-phone"></span></div>
+      <div class="review-kv"><span>Email</span><span id="review-email"></span></div>
+      <div class="review-kv"><span>Address</span><span id="review-addr"></span></div>
+    </div>
+
+    <div class="review-section">
+      <div class="review-heading">Services requested</div>
+      <ul class="review-list" id="review-services"></ul>
+    </div>
+
+    <div class="review-section hidden" id="review-additional-section">
+      <div class="review-heading">Additional requests</div>
+      <ul class="review-list plain" id="review-additional"></ul>
+    </div>
+
+    <div class="review-section hidden" id="review-property-section">
+      <div class="review-heading">Property information</div>
+      <div class="review-kv"><span>Address</span><span id="review-prop-addr"></span></div>
+      <div style="font-size:12px;color:var(--ink-faint);margin:10px 0 6px">Mapped areas</div>
+      <ul class="review-list" id="review-mapped-areas"></ul>
+    </div>
+
+    <div class="details-submit-bar">
+      <button class="btn primary" onclick="submitRequest()">Confirm &amp; submit</button>
+      <div id="review-status" style="font-size:13px;color:#b3413a;margin-top:10px"></div>
+    </div>
+    <button class="btn ghost" style="margin-top:9px" onclick="backToDetails()">← Edit details</button>
   </div>
 
   <!-- SUCCESS -->
@@ -968,6 +1056,7 @@ function chooseFlow(mode){
     document.querySelector('.steps').classList.remove('hidden');
     document.getElementById('builder').classList.remove('hidden');
     if(standalone)document.getElementById('integration').classList.remove('hidden');
+    renderSelectedServicesSummary();
   }else{
     showQuickDetails('Tell us what you need','Send your details and we’ll prepare your quote — usually same day.',true);
   }
@@ -983,13 +1072,14 @@ function toggleWindowsAddon(){
   const note=document.getElementById('windows-addon-note');
   if(note)note.classList.toggle('hidden',!windowsRequested);
   updateEstimate();
+  renderSelectedServicesSummary();
 }
 // Shared by the quick-enquiry flow — builds/refreshes its multi-select
 // service grid every time it's shown.
 function showQuickDetails(heading,sub,showServiceField){
   document.getElementById('details').classList.remove('hidden');
   document.getElementById('c-service-field').classList.toggle('hidden',!showServiceField);
-  if(showServiceField)buildQuickServicePicker();
+  if(showServiceField){buildQuickServicePicker();renderSelectedServicesSummary();}
   document.querySelectorAll('.map-only-field').forEach(el=>el.classList.add('hidden'));
   document.getElementById('details-heading').textContent=heading;
   document.getElementById('details-sub').textContent=sub;
@@ -1012,30 +1102,61 @@ function backToChoice(){
    requested-service tags for the business to quote manually — same
    treatment "Request Windows Quote" already got before this rework. ===== */
 const QUICK_SERVICES=[
-  {key:'housewash',label:'Exterior House Wash'},
-  {key:'roof',label:'Roof Treatment'},
-  {key:'solar',label:'Solar Panel Clean'},
-  {key:'driveway',label:'Driveway Clean'},
-  {key:'pavers',label:'Pavers Clean'},
-  {key:'fence',label:'Fence Clean'},
-  {key:'deck',label:'Deck Clean'},
-  {key:'gutter',label:'Gutter Clean'},
-  {key:'spider',label:'Spider Treatment'},
-  {key:'other',label:'Other'},
-  {key:'windows',label:'Request Windows Quote'}
+  {key:'housewash',label:'Exterior House Wash',desc:'Remove mould, dirt and grime from exterior surfaces.'},
+  {key:'roof',label:'Roof Treatment',desc:'Soft-wash treatment to remove moss and lichen build-up.'},
+  {key:'solar',label:'Solar Panel Clean',desc:'Restore panel efficiency by clearing dust and residue.'},
+  {key:'driveway',label:'Driveway Clean',desc:'Restore concrete and paving appearance.'},
+  {key:'pavers',label:'Pavers Clean',desc:'Lift ground-in dirt and moss from paved areas.'},
+  {key:'fence',label:'Fence Clean',desc:'Clean built-up grime and mould from fence lines.'},
+  {key:'deck',label:'Deck Clean',desc:'Refresh timber or composite decking surfaces.'},
+  {key:'gutter',label:'Gutter Clean',desc:'Clear leaves and debris to keep water flowing.'},
+  {key:'spider',label:'Spider Treatment',desc:'Treat eaves and entry points to deter spiders.'},
+  {key:'other',label:'Other',desc:'Tell us what you need in the notes below.'},
+  {key:'windows',label:'Request Windows Quote',desc:'We’ll assess and send a separate windows quote.'}
 ];
 let quickSelectedServices=new Set();
 function buildQuickServicePicker(){
   const wrap=document.getElementById('c-service-picker');
   if(!wrap)return;
-  wrap.innerHTML=QUICK_SERVICES.map(s=>
-    `<button type="button" class="svc-btn ${quickSelectedServices.has(s.key)?'sel':''}" data-qsvc="${s.key}" onclick="toggleQuickService('${s.key}')">${s.label}</button>`
-  ).join('');
+  wrap.innerHTML=QUICK_SERVICES.map(s=>{
+    const sel=quickSelectedServices.has(s.key);
+    return `<button type="button" class="svc-btn qsvc-card ${sel?'sel':''}" data-qsvc="${s.key}" onclick="toggleQuickService('${s.key}')" aria-pressed="${sel}">
+      <span class="qsvc-title"><span class="qsvc-check">${sel?'✓':''}</span>${s.label}</span>
+      <span class="qsvc-desc">${s.desc}</span>
+    </button>`;
+  }).join('');
 }
 function toggleQuickService(key){
   if(quickSelectedServices.has(key))quickSelectedServices.delete(key);
   else quickSelectedServices.add(key);
   buildQuickServicePicker();
+  renderSelectedServicesSummary();
+}
+// Shared "Your selected services" recap — quick-enquiry reads from
+// quickSelectedServices (the multi-select grid), the map flow reads the
+// distinct set of services actually drawn (areas[]). Windows is always
+// shown as its own addon line, never mixed into the services list, so the
+// review step later can cleanly separate "services requested" from
+// "additional requests" the same way the CRM display does.
+function selSummaryHtml(labels,windowsOn){
+  const title='<div class="sel-summary-title">Your selected services</div>';
+  if(!labels.length&&!windowsOn)return title+'<div class="sel-summary-empty">No services selected yet</div>';
+  const items=labels.map(l=>`<div class="sel-summary-item">${l}</div>`).join('');
+  const addon=windowsOn?'<div class="sel-summary-item addon">Windows quote requested</div>':'';
+  return title+'<div class="sel-summary-list">'+items+addon+'</div>';
+}
+function renderSelectedServicesSummary(){
+  const quickWrap=document.getElementById('quick-sel-summary');
+  if(quickWrap){
+    const labels=QUICK_SERVICES.filter(s=>s.key!=='windows'&&quickSelectedServices.has(s.key)).map(s=>s.label);
+    quickWrap.innerHTML=selSummaryHtml(labels,quickSelectedServices.has('windows'));
+  }
+  const mapWrap=document.getElementById('map-sel-summary');
+  if(mapWrap){
+    const seen=new Set(),labels=[];
+    areas.forEach(a=>{if(!seen.has(a.svc)){seen.add(a.svc);labels.push(SERVICES[a.svc].label);}});
+    mapWrap.innerHTML=selSummaryHtml(labels,windowsRequested);
+  }
 }
 
 let activeSvc = 'driveway';
@@ -1367,7 +1488,7 @@ function commitArea(){
   area.size=sizeOf(area);
   areas.push(area);
   drawing=[];drawingGeoPts=[];
-  renderDraw();renderAreas();renderList();updateEstimate();updateHint();showStoreyRow();
+  renderDraw();renderAreas();renderList();updateEstimate();updateHint();showStoreyRow();renderSelectedServicesSummary();
 }
 function renderAreas(){
   const layer=document.getElementById('layer-areas');
@@ -1387,7 +1508,7 @@ function renderAreas(){
   }).join('');
 }
 function undoPoint(){if(drawing.length){drawing.pop();drawingGeoPts.pop();renderDraw();updateHint();}}
-function clearAll(){drawing=[];drawingGeoPts=[];areas=[];renderDraw();renderAreas();renderList();updateEstimate();updateHint();}
+function clearAll(){drawing=[];drawingGeoPts=[];areas=[];renderDraw();renderAreas();renderList();updateEstimate();updateHint();renderSelectedServicesSummary();}
 
 /* ===== side list + estimate ===== */
 function renderList(){
@@ -1403,7 +1524,7 @@ function renderList(){
     </div>`;
   }).join('');
 }
-function removeArea(id){areas=areas.filter(a=>a.id!==id);renderAreas();renderList();updateEstimate();updateHint();showStoreyRow();}
+function removeArea(id){areas=areas.filter(a=>a.id!==id);renderAreas();renderList();updateEstimate();updateHint();showStoreyRow();renderSelectedServicesSummary();}
 function rawTotal(){
   return areas.reduce((s,a)=>s+a.size*effectiveRate(a),0);
 }
@@ -1550,6 +1671,14 @@ function buildPayload(){
     ?QUICK_SERVICES.filter(s=>s.key!=='windows'&&quickSelectedServices.has(s.key)).map(s=>s.label)
     :[];
   const notesPrefix=quickLabels.length?('Services requested: '+quickLabels.join(', ')+'. '):'';
+  // Structured list of what was actually requested — distinct area service
+  // labels for a mapped quote, the multi-select picks for quick-enquiry.
+  // Used by both the review screen (renderReview()) and the CRM (see
+  // ingestQuoteRequest() in index.html), so services are never represented
+  // ONLY as prose inside notes.
+  const requestedServices=isMapped
+    ?[...new Set(areas.map(a=>a.svc))].map(k=>SERVICES[k].label)
+    :quickLabels;
   // windowsRequested is a single flag regardless of which flow it came from
   // — toggled directly in the map flow, or implied by 'windows' being one
   // of quick-enquiry's selected services. The CRM appends its own canonical
@@ -1563,6 +1692,7 @@ function buildPayload(){
     business_id:TURNKEY_BUSINESS_ID,
     requestType:flowMode, // 'map' | 'quick' — so the CRM can label/handle the lead without having to infer it from which fields are empty
     windowsRequested:windowsFlag,
+    requestedServices,
     customer:{
       name:(document.getElementById('c-first-name').value.trim()+' '+document.getElementById('c-last-name').value.trim()).trim(),
       firstName:document.getElementById('c-first-name').value.trim(),
@@ -1594,27 +1724,95 @@ function buildPayload(){
     submittedAt:new Date().toISOString()
   };
 }
-async function submitRequest(){
+// Shared by goReview() (before showing the review screen) and submitRequest()
+// (as a defense-in-depth re-check — the review screen has no editable
+// fields, so this should never actually fail there, but it's cheap enough
+// to re-run rather than trust state didn't change between the two steps).
+// Returns null when valid, or the alert message to show when it isn't.
+function validateDetailsForm(){
   const firstName=document.getElementById('c-first-name').value.trim();
   const lastName=document.getElementById('c-last-name').value.trim();
   const phone=document.getElementById('c-phone').value.trim();
   const email=document.getElementById('c-email').value.trim();
   const addr=document.getElementById('c-addr').value.trim();
   const source=document.getElementById('c-source').value;
-  if(!firstName){alert('Please add your first name');return;}
-  if(!lastName){alert('Please add your last name');return;}
-  if(!phone){alert('Please add a phone number so we can reach you');return;}
-  if(!email){alert('Please add an email so we can send your quote');return;}
-  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){alert('That email address doesn’t look right — please check it');return;}
-  if(!addr){alert('Please add the property address');return;}
-  if(!source){alert('Please let us know how you found us');return;}
-  if(flowMode==='quick'&&!quickSelectedServices.size){alert('Please choose at least one service you need');return;}
-  if(!document.getElementById('c-terms').checked){alert('Please accept the Terms & Conditions to continue');return;}
-  if(!document.getElementById('c-important').checked){alert('Please confirm you\'ve read the important information to continue');return;}
-  if(window.TURNKEY_WEBHOOK&&!TURNKEY_BUSINESS_ID){alert('This booking link looks incomplete — please ask the business for their correct booking link.');return;}
+  if(!firstName)return'Please add your first name';
+  if(!lastName)return'Please add your last name';
+  if(!phone)return'Please add a phone number so we can reach you';
+  if(!email)return'Please add an email so we can send your quote';
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))return'That email address doesn’t look right — please check it';
+  if(!addr)return'Please add the property address';
+  if(!source)return'Please let us know how you found us';
+  if(flowMode==='quick'&&!quickSelectedServices.size)return'Please choose at least one service you need';
+  if(!document.getElementById('c-terms').checked)return'Please accept the Terms & Conditions to continue';
+  if(!document.getElementById('c-important').checked)return'Please confirm you\'ve read the important information to continue';
+  if(window.TURNKEY_WEBHOOK&&!TURNKEY_BUSINESS_ID)return'This booking link looks incomplete — please ask the business for their correct booking link.';
+  return null;
+}
+// Details form's "Review my request" button — validates, then renders the
+// review screen straight from buildPayload()'s own output (see renderReview())
+// so what's shown there can never drift from what actually gets submitted.
+function goReview(){
+  const err=validateDetailsForm();
+  if(err){alert(err);return;}
+  renderReview(buildPayload());
+  document.getElementById('details').classList.add('hidden');
+  document.getElementById('review').classList.remove('hidden');
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+function backToDetails(){
+  document.getElementById('review').classList.add('hidden');
+  document.getElementById('details').classList.remove('hidden');
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+function renderReview(payload){
+  const c=payload.customer;
+  document.getElementById('review-name').textContent=c.name||'—';
+  document.getElementById('review-phone').textContent=c.phone||'—';
+  document.getElementById('review-email').textContent=c.email||'—';
+  document.getElementById('review-addr').textContent=c.address||'—';
+
+  document.getElementById('review-services').innerHTML=payload.requestedServices.length
+    ?payload.requestedServices.map(l=>`<li>${l}</li>`).join('')
+    :'<li class="review-empty">No services selected</li>';
+
+  // Raw customer-typed notes only — payload.customer.notes already has the
+  // "Services requested: ..." prefix folded in for the CRM, which would be
+  // redundant to repeat here since the Services Requested section above
+  // already shows the same list.
+  const notesRaw=document.getElementById('c-notes').value.trim();
+  const addRows=[];
+  if(payload.windowsRequested)addRows.push('Windows quote requested');
+  if(notesRaw)addRows.push('Customer notes: “'+notesRaw+'”');
+  const addSection=document.getElementById('review-additional-section');
+  if(addRows.length){
+    addSection.classList.remove('hidden');
+    document.getElementById('review-additional').innerHTML=addRows.map(r=>`<li>${r}</li>`).join('');
+  }else{
+    addSection.classList.add('hidden');
+  }
+
+  const propSection=document.getElementById('review-property-section');
+  if(payload.areas&&payload.areas.length){
+    propSection.classList.remove('hidden');
+    document.getElementById('review-prop-addr').textContent=c.address||'—';
+    document.getElementById('review-mapped-areas').innerHTML=payload.areas.map(a=>
+      `<li>${a.label} — approx. ${a.size}${a.unit}</li>`
+    ).join('');
+  }else{
+    propSection.classList.add('hidden');
+  }
+}
+// Review screen's "Confirm & submit" button — the actual send. Re-validates
+// (see validateDetailsForm()'s header comment) then runs the exact same
+// buildPayload()/webhook logic this always has; only the button/status
+// elements it targets moved from the details form to the review screen.
+async function submitRequest(){
+  const err=validateDetailsForm();
+  if(err){alert(err);backToDetails();return;}
   const payload=buildPayload();
-  const status=document.getElementById('submit-status');
-  const btn=document.querySelector('#details .btn.primary');
+  const status=document.getElementById('review-status');
+  const btn=document.querySelector('#review .btn.primary');
   if(status)status.textContent='';
 
   // If embedded, also post to the parent site (Wix/Squarespace can catch
@@ -1633,7 +1831,7 @@ async function submitRequest(){
       if(!res.ok)throw new Error('HTTP '+res.status);
       showSuccess(payload);
     }catch(e){
-      if(btn){btn.disabled=false;btn.textContent='Send my quote request';}
+      if(btn){btn.disabled=false;btn.textContent='Confirm & submit';}
       if(status)status.textContent='Could not send your request — check your connection and try again, or call us directly.';
     }
     return;
@@ -1642,6 +1840,7 @@ async function submitRequest(){
 }
 function showSuccess(p){
   document.getElementById('details').classList.add('hidden');
+  document.getElementById('review').classList.add('hidden');
   document.getElementById('builder').classList.add('hidden');
   document.getElementById('mode-choice').classList.add('hidden');
   document.getElementById('integration').classList.add('hidden');
@@ -1651,18 +1850,26 @@ function showSuccess(p){
   // Windows never gets a fake price whichever flow it rode in on — always
   // its own "no price yet" line, separate from any real mapped total.
   const windowsRow=p.windowsRequested?`<div class="rrow"><span class="rk">Additional request</span><span>Window cleaning — pending assessment</span></div>`:'';
+  const addrRow=`<div class="rrow"><span class="rk">Address</span><span>${p.customer.address||'—'}</span></div>`;
+  const contactRow=`<div class="rrow"><span class="rk">We'll contact</span><span>${p.customer.phone||p.customer.email}</span></div>`;
   if(p.areas&&p.areas.length){
+    // Priced rows already list every requested service with its own price —
+    // a second plain "services requested" list right above would just
+    // repeat the same names with no new information.
     const rows=p.areas.map(a=>`<div class="rrow"><span class="rk">${a.label} · ${a.size}${a.unit}</span><span>$${(a.price||0).toLocaleString()}</span></div>`).join('');
     document.getElementById('recap').innerHTML=rows+
       `<div class="rrow"><span class="rk">Estimated range</span><span style="font-weight:600">$${p.estimateRange.min.toLocaleString()}–$${p.estimateRange.max.toLocaleString()}</span></div>`+
-      windowsRow+
-      `<div class="rrow"><span class="rk">We'll contact</span><span>${p.customer.phone||p.customer.email}</span></div>`;
+      windowsRow+addrRow+contactRow;
     document.getElementById('success-msg').textContent=`Thanks ${p.customer.name.split(' ')[0]||''}! Your mapped areas are on their way. We'll send a firm quote ${p.customer.timing==='As soon as possible'?'shortly':'soon'}.`;
   }else{
-    // quick enquiry (or a map-flow visit that only toggled windows, nothing
-    // drawn) — nothing measured, no estimate to recap.
-    document.getElementById('recap').innerHTML=windowsRow+`<div class="rrow"><span class="rk">We'll contact</span><span>${p.customer.phone||p.customer.email}</span></div>`;
-    document.getElementById('success-msg').textContent=`Thanks ${p.customer.name.split(' ')[0]||''}! We've got your request and will prepare your quote shortly.`;
+    // Quick enquiry (or a map-flow visit that only toggled windows, nothing
+    // drawn) — nothing priced, so the plain services list IS the
+    // confirmation of what was requested.
+    const servicesList=p.requestedServices.length
+      ?`<div class="rrow" style="display:block"><span class="rk" style="display:block;margin-bottom:8px">Services requested</span><ul class="review-list plain">${p.requestedServices.map(l=>`<li>${l}</li>`).join('')}</ul></div>`
+      :'';
+    document.getElementById('recap').innerHTML=servicesList+windowsRow+addrRow+contactRow;
+    document.getElementById('success-msg').textContent=`Thanks ${p.customer.name.split(' ')[0]||''}! We will review your request and get back to you shortly.`;
   }
   window.scrollTo({top:0,behavior:'smooth'});
 }
@@ -1678,6 +1885,7 @@ function startOver(){
   document.querySelector('.hero').classList.add('hidden');
   document.getElementById('builder').classList.add('hidden');
   document.getElementById('details').classList.add('hidden');
+  document.getElementById('review').classList.add('hidden');
   document.getElementById('integration').classList.add('hidden');
   ['c-first-name','c-last-name','c-phone','c-email','c-notes','c-date','c-photos'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('c-source').value='';
@@ -1685,6 +1893,7 @@ function startOver(){
   document.getElementById('c-important').checked=false;
   selectedPhotos=[];
   const ps=document.getElementById('c-photos-status');if(ps)ps.textContent='';
+  renderSelectedServicesSummary();
   updateStep(1);window.scrollTo({top:0,behavior:'smooth'});
 }
 
