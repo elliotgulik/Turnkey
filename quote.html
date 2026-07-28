@@ -23,6 +23,11 @@
   }
   *{box-sizing:border-box;margin:0;padding:0}
   body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','SF Pro Text','Segoe UI',Helvetica,Arial,sans-serif;background:var(--paper);color:var(--ink);line-height:1.5;-webkit-font-smoothing:antialiased;min-height:100vh}
+  /* Per-business font style (Settings → Colours & document templates) — a
+     small, bounded set of safe web-safe stacks, not a free-text font
+     picker, so this can never break layout or pull in a slow web font. */
+  body.font-serif{font-family:Georgia,'Iowan Old Style','Palatino Linotype',Palatino,serif}
+  body.font-rounded{font-family:'Century Gothic','Avenir Next',Avenir,ui-rounded,-apple-system,sans-serif}
   button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
   textarea{font-family:inherit;font-size:14px;color:var(--ink)}
   .wrap{max-width:560px;margin:0 auto;padding:40px 18px 60px}
@@ -31,6 +36,23 @@
   .head img{width:44px;height:44px;border-radius:11px;object-fit:cover;margin-bottom:10px}
   .head .biz-name{font-size:17px;font-weight:650;letter-spacing:-.01em}
   .head .biz-sub{font-size:12.5px;color:var(--ink-faint);margin-top:2px}
+  /* Header style: banner — a full-width primary-colour band instead of the
+     plain centered header, for businesses that want a bolder brand moment
+     at the top of their quote. Primary colour is deliberately separate from
+     accent (buttons/highlights) so a business can pair e.g. a dark banner
+     with a brighter accent on the Approve button. */
+  .head.banner{background:var(--primary,var(--teal));border-bottom:none;padding:32px 28px 26px}
+  .head.banner .biz-name{color:#fff}
+  .head.banner .biz-sub{color:rgba(255,255,255,.75)}
+  .head.banner img{background:#fff;padding:4px}
+  .quote-intro{font-size:13.5px;color:var(--ink-soft);line-height:1.55;background:var(--surface-2);border-radius:var(--radius-sm);padding:14px 15px;margin-bottom:16px}
+  .terms-line{font-size:12px;color:var(--ink-faint);text-align:center;margin-top:14px;line-height:1.5}
+  .terms-line a,.terms-line summary{color:var(--ink-soft);cursor:pointer;text-decoration:underline;text-underline-offset:2px;display:inline}
+  .terms-detail{margin-top:10px;text-align:left;font-size:12px;color:var(--ink-soft);background:var(--surface-2);border-radius:var(--radius-sm);padding:12px 14px;line-height:1.6}
+  .terms-detail h5{font-size:10.5px;font-weight:700;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.04em;margin:10px 0 3px}
+  .terms-detail h5:first-child{margin-top:0}
+  .terms-detail p,.terms-detail ul{margin-bottom:2px}
+  .terms-detail ul{padding-left:18px}
   .body{padding:26px 28px}
   .qmeta{display:flex;justify-content:space-between;align-items:baseline;font-size:11.5px;color:var(--ink-faint);margin-bottom:16px}
   .qmeta b{color:var(--ink-soft);font-weight:600}
@@ -339,7 +361,7 @@ function pubPriceBreakdown(q){
   const adjustment=Math.round((q.amount||0)-lineSum);
   const rows=services.map(s=>{
     const svc=TK_PRICING.SERVICES[s.svc]; if(!svc)return '';
-    const note=(s.svc==='roof'&&s.roofType&&TK_PRICING.ROOF_TYPES[s.roofType])?TK_PRICING.ROOF_TYPES[s.roofType].label
+    const note=(svc.usesRoofType&&s.roofType&&TK_PRICING.ROOF_TYPES[s.roofType])?TK_PRICING.ROOF_TYPES[s.roofType].label
       :(s.svc==='housewash'&&s.storeys&&TK_PRICING.STOREY_TYPES[s.storeys])?TK_PRICING.STOREY_TYPES[s.storeys].label
       :(s.svc==='fence'&&s.sides&&TK_PRICING.FENCE_SIDES[s.sides])?TK_PRICING.FENCE_SIDES[s.sides].label:'';
     const sub=s.fixedPrice!=null?'Fixed price':(s.qty+' '+svc.unit+' × $'+TK_PRICING.effectiveRate(s).toFixed(2)+'/'+svc.unit+(note?' · '+note:''));
@@ -361,11 +383,39 @@ function renderQuote(q){
   const accent=(biz.accentColor&&/^#[0-9a-fA-F]{6}$/.test(biz.accentColor))?biz.accentColor:'#138a72';
   document.documentElement.style.setProperty('--teal',accent);
   document.documentElement.style.setProperty('--teal-bright',accent);
+  // Primary colour (header banner) is separate from accent (buttons) — falls
+  // back to accent so a business that's only ever set one colour still gets
+  // a consistent look instead of a jarring default teal banner.
+  const primary=(biz.primaryColor&&/^#[0-9a-fA-F]{6}$/.test(biz.primaryColor))?biz.primaryColor:accent;
+  document.documentElement.style.setProperty('--primary',primary);
+  document.body.classList.remove('font-serif','font-rounded');
+  if(biz.fontStyle==='serif'||biz.fontStyle==='rounded')document.body.classList.add('font-'+biz.fontStyle);
+  const bannerHeader=biz.headerStyle==='banner';
   const notesHtml=q.notes?`<div class="notes-box">${q.notes.replace(/</g,'&lt;')}</div>`:'';
+  const introHtml=q.status!=='accepted'&&q.status!=='declined'&&biz.quoteIntroMessage
+    ?`<div class="quote-intro">${biz.quoteIntroMessage.replace(/</g,'&lt;').replace(/\n/g,'<br>')}</div>`:'';
   const addrLine=[cust.address,cust.suburb].filter(Boolean).join(', ');
   const durMin=parseInt(q.estimatedDurationMin,10);
   const durBadge=durMin?`<div class="dur-badge">⏱ Estimated ${fmtDur(durMin)} on site</div>`:'';
   const withGeo=pubAreasWithGeo(q.areaPolys);
+  const bizName=biz.name||'this business';
+
+  // Terms line — shown above the quote actions instead of no mention of
+  // terms at all. "[Business Name] Terms and Conditions", never TurnKey's;
+  // sourced from the SAME TK_POLICIES defaults/renderer the Settings →
+  // Policies & Terms editor previews, so what a customer sees here can
+  // never drift from what the business configured (or the sensible default
+  // if they haven't touched it yet).
+  const policies=biz.policies||{};
+  const agreementText=window.TK_POLICIES?TK_POLICIES.withBizName(TK_POLICIES.getField(policies,'customerAgreementWording'),bizName):'';
+  const termsDetailFields=['quoteTerms','cancellationPolicy','paymentTerms','warrantyInfo','additionalNotes'];
+  const termsDetailHtml=window.TK_POLICIES?termsDetailFields.map(key=>{
+    const f=TK_POLICIES.FIELDS.find(x=>x.key===key);
+    const raw=TK_POLICIES.withBizName(TK_POLICIES.getField(policies,key),bizName);
+    if(!raw)return '';
+    return `<h5>${f.label}</h5>${TK_POLICIES.renderPolicyHtml(raw)}`;
+  }).join(''):'';
+  const termsLineHtml=agreementText?`<div class="terms-line"><p>${agreementText.replace(/</g,'&lt;')}</p>${termsDetailHtml?`<details><summary>View full terms</summary><div class="terms-detail">${termsDetailHtml}</div></details>`:''}</div>`:'';
 
   let actionsHtml='';
   if(q.status==='accepted'){
@@ -379,15 +429,16 @@ function renderQuote(q){
         <button class="btn ghost" onclick="toggleQuestion()">Ask a Question</button>
         <button class="btn ghost" onclick="respond('decline')" style="color:var(--ink-faint)">Not Ready Yet</button>
       </div>
+      ${termsLineHtml}
       <div class="question-box" id="question-box">
-        <textarea id="question-text" placeholder="What would you like to ask or change?"></textarea>
+        <textarea id="question-text" placeholder="What would you like to ask or change?" aria-label="Your question"></textarea>
         <button class="btn primary" onclick="submitQuestion()">Send question</button>
       </div>
       <div class="msg" id="action-msg"></div>`;
   }
 
   document.getElementById('card').innerHTML=`
-    <div class="head">
+    <div class="head${bannerHeader?' banner':''}">
       ${biz.logoUrl?`<img src="${biz.logoUrl.replace(/"/g,'&quot;')}" alt="">`:''}
       <div class="biz-name">${biz.name||'Your service provider'}</div>
       <div class="biz-sub">${biz.phone||biz.email||''}</div>
@@ -397,6 +448,7 @@ function renderQuote(q){
       <div class="greeting">Quote for ${cust.name||'you'}</div>
       ${addrLine?`<div class="addr">${addrLine}</div>`:''}
       ${durBadge}
+      ${introHtml}
       <div id="qmap-zone"></div>
       ${pubPropertySummary(q.services)}
       ${notesHtml}

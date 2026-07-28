@@ -28,11 +28,16 @@
     --shadow:0 1px 1px rgba(10,28,43,.03),0 6px 20px rgba(10,28,43,.05);
     --shadow-lg:0 10px 40px rgba(10,28,43,.12);
     /* per-service colours for drawn areas */
-    --c-driveway:#c2683a; --c-housewash:#2f7d8f; --c-roof:#7a5bbf; --c-gutter:#b08a1e; --c-patio:#0f7d6b; --c-deck:#8a6f3f; --c-fence:#6b7a3a; --c-windows:#4a6b8a;
+    --c-driveway:#c2683a; --c-housewash:#2f7d8f; --c-roof:#7a5bbf; --c-rooftreatment:#9a7fd1; --c-gutter:#b08a1e; --c-patio:#0f7d6b; --c-deck:#8a6f3f; --c-fence:#6b7a3a; --c-windows:#4a6b8a;
   }
   *{box-sizing:border-box;margin:0;padding:0}
   html,body{height:100%}
   body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','SF Pro Text','Segoe UI',Helvetica,Arial,sans-serif;background:var(--paper);color:var(--ink);line-height:1.5;-webkit-font-smoothing:antialiased}
+  /* Per-business font style (Settings → Colours & document templates) —
+     same bounded, web-safe set as quote.html, applied here too so a
+     business's booking page and quote page always match. */
+  body.font-serif{font-family:Georgia,'Iowan Old Style','Palatino Linotype',Palatino,serif}
+  body.font-rounded{font-family:'Century Gothic','Avenir Next',Avenir,ui-rounded,-apple-system,sans-serif}
   button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
   input,select,textarea{font-family:inherit;font-size:15px;color:var(--ink)}
 
@@ -164,6 +169,14 @@
   .check-row input[type=checkbox]{width:20px;height:20px;flex-shrink:0;margin-top:1px;accent-color:var(--teal)}
   .check-row span{font-size:13px;color:var(--ink-soft);line-height:1.5}
   .check-row a{color:var(--teal);text-decoration:underline}
+  /* Terms & Policies disclosure — a plain toggled panel, not a modal: no
+     extra overlay system needed on this page, and the trigger stays a real
+     link (keyboard-focusable, works with a screen reader) rather than a
+     dead href="#". */
+  .terms-detail-body{font-size:12.5px;color:var(--ink-soft);line-height:1.6;background:var(--surface-2);border-radius:var(--radius-sm);padding:12px 14px;margin:-2px 0 10px}
+  .terms-detail-body h5{font-size:10.5px;font-weight:700;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.04em;margin:10px 0 3px}
+  .terms-detail-body h5:first-child{margin-top:0}
+  .terms-detail-body ul{padding-left:18px}
 
   .map-stage{position:relative;width:100%;aspect-ratio:4/3;background:#dfe6e3;overflow:hidden;cursor:crosshair;touch-action:none;user-select:none}
   .map-stage.pan-tool{cursor:grab}
@@ -209,9 +222,9 @@
 
   /* address bar over map */
   .addr-bar{display:flex;gap:8px;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--surface-2)}
-  .addr-bar input{flex:1;min-width:0;padding:10px 13px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--surface)}
+  .addr-bar input{flex:1;min-width:0;min-height:44px;padding:10px 13px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--surface)}
   .addr-bar input:focus{outline:none;border-color:var(--teal);box-shadow:0 0 0 3px var(--teal-wash)}
-  .addr-go{font-size:13px;font-weight:600;padding:0 16px;border-radius:var(--radius-sm);background:var(--ink);color:#fff}
+  .addr-go{font-size:13px;font-weight:600;min-height:44px;padding:0 16px;border-radius:var(--radius-sm);background:var(--ink);color:#fff}
 
   /* side summary */
   .side h3{font-size:15px;font-weight:600;letter-spacing:-.01em}
@@ -259,21 +272,36 @@
   .field label{display:block;font-size:13px;font-weight:500;color:var(--ink-soft);margin-bottom:6px}
   .field input,.field textarea,.field select{width:100%;padding:12px 13px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--surface)}
   .field input:focus,.field textarea:focus,.field select:focus{outline:none;border-color:var(--teal);box-shadow:0 0 0 3px var(--teal-wash)}
-  .details-submit-bar{margin-top:18px}
+  /* Points at exactly which field a validation error is about, instead of
+     a single generic message the customer has to match up themselves. */
+  .field-error input,.field-error textarea,.field-error select{border-color:#b3413a}
+  .field-error.check-row{border-color:#b3413a;background:#fbeeec}
+  .field.field-error > label{color:#b3413a}
+  /* MobileActionBar — the one reusable "Back + primary action" bar used at
+     the bottom of every step (map builder, details form, review). Back and
+     the primary action sit directly next to each other always, not just on
+     mobile, so the primary action is never something you have to hunt for
+     below a long form. On mobile it additionally pins to the bottom of the
+     screen — the classic mobile-checkout pattern — since a form/step this
+     long would otherwise bury it below a scroll. */
+  .mobile-action-bar{margin-top:18px;display:flex;flex-wrap:wrap;gap:10px}
+  .mobile-action-bar .btn{width:auto;margin-top:0}
+  .mobile-action-bar .btn-back{flex:0 0 auto;padding-left:18px;padding-right:18px}
+  .mobile-action-bar .btn-go{flex:1 1 auto;min-width:140px}
+  .mobile-action-bar .bar-status{flex-basis:100%;font-size:13px;color:#b3413a;margin-top:2px}
   @media(max-width:720px){
-    /* Pin the submit action to the bottom of the screen so it's always
-       reachable on a form this long, instead of making the customer
-       scroll all the way back down to send it — the classic mobile
-       checkout pattern. Extra bottom padding on #details keeps the last
-       field (and the Back link) from ever sitting underneath the bar. */
+    /* Extra bottom padding on the step containers keeps their last field
+       (and, now, the Back button) from ever sitting underneath the fixed bar. */
     #details{padding-bottom:104px}
-    .details-submit-bar{
+    #review{padding-bottom:104px}
+    #builder{padding-bottom:104px}
+    .mobile-action-bar{
       position:fixed;left:0;right:0;bottom:0;z-index:30;margin-top:0;
       background:var(--surface);border-top:1px solid var(--line);
       padding:12px 16px max(12px,env(safe-area-inset-bottom));
       box-shadow:0 -6px 20px rgba(10,28,43,.08);
     }
-    .details-submit-bar .btn{width:100%}
+    .mobile-action-bar .btn-back{flex:0 0 92px}
   }
 
   .hidden{display:none!important}
@@ -396,7 +424,7 @@ function initPlacesAutocomplete(){
   <div class="builder hidden" id="builder">
     <div class="card">
       <div class="addr-bar">
-        <input id="addr" placeholder="Start typing your address..." autocomplete="off">
+        <input id="addr" placeholder="Start typing your address..." aria-label="Property address" autocomplete="off">
         <button class="addr-go" onclick="locateAddr()">Find</button>
       </div>
       <div class="map-tools map-tools-svc">
@@ -478,7 +506,10 @@ function initPlacesAutocomplete(){
           <div class="est-sub" id="est-sub">A guide only. We confirm the final price from your map and a quick check.</div>
         </div>
 
-        <button class="btn primary" id="next-btn" disabled onclick="goDetails()">Continue to details →</button>
+        <div class="mobile-action-bar">
+          <button type="button" class="btn ghost btn-back" onclick="backToChoiceFromBuilder()">← Back</button>
+          <button class="btn primary btn-go" id="next-btn" disabled onclick="goDetails()">Continue to details →</button>
+        </div>
       </div>
     </div>
   </div>
@@ -488,40 +519,41 @@ function initPlacesAutocomplete(){
     <h3 id="details-heading" style="font-size:19px;margin-bottom:4px">Almost done — where do we send the quote?</h3>
     <p id="details-sub" style="font-size:13.5px;color:var(--ink-soft);margin-bottom:18px">We'll review your mapped areas and send a firm quote, usually same day.</p>
     <div class="form-grid">
-      <div class="field"><label>First name *</label><input id="c-first-name" placeholder="Sarah"></div>
-      <div class="field"><label>Last name *</label><input id="c-last-name" placeholder="Thompson"></div>
-      <div class="field"><label>Email *</label><input id="c-email" type="email" placeholder="sarah@email.com"></div>
-      <div class="field"><label>Phone *</label><input id="c-phone" type="tel" placeholder="021 555 0123"></div>
-      <div class="field full"><label>Job address *</label><input id="c-addr" placeholder="12 Hurstmere Road, Takapuna"></div>
+      <div class="field"><label for="c-first-name">First name *</label><input id="c-first-name" placeholder="Sarah"></div>
+      <div class="field"><label for="c-last-name">Last name *</label><input id="c-last-name" placeholder="Thompson"></div>
+      <div class="field"><label for="c-email">Email *</label><input id="c-email" type="email" placeholder="sarah@email.com"></div>
+      <div class="field"><label for="c-phone">Phone *</label><input id="c-phone" type="tel" placeholder="021 555 0123"></div>
+      <div class="field full"><label for="c-addr">Job address *</label><input id="c-addr" placeholder="12 Hurstmere Road, Takapuna"></div>
       <!-- Quick-enquiry only — the map flow already knows the service(s)
            from what was drawn (plus the windows add-on toggle alongside it). -->
       <div class="field full hidden" id="c-service-field">
-        <label>Services required * <span style="color:var(--ink-faint);font-weight:400">(select all that apply)</span></label>
-        <div class="svc-pick" id="c-service-picker"></div>
+        <label id="c-service-picker-label">Services required * <span style="color:var(--ink-faint);font-weight:400">(select all that apply)</span></label>
+        <div class="svc-pick" id="c-service-picker" role="group" aria-labelledby="c-service-picker-label"></div>
         <!-- Live-updating recap of what's been picked so far — kept right
              under the picker so a customer scrolling down the form still
              sees confirmation of their choices without scrolling back up.
              Populated by renderSelectedServicesSummary(). -->
         <div class="sel-summary" id="quick-sel-summary"></div>
       </div>
-      <div class="field full"><label>Anything else you want us to know? <span style="color:var(--ink-faint);font-weight:400">(optional)</span></label><textarea id="c-notes" rows="2" placeholder="e.g. heavy moss on the south side, dog in the yard"></textarea></div>
-      <div class="field map-only-field"><label>Preferred timing</label><select id="c-timing"><option>As soon as possible</option><option>Within 2 weeks</option><option>This month</option><option>Just getting a price</option></select></div>
-      <div class="field"><label>How did you find us? *</label><select id="c-source"><option value="">Select…</option><option>Google search</option><option>Facebook</option><option>Referral</option><option>Repeat customer</option><option>Other</option></select></div>
-      <div class="field map-only-field"><label>Preferred date <span style="color:var(--ink-faint);font-weight:400">(optional)</span></label><input type="date" id="c-date"></div>
-      <div class="field map-only-field"><label>Preferred time of day</label><select id="c-window"><option>Anytime</option><option>Morning</option><option>Afternoon</option><option>Evening</option></select></div>
-      <div class="field full"><label>Photos <span style="color:var(--ink-faint);font-weight:400">(optional, up to 6)</span></label><input type="file" id="c-photos" accept="image/*" capture="environment" multiple onchange="onPhotosChosen(this)"><div id="c-photos-status" style="font-size:12.5px;color:var(--ink-soft);margin-top:6px"></div></div>
+      <div class="field full"><label for="c-notes">Anything else you want us to know? <span style="color:var(--ink-faint);font-weight:400">(optional)</span></label><textarea id="c-notes" rows="2" placeholder="e.g. heavy moss on the south side, dog in the yard"></textarea></div>
+      <div class="field map-only-field"><label for="c-timing">Preferred timing</label><select id="c-timing"><option>As soon as possible</option><option>Within 2 weeks</option><option>This month</option><option>Just getting a price</option></select></div>
+      <div class="field"><label for="c-source">How did you find us? *</label><select id="c-source"><option value="">Select…</option><option>Google search</option><option>Facebook</option><option>Referral</option><option>Repeat customer</option><option>Other</option></select></div>
+      <div class="field map-only-field"><label for="c-date">Preferred date <span style="color:var(--ink-faint);font-weight:400">(optional)</span></label><input type="date" id="c-date"></div>
+      <div class="field map-only-field"><label for="c-window">Preferred time of day</label><select id="c-window"><option>Anytime</option><option>Morning</option><option>Afternoon</option><option>Evening</option></select></div>
+      <div class="field full"><label for="c-photos">Photos <span style="color:var(--ink-faint);font-weight:400">(optional, up to 6)</span></label><input type="file" id="c-photos" accept="image/*" capture="environment" multiple onchange="onPhotosChosen(this)"><div id="c-photos-status" style="font-size:12.5px;color:var(--ink-soft);margin-top:6px"></div></div>
     </div>
-    <label class="check-row"><input type="checkbox" id="c-terms"><span>I agree to Turnkey's <a href="#" onclick="event.stopPropagation()">Terms &amp; Conditions</a> for this quote request. *</span></label>
+    <label class="check-row"><input type="checkbox" id="c-terms"><span>I agree to <span id="c-terms-bizname">this business's</span> <a href="#" id="c-terms-link" onclick="event.stopPropagation();event.preventDefault();toggleTermsDetail();return false">Terms &amp; Conditions</a> for this quote request. *</span></label>
+    <div class="terms-detail-body hidden" id="c-terms-detail-body"></div>
     <label class="check-row"><input type="checkbox" id="c-important"><span>I understand this is a preliminary request — final pricing is confirmed after a review of my property. *</span></label>
     <!-- On mobile this bar pins to the bottom of the screen (see
-         .details-submit-bar in the mobile media query) so the submit
-         action stays reachable without scrolling back down past a form
-         this long; on desktop it's just the button in normal flow. -->
-    <div class="details-submit-bar">
-      <button class="btn primary" onclick="goReview()">Review my request</button>
-      <div id="submit-status" style="font-size:13px;color:#b3413a;margin-top:10px"></div>
+         .mobile-action-bar in the mobile media query) so Back and the
+         submit action both stay reachable without scrolling back down past
+         a form this long; on desktop it's just the two buttons in normal flow. -->
+    <div class="mobile-action-bar">
+      <button type="button" class="btn ghost btn-back" id="details-back-btn" onclick="backToMap()">← Back</button>
+      <button class="btn primary btn-go" onclick="goReview()">Review my request</button>
+      <div id="submit-status" class="bar-status"></div>
     </div>
-    <button class="btn ghost" id="details-back-btn" style="margin-top:9px" onclick="backToMap()">← Back to map</button>
   </div>
 
   <!-- STEP 4: review — a confirmation screen between the details form and
@@ -561,11 +593,11 @@ function initPlacesAutocomplete(){
       <ul class="review-list" id="review-mapped-areas"></ul>
     </div>
 
-    <div class="details-submit-bar">
-      <button class="btn primary" onclick="submitRequest()">Confirm &amp; submit</button>
-      <div id="review-status" style="font-size:13px;color:#b3413a;margin-top:10px"></div>
+    <div class="mobile-action-bar">
+      <button type="button" class="btn ghost btn-back" onclick="backToDetails()">← Back</button>
+      <button class="btn primary btn-go" onclick="submitRequest()">Confirm &amp; submit</button>
+      <div id="review-status" class="bar-status"></div>
     </div>
-    <button class="btn ghost" style="margin-top:9px" onclick="backToDetails()">← Edit details</button>
   </div>
 
   <!-- SUCCESS -->
@@ -628,7 +660,8 @@ if(!window.TURNKEY_CONFIG){
 const SERVICES = {
   driveway: {label:'Driveway / Patio Cleaning', unit:'m²', rate:TK_PRICING.SERVICES.driveway.rate,  kind:'area',      color:'var(--c-driveway)', hex:'#c2683a'},
   housewash:{label:'House Wash',             unit:'m',  rate:TK_PRICING.SERVICES.housewash.rate, kind:'perimeter', color:'var(--c-housewash)', hex:'#2f7d8f'},
-  roof:     {label:'Roof Treatment',         unit:'m²', rate:TK_PRICING.SERVICES.roof.rate,      kind:'area',      color:'var(--c-roof)',      hex:'#7a5bbf'},
+  roof:     {label:'Roof Wash',              unit:'m²', rate:TK_PRICING.SERVICES.roof.rate,      kind:'area',      color:'var(--c-roof)',      hex:'#7a5bbf'},
+  rooftreatment:{label:'Roof Treatment',     unit:'m²', rate:TK_PRICING.SERVICES.rooftreatment.rate, kind:'area',  color:'var(--c-rooftreatment)', hex:'#9a7fd1'},
   deck:     {label:'Deck Cleaning',          unit:'m²', rate:TK_PRICING.SERVICES.deck.rate,      kind:'area',      color:'var(--c-deck)',      hex:'#8a6f3f'},
   gutter:   {label:'Gutter Cleaning',        unit:'m',  rate:TK_PRICING.SERVICES.gutter.rate,    kind:'length',    color:'var(--c-gutter)',    hex:'#b08a1e'},
   fence:    {label:'Fence Cleaning',         unit:'m',  rate:TK_PRICING.SERVICES.fence.rate,     kind:'length',    color:'var(--c-fence)',     hex:'#6b7a3a'},
@@ -716,11 +749,19 @@ try{const u=new URL(location.href);const m=u.searchParams.get('mode');if(m==='ma
   // margin, fuel cost) and chemical cost-per-litre, which is internal
   // business-economics data that has no reason to ever reach a public,
   // unauthenticated page's network tab.
-  const url=window.TURNKEY_CONFIG.supabaseUrl+'/rest/v1/businesses?id=eq.'+encodeURIComponent(TURNKEY_BUSINESS_ID)+'&select=name,phone,email,region,logo_url,accent_color,rates:pricing_config->rates';
+  const url=window.TURNKEY_CONFIG.supabaseUrl+'/rest/v1/businesses?id=eq.'+encodeURIComponent(TURNKEY_BUSINESS_ID)+'&select=name,phone,email,region,logo_url,accent_color,primary_color,font_style,policies_config,rates:pricing_config->rates';
   fetch(url,{headers:{apikey:window.TURNKEY_CONFIG.supabaseAnonKey}})
     .then(r=>r.json()).then(rows=>{
       const biz=(rows&&rows[0])||null;
       if(!biz)return;
+      if(biz.font_style==='serif'||biz.font_style==='rounded')document.body.classList.add('font-'+biz.font_style);
+      // Terms checkbox previously always said "Turnkey's Terms & Conditions"
+      // no matter which business's quote form a customer was actually on —
+      // the real root cause of that complaint. Now sourced from the same
+      // TK_POLICIES defaults/renderer the Settings → Policies & Terms editor
+      // previews (pricing-engine.js), so this can never show stale/different
+      // wording than what the business actually configured.
+      renderTermsDetail(biz.name,biz.policies_config);
       // Rates here were a hardcoded constant labelled "mirrored from the CRM"
       // that never actually synced — a business changing a rate in Settings
       // → Pricing had no effect on what customers were quoted here, forever.
@@ -754,8 +795,37 @@ try{const u=new URL(location.href);const m=u.searchParams.get('mode');if(m==='ma
         document.documentElement.style.setProperty('--teal',biz.accent_color);
         document.documentElement.style.setProperty('--teal-bright',biz.accent_color);
       }
+      if(biz.primary_color&&/^#[0-9a-fA-F]{6}$/.test(biz.primary_color)){
+        document.documentElement.style.setProperty('--primary',biz.primary_color);
+      }
     }).catch(()=>{}); // network/RLS failure → keep the generic fallback copy already in the HTML
 })();
+// Fills the terms checkbox's business name + its expandable detail panel.
+// Called once the business fetch above resolves; if it never resolves (no
+// biz id, network/RLS failure), the checkbox keeps its generic HTML fallback
+// text ("this business's") rather than ever showing another business's name
+// or breaking the form.
+function renderTermsDetail(bizName,policies){
+  const nameEl=document.getElementById('c-terms-bizname');
+  if(nameEl)nameEl.textContent=(bizName||'this business')+"'s";
+  const body=document.getElementById('c-terms-detail-body');
+  if(!body||!window.TK_POLICIES)return;
+  const name=bizName||'this business';
+  const fields=['quoteTerms','cancellationPolicy','paymentTerms','warrantyInfo','additionalNotes'];
+  body.innerHTML=fields.map(key=>{
+    const f=TK_POLICIES.FIELDS.find(x=>x.key===key);
+    const raw=TK_POLICIES.withBizName(TK_POLICIES.getField(policies,key),name);
+    if(!raw)return '';
+    return `<h5>${f.label}</h5>${TK_POLICIES.renderPolicyHtml(raw)}`;
+  }).join('');
+}
+function toggleTermsDetail(){
+  const body=document.getElementById('c-terms-detail-body');
+  const link=document.getElementById('c-terms-link');
+  if(!body)return;
+  const nowOpen=body.classList.toggle('hidden')===false;
+  if(link)link.textContent=nowOpen?'Hide Terms & Conditions':'Terms & Conditions';
+}
 
 const SAT_ZOOM_DEFAULT=19; // covers ~153m×115m — right for a full NZ residential section
 const OSM_ZOOM_DEFAULT=18, OSM_ZOOM_MIN=15, OSM_ZOOM_MAX=19, OSM_TILES=3;
@@ -1054,6 +1124,20 @@ function chooseFlow(mode){
   }else{
     showQuickDetails('Tell us what you need','Send your details and we’ll prepare your quote — usually same day.',true);
   }
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+// Reverses chooseFlow('map') — previously there was no way back to the
+// Map/Quick-enquiry choice screen from inside the map builder at all once
+// picked, on mobile or desktop. Mirrors backToChoice() (the quick-enquiry
+// flow's equivalent) for the map flow.
+function backToChoiceFromBuilder(){
+  document.querySelector('.hero').classList.add('hidden');
+  document.querySelector('.steps').classList.add('hidden');
+  document.getElementById('builder').classList.add('hidden');
+  const integration=document.getElementById('integration');
+  if(integration)integration.classList.add('hidden');
+  document.getElementById('mode-choice').classList.remove('hidden');
+  flowMode=null;
   window.scrollTo({top:0,behavior:'smooth'});
 }
 // Toggled from the map flow's service picker — an add-on the customer can
@@ -1723,6 +1807,9 @@ function buildPayload(){
 // fields, so this should never actually fail there, but it's cheap enough
 // to re-run rather than trust state didn't change between the two steps).
 // Returns null when valid, or the alert message to show when it isn't.
+// Returns {msg, fieldId} for the first invalid field, or null once the form
+// is valid — fieldId lets goReview() point at exactly which field is wrong
+// (focus + a beside-the-field error) instead of a single generic message.
 function validateDetailsForm(){
   const firstName=document.getElementById('c-first-name').value.trim();
   const lastName=document.getElementById('c-last-name').value.trim();
@@ -1730,25 +1817,43 @@ function validateDetailsForm(){
   const email=document.getElementById('c-email').value.trim();
   const addr=document.getElementById('c-addr').value.trim();
   const source=document.getElementById('c-source').value;
-  if(!firstName)return'Please add your first name';
-  if(!lastName)return'Please add your last name';
-  if(!phone)return'Please add a phone number so we can reach you';
-  if(!email)return'Please add an email so we can send your quote';
-  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))return'That email address doesn’t look right — please check it';
-  if(!addr)return'Please add the property address';
-  if(!source)return'Please let us know how you found us';
-  if(flowMode==='quick'&&!quickSelectedServices.size)return'Please choose at least one service you need';
-  if(!document.getElementById('c-terms').checked)return'Please accept the Terms & Conditions to continue';
-  if(!document.getElementById('c-important').checked)return'Please confirm you\'ve read the important information to continue';
-  if(window.TURNKEY_WEBHOOK&&!TURNKEY_BUSINESS_ID)return'This booking link looks incomplete — please ask the business for their correct booking link.';
+  if(!firstName)return{msg:'Please add your first name',fieldId:'c-first-name'};
+  if(!lastName)return{msg:'Please add your last name',fieldId:'c-last-name'};
+  if(!phone)return{msg:'Please add a phone number so we can reach you',fieldId:'c-phone'};
+  if(!email)return{msg:'Please add an email so we can send your quote',fieldId:'c-email'};
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))return{msg:'That email address doesn’t look right — please check it',fieldId:'c-email'};
+  if(!addr)return{msg:'Please add the property address',fieldId:'c-addr'};
+  if(!source)return{msg:'Please let us know how you found us',fieldId:'c-source'};
+  if(flowMode==='quick'&&!quickSelectedServices.size)return{msg:'Please choose at least one service you need',fieldId:'c-service-picker'};
+  if(!document.getElementById('c-terms').checked)return{msg:'Please accept the Terms & Conditions to continue',fieldId:'c-terms'};
+  if(!document.getElementById('c-important').checked)return{msg:'Please confirm you\'ve read the important information to continue',fieldId:'c-important'};
+  if(window.TURNKEY_WEBHOOK&&!TURNKEY_BUSINESS_ID)return{msg:'This booking link looks incomplete — please ask the business for their correct booking link.',fieldId:null};
   return null;
+}
+// Shows a validation error beside the sticky action bar (not a blocking
+// native alert()) and draws attention to the actual invalid field — a red
+// outline plus scrolling it into view — so the customer never has to guess
+// which of a dozen fields the message is about.
+function showFieldError(err,statusElId){
+  const status=document.getElementById(statusElId);
+  if(status)status.textContent=err.msg;
+  document.querySelectorAll('.field-error').forEach(el=>el.classList.remove('field-error'));
+  if(!err.fieldId)return;
+  const field=document.getElementById(err.fieldId);
+  if(!field)return;
+  const row=field.closest('.field')||field.closest('.check-row')||field;
+  row.classList.add('field-error');
+  field.scrollIntoView({behavior:'smooth',block:'center'});
+  if(typeof field.focus==='function')field.focus({preventScroll:true});
 }
 // Details form's "Review my request" button — validates, then renders the
 // review screen straight from buildPayload()'s own output (see renderReview())
 // so what's shown there can never drift from what actually gets submitted.
 function goReview(){
   const err=validateDetailsForm();
-  if(err){alert(err);return;}
+  if(err){showFieldError(err,'submit-status');return;}
+  document.getElementById('submit-status').textContent='';
+  document.querySelectorAll('.field-error').forEach(el=>el.classList.remove('field-error'));
   renderReview(buildPayload());
   document.getElementById('details').classList.add('hidden');
   document.getElementById('review').classList.remove('hidden');
@@ -1803,7 +1908,7 @@ function renderReview(payload){
 // elements it targets moved from the details form to the review screen.
 async function submitRequest(){
   const err=validateDetailsForm();
-  if(err){alert(err);backToDetails();return;}
+  if(err){backToDetails();showFieldError(err,'submit-status');return;}
   const payload=buildPayload();
   const status=document.getElementById('review-status');
   const btn=document.querySelector('#review .btn.primary');

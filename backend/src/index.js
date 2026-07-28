@@ -11,7 +11,7 @@ import { encryptToken, decryptToken } from './crypto.js'
 import * as gmail from './providers/gmail.js'
 import * as googleCalendar from './providers/googleCalendar.js'
 import { fetchIcs } from './ical.js'
-import { sendNotification } from './services/notifications.js'
+import { sendNotification, isConfigured as isOneSignalConfigured } from './services/notifications.js'
 
 const PORT = Number(process.env.PORT || 3001)
 const STORAGE = (process.env.STORAGE || 'file').toLowerCase()
@@ -1177,4 +1177,17 @@ app.post('/api/ai/marketing', requireBusiness, async (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 TurnKey backend running on port ${PORT}`)
   console.log(`📦 Storage mode: ${STORAGE}`)
+  // Loud and specific on purpose — "push notifications aren't delivering"
+  // is otherwise nearly undiagnosable from the frontend alone (permission
+  // grant + subscription capture happen there and succeed independently of
+  // this), and the two most common misconfigurations look identical from
+  // the outside (a business/device with push never enabled, vs. this
+  // server never having a REST key at all) unless this is named explicitly
+  // at boot, once, where whoever deployed this will actually see it.
+  if (isOneSignalConfigured()) {
+    console.log('✅ OneSignal push configured (ONESIGNAL_APP_ID + ONESIGNAL_API_KEY both set)')
+  } else {
+    const missing = [!process.env.ONESIGNAL_APP_ID && 'ONESIGNAL_APP_ID', !process.env.ONESIGNAL_API_KEY && 'ONESIGNAL_API_KEY'].filter(Boolean)
+    console.warn(`⚠️  OneSignal push NOT configured — missing ${missing.join(' and ')} in this server's environment. Every sendNotification() call will write the in-app notification row but skip the actual push (see [Notify] logs). Get these from OneSignal dashboard → Settings → Keys & IDs, then set them here (NOT in Netlify — that's TURNKEY_ONESIGNAL_APP_ID, a different, frontend-only variable).`)
+  }
 })

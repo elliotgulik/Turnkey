@@ -70,7 +70,8 @@ export async function sendNotification(supabase, { business_id, type, title, mes
   if (logErr) console.error('[Notify] failed to write in-app notification row', { type, recipient, error: logErr })
 
   if (!isConfigured()) {
-    console.log('[Notify]', type || 'general', '→', recipient, '— skipped: OneSignal not configured (in-app row still written)')
+    const missing = [!ONESIGNAL_APP_ID && 'ONESIGNAL_APP_ID', !ONESIGNAL_API_KEY && 'ONESIGNAL_API_KEY'].filter(Boolean).join(' and ')
+    console.log('[Notify]', type || 'general', '→', recipient, `— skipped: OneSignal not configured on this server (missing ${missing} — in-app row still written)`)
     return { ok: true, skipped: 'onesignal_not_configured' }
   }
 

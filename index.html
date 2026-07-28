@@ -263,6 +263,15 @@
   .modal{background:var(--surface);border-radius:22px;width:100%;max-width:560px;box-shadow:var(--shadow-lg);animation:pop .28s cubic-bezier(.2,.8,.2,1);overflow:hidden}
   @keyframes pop{from{opacity:0;transform:scale(.97) translateY(10px)}to{opacity:1;transform:none}}
 
+  /* Shared full-size image preview — click any quote/area photo thumb to
+     open it here instead of a new tab, on both mobile and desktop. Sits in
+     the same .overlay stack (z-index 100) so it layers correctly whether
+     opened from the quote map, the attachments list, or elsewhere. */
+  #lightbox-overlay{align-items:center;padding:24px;background:rgba(6,16,26,.82)}
+  .lightbox-inner{position:relative;max-width:94vw;max-height:92vh;margin:auto;animation:pop .22s cubic-bezier(.2,.8,.2,1)}
+  .lightbox-inner img{display:block;max-width:94vw;max-height:92vh;width:auto;height:auto;object-fit:contain;border-radius:10px;box-shadow:var(--shadow-lg)}
+  .lightbox-close{position:fixed;top:18px;right:20px;width:40px;height:40px;border-radius:50%;background:rgba(10,28,43,.65);color:#fff;border:none;font-size:22px;line-height:1;cursor:pointer;z-index:110}
+
   /* On phones, every modal becomes an iOS-style bottom sheet instead of a
      centered popup — full width, rounded top corners only, slides up from
      the bottom edge, capped height with its own internal scroll so a tall
@@ -283,9 +292,39 @@
   .modal-foot{padding:16px 26px 22px;display:flex;gap:10px;justify-content:flex-end;border-top:1px solid var(--line)}
 
   /* ===== auth (sign in / create account) — the very first thing a paying
-     customer ever sees, so it gets the same design language as the rest of
-     the app instead of one-off inline styles. ===== */
-  .auth-shell{display:flex;min-height:100vh;align-items:center;justify-content:center;background:var(--paper);padding:20px}
+     customer ever sees. Previously just a bare card with "Turnkey" and
+     "Sign in to your CRM" — nothing explaining what the product IS, why a
+     business owner should trust it, or what they get. Redesigned as a
+     split layout: a dark marketing hero (what/why/trust) alongside the
+     SAME auth card/fields/ids/functions as before, completely unchanged —
+     this is presentation only, no auth logic was touched. Mobile-first:
+     below 900px the hero collapses to a short headline + subtext (no
+     benefit list) stacked ABOVE the card, so signing in still only takes a
+     couple of scrolls, not a marketing page first. ===== */
+  .auth-shell{display:grid;grid-template-columns:1fr;min-height:100vh;background:var(--paper)}
+  .auth-hero{
+    background:linear-gradient(155deg,#0a1c2b 0%,#0f2d3f 55%,#0f3d3a 100%);
+    color:#fff;padding:44px 28px 36px;display:flex;flex-direction:column;justify-content:center;gap:18px;
+  }
+  .auth-hero-badge{display:inline-flex;align-items:center;gap:9px;font-size:13px;font-weight:650;letter-spacing:-.01em;width:fit-content}
+  .auth-hero-badge img{border-radius:8px;display:block}
+  .auth-hero-title{font-size:28px;font-weight:700;letter-spacing:-.03em;line-height:1.12;max-width:480px}
+  .auth-hero-sub{font-size:14.5px;line-height:1.55;color:rgba(255,255,255,.72);max-width:440px}
+  .auth-hero-benefits{list-style:none;display:none;flex-direction:column;gap:11px;margin-top:4px}
+  .auth-hero-benefit{display:flex;align-items:center;gap:11px;font-size:14px;font-weight:500;color:rgba(255,255,255,.92)}
+  .auth-hero-benefit .hb-ico{flex-shrink:0;width:26px;height:26px;border-radius:8px;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.12)}
+  .auth-hero-benefit .hb-ico svg{width:14px;height:14px}
+  .auth-hero-trust{display:none;font-size:12.5px;color:rgba(255,255,255,.55);border-top:1px solid rgba(255,255,255,.14);padding-top:16px;margin-top:6px;max-width:440px;line-height:1.5}
+  .auth-cards{display:flex;align-items:center;justify-content:center;padding:32px 20px 44px}
+  @media(min-width:900px){
+    .auth-shell{grid-template-columns:1fr 460px}
+    .auth-hero{padding:60px 56px}
+    .auth-hero-title{font-size:36px}
+    .auth-hero-sub{font-size:15.5px}
+    .auth-hero-benefits{display:flex}
+    .auth-hero-trust{display:block}
+    .auth-cards{padding:40px}
+  }
   .auth-card{max-width:360px;width:100%;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:36px 32px;box-shadow:var(--shadow-lg);text-align:center}
   .auth-mark{border-radius:11px;margin-bottom:14px}
   .auth-card h1{font-size:21px;font-weight:650;letter-spacing:-.02em;color:var(--ink);margin-bottom:4px}
@@ -421,6 +460,7 @@
 
   .toast{position:fixed;bottom:28px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--ink);color:#fff;font-size:14px;font-weight:500;padding:13px 22px;border-radius:980px;opacity:0;pointer-events:none;transition:opacity .25s,transform .25s;z-index:200;box-shadow:var(--shadow-lg)}
   .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  .toast.show.clickable{pointer-events:auto;cursor:pointer;text-decoration:underline;text-underline-offset:3px}
 
   .back-link{font-size:13px;color:var(--ink-soft);display:inline-flex;align-items:center;gap:5px;margin-bottom:18px;padding:6px 12px;border-radius:980px;background:var(--surface-2)}
   .back-link:hover{color:var(--ink);background:var(--line)}
@@ -1096,6 +1136,10 @@
   .qe-photo-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
   .qe-photo-thumb{width:46px;height:46px;border-radius:6px;background:var(--surface-2) center/cover;position:relative;flex-shrink:0}
   .qe-photo-rm{position:absolute;top:-5px;right:-5px;width:16px;height:16px;border-radius:50%;background:var(--coral);color:#fff;font-size:10px;line-height:16px;text-align:center}
+  /* Quote attachment thumbnails — bigger than the area-photo thumbs above
+     since this is the main preview of what's attached to the whole quote,
+     not a small in-context marker. Click opens the full-size lightbox. */
+  .qa-photo-thumb{width:72px;height:72px;border-radius:8px;background:var(--surface-2) center/cover;cursor:pointer;flex-shrink:0;border:1px solid var(--line)}
   @media(max-width:720px){
     .qe-toolbar .btn.sm{min-height:44px;padding:8px 13px}
     .qe-zoom button{width:44px;height:44px;font-size:18px}
@@ -1223,6 +1267,21 @@
 </head>
 <body>
 <div id="auth-overlay" class="auth-shell">
+  <div class="auth-hero">
+    <div class="auth-hero-badge"><img src="icon-192.png" alt="" width="26" height="26">Turnkey</div>
+    <div class="auth-hero-title">Run your service business smarter</div>
+    <p class="auth-hero-sub">Create professional quotes, manage jobs, send invoices, and organise your entire operation from one simple platform.</p>
+    <ul class="auth-hero-benefits">
+      <li class="auth-hero-benefit"><span class="hb-ico" style="color:var(--m-sales)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v13H7l-3 3z"/><line x1="8" y1="9" x2="16" y2="9"/><line x1="8" y1="13" x2="13" y2="13"/></svg></span>Instant professional quotes</li>
+      <li class="auth-hero-benefit"><span class="hb-ico" style="color:var(--m-cal)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="3" x2="8" y2="7"/><line x1="16" y1="3" x2="16" y2="7"/></svg></span>Online booking requests</li>
+      <li class="auth-hero-benefit"><span class="hb-ico" style="color:var(--m-money)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="2" x2="12" y2="22"/><path d="M17 6H9.5a2.5 2.5 0 0 0 0 5h5a2.5 2.5 0 0 1 0 5H7"/></svg></span>Automated invoices</li>
+      <li class="auth-hero-benefit"><span class="hb-ico" style="color:var(--m-dash)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="8.5" r="2.6"/><path d="M15.5 14.3c2.6.4 4.5 2.6 4.5 5.7"/></svg></span>Customer management</li>
+      <li class="auth-hero-benefit"><span class="hb-ico" style="color:var(--m-ops)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 9l2 2 4-4"/><line x1="8" y1="15" x2="16" y2="15"/></svg></span>Job scheduling</li>
+      <li class="auth-hero-benefit"><span class="hb-ico" style="color:var(--m-insight)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s7-6.4 7-12a7 7 0 1 0-14 0c0 5.6 7 12 7 12z"/><circle cx="12" cy="9" r="2.4"/></svg></span>Built for service businesses</li>
+    </ul>
+    <p class="auth-hero-trust">Used by pressure washing, cleaning and other service businesses to run quotes, jobs and invoicing end to end — no spreadsheets, no chasing paper quotes.</p>
+  </div>
+  <div class="auth-cards">
   <div class="auth-card" id="auth-card-normal">
     <img class="auth-mark" src="icon-192.png" alt="" width="44" height="44">
     <h1>Turnkey</h1>
@@ -1241,6 +1300,7 @@
     <div class="field"><label>New password</label><input id="auth-new-password" type="password" placeholder="At least 6 characters" autocomplete="new-password" onkeydown="if(event.key==='Enter')handlePasswordRecoverySubmit()"></div>
     <div id="auth-recovery-msg" class="auth-msg"></div>
     <button class="btn primary block" id="auth-recovery-btn" onclick="handlePasswordRecoverySubmit()">Save new password</button>
+  </div>
   </div>
 </div>
 <div class="app" style="display:none">
@@ -1276,10 +1336,10 @@
     </div>
   </nav>
   <nav class="bottom-nav" id="bottom-nav">
-    <button data-view="dashboard"><span class="bn-ico" data-icon="dashboard"></span>Dashboard</button>
-    <button data-view="customers"><span class="bn-ico" data-icon="customers"></span>Customers</button>
-    <button data-view="calendar"><span class="bn-ico" data-icon="calendar"></span>Calendar</button>
+    <button data-view="pipeline" class="active"><span class="bn-ico" data-icon="pipeline"></span>Pipeline</button>
     <button data-view="jobsflow"><span class="bn-ico" data-icon="jobsflow"></span>Jobs</button>
+    <button data-view="leads"><span class="bn-ico" data-icon="leads"></span>Quotes</button>
+    <button data-view="customers"><span class="bn-ico" data-icon="customers"></span>Customers</button>
     <button onclick="openMoreSheet()"><span class="bn-ico" data-icon="more"></span>More</button>
   </nav>
   <main>
@@ -1510,10 +1570,18 @@
   <div class="modal-foot"><button class="btn ghost" onclick="closeModal('job-note-overlay')">Cancel</button><button class="btn primary" onclick="saveJobNote()">Save note</button></div>
 </div></div>
 
+<div class="overlay" id="lightbox-overlay"><div class="lightbox-inner"><button type="button" class="lightbox-close" aria-label="Close" onclick="closeModal('lightbox-overlay')">×</button><img id="lightbox-img" src="" alt="Full-size photo"></div></div>
+
 <div class="overlay" id="tpl-overlay"><div class="modal">
   <div class="modal-head"><div><h3>Edit template</h3><p>Your header, contact details, colours and terms — applied to every quote and invoice.</p></div><button class="x" aria-label="Close" onclick="closeModal('tpl-overlay')">×</button></div>
   <div class="modal-body" id="tpl-body"></div>
   <div class="modal-foot"><button class="btn ghost" onclick="closeModal('tpl-overlay')">Cancel</button><button class="btn primary" onclick="saveTemplate()">Save template</button></div>
+</div></div>
+
+<div class="overlay" id="policies-overlay"><div class="modal wide">
+  <div class="modal-head"><div><h3>Policies &amp; Terms</h3><p>Shown to customers on your quote request form and quote approval page — not TurnKey's terms, yours.</p></div><button class="x" aria-label="Close" onclick="closeModal('policies-overlay')">×</button></div>
+  <div class="modal-body" id="policies-body"></div>
+  <div class="modal-foot"><button class="btn ghost" onclick="closeModal('policies-overlay')">Cancel</button><button class="btn primary" onclick="savePolicies()">Save policies</button></div>
 </div></div>
 
 <div class="overlay" id="schedule-overlay"><div class="modal">
@@ -1726,7 +1794,7 @@ const SVC_COST=TK_COST.SVC_COST, CHEMICALS=TK_COST.CHEMICALS, COST_INPUTS=TK_COS
 // Thin compatibility wrapper — existing callers (renderEstimate,
 // confirmQuoteSend's duration estimate) get the same shape as before;
 // TK_COST.costBreakdown() is the one real implementation.
-function estimateJob(services){return TK_COST.costBreakdown((services||[]).map(s=>({svc:s.svc,qty:s.qty})));}
+function estimateJob(services,travel){return TK_COST.costBreakdown((services||[]).map(s=>({svc:s.svc,qty:s.qty})),travel);}
 function fmtDur(min){const h=Math.floor(min/60),m=Math.round(min%60);return h?`${h}h ${m?m+'m':''}`.trim():`${m}m`}
 const DAY_START_MIN = 8*60; // crews start at 8:00am
 function fmtTime(mins){let h=Math.floor(mins/60),m=Math.round(mins%60);const ap=h>=12?'pm':'am';let h12=h%12;if(h12===0)h12=12;return `${h12}:${String(m).padStart(2,'0')}${ap}`;}
@@ -2130,6 +2198,7 @@ const NOTIFICATION_EVENTS=[
   {key:'job_cancelled',label:'Job cancelled'},
   {key:'job_tomorrow',label:'Job scheduled for tomorrow'},
   {key:'job_today',label:"Today's job reminder"},
+  {key:'job_started',label:'Technician starts a job'},
   {key:'invoice_created',label:'Invoice created'},
   {key:'invoice_overdue',label:'Invoice overdue'},
   {key:'payment_received',label:'Payment received'},
@@ -2311,12 +2380,27 @@ async function syncPushSubscription(subscriptionId){
   console.log('[Push] Supabase upsert to notification_subscriptions OK — subscription id',subscriptionId,'business',currentBusinessId,'user',currentUserId);
   return true;
 }
+// iOS Safari (and any iOS browser — they all share WebKit) can NEVER receive
+// web push from an ordinary browser tab, full stop — this is an Apple
+// platform restriction, not something any app-side fix can work around.
+// Since iOS 16.4, it DOES work once the site is added to the Home Screen
+// (launched as a standalone PWA) — navigator.standalone is the iOS-specific
+// signal for that; display-mode:standalone is the cross-platform equivalent
+// other browsers set. Without this check, an iPhone user who taps "Enable
+// notifications" in a regular Safari tab sees the flow hang or fail with no
+// explanation — indistinguishable from the button just being broken.
+function isIosNonStandalonePwa(){
+  const isIos=/iphone|ipad|ipod/i.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+  const isStandalone=window.navigator.standalone===true||window.matchMedia('(display-mode: standalone)').matches;
+  return isIos&&!isStandalone;
+}
 async function enablePushNotifications(btn){
   if(pushBusy)return;
   const appId=(window.TURNKEY_CONFIG&&window.TURNKEY_CONFIG.onesignalAppId)||'';
   const permission=('Notification' in window)?Notification.permission:'(no Notification API)';
-  console.log('[Push] Enable clicked — appId:',appId||'(none)','Notification.permission:',permission);
+  console.log('[Push] Enable clicked — appId:',appId||'(none)','Notification.permission:',permission,'iOS non-standalone:',isIosNonStandalonePwa());
   if(!appId){toast('Push notifications aren’t set up for this TurnKey yet — ask your admin to configure OneSignal');return;}
+  if(isIosNonStandalonePwa()){toast('On iPhone/iPad, first add TurnKey to your Home Screen (Share → Add to Home Screen), then open it from there and try again — Safari can’t deliver notifications to an ordinary browser tab.',6000);return;}
   if(!('Notification' in window)){toast('Notifications aren’t supported in this browser');return;}
   if(Notification.permission==='denied'){toast('Notifications are blocked in your browser settings.');return;}
   pushBusy=true;
@@ -2523,13 +2607,13 @@ function addFollow(id){
 function removeFollow(id,fid){const r=records.find(x=>x.id===id);r.follows=r.follows.filter(x=>x.id!==fid);openDetail(id);toast('Follow-up removed');}
 function sendFollowNow(id,fid){
   const r=records.find(x=>x.id===id);const f=r.follows.find(x=>x.id===fid);
-  // Open the operator's real email/text app with the message pre-filled
+  // Email opens Gmail compose in a new tab (openGmailCompose); text opens the device's own SMS app.
   const bodyText=buildFollowBody(r,f);
   const to=f.channel==='email'?r.email:r.phone;
   if(!to){toast(`No ${f.channel==='email'?'email':'phone'} on file for ${r.name}`);return;}
   if(f.channel==='email'){
     const subject='Following up on your quote — '+docBizName();
-    window.location.href=`mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(bodyText)}`;
+    openGmailCompose({to,subject,body:bodyText});
   }else{
     const cleanPhone=to.replace(/\s/g,'');
     // sms: on iOS uses "&body=", on Android "?body="; use ? which both accept in practice
@@ -2722,6 +2806,23 @@ function openQuoteModal(id){
 
   if(!draftLines.length)draftLines=[{svc:'driveway',qty:''}];
   renderSvcLines();renderRequestedServicesZone();renderQuoteAttachList();openModal('quote-overlay');
+  loadQuoteTravelInfo(r);
+}
+// Real travel distance/time for whichever quote is currently open, or null
+// while it's still loading / unavailable (no home address configured, both
+// lookups failed, etc.) — renderEstimate() falls back to the cost engine's
+// own default whenever this is null, so a slow/failed lookup never blocks
+// or breaks the estimate panel, just makes it less precise until it resolves.
+let quoteTravelInfo=null;
+let quoteTravelInfoForId=null; // guards against a slow lookup for a since-closed quote overwriting the currently open one
+async function loadQuoteTravelInfo(r){
+  quoteTravelInfo=null;
+  quoteTravelInfoForId=r.id;
+  renderEstimate();
+  const info=await calcTravelDistance(r.address,r.suburb);
+  if(quoteTravelInfoForId!==r.id)return; // a different quote is open now — discard this stale result
+  quoteTravelInfo=info;
+  renderEstimate();
 }
 // The customer's raw ask (getRequestedServices()) vs draftLines (the
 // operator's actual priced quote lines) are deliberately two separate
@@ -2794,13 +2895,23 @@ function renderQuoteAttachList(){
   const zone=document.getElementById('quote-attach-list');if(!zone)return;
   const r=records.find(x=>x.id===activeLeadId);
   const list=(r&&r.quoteAttachments)||[];
-  zone.innerHTML=list.length
-    ?list.map((a,i)=>`<span class="seg" style="cursor:pointer" onclick="viewAttachmentPath('${a.path}')">${(a.filename||'file').replace(/</g,'&lt;')}</span>`).join('')
-    :'<span style="font-size:12px;color:var(--ink-faint)">No files attached</span>';
+  if(!list.length){zone.innerHTML='<span style="font-size:12px;color:var(--ink-faint)">No files attached</span>';return;}
+  // Real thumbnails for photos (loaded async below, same pattern as the
+  // quote-map area photos) — non-image attachments (PDFs etc) keep the
+  // filename chip since there's nothing to thumbnail.
+  zone.innerHTML=list.map(a=>isImagePath(a.path)
+    ?`<div class="qa-photo-thumb" data-path="${a.path}" title="${(a.filename||'file').replace(/"/g,'&quot;')}" onclick="viewAttachmentPath('${a.path}')"></div>`
+    :`<span class="seg" style="cursor:pointer" onclick="viewAttachmentPath('${a.path}')">${(a.filename||'file').replace(/</g,'&lt;')}</span>`
+  ).join('');
+  zone.querySelectorAll('.qa-photo-thumb[data-path]').forEach(async cell=>{
+    const url=await signedUrlFor(cell.dataset.path);
+    if(url)cell.style.backgroundImage=`url("${url}")`;
+  });
 }
 async function viewAttachmentPath(path){
   const url=await signedUrlFor(path);
-  if(url)window.open(url,'_blank');else toast('Could not open file');
+  if(!url){toast('Could not open file');return;}
+  if(isImagePath(path))openImageLightbox(url);else window.open(url,'_blank');
 }
 // Show the property with the customer's outlined areas (if the lead came from the booking widget), else a placeholder.
 /* =====================================================================
@@ -2812,7 +2923,7 @@ async function viewAttachmentPath(path){
    and so staff edits (move/resize/add/delete/duplicate) use the exact same
    already-debugged math instead of a second, divergent geometry engine.
    ===================================================================== */
-const QE_SVC_HEX={driveway:'#c2683a',housewash:'#2f7d8f',roof:'#7a5bbf',patio:'#0f7d6b',gutter:'#b08a1e',fence:'#6b7a3a',windows:'#4a6b8a'};
+const QE_SVC_HEX={driveway:'#c2683a',housewash:'#2f7d8f',roof:'#7a5bbf',rooftreatment:'#9a7fd1',patio:'#0f7d6b',gutter:'#b08a1e',fence:'#6b7a3a',windows:'#4a6b8a'};
 // QE_ZOOM_MAX=22 is Google Static Maps' actual documented ceiling (21 is
 // merely where most integrations stop, not a hard limit) — imagery
 // resolution below that is a per-location Google Maps coverage question,
@@ -3407,7 +3518,7 @@ function qeRemoveAreaPhoto(id,path){
 }
 async function qeOpenAreaPhoto(path){
   const url=await signedUrlFor(path);
-  if(url)window.open(url,'_blank');else toast('Could not open photo');
+  if(url)openImageLightbox(url);else toast('Could not open photo');
 }
 
 /* ---------- fit-all / zoom ---------- */
@@ -3692,7 +3803,7 @@ function lineSubtotal(line){return TK_PRICING.lineTotal(line);}
 // doc-preview invoice table and the Customer Profile timeline so all three
 // describe a line identically, not just total it identically.
 function lineVariantNote(s){
-  if(s.svc==='roof'&&s.roofType&&ROOF_TYPES[s.roofType])return ROOF_TYPES[s.roofType].label;
+  if(SERVICES[s.svc]&&SERVICES[s.svc].usesRoofType&&s.roofType&&ROOF_TYPES[s.roofType])return ROOF_TYPES[s.roofType].label;
   if(s.svc==='housewash'&&s.storeys&&STOREY_TYPES[s.storeys])return STOREY_TYPES[s.storeys].label;
   if(s.svc==='fence'&&s.sides&&FENCE_SIDES[s.sides])return FENCE_SIDES[s.sides].label;
   return '';
@@ -3724,7 +3835,7 @@ function renderSvcLines(){
     const rec=costBd.lines.find(b=>b.line===line);
     const displayRate=line.customRate!=null?parseFloat(line.customRate):TK_PRICING.effectiveRate(line);
     let extraRow='';
-    if(line.svc==='roof'){
+    if(svc.usesRoofType){
       if(!line.roofType)line.roofType='concrete';
       extraRow='<select class="sl-roof" onchange="draftLines['+i+'].roofType=this.value;draftLines['+i+'].customRate=null;renderSvcLines()">'+
         Object.entries(ROOF_TYPES).map(([k,v])=>`<option value="${k}" ${k===line.roofType?'selected':''}>Roof type: ${v.label} (\u00d7${v.mult})</option>`).join('')+'</select>';
@@ -3905,7 +4016,7 @@ function renderEstimate(){
   const zone=document.getElementById('estimate-zone'); if(!zone) return;
   const lines=draftLines.filter(l=>(parseFloat(l.qty)||0)>0);
   if(!lines.length){zone.innerHTML='';return;}
-  const e=estimateJob(lines.map(l=>({svc:l.svc,qty:parseFloat(l.qty)||0})));
+  const e=estimateJob(lines.map(l=>({svc:l.svc,qty:parseFloat(l.qty)||0})),quoteTravelInfo);
   const finalTotal=quoteTotal();
   const profit=finalTotal-e.cost;
   const marginPct=TK_COST.marginPct(finalTotal,e.cost);
@@ -3925,7 +4036,7 @@ function renderEstimate(){
       <div class="est-rows">
         <div class="est-r"><span>Wages (${COST_INPUTS.crew} crew \u00d7 ${e.labourHrs.toFixed(1)}h \u00d7 $${COST_INPUTS.wage})</span><span>${money(e.wageCost)}</span></div>
         <div class="est-r"><span>Chemicals (${e.litres.toFixed(1)} L)</span><span>${money(e.chem)}</span></div>
-        <div class="est-r"><span>Fuel (${COST_INPUTS.avgKm}km round trip)</span><span>${money(e.fuelCost)}</span></div>
+        <div class="est-r"><span>${quoteTravelInfo?`Travel — ${e.travelKm.toFixed(1)}km round trip${e.travelMins?' · ~'+fmtDur(Math.round(e.travelMins))+' drive':''}${quoteTravelInfo.source==='estimate'?' (estimated)':''}`:`Fuel (${e.travelKm}km round trip — add a home address in Settings for an accurate estimate)`}</span><span>${money(e.fuelCost)}</span></div>
         <div class="est-r"><span>Equipment wear</span><span>${money(e.equipmentCost)}</span></div>
         <div class="est-r"><span>Consumables</span><span>${money(e.consumablesCost)}</span></div>
         <div class="est-r est-total"><span>Total cost to deliver</span><span>${money(e.cost)}</span></div>
@@ -3981,7 +4092,10 @@ function confirmQuoteSend(){
   // margin actually was at the time, not get silently recalculated against
   // today's rates every time someone reopens it (Reporting needs this to
   // stay historically accurate, not just the live Quote Builder).
-  const costBd=TK_COST.costBreakdown(lines);
+  const costBd=TK_COST.costBreakdown(lines,quoteTravelInfo);
+  r.travelKm=costBd.travelKm;
+  r.travelMins=costBd.travelMins;
+  r.travelSource=quoteTravelInfo?quoteTravelInfo.source:'default';
   r.services=lines.map(l=>{
     const o={svc:l.svc,qty:parseFloat(l.qty)};
     if(l.roofType)o.roofType=l.roofType;
@@ -4047,6 +4161,35 @@ function logActivity(customerId,jobId,type,summary,detail){
   }).then(({error})=>{if(error)console.error('Activity log failed',error);});
 }
 
+// Opens Gmail's own web compose window in a NEW tab, pre-filled with
+// to/subject/body — this is Gmail's normal compose URL
+// (mail.google.com/mail/?view=cm), not a mailto: link and not an OAuth-
+// authenticated send. That means Gmail's own account picker applies exactly
+// as if the user had opened gmail.com and clicked Compose themselves: on a
+// shared computer or with multiple Google accounts signed in, Gmail asks
+// which one to send as, and nothing here can pick that for them or send on
+// their behalf. The caller's own tab (this one) is left completely alone.
+function openGmailCompose({to,subject,body}){
+  const params=new URLSearchParams();
+  if(to)params.set('to',to);
+  if(subject)params.set('su',subject);
+  if(body)params.set('body',body);
+  const url='https://mail.google.com/mail/?view=cm&fs=1&'+params.toString();
+  const win=window.open(url,'_blank');
+  // window.open() only reliably succeeds as the DIRECT result of a user
+  // gesture (a click) — by the time generateAndSendDoc()'s async work
+  // (Supabase sync, PDF generation, its own 600ms delay) has run, the
+  // browser may no longer count this as close enough to the original click
+  // and silently block it. Most browsers return null for a blocked popup; a
+  // few return an already-closed window instead — either way, the only way
+  // to actually recover is a fresh, real click from the user, so hand them
+  // one via the toast itself instead of just claiming a tab opened.
+  if(!win||win.closed){
+    toast('Gmail was blocked by your browser — tap here to open it',8000,()=>window.open(url,'_blank'));
+    return null;
+  }
+  return win;
+}
 async function generateAndSendDoc(mode,r){
   // The public quote-approval link (quote.html?t=...) only exists once the
   // quote row is synced to Supabase — public_token is server-generated, not
@@ -4068,12 +4211,23 @@ async function generateAndSendDoc(mode,r){
   // since an invoice is generated straight from the completed job's already-
   // final property outline — same geometry the quote was drawn with).
   if(r._mapSnapshotDataUrl===undefined)await preloadMapSnapshot(r);
-  // Preferred path: Gmail connected → compose + send inside TurnKey, no
-  // download required — recipient is editable in the composer, so a missing
-  // email on file no longer blocks this path, just leaves it blank to fill in.
-  // Falls back to the PDF-download+mailto flow below only when Gmail isn't
-  // connected at all — there's no other way to actually send email.
-  if(emailAccount){openSendDocModal(mode,r);return;}
+  // ALWAYS downloads the PDF, then opens GMAIL'S OWN web compose window
+  // (openGmailCompose() — mail.google.com/mail/?view=cm, NOT a mailto: link)
+  // in a brand new tab, subject/body pre-filled, leaving this TurnKey tab
+  // untouched. Two things this deliberately avoids: (1) mailto:, which hands
+  // off to whatever the OS's default mail app is — Apple Mail on a Mac even
+  // when the business only actually uses Gmail; (2) any OAuth-authenticated
+  // send, which would silently send AS whichever Google account happens to
+  // already be signed in, not necessarily the person actually at the
+  // keyboard. Gmail's own compose URL means Gmail's own normal account
+  // picker applies — exactly like clicking Compose after visiting gmail.com
+  // directly — so on a shared computer or with multiple business owners,
+  // whoever is sending chooses their own account every time. Gmail OAuth
+  // itself is untouched everywhere else it's used (Inbox, automated
+  // lifecycle emails) — this only changes the Send Quote/Send Invoice button.
+  // (openSendDocModal()/saveSendDocDraft()/confirmSendDocEmail() below are
+  // no longer called from here and are effectively dead now — left in place
+  // rather than risk a partial removal of their shared modal HTML/CSS.)
   const num=docNumber(mode,r);
   const filename=(mode==='quote'?'Quote':'Invoice')+'-'+num+'.pdf';
   const bizName=docBizName();
@@ -4090,9 +4244,9 @@ async function generateAndSendDoc(mode,r){
       downloadBlob(pdfBlob,filename);
       if(r.email){
         setTimeout(function(){
-          window.location.href='mailto:'+encodeURIComponent(r.email)+'?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(shortBody);
+          openGmailCompose({to:r.email,subject,body:shortBody});
         },600);
-        toast('PDF saved \u2014 attach '+filename+' in the email that just opened. Connect Gmail in Settings to send in one step next time.');
+        toast('PDF saved \u2014 attach '+filename+' in the Gmail tab that just opened, then choose which account to send from.');
       }else{
         toast('PDF saved as '+filename+'. No email on file for '+r.name+'.');
       }
@@ -4101,8 +4255,8 @@ async function generateAndSendDoc(mode,r){
     }catch(e){console.warn('PDF generation failed, falling back:',e);}
   }
   if(r.email){
-    window.location.href='mailto:'+encodeURIComponent(r.email)+'?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(buildDocEmailBody(mode,r));
-    toast('Email opened for '+r.name);
+    openGmailCompose({to:r.email,subject,body:buildDocEmailBody(mode,r)});
+    toast('Gmail opened for '+r.name+' \u2014 choose which account to send from.');
     logActivity(r.customerId,r.jobId,mode==='quote'?'quote_sent':'invoice_sent',(mode==='quote'?'Quote sent \u2014 ':'Invoice sent \u2014 ')+money(r.total||0)+' to '+r.email);
   }else{
     toast((mode==='quote'?'Quote':'Invoice')+' saved. No email on file for '+r.name+'.');
@@ -4485,12 +4639,86 @@ function restoreEmailTemplateDefaults(type){
   else document.getElementById('tpl-invoice-payment').value=d.payment_instructions;
   toast('Restored — click Save to keep it');
 }
+/* ===== Policies & Terms — customer-facing (booking.html's quote-request
+   checkbox, quote.html's acceptance page), stored in businesses.policies_config.
+   Deliberately separate from docTemplate.quoteTerms/invoiceTerms above,
+   which style the operator-facing PDF/email only. See TK_POLICIES
+   (pricing-engine.js) for the shared field list/defaults/safe renderer used
+   here, on booking.html and on quote.html alike. ===== */
+function openPoliciesEditor(){
+  const policies=(currentBusinessProfile&&currentBusinessProfile.policies_config)||{};
+  const bizName=docBizName();
+  document.getElementById('policies-body').innerHTML=`
+    <p style="font-size:12px;color:var(--ink-faint);margin:-4px 0 14px">Shown to customers on your quote request form and quote approval page as "<b>${bizName}'s</b> Terms and Conditions" — never TurnKey's. Leave a blank line between paragraphs; start a line with "- " for a bullet point.</p>
+    ${TK_POLICIES.FIELDS.map(f=>{
+      const val=TK_POLICIES.getField(policies,f.key);
+      return `<div class="field">
+        <label>${f.label} <span style="color:var(--ink-faint);font-weight:400" id="pol-${f.key}-count">${val.length}/${f.limit}</span></label>
+        <textarea id="pol-${f.key}" rows="${f.key==='customerAgreementWording'?2:4}" maxlength="${f.limit}" oninput="document.getElementById('pol-${f.key}-count').textContent=this.value.length+'/${f.limit}';renderPoliciesPreview()">${val.replace(/</g,'&lt;')}</textarea>
+        <button type="button" class="btn ghost sm" style="margin-top:6px" onclick="restorePolicyDefault('${f.key}')">Restore default</button>
+      </div>`;
+    }).join('')}
+    <div class="panel" style="margin-top:6px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h4 style="margin:0">Preview</h4><span style="font-size:12px;color:var(--ink-faint)">What a customer will see</span></div>
+      <div id="policies-preview" style="font-size:13px;color:var(--ink-soft);line-height:1.6"></div>
+    </div>`;
+  renderPoliciesPreview();
+  openModal('policies-overlay');
+}
+function renderPoliciesPreview(){
+  const zone=document.getElementById('policies-preview');if(!zone)return;
+  const bizName=docBizName();
+  const get=key=>{const el=document.getElementById('pol-'+key);return el?el.value:'';};
+  const html=TK_POLICIES.FIELDS.map(f=>{
+    const raw=TK_POLICIES.withBizName(get(f.key),bizName);
+    if(!raw)return '';
+    return `<div style="margin-bottom:12px"><div style="font-size:11px;font-weight:700;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">${f.label}</div>${TK_POLICIES.renderPolicyHtml(raw)}</div>`;
+  }).join('');
+  zone.innerHTML=html||'<span style="color:var(--ink-faint)">Nothing to preview yet.</span>';
+}
+function restorePolicyDefault(key){
+  const f=TK_POLICIES.FIELDS.find(x=>x.key===key);if(!f)return;
+  const ta=document.getElementById('pol-'+key);if(!ta)return;
+  ta.value=f.default;
+  const counter=document.getElementById('pol-'+key+'-count');if(counter)counter.textContent=f.default.length+'/'+f.limit;
+  renderPoliciesPreview();
+}
+async function savePolicies(){
+  if(!sb||!currentBusinessId){toast('Something went wrong — try refreshing the page');return;}
+  const policies={};
+  TK_POLICIES.FIELDS.forEach(f=>{
+    const ta=document.getElementById('pol-'+f.key);
+    if(ta)policies[f.key]=ta.value.trim();
+  });
+  const {data,error}=await sb.from('businesses').upsert({id:currentBusinessId,policies_config:policies}).select('*').maybeSingle();
+  if(error){console.error('Save policies failed',error);toast('Could not save policies — try again');return;}
+  currentBusinessProfile=data;
+  toast('Policies saved ✓');
+  closeModal('policies-overlay');
+}
 function openTemplateEditor(){
   const t=docTemplate;
   document.getElementById('tpl-body').innerHTML=`
     <p style="font-size:12px;color:var(--ink-faint);margin:-4px 0 14px">These style the attached/embedded PDF. Name/phone/email start filled in from your <b>Business profile</b> (Connections) — edit here to use something different just for documents.</p>
     <div class="field-row"><div class="field"><label>Business name</label><input id="tpl-business" placeholder="Your Business Name" value="${(t.business||'').replace(/"/g,'&quot;')}"></div><div class="field"><label>Accent colour</label><input id="tpl-accent" type="color" value="${t.accent}" style="height:44px;padding:4px"></div></div>
     <div class="field"><label>Tagline</label><input id="tpl-tagline" placeholder="e.g. Exterior cleaning · Auckland" value="${(t.tagline||'').replace(/"/g,'&quot;')}"></div>
+    <div class="panel" style="padding:16px 18px;margin:14px 0">
+      <h4 style="margin-bottom:2px">Customer-facing branding</h4>
+      <p style="font-size:12px;color:var(--ink-faint);margin-bottom:12px">Applied to your online booking page and the quote your customer approves — this is what makes two businesses on Turnkey look completely different to their customers.</p>
+      <div class="field-row">
+        <div class="field"><label>Primary colour <span style="color:var(--ink-faint);font-weight:400">(headers/banners)</span></label><input id="tpl-primary-color" type="color" value="${(currentBusinessProfile&&currentBusinessProfile.primary_color)||t.accent||'#138a72'}" style="height:44px;padding:4px"></div>
+        <div class="field"><label>Font style</label><select id="tpl-font-style">
+          <option value="system" ${(!currentBusinessProfile||!currentBusinessProfile.font_style||currentBusinessProfile.font_style==='system')?'selected':''}>System (clean, modern)</option>
+          <option value="serif" ${currentBusinessProfile&&currentBusinessProfile.font_style==='serif'?'selected':''}>Serif (traditional, formal)</option>
+          <option value="rounded" ${currentBusinessProfile&&currentBusinessProfile.font_style==='rounded'?'selected':''}>Rounded (friendly, casual)</option>
+        </select></div>
+        <div class="field"><label>Header style</label><select id="tpl-header-style">
+          <option value="centered" ${(!currentBusinessProfile||!currentBusinessProfile.header_style||currentBusinessProfile.header_style==='centered')?'selected':''}>Centered logo</option>
+          <option value="banner" ${currentBusinessProfile&&currentBusinessProfile.header_style==='banner'?'selected':''}>Full-width colour banner</option>
+        </select></div>
+      </div>
+      <div class="field"><label>Quote introduction message <span style="color:var(--ink-faint);font-weight:400">(optional — shown above the price on the customer's quote page)</span></label><textarea id="tpl-quote-intro" rows="2" placeholder="e.g. Thanks for the opportunity to quote on your property — here's what we'd recommend.">${(currentBusinessProfile&&currentBusinessProfile.quote_intro_message||'').replace(/</g,'&lt;')}</textarea></div>
+    </div>
     <div class="field-row"><div class="field"><label>Phone</label><input id="tpl-phone" placeholder="021 000 0000" value="${t.phone||''}"></div><div class="field"><label>Email</label><input id="tpl-email" placeholder="hello@yourbusiness.co.nz" value="${t.email||''}"></div></div>
     <div class="field"><label>GST number <span style="color:var(--ink-faint);font-weight:400">(optional — leave blank if not GST-registered)</span></label><input id="tpl-gst" placeholder="123-456-789" value="${t.gstNo||''}"></div>
     <div class="field"><label>Quote terms</label><textarea id="tpl-qterms" rows="3">${t.quoteTerms||''}</textarea></div>
@@ -4566,7 +4794,15 @@ async function saveTemplate(){
   if(sb&&currentBusinessId){
     // Persist the accent colour server-side (previously only in localStorage,
     // so it never synced across devices or reached the public booking page).
-    const {data:bizData,error:bizErr}=await sb.from('businesses').upsert({id:currentBusinessId,accent_color:docTemplate.accent}).select('*').maybeSingle();
+    // primary_color/font_style/header_style/quote_intro_message are new —
+    // customer-facing branding for booking.html/quote.html, distinct from
+    // docTemplate above (which only ever styled the operator-facing PDF).
+    const brandingPayload={
+      id:currentBusinessId,accent_color:docTemplate.accent,
+      primary_color:g('tpl-primary-color'),font_style:g('tpl-font-style'),
+      header_style:g('tpl-header-style'),quote_intro_message:g('tpl-quote-intro')
+    };
+    const {data:bizData,error:bizErr}=await sb.from('businesses').upsert(brandingPayload).select('*').maybeSingle();
     if(!bizErr)currentBusinessProfile=bizData;
     for(const type of ['quote','invoice']){
       const payload={
@@ -4911,6 +5147,10 @@ function startJob(id){
     navigator.geolocation.getCurrentPosition(pos=>{r.startLocation={lat:pos.coords.latitude,lng:pos.coords.longitude};},()=>{},{timeout:5000,maximumAge:60000});
   }
   logStatusChange(r,'in_progress');
+  // Real-time field-operations visibility for the owner/managers — previously
+  // silent, so a job starting was only ever visible by opening the app and
+  // checking status manually.
+  triggerPush({type:'job_started',title:'Job started',message:(r.tech&&r.tech!=='Unassigned'?r.tech+' started':'Started')+' the job for '+r.name,url:'/index.html?open=pipeline'});
   render();renderAll();
   openDetail(id);
   toast('Job started ✓');
@@ -5715,7 +5955,7 @@ function renderPricing(){
       <div class="rate-card">
         <div class="rc-head"><div><div class="rc-name">${v.label}</div><div class="rc-basis">Priced by ${v.basis}</div></div></div>
         <div class="rate-tiers">
-          ${k==='roof'?Object.entries(ROOF_TYPES).map(([rk,rv])=>`<div class="rate-tier"><label>${rv.label}</label><div class="ri"><span>$</span><input type="number" value="${(v.rate*rv.mult).toFixed(0)}" onchange="setRoofRate('${rk}',this.value)"><span>/${v.unit}</span></div></div>`).join('')
+          ${v.usesRoofType?Object.entries(ROOF_TYPES).map(([rk,rv])=>`<div class="rate-tier"><label>${rv.label}</label><div class="ri"><span>$</span><input type="number" value="${(v.rate*rv.mult).toFixed(0)}" onchange="setRoofRate('${k}','${rk}',this.value)"><span>/${v.unit}</span></div></div>`).join('')
           :`<div class="rate-tier"><label>Standard rate</label><div class="ri"><span>$</span><input type="number" value="${v.rate}" onchange="setRate('${k}',this.value)"><span>/${v.unit}</span></div></div>`}
         </div>
       </div>`).join('')}
@@ -5785,7 +6025,7 @@ function renderPricingStats(){
   </div>`;
 }
 function setRate(k,val){SERVICES[k].rate=parseFloat(val)||0;saveState();savePricingConfig();toast(SERVICES[k].label+' rate updated')}
-function setRoofRate(rk,val){const base=parseFloat(val)/ROOF_TYPES[rk].mult;SERVICES.roof.rate=base;savePricingConfig();toast('Roof rate updated')}
+function setRoofRate(k,rk,val){const base=parseFloat(val)/ROOF_TYPES[rk].mult;SERVICES[k].rate=base;savePricingConfig();toast(SERVICES[k].label+' rate updated')}
 function setChemPrice(ck,val){CHEMICALS[ck].perL=parseFloat(val)||0;saveState();savePricingConfig();renderPricing();toast(CHEMICALS[ck].label.split(' (')[0]+' price updated')}
 function setCostInput(key,val){COST_INPUTS[key]=parseFloat(val)||0;saveState();savePricingConfig();toast('Pricing input updated')}
 // Every rate/chemical price/cost input is business-specific and persisted
@@ -6846,9 +7086,38 @@ function renderAll(){
 
 function openModal(id){document.getElementById(id).classList.add('open')}
 function closeModal(id){document.getElementById(id).classList.remove('open')}
+// True for anything the browser can actually render as an <img> — used to
+// decide "open in the in-app lightbox" vs "open in a new tab" (a PDF/other
+// document opened in the lightbox would just show a broken image icon).
+function isImagePath(path){return /\.(jpe?g|png|gif|webp|bmp|svg)(\?|$)/i.test(path||'');}
+function openImageLightbox(url){
+  const img=document.getElementById('lightbox-img');
+  if(!img||!url)return;
+  img.src=url;
+  openModal('lightbox-overlay');
+}
 document.querySelectorAll('.overlay').forEach(o=>o.addEventListener('click',e=>{if(e.target===o)o.classList.remove('open')}));
 let toastTimer;
-function toast(m,ms){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.remove('show'),ms||2200)}
+let toastClickHandler=null;
+// Optional 3rd arg makes the toast itself clickable — used for things like
+// the blocked-popup fallback below, where the only way to recover is to
+// hand the user a real click to act on. The single shared #toast element is
+// reused for every message in the app, so any previous click handler/
+// clickable styling is always cleared first — otherwise a later, unrelated
+// plain toast could inherit a stale handler from an earlier clickable one.
+function toast(m,ms,onClick){
+  const t=document.getElementById('toast');
+  t.textContent=m;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  if(toastClickHandler){t.removeEventListener('click',toastClickHandler);toastClickHandler=null;}
+  t.classList.toggle('clickable',!!onClick);
+  if(onClick){
+    toastClickHandler=onClick;
+    t.addEventListener('click',toastClickHandler);
+  }
+  toastTimer=setTimeout(()=>t.classList.remove('show'),ms||2200);
+}
 
 /* ===== BACKEND: base URL for every per-business route (leads, email,
    calendar, AI marketing) — always comes from config.js, resolved per
@@ -6906,6 +7175,9 @@ function openMoreSheet(){
   const row=(label,onclick,danger)=>`<button class="more-row${danger?' danger':''}" onclick="closeModal('more-overlay');${onclick}"><span class="mr-label">${label}</span><span class="mr-chev">›</span></button>`;
   const isTech=currentUserRole==='technician';
   document.getElementById('more-body').innerHTML=`
+    <div class="more-group-label">Overview</div>
+    ${!isTech?row('Dashboard',"switchView('dashboard')"):''}
+    ${row('Calendar',"switchView('calendar')")}
     ${!isTech?`<div class="more-group-label">Work</div>${row('Operations',"switchView('ops')")}${row('Pricing',"switchView('pricing')")}${row('Goals',"switchView('goals')")}`:''}
     <div class="more-group-label">Business</div>
     ${row('Settings',"openSettings()")}
@@ -6958,6 +7230,9 @@ function openSettings(){
       <div class="field"><label>Phone</label><input id="biz-phone-input" placeholder="e.g. 021 000 0000" value="${(biz.phone||'').replace(/"/g,'&quot;')}"></div>
       <div class="field"><label>Email</label><input id="biz-email-input" type="email" placeholder="e.g. hello@yourbusiness.co.nz" value="${(biz.email||'').replace(/"/g,'&quot;')}"></div>
       <div class="field"><label>Location / region</label><input id="biz-region-input" placeholder="e.g. Auckland, New Zealand" value="${(biz.region||'').replace(/"/g,'&quot;')}"></div>
+      <div class="field"><label>Home / depot address</label><input id="biz-home-address-input" placeholder="e.g. 12 Example Street, Albany, Auckland" value="${(biz.home_address||'').replace(/"/g,'&quot;')}">
+        <div style="font-size:12.5px;color:var(--ink-faint);margin-top:4px">Used to calculate real travel distance/cost to each job. Be as specific as possible — a full street address, not just a suburb.</div>
+      </div>
       <p style="font-size:11px;color:var(--ink-faint);margin:4px 0 10px">Also drives weather and satellite maps — set this to where you actually operate.</p>
       <button class="btn primary sm" onclick="saveBusinessProfile()">Save business profile</button>
       `:`<p style="font-size:12px;color:var(--ink-faint)">Only an owner or manager can edit this.</p>`}
@@ -6973,7 +7248,8 @@ function openSettings(){
         ${canEditBusiness?`<div><input type="file" id="biz-logo-input" accept="image/*" style="display:none" onchange="onBizLogoChosen(this)"><button class="btn ghost sm" onclick="document.getElementById('biz-logo-input').click()">${biz.logo_url?'Change logo':'Upload logo'}</button></div>`:''}
       </div>
     </div>
-    ${settingsRow('Colours &amp; document templates','Customise how quotes and invoices look',"closeModal('settings-overlay');openTemplateEditor()")}`)}
+    ${settingsRow('Colours &amp; document templates','Customise how quotes and invoices look',"closeModal('settings-overlay');openTemplateEditor()")}
+    ${settingsRow('Policies &amp; Terms','What customers see instead of "TurnKey Terms and Conditions"',"closeModal('settings-overlay');openPoliciesEditor()")}`)}
     ${settingsGroup('Team',settingsRow('Team &amp; roles',null,"closeModal('settings-overlay');openTeam()"))}
     ${settingsGroup('Templates',settingsRow('Email &amp; document templates',null,"closeModal('settings-overlay');openTemplateEditor()"))}
     ${settingsGroup('Pricing',settingsRow('Rates, chemical costs &amp; margins',null,"closeModal('settings-overlay');switchView('pricing')"))}
@@ -6989,10 +7265,11 @@ function openSettings(){
     <div class="conn-card ${pushSubscribed?'live':''}" style="margin-bottom:10px">
       <div class="conn-top"><span class="conn-name">Push notifications</span><span class="conn-badge ${pushSubscribed?'on':'off'}">${pushSubscribed?'● Notifications Enabled — this device':'Notifications Off — this device'}</span></div>
       <p>Get a notification on your phone or laptop even when TurnKey isn’t open — new enquiries, quote approvals, payments. This is a per-device setting: enable it on every phone/computer you want alerts on.</p>
+      ${isIosNonStandalonePwa()?`<p style="font-size:12px;color:var(--amber);background:var(--amber-wash);border-radius:8px;padding:9px 11px;margin-bottom:8px">On iPhone/iPad: tap Share → <b>Add to Home Screen</b> first, then open TurnKey from the Home Screen icon and come back here — Safari can't deliver notifications to an ordinary browser tab.</p>`:''}
       ${window.TURNKEY_CONFIG&&window.TURNKEY_CONFIG.onesignalAppId
         ?(pushSubscribed
           ?`<button class="btn ghost sm" ${pushBusy?'disabled':''} onclick="disablePushNotifications(this)">Disable on this device</button>`
-          :`<button class="btn accent sm" ${pushBusy?'disabled':''} onclick="enablePushNotifications(this)">Enable notifications</button>`)
+          :`<button class="btn accent sm" ${pushBusy||isIosNonStandalonePwa()?'disabled':''} onclick="enablePushNotifications(this)">Enable notifications</button>`)
         :`<p style="font-size:12px;color:var(--ink-faint)">Not set up yet — an admin needs to configure OneSignal for this TurnKey (see .env.example).</p>`}
     </div>
     <div class="conn-card">
@@ -7416,7 +7693,7 @@ let currentBusinessProfile=null;
 let supabaseSyncTimer=null;
 
 function showAuth(){
-  document.getElementById('auth-overlay').style.display='flex';
+  document.getElementById('auth-overlay').style.display='grid';
   document.querySelector('.app').style.display='none';
   document.getElementById('auth-card-recovery').style.display='none';
   document.getElementById('auth-card-normal').style.display='';
@@ -7431,7 +7708,7 @@ function showApp(){
 // the app with no prompt to actually set a new password, which is a dead
 // end for the one flow the whole reset process exists for.
 function showPasswordRecovery(){
-  document.getElementById('auth-overlay').style.display='flex';
+  document.getElementById('auth-overlay').style.display='grid';
   document.querySelector('.app').style.display='none';
   document.getElementById('auth-card-normal').style.display='none';
   document.getElementById('auth-card-recovery').style.display='';
@@ -7466,13 +7743,25 @@ async function handleSignIn(){
   setAuthBusy(false);
   if(error){
     // TEMPORARY (frontend-only UX change, not a backend/Supabase setting):
-    // don't show "Too many attempts" on the login screen — silently reset
-    // the form instead so the user can just try again. Every other auth
-    // error (wrong password, invalid email, network, etc.) still shows
-    // normally below via friendlyAuthError(). To revert, delete this
-    // if-block and go back to unconditionally calling
-    // setAuthMsg(friendlyAuthError(error.message)).
-    if(/rate limit/i.test(error.message)){
+    // don't show any "too many attempts"-style message on the login screen
+    // — silently reset the form instead so the user can just try again.
+    // Every other auth error (wrong password, invalid email, network, etc.)
+    // still shows normally below via friendlyAuthError().
+    //
+    // Checks the HTTP status (429 = rate limited) FIRST, not just message
+    // text — Supabase's actual wording for this varies ("rate limit
+    // exceeded", "too many requests", "for security purposes, you can only
+    // request this after...", etc. depending on version/endpoint), so a
+    // single hardcoded phrase match was silently missing real cases. The
+    // regex stays as a fallback for the rare case status isn't populated.
+    // setAuthBusy(false) above already re-enables the Sign in button
+    // regardless of which branch runs, so a retry is never actually
+    // blocked — this only ever changes what MESSAGE is shown.
+    //
+    // To revert entirely: delete this if-block and go back to
+    // unconditionally calling setAuthMsg(friendlyAuthError(error.message)).
+    const isRateLimited=error.status===429||/rate.?limit|too many (requests|attempts)|security purposes/i.test(error.message||'');
+    if(isRateLimited){
       document.getElementById('auth-password').value='';
       setAuthMsg('');
       return;
@@ -7808,13 +8097,56 @@ async function geocodeRegion(region){
     return {lat:parseFloat(results[0].lat),lng:parseFloat(results[0].lon)};
   }catch(e){return null;}
 }
+// Great-circle distance between two lat/lng points, in km.
+function haversineKm(lat1,lng1,lat2,lng2){
+  const R=6371;
+  const dLat=(lat2-lat1)*Math.PI/180, dLng=(lng2-lng1)*Math.PI/180;
+  const a=Math.sin(dLat/2)**2+Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLng/2)**2;
+  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+// Real round-trip travel distance/time from the business's home address to a
+// job address — replaces cost-engine.js's hardcoded COST_INPUTS.avgKm guess.
+// Prefers Google's Distance Matrix (actual road distance/drive time) when a
+// Maps key is configured; falls back to geocoding the destination + a
+// straight-line estimate (with a road-winding correction factor, since real
+// roads are never a straight line) when there's no key. Returns null (never
+// throws) when there isn't enough information to calculate anything — every
+// caller treats null as "use the cost engine's own default," so a business
+// that hasn't set a home address yet is never broken, just less precise.
+async function calcTravelDistance(destAddr,destSuburb){
+  const biz=currentBusinessProfile;
+  const dest=[destAddr,destSuburb].filter(Boolean).join(', ');
+  if(!dest||!biz||!biz.home_address)return null;
+  const mapsKey=turnkeyMapsKey();
+  if(mapsKey){
+    try{
+      const j=await qeFetchWithTimeout('https://maps.googleapis.com/maps/api/distancematrix/json?units=metric&origins='+encodeURIComponent(biz.home_address)+'&destinations='+encodeURIComponent(dest)+'&key='+encodeURIComponent(mapsKey),8000);
+      const el=j&&j.rows&&j.rows[0]&&j.rows[0].elements&&j.rows[0].elements[0];
+      if(el&&el.status==='OK'){
+        // Distance Matrix returns one-way; double it for a round trip, to
+        // match how COST_INPUTS.avgKm was always framed ("round trip").
+        return {km:el.distance.value/1000*2, mins:el.duration.value/60*2, source:'google'};
+      }
+    }catch(e){/* fall through to the free fallback below */}
+  }
+  if(!isFinite(biz.home_lat)||!isFinite(biz.home_lng))return null; // home address set but not geocoded yet
+  const destLoc=await geocodeRegion(dest);
+  if(!destLoc)return null;
+  const straightKm=haversineKm(biz.home_lat,biz.home_lng,destLoc.lat,destLoc.lng);
+  // Real roads are never a straight line — apply a standard winding-factor
+  // correction and a conservative blended average speed, since this fallback
+  // path has no actual road data to work from.
+  const roadKm=straightKm*1.3;
+  return {km:roadKm*2, mins:(roadKm/45*60)*2, source:'estimate'};
+}
 async function saveBusinessProfile(){
   if(!sb||!currentBusinessId)return;
   const name=document.getElementById('biz-name-input').value.trim();
   const phone=document.getElementById('biz-phone-input').value.trim();
   const email=document.getElementById('biz-email-input').value.trim();
   const region=document.getElementById('biz-region-input').value.trim();
-  const payload={id:currentBusinessId,name,phone,email,region};
+  const homeAddress=document.getElementById('biz-home-address-input').value.trim();
+  const payload={id:currentBusinessId,name,phone,email,region,home_address:homeAddress};
   // Only re-geocode when the region text actually changed, so unrelated
   // name/phone/email edits don't hammer Nominatim on every save.
   if(region&&region!==(currentBusinessProfile&&currentBusinessProfile.region)){
@@ -7822,6 +8154,12 @@ async function saveBusinessProfile(){
     if(loc){payload.region_lat=loc.lat;payload.region_lng=loc.lng;}
   }else if(!region){
     payload.region_lat=null;payload.region_lng=null;
+  }
+  if(homeAddress&&homeAddress!==(currentBusinessProfile&&currentBusinessProfile.home_address)){
+    const loc=await geocodeRegion(homeAddress);
+    if(loc){payload.home_lat=loc.lat;payload.home_lng=loc.lng;}
+  }else if(!homeAddress){
+    payload.home_lat=null;payload.home_lng=null;
   }
   const {data,error}=await sb.from('businesses').upsert(payload).select('*').maybeSingle();
   if(error){console.error('Save business profile failed',error);toast('Could not save business profile — try again');return;}
@@ -8879,11 +9217,50 @@ async function ensureRecordSynced(r){
   if(!r.customerId||!r.jobId)await syncRecordToSupabase(r);
   return r;
 }
+// Resizes/compresses an image client-side before upload — same technique as
+// booking.html's resizeImageFile(), but returns a Blob (not a data URL) so
+// it can go straight into storage.upload() without a base64 round-trip.
+// Caps the LONG edge at maxDim so orientation is never distorted; quality
+// is a JPEG re-encode, not a crop, so nothing is destroyed, just compressed.
+function resizeImageBlob(file,maxDim,quality){
+  return new Promise((resolve)=>{
+    const reader=new FileReader();
+    reader.onload=()=>{
+      const img=new Image();
+      img.onload=()=>{
+        let w=img.width,h=img.height;
+        if(w>=h&&w>maxDim){h=Math.round(h*maxDim/w);w=maxDim;}
+        else if(h>w&&h>maxDim){w=Math.round(w*maxDim/h);h=maxDim;}
+        const canvas=document.createElement('canvas');
+        canvas.width=w;canvas.height=h;
+        canvas.getContext('2d').drawImage(img,0,0,w,h);
+        canvas.toBlob(resolve,'image/jpeg',quality);
+      };
+      img.onerror=()=>resolve(null);
+      img.src=reader.result;
+    };
+    reader.onerror=()=>resolve(null);
+    reader.readAsDataURL(file);
+  });
+}
 async function uploadAttachment(file,kind,{customerId,jobId}={}){
   if(!sb||!currentBusinessId){toast('Not connected yet \u2014 try refreshing the page');return null;}
-  const safe=(file.name||'file').replace(/[^a-zA-Z0-9_.-]/g,'_');
-  const path=`${currentBusinessId}/${kind}/${Date.now()}-${Math.random().toString(36).slice(2,8)}-${safe}`;
-  const {error:upErr}=await sb.storage.from(UPLOAD_BUCKET).upload(path,file,{contentType:file.type||undefined});
+  let uploadFile=file;
+  let safe=(file.name||'file').replace(/[^a-zA-Z0-9_.-]/g,'_');
+  // Only compress actual photos over a reasonable size — small images and
+  // non-image files (PDFs etc) pass through untouched. If the resize/decode
+  // fails for any reason, fall back to uploading the original rather than
+  // losing the attachment.
+  if(file.type&&file.type.startsWith('image/')&&file.size>300*1024){
+    const resized=await resizeImageBlob(file,1920,0.82);
+    if(resized&&resized.size<file.size){
+      uploadFile=resized;
+      safe=safe.replace(/\.[a-zA-Z0-9]+$/,'')+'.jpg';
+    }
+  }
+  const safeName=safe;
+  const path=`${currentBusinessId}/${kind}/${Date.now()}-${Math.random().toString(36).slice(2,8)}-${safeName}`;
+  const {error:upErr}=await sb.storage.from(UPLOAD_BUCKET).upload(path,uploadFile,{contentType:uploadFile.type||file.type||undefined});
   if(upErr){console.error('Upload failed',upErr);toast('Upload failed — try again');return null;}
   const row={business_id:currentBusinessId,customer_id:customerId||null,job_id:jobId||null,kind,path,filename:file.name};
   const {data,error}=await sb.from('attachments').insert(row).select('*').single();

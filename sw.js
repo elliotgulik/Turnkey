@@ -13,7 +13,7 @@
 // ever requests it directly — see netlify.toml's explicit passthrough rule
 // for why that file has to exist as a real, non-redirected file.
 importScripts('https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.sw.js');
-const CACHE='turnkey-v3'; // bumped from v2 — see the fetch handler rewrite below
+const CACHE='turnkey-v4'; // bumped from v3 — cost-engine.js's cost math changed (real travel distance instead of a hardcoded km guess); static assets are served stale-while-revalidate below, so without this bump a returning user's first post-deploy load would still run the old pricing logic from cache
 // Note: HTML pages are deliberately NOT precached here — they're handled by the
 // network-first navigate branch below so refreshes always pick up the newest deploy.
 const SHELL=['./config.js','./manifest.webmanifest','./icon-192.png','./icon-512.png'];

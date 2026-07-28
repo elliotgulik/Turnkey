@@ -12,6 +12,11 @@ window.TK_COST = (function(){
     driveway: { m2ph:55, chem:'sodiumHypo', litrePerM2:0.030 },
     housewash:{ m2ph:35, chem:'softWash',   litrePerM2:0.06  }, // per linear metre of perimeter
     roof:     { m2ph:30, chem:'softWash',   litrePerM2:0.055 },
+    // Chemical/application only — no pressure-washing pass, so real labour
+    // time per m² is much lower than a full Roof Wash (higher m2ph = faster
+    // coverage); chemical use per m² is similar-to-slightly-higher since the
+    // chemical application IS the service, not a pre-wash step.
+    rooftreatment:{ m2ph:70, chem:'softWash', litrePerM2:0.06 },
     gutter:   { m2ph:45, chem:'degreaser',  litrePerM2:0.010 }, // per linear metre
     fence:    { m2ph:55, chem:'sodiumHypo', litrePerM2:0.020 }, // per linear metre
     patio:    { m2ph:50, chem:'sodiumHypo', litrePerM2:0.028 }
@@ -57,15 +62,21 @@ window.TK_COST = (function(){
   // per-service "recommended price" can be shown at all. Per-line figures
   // always sum exactly to the job-level totals (last line absorbs any
   // rounding remainder) so nothing here can ever look inconsistent.
-  function costBreakdown(lines){
+  function costBreakdown(lines,travel){
     const active=(lines||[]).filter(l=>SVC_COST[l.svc]&&(parseFloat(l.qty)||0)>0);
     const totalCleanMin=active.reduce((s,l)=>s+lineCleanMin(l),0);
+    // travel is optional {km, mins} for the actual business->job distance
+    // (see calcTravelDistance() in index.html); falls back to the fixed
+    // avgKm guess when no real distance has been calculated yet (e.g. no
+    // home address configured, or the lookup is still in flight).
+    const travelKm=(travel&&isFinite(travel.km))?travel.km:COST_INPUTS.avgKm;
+    const travelMins=(travel&&isFinite(travel.mins))?travel.mins:null;
     const totalLabourMin=totalCleanMin+COST_INPUTS.setupMin;
     const totalLabourHrs=totalLabourMin/60;
     const totalWageCost=totalLabourHrs*COST_INPUTS.wage*COST_INPUTS.crew;
     const totalChemCost=active.reduce((s,l)=>s+lineChemCost(l),0);
     const totalLitres=active.reduce((s,l)=>s+lineLitres(l),0);
-    const fuelCost=COST_INPUTS.avgKm*COST_INPUTS.fuelPerKm;
+    const fuelCost=travelKm*COST_INPUTS.fuelPerKm;
     const equipmentCost=COST_INPUTS.equipmentPerJob||0;
     const consumablesCost=COST_INPUTS.consumablesPerJob||0;
     const fixedExtras=fuelCost+equipmentCost+consumablesCost;
@@ -105,6 +116,7 @@ window.TK_COST = (function(){
       labourMin:Math.round(totalLabourMin), labourHrs:totalLabourHrs,
       wageCost:totalWageCost, chem:totalChemCost, litres:totalLitres,
       fuelCost, equipmentCost, consumablesCost,
+      travelKm, travelMins, travelIsEstimate:!(travel&&isFinite(travel.km)),
       cost:Math.round(totalCost),
       recommended:recommendedTotal,
       targetMargin:COST_INPUTS.targetMargin
