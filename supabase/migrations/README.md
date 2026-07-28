@@ -48,6 +48,8 @@ guess.
 
 **`20260728120000_notification_system_fixes.sql`** — real fix, needs to be run against production. `notification_preferences.event`'s check constraint only ever allowed 8 of the 16 event types Settings → Notifications actually shows — every save has been silently failing for the other 8 (quote_sent, quote_declined, customer_question, job_rescheduled, job_cancelled, job_today, invoice_created, customer_approved_work), so those toggles have never actually persisted. Expanded to the full list plus a new `job_started` event. Also adds `notifications.data` (jsonb). Does NOT fix push delivery itself — that's an environment variable, not a schema issue; see the file's own header comment and the session report.
 
+**`20260728130000_email_accounts_updated_at.sql`** — small real fix, needs to be run against production. Adds `email_accounts.updated_at` (the table otherwise already matches what a Gmail-OAuth audit expects — see `backend/supabase/schema-email.sql` — tokens are stored encrypted, not plaintext, deliberately).
+
 ## What's NOT in here yet
 
 Everything else — `customers`, `users`, `businesses`, `attachments`,

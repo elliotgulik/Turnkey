@@ -13,7 +13,7 @@
 // ever requests it directly — see netlify.toml's explicit passthrough rule
 // for why that file has to exist as a real, non-redirected file.
 importScripts('https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.sw.js');
-const CACHE='turnkey-v4'; // bumped from v3 — cost-engine.js's cost math changed (real travel distance instead of a hardcoded km guess); static assets are served stale-while-revalidate below, so without this bump a returning user's first post-deploy load would still run the old pricing logic from cache
+const CACHE='turnkey-v5'; // bumped from v4 — new brand icon/favicon/apple-touch-icon assets replaced the old ones under the SAME filenames; static assets are served stale-while-revalidate below, so without this bump an already-installed PWA/returning browser would keep showing the old cached icon bytes indefinitely instead of picking up the new mark
 // Note: HTML pages are deliberately NOT precached here — they're handled by the
 // network-first navigate branch below so refreshes always pick up the newest deploy.
 const SHELL=['./config.js','./manifest.webmanifest','./icon-192.png','./icon-512.png'];

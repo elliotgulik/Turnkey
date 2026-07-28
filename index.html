@@ -17,7 +17,7 @@
      dependency above rather than something injected at runtime. -->
 <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
 <link rel="manifest" href="manifest.webmanifest">
-<meta name="theme-color" content="#138a72">
+<meta name="theme-color" content="#2e9486">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="TurnKey">
@@ -31,6 +31,16 @@
 <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
 <link rel="icon" type="image/png" sizes="16x16" href="favicon-16.png">
 <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+<!-- Open Graph / social preview — relative image path resolves against the
+     page URL for every major scraper (Facebook/Slack/Twitter/LinkedIn all
+     do this in practice, despite the spec nominally wanting an absolute
+     URL); update to a hardcoded absolute URL if this is ever hosted at a
+     fixed known domain. -->
+<meta property="og:title" content="TurnKey — Service Business CRM">
+<meta property="og:description" content="Run your service business smarter — quotes, jobs, scheduling and invoicing in one platform.">
+<meta property="og:image" content="icon-512.png">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary">
 <style>
   :root{
     /* cool, restrained navy/teal system */
@@ -7636,13 +7646,25 @@ async function syncEmail(){
     if(res.ok&&document.getElementById('view-inbox')?.classList.contains('active'))renderInbox();
   }catch(e){console.error('Email sync failed',e);}
 }
-// Landed back here from Google's OAuth consent screen (via the backend's callback redirect)
+// Landed back here from Google's OAuth consent screen (via the backend's
+// callback redirect). This IIFE runs at script-PARSE time — before sign-in
+// has even been checked, let alone handleAuthedSession()'s
+// loadEmailAccountStatus() call — so a successful connection only ever got
+// a toast here; emailAccount itself stayed whatever it was before the
+// redirect (null, on a first-time connect) until/unless the user happened
+// to manually reopen Settings → Connections later. That's the concrete bug
+// behind "no account appears without a manual refresh": the data WAS
+// correct by the time handleAuthedSession() finished loading it, nothing
+// ever showed it to the user. pendingEmailConnectSuccess is consumed at the
+// end of handleAuthedSession() below, once emailAccount is actually fresh,
+// to open Settings → Connections automatically.
+let pendingEmailConnectSuccess=false;
 (function(){
   try{
     const u=new URL(location.href);
     const status=u.searchParams.get('email_connect');
     if(status){
-      if(status==='success')toast('Gmail connected ✓');
+      if(status==='success'){toast('Gmail connected ✓');pendingEmailConnectSuccess=true;}
       else toast('Could not connect Gmail'+(u.searchParams.get('msg')?': '+u.searchParams.get('msg'):''));
       u.searchParams.delete('email_connect');u.searchParams.delete('msg');
       history.replaceState({},'',u.pathname+u.search);
@@ -7867,6 +7889,15 @@ async function handleAuthedSession(session){
   loadChecklistTemplates();
   pollBackendLeads();
   await loadEmailAccountStatus();
+  if(pendingEmailConnectSuccess){
+    pendingEmailConnectSuccess=false;
+    // emailAccount is now fresh (just loaded above) — open straight to
+    // Connections (same standalone modal Settings' own "Gmail" row opens)
+    // so "Connected as you@gmail.com" is the very next thing the user sees,
+    // instead of them having to go find it themselves after the redirect
+    // dropped them back on whatever the default view is.
+    openConnections();
+  }
   syncEmail();
   loadEmailTemplates();
   loadLifecycleEmails();

@@ -470,8 +470,10 @@ async function getValidAccessToken(businessId, userId, providerName) {
     accessToken = refreshed.access_token
     await authClient.from('email_accounts').update({
       access_token_enc: encryptToken(accessToken),
-      token_expiry: new Date(Date.now() + (refreshed.expires_in || 3600) * 1000).toISOString()
+      token_expiry: new Date(Date.now() + (refreshed.expires_in || 3600) * 1000).toISOString(),
+      updated_at: new Date().toISOString()
     }).eq('id', acct.id)
+    console.log('[OAuth] access token refreshed', { provider: providerName, businessId, userId })
   }
   return { accessToken, account: acct }
 }
@@ -488,7 +490,9 @@ app.get('/api/email/oauth/start', requireBusiness, (req, res) => {
   try {
     const providerName = req.query.provider === 'microsoft' ? 'microsoft' : 'gmail'
     const provider = PROVIDERS[providerName]
+    console.log('[OAuth] started', { provider: providerName, businessId: req.businessId, userId: req.userId })
     if (!provider || !provider.isConfigured()) {
+      console.warn('[OAuth] start rejected — provider not configured', { provider: providerName })
       return res.status(503).json({ error: providerName + ' is not configured on this server yet' })
     }
     // The frontend's own origin travels inside the signed state (rather than a
@@ -496,42 +500,88 @@ app.get('/api/email/oauth/start', requireBusiness, (req, res) => {
     // which domain the CRM is served from — and can't be tampered with in transit.
     const origin = String(req.query.origin || '').slice(0, 200)
     if (!/^https?:\/\/[a-zA-Z0-9.-]+(:\d+)?$/.test(origin)) {
+      console.warn('[OAuth] start rejected — missing/invalid origin', { origin })
       return res.status(400).json({ error: 'Missing or invalid origin' })
     }
     const redirectUri = `https://${req.get('host')}/api/email/oauth/callback/${providerName}`
     const state = signState({ businessId: req.businessId, userId: req.userId, provider: providerName, origin, nonce: crypto.randomUUID() })
+    // Logged once per connection attempt, at info level, specifically so a
+    // "redirect_uri_mismatch" error on Google's side (the single most common
+    // real-world cause of "nothing happens after I approve" — Google shows
+    // ITS OWN error page and never gets back to TurnKey at all) can be
+    // diagnosed by literally comparing this logged value against Google
+    // Cloud Console's Authorized redirect URIs list, byte for byte.
+    console.log('[OAuth] auth URL built', { provider: providerName, redirectUri, origin })
     res.json({ url: provider.getAuthUrl(redirectUri, state) })
   } catch (err) {
-    console.error('Email OAuth start failed', { provider: req.query.provider, businessId: req.businessId, error: err.message, stack: err.stack })
+    console.error('[OAuth] start FAILED', { provider: req.query.provider, businessId: req.businessId, error: err.message, stack: err.stack })
     res.status(500).json({ error: 'Could not start the connection: ' + err.message })
   }
 })
 
 app.get('/api/email/oauth/callback/:provider', async (req, res) => {
   const providerName = req.params.provider
+  console.log('[OAuth] callback received', { provider: providerName, hasCode: !!req.query.code, hasError: !!req.query.error, hasState: !!req.query.state })
   const claims = verifyState(req.query.state)
-  const bounce = (status, msg) => res.redirect((claims?.origin || '/') + `/index.html?email_connect=${status}` + (msg ? `&msg=${encodeURIComponent(msg)}` : ''))
+  // Falls back to a bare relative path (resolves against THIS backend host,
+  // not the frontend) rather than the previous `(claims?.origin||'/') +
+  // '/index.html...'`, which — when claims is null — built '//index.html...'.
+  // A URL starting with // is parsed by browsers as protocol-relative,
+  // i.e. "index.html" gets treated as a HOSTNAME, so the redirect silently
+  // failed to a broken address instead of ever reaching TurnKey — this is a
+  // real, if rare, way "nothing happens" could occur even after a fully
+  // successful token exchange. The relative-path fallback below still isn't
+  // the actual frontend, but it fails as a clean 404 instead of a bogus
+  // hostname, and it's logged so a business hitting this edge case is
+  // actually diagnosable.
+  const bounce = (status, msg) => {
+    const path = `/index.html?email_connect=${status}` + (msg ? `&msg=${encodeURIComponent(msg)}` : '')
+    if (!claims?.origin) console.warn('[OAuth] callback bouncing with NO known origin (state missing/invalid) — redirecting to a relative path, which will 404 on this backend rather than reach the frontend', { provider: providerName, status })
+    res.redirect((claims?.origin || '') + path)
+  }
 
-  if (req.query.error) return bounce('error', String(req.query.error))
-  if (!claims) return bounce('error', 'That connection request expired or was invalid — please try again')
+  if (req.query.error) { console.warn('[OAuth] Google returned an error', { provider: providerName, error: req.query.error }); return bounce('error', String(req.query.error)) }
+  if (!claims) { console.warn('[OAuth] state verification FAILED — missing, tampered, or signed with a different OAUTH_STATE_SECRET', { provider: providerName }); return bounce('error', 'That connection request expired or was invalid — please try again') }
+  console.log('[OAuth] state verified', { provider: providerName, businessId: claims.businessId, userId: claims.userId })
+  if (!req.query.code) { console.warn('[OAuth] no authorization code in callback', { provider: providerName }); return bounce('error', 'Google did not return an authorization code') }
+  console.log('[OAuth] authorization code received', { provider: providerName })
   const provider = PROVIDERS[providerName]
-  if (!provider || !provider.isConfigured()) return bounce('error', providerName + ' is not configured')
+  if (!provider || !provider.isConfigured()) { console.warn('[OAuth] callback rejected — provider not configured', { provider: providerName }); return bounce('error', providerName + ' is not configured') }
 
   try {
     const redirectUri = `https://${req.get('host')}/api/email/oauth/callback/${providerName}`
     const tok = await provider.exchangeCode(req.query.code, redirectUri)
+    console.log('[OAuth] token exchange successful', { provider: providerName, email: tok.email, hasRefreshToken: !!tok.refresh_token, scope: tok.scope })
+    // Google only returns a refresh_token on the FIRST consent for a given
+    // account/scope combination — a reconnect after already-granted access
+    // can come back with none, which would silently overwrite a working
+    // refresh_token with an empty one on upsert. Re-use the existing stored
+    // one in that case instead of clobbering it.
+    let refreshTokenEnc
+    if (tok.refresh_token) {
+      refreshTokenEnc = encryptToken(tok.refresh_token)
+    } else {
+      console.warn('[OAuth] no refresh_token in this response (Google omits it on repeat consent) — keeping the previously stored one', { provider: providerName })
+      const { data: existing } = await authClient.from('email_accounts').select('refresh_token_enc')
+        .eq('business_id', claims.businessId).eq('user_id', claims.userId).eq('provider', providerName).maybeSingle()
+      if (!existing?.refresh_token_enc) { console.error('[OAuth] no refresh_token from Google AND none stored previously — cannot complete connection', { provider: providerName }); return bounce('error', 'Google did not grant offline access — try disconnecting any existing TurnKey access at myaccount.google.com/permissions, then reconnect') }
+      refreshTokenEnc = existing.refresh_token_enc
+    }
     const { error } = await authClient.from('email_accounts').upsert({
       business_id: claims.businessId, user_id: claims.userId, provider: providerName,
       email_address: tok.email,
       access_token_enc: encryptToken(tok.access_token),
-      refresh_token_enc: encryptToken(tok.refresh_token),
+      refresh_token_enc: refreshTokenEnc,
       token_expiry: new Date(Date.now() + (tok.expires_in || 3600) * 1000).toISOString(),
-      scope: tok.scope
+      scope: tok.scope,
+      updated_at: new Date().toISOString()
     }, { onConflict: 'business_id,user_id,provider' })
     if (error) throw error
+    console.log('[OAuth] database save successful', { provider: providerName, businessId: claims.businessId, userId: claims.userId, email: tok.email })
+    console.log('[OAuth] account connected', { provider: providerName, email: tok.email })
     bounce('success')
   } catch (err) {
-    console.error('OAuth callback failed', err)
+    console.error('[OAuth] callback FAILED', { provider: providerName, businessId: claims.businessId, userId: claims.userId, error: err.message, stack: err.stack })
     bounce('error', 'Could not finish connecting — check server logs')
   }
 })
@@ -1189,5 +1239,21 @@ app.listen(PORT, () => {
   } else {
     const missing = [!process.env.ONESIGNAL_APP_ID && 'ONESIGNAL_APP_ID', !process.env.ONESIGNAL_API_KEY && 'ONESIGNAL_API_KEY'].filter(Boolean)
     console.warn(`⚠️  OneSignal push NOT configured — missing ${missing.join(' and ')} in this server's environment. Every sendNotification() call will write the in-app notification row but skip the actual push (see [Notify] logs). Get these from OneSignal dashboard → Settings → Keys & IDs, then set them here (NOT in Netlify — that's TURNKEY_ONESIGNAL_APP_ID, a different, frontend-only variable).`)
+  }
+  // Same "loud and specific at boot" treatment as OneSignal above —
+  // "Connect Gmail does nothing after I approve on Google's screen" is
+  // otherwise nearly undiagnosable, because the failure happens entirely
+  // server-side, after Google's own redirect, with nothing for the browser
+  // to show except whatever the callback's error bounce says (and if
+  // EMAIL_TOKEN_KEY specifically is missing, encryptToken() throws AFTER a
+  // successful token exchange — the connection silently never saves).
+  if (gmail.isConfigured() && process.env.EMAIL_TOKEN_KEY) {
+    console.log('✅ Gmail OAuth configured (GMAIL_CLIENT_ID + GMAIL_CLIENT_SECRET + EMAIL_TOKEN_KEY all set)')
+  } else {
+    const missing = [!process.env.GMAIL_CLIENT_ID && 'GMAIL_CLIENT_ID', !process.env.GMAIL_CLIENT_SECRET && 'GMAIL_CLIENT_SECRET', !process.env.EMAIL_TOKEN_KEY && 'EMAIL_TOKEN_KEY'].filter(Boolean)
+    const consequence = (!process.env.GMAIL_CLIENT_ID || !process.env.GMAIL_CLIENT_SECRET)
+      ? 'Connect Gmail will fail immediately with a 503, before reaching Google.'
+      : 'Connect Gmail will reach Google and get approved, then fail silently from the browser side when the callback tries to encrypt the token — see [OAuth] callback FAILED in these logs when that happens.'
+    console.warn(`⚠️  Gmail OAuth NOT fully configured — missing ${missing.join(', ')} in this server's environment. ${consequence} See .env.example for where to get each value.`)
   }
 })
