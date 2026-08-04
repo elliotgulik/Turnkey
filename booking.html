@@ -12,6 +12,7 @@
 <meta name="referrer" content="strict-origin-when-cross-origin">
 <script src="config.js"></script>
 <script src="pricing-engine.js"></script>
+<script src="format-utils.js"></script>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>Get an instant wash quote — Turnkey</title>
 <meta name="theme-color" content="#2e9486">
@@ -839,6 +840,7 @@ let SAT_ZOOM=SAT_ZOOM_DEFAULT;  // may be overridden per-property based on geoco
 let SAT_LAT=-36.8;              // updated to actual property lat after geocoding
 let SAT_ADDRESS=null;
 let _lastLat=null,_lastLng=null,_lastLabel=null;
+let _origLat=null,_origLng=null; // the geocoded property location, set once — see renderAreas()'s pin
 // Bumped on every reloadMapAt() call — the Google satellite image request is
 // async (an Image() load), so a customer clicking +/- twice in quick
 // succession (ordinary behaviour, especially "it didn't seem to zoom, let
@@ -876,6 +878,7 @@ function zoomForViewport(ne,sw){
    duplicating that choice and risking drifting out of sync with each other. */
 function reloadMapAt(lat,lng,zoom,label){
   _lastLat=lat;_lastLng=lng;_lastLabel=label||_lastLabel;
+  if(_origLat==null){_origLat=lat;_origLng=lng;}
   SAT_ZOOM=zoom;
   const token=++mapLoadToken;
   if(MAPS_KEY&&!GOOGLE_MAPS_BLOCKED){
@@ -919,6 +922,7 @@ function fetchWithTimeout(url,ms){
 }
 function enableSatellite(address){
   if(!MAPS_KEY||!address)return false;
+  _origLat=null;_origLng=null; // a new address search re-pins from scratch
   if(GOOGLE_MAPS_BLOCKED)return enableOsm(address);
   const hint=document.getElementById('hint');
   hint.textContent='Locating address…';
@@ -954,6 +958,7 @@ function enableOsmLatLng(lat,lng,label){
 }
 function enableOsm(address){
   if(!address)return false;
+  _origLat=null;_origLng=null; // a new address search re-pins from scratch
   const hint=document.getElementById('hint');
   hint.textContent='Locating address…';
   fetchWithTimeout('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(address+', '+(BIZ_REGION||'New Zealand')),8000)
@@ -1590,6 +1595,13 @@ function renderAreas(){
     return `${shape}
       <g><rect x="${cx-30}" y="${cy-13}" width="60" height="26" rx="13" fill="#fff" opacity=".92"/><text x="${cx}" y="${cy+5}" text-anchor="middle" font-size="14" font-weight="700" fill="${hex}">${a.size}${unit}</text></g>`;
   }).join('');
+  // Geocoded property location — reprojected through the same lat/lng→SVG
+  // math as the drawn areas, so it stays correctly anchored to the actual
+  // house through any amount of panning/zooming.
+  if(_origLat!=null){
+    const op=latLngToSvg({lat:_origLat,lng:_origLng});
+    layer.insertAdjacentHTML('beforeend',`<g class="origin-pin" style="pointer-events:none"><path d="M${op.x} ${op.y+2} c-7-10-11-16-11-22a11 11 0 1 1 22 0c0 6-4 12-11 22z" fill="#e0483a" stroke="#fff" stroke-width="2"/><circle cx="${op.x}" cy="${op.y-20}" r="4" fill="#fff"/></g>`);
+  }
 }
 function undoPoint(){if(drawing.length){drawing.pop();drawingGeoPts.pop();renderDraw();updateHint();}}
 function clearAll(){drawing=[];drawingGeoPts=[];areas=[];renderDraw();renderAreas();renderList();updateEstimate();updateHint();renderSelectedServicesSummary();}

@@ -11,6 +11,7 @@
 <script src="pricing-engine.js"></script>
 <script src="cost-engine.js"></script>
 <script src="map-snapshot.js"></script>
+<script src="format-utils.js"></script>
 <!-- OneSignal Web Push SDK — harmless to load even when onesignalAppId is
      unset (initOneSignal() below just never calls OneSignal.init() in that
      case), so this stays a plain unconditional tag like every other CDN
@@ -565,16 +566,14 @@
   @media(max-width:640px){.iw-src-grid{grid-template-columns:repeat(2,1fr)}.iw-upload-label{min-width:100%}.iw-foot{flex-wrap:wrap}}
 
   /* customer profile */
-  .cp-head{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:18px}
-  .cp-name{font-size:21px;font-weight:700;letter-spacing:-.01em}
-  .cp-sub{font-size:13px;color:var(--ink-soft);margin-top:2px}
   .cp-actions{display:flex;gap:8px;flex-wrap:wrap}
   .cp-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px}
   .cp-stat{background:var(--surface-2);border-radius:var(--radius-sm);padding:14px;text-align:center}
-  .cp-stat-v{font-size:17px;font-weight:700}
+  .cp-stat-v{font-size:17px;font-weight:700;font-variant-numeric:tabular-nums}
   .cp-stat-l{font-size:10.5px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.03em;margin-top:3px}
-  .cp-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}
   .cp-photo-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:8px}
+  .cp-property-img{width:100%;aspect-ratio:16/9;border-radius:var(--radius-sm);overflow:hidden;margin-bottom:14px;background:var(--surface-2)}
+  .cp-property-img img{width:100%;height:100%;object-fit:cover;display:block}
   .cp-photo{aspect-ratio:1;border-radius:var(--radius-sm);background:var(--surface-2) center/cover;position:relative;overflow:hidden}
   .cp-photo-tag{position:absolute;left:5px;bottom:5px;font-size:9px;font-weight:700;text-transform:uppercase;background:rgba(10,28,43,.65);color:#fff;padding:2px 6px;border-radius:980px}
   .cp-timeline-row{display:flex;gap:10px;padding:9px 0;border-bottom:1px solid var(--line-soft)}
@@ -584,6 +583,42 @@
   .cp-timeline-sum{font-size:13px}
   .cp-timeline-when{font-size:11px;color:var(--ink-faint);margin-top:1px}
   @media(max-width:720px){.cp-grid{grid-template-columns:1fr}.cp-stats{grid-template-columns:repeat(2,1fr)}}
+
+  /* ===== Customer profile redesign — this is meant to be "the centre of
+     the CRM", so it gets its own hero (avatar/name/status), a row of real
+     one-tap quick actions (not buried in a menu), and a tab bar instead of
+     one long stacked scroll — the tab bar is sticky so switching sections
+     never requires scrolling back to the top first, which matters most on
+     a phone held in one hand. ===== */
+  .cp-hero{display:flex;gap:14px;align-items:flex-start;margin-bottom:16px}
+  .cp-avatar{width:56px;height:56px;border-radius:50%;background:var(--teal-wash);color:var(--teal);display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:700;flex-shrink:0;letter-spacing:-.02em}
+  .cp-hero-main{flex:1;min-width:0}
+  .cp-name{font-size:22px;font-weight:700;letter-spacing:-.01em;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .cp-sub{font-size:13.5px;color:var(--ink-soft);margin-top:3px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .cp-hero-contact{font-size:13px;color:var(--ink-faint);margin-top:2px}
+  .cp-stats-secondary{grid-template-columns:repeat(2,1fr);margin-bottom:14px}
+  .cp-stats-secondary .cp-stat{padding:10px}
+  .cp-quick-actions{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px}
+  .cp-qa{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;flex:1;min-width:64px;min-height:56px;padding:9px 6px;border-radius:var(--radius-sm);background:var(--surface-2);color:var(--ink);font-size:11px;font-weight:600;text-align:center;border:1px solid transparent}
+  .cp-qa:hover{background:var(--teal-wash);color:var(--teal);border-color:var(--teal)}
+  .cp-qa svg{width:19px;height:19px}
+  .cp-qa.primary{background:var(--teal);color:#fff}
+  .cp-qa.primary:hover{background:var(--teal-bright);color:#fff}
+  .cp-outstanding{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;background:var(--coral-wash);border:1px solid var(--coral);border-radius:var(--radius-sm);padding:13px 16px;margin-bottom:16px}
+  .cp-outstanding .l{font-size:12px;color:var(--coral);font-weight:700;text-transform:uppercase;letter-spacing:.03em}
+  .cp-outstanding .v{font-size:19px;font-weight:700;color:var(--ink);margin-top:2px}
+  .cp-tabs{display:flex;gap:2px;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;background:var(--surface-2);border-radius:980px;padding:3px;margin-bottom:16px;position:sticky;top:0;z-index:5}
+  .cp-tabs::-webkit-scrollbar{display:none}
+  .cp-tab{flex:1;white-space:nowrap;padding:8px 14px;border-radius:980px;font-size:12.5px;font-weight:600;color:var(--ink-soft);min-height:36px}
+  .cp-tab.sel{background:var(--surface);color:var(--ink);box-shadow:var(--shadow)}
+  .cp-tab .ct{font-variant-numeric:tabular-nums;color:var(--ink-faint);margin-left:3px}
+  .cp-tab.sel .ct{color:var(--teal)}
+  @media(max-width:720px){
+    .cp-avatar{width:48px;height:48px;font-size:17px}
+    .cp-name{font-size:19px}
+    .cp-quick-actions{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 -26px 18px;padding:0 26px}
+    .cp-qa{min-width:74px}
+  }
 
   /* ===== Shared "booked" hero — reused on Customer Profile and Job Detail
      so booking info reads the same way everywhere instead of being a
@@ -678,6 +713,18 @@
     .bottom-nav button.active{color:var(--teal);background:var(--teal-wash)}
     .bottom-nav .bn-ico{display:flex;align-items:center;justify-content:center;height:20px}
     .bottom-nav .bn-ico svg{width:20px;height:20px}
+    /* Create — the one action worth breaking the grid for: raised above the
+       bar on its own filled circle so it reads as "the" primary action
+       instead of a sixth equal tab, the standard "FAB-in-tab-bar" mobile
+       pattern. flex:0 (not 1, unlike its siblings) so it doesn't stretch
+       to match their width — its whole point is to look different. */
+    .bottom-nav .bn-create{flex:0 0 auto;width:56px;padding:0;margin-top:-22px}
+    .bottom-nav .bn-create-plus{
+      display:flex;align-items:center;justify-content:center;width:52px;height:52px;border-radius:50%;
+      background:var(--teal);color:#fff;font-size:28px;font-weight:400;line-height:1;
+      box-shadow:0 6px 16px rgba(19,138,114,.4),0 0 0 4px var(--surface);
+    }
+    .bottom-nav .bn-create:active .bn-create-plus{background:var(--teal-bright);transform:scale(.94)}
   }
 
   /* ===== technician mode — bigger tap targets everywhere, one-handed/gloved use ===== */
@@ -1347,8 +1394,8 @@
   </nav>
   <nav class="bottom-nav" id="bottom-nav">
     <button data-view="pipeline" class="active"><span class="bn-ico" data-icon="pipeline"></span>Pipeline</button>
-    <button data-view="jobsflow"><span class="bn-ico" data-icon="jobsflow"></span>Jobs</button>
-    <button data-view="leads"><span class="bn-ico" data-icon="leads"></span>Quotes</button>
+    <button data-view="calendar"><span class="bn-ico" data-icon="calendar"></span>Calendar</button>
+    <button class="bn-create" id="bn-create-btn" onclick="openLeadModal()" aria-label="Create new lead"><span class="bn-create-plus">+</span></button>
     <button data-view="customers"><span class="bn-ico" data-icon="customers"></span>Customers</button>
     <button onclick="openMoreSheet()"><span class="bn-ico" data-icon="more"></span>More</button>
   </nav>
@@ -2107,7 +2154,7 @@ async function loadEmailTemplates(){
 // {{job_address}}/{{scheduled_date}} names kept as aliases so templates
 // saved before this pass keep resolving correctly.
 function emailTemplateVars(r,mode){
-  const addr=[r.address,r.suburb].filter(Boolean).join(', ')||'—';
+  const addr=TK_FORMAT.address(r,{fallback:'—'});
   const servicesList=(r.services||[]).map(s=>{
     const v=SERVICES[s.svc];
     return v?v.label+(s.qty?' ('+s.qty+' '+v.unit+')':''):s.svc;
@@ -2709,7 +2756,7 @@ function renderLeadCustomerResults(query){
     .filter(g=>(g.name||'').toLowerCase().includes(q)||(g.phone||'').includes(q)||(g.email||'').toLowerCase().includes(q)||(g.address||'').toLowerCase().includes(q)||(g.suburb||'').toLowerCase().includes(q))
     .slice(0,6);
   box.innerHTML=matches.length?matches.map(g=>{
-    const addr=[g.address,g.suburb].filter(Boolean).join(', ')||'No address on file';
+    const addr=TK_FORMAT.address(g,{fallback:'No address on file'});
     const contact=[g.phone,g.email].filter(Boolean).join(' · ')||'No phone/email on file';
     return `<button type="button" class="l-cust-result" onclick="selectLeadCustomer('${g.customerId}')">
       <div class="lcr-name">${(g.name||'').replace(/</g,'&lt;')}</div>
@@ -2898,6 +2945,7 @@ async function onQuoteAttachChosen(input){
   if(!row)return;
   if(!r.quoteAttachments)r.quoteAttachments=[];
   r.quoteAttachments.push({filename:file.name,path:row.path});
+  logActivity(r.customerId,r.jobId,'photo_added','File attached to quote: '+(file.name||'file'));
   renderQuoteAttachList();
   toast('Attached');
 }
@@ -2955,7 +3003,7 @@ function qeNormalizeAreas(r){
 
 function renderQuoteMap(r){
   const zone=document.getElementById('quote-map-zone'); if(!zone)return;
-  const addr=[r.address,r.suburb].filter(Boolean).join(', ');
+  const addr=TK_FORMAT.address(r);
   const geoRegion=(currentBusinessProfile&&currentBusinessProfile.region)||'Auckland, New Zealand';
   qe={
     r, areas:qeNormalizeAreas(r), selectedId:null,
@@ -3202,6 +3250,14 @@ function qeRenderAreas(){
     const pts=qe.drawing.map(p=>`${p.x},${p.y}`).join(' ');
     if(qe.drawing.length>1)out+=`<polyline class="qe-draw-line" points="${pts}" fill="${hex}22" stroke="${hex}" stroke-width="3" stroke-linejoin="round" style="pointer-events:none"/>`;
     qe.drawing.forEach((p,i)=>{out+=`<circle class="qe-pt-handle qe-draw-handle" data-idx="${i}" cx="${p.x}" cy="${p.y}" r="${i===0?10:8}" fill="#fff" stroke="${hex}" stroke-width="3"/>`;});
+  }
+  // The geocoded property location, pinned once on first load (qe.originLat/
+  // Lng) and reprojected through the same lat/lng→SVG math as every drawn
+  // area — so it stays correctly anchored to the actual house through any
+  // amount of panning/zooming, unlike a marker baked into a static image URL.
+  if(qe.originLat!=null){
+    const op=qeLatLngToSvg({lat:qe.originLat,lng:qe.originLng});
+    out+=`<g class="qe-origin-pin" style="pointer-events:none"><path d="M${op.x} ${op.y+2} c-7-10-11-16-11-22a11 11 0 1 1 22 0c0 6-4 12-11 22z" fill="#e0483a" stroke="#fff" stroke-width="2"/><circle cx="${op.x}" cy="${op.y-20}" r="4" fill="#fff"/></g>`;
   }
   svg.innerHTML=out;
 }
@@ -4412,7 +4468,7 @@ function buildDocPDF(mode,r,outputType){
   doc.setFont('helvetica','normal');doc.setFontSize(8.5);
   doc.setTextColor(80,90,100);
   var fromLines=[t.phone,t.email,t.gstNo?'GST '+t.gstNo:null].filter(Boolean);
-  var addr=[r.address,r.suburb].filter(Boolean).join(', ');
+  var addr=TK_FORMAT.address(r);
   var contact=[r.phone,r.email].filter(Boolean).join('  \u00b7  ');
   var toLines=[addr,contact].filter(Boolean);
   var maxL=Math.max(fromLines.length,toLines.length);
@@ -4552,9 +4608,12 @@ function docNumber(mode,r){
 // client-side SVG reprojection needed for a flat, non-interactive document.
 function docMapSectionHtml(r){
   const mapsKey=(window.TURNKEY_CONFIG&&window.TURNKEY_CONFIG.mapsKey)||'';
-  const url=window.TK_MAP_SNAPSHOT&&r.areaPolys&&r.areaPolys.length?TK_MAP_SNAPSHOT.buildUrl(r.areaPolys,mapsKey,{size:'640x400',scale:2}):null;
+  if(!window.TK_MAP_SNAPSHOT||!mapsKey)return '';
+  const hasOutline=r.areaPolys&&r.areaPolys.length;
+  const fallbackAddress=TK_FORMAT.address(r);
+  const url=TK_MAP_SNAPSHOT.buildUrl(r.areaPolys,mapsKey,{size:'640x400',scale:2,fallbackAddress});
   if(!url)return '';
-  return `<div class="doc-map"><div class="dp-label">Property area</div><img src="${url}" alt="Property outline" loading="lazy"></div>`;
+  return `<div class="doc-map"><div class="dp-label">${hasOutline?'Property area':'Property'}</div><img src="${url}" alt="${hasOutline?'Property outline':'Property photo'}" loading="lazy"></div>`;
 }
 function renderDocHTML(mode,r){
   const t=docTemplate;
@@ -4587,11 +4646,12 @@ function renderDocHTML(mode,r){
         <div class="doc-title">${title}</div>
         <div class="doc-num">${docNumber(mode,r)}</div>
         <div class="doc-date">${today}</div>
+        ${mode==='quote'&&r.quoteSentAt?`<div class="doc-date">Submitted ${TK_FORMAT.submitted(r.quoteSentAt).full}</div>`:''}
       </div>
     </div>
     <div class="doc-parties">
       <div><div class="dp-label">From</div><div class="dp-name">${bizName}</div>${fromContact?`<div class="dp-line">${fromContact}</div>`:''}${t.gstNo?`<div class="dp-line">GST ${t.gstNo}</div>`:''}</div>
-      <div><div class="dp-label">${mode==='quote'?'Prepared for':'Billed to'}</div><div class="dp-name">${r.name}</div><div class="dp-line">${r.address||''}${r.suburb?', '+r.suburb:''}</div>${toContact?`<div class="dp-line">${toContact}</div>`:''}</div>
+      <div><div class="dp-label">${mode==='quote'?'Prepared for':'Billed to'}</div><div class="dp-name">${r.name}</div>${TK_FORMAT.address(r)?`<div class="dp-line">${TK_FORMAT.address(r)}</div>`:''}${toContact?`<div class="dp-line">${toContact}</div>`:''}</div>
     </div>
     ${docMapSectionHtml(r)}
     <table class="doc-table"><thead><tr><th>Service</th><th class="r">Amount</th></tr></thead><tbody>${rows}</tbody></table>
@@ -5053,7 +5113,7 @@ function openDetail(id){
 
   document.getElementById('view-detail').innerHTML=`
     <a class="back-link" onclick="render();switchView('pipeline')">← Back to pipeline</a>
-    <div class="view-head"><div><h2>${r.name}</h2><p>${r.address||'—'}${r.suburb?', '+r.suburb:''} · ${r.phone||'no phone'}</p></div><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    <div class="view-head"><div><h2>${r.name}</h2><p>${TK_FORMAT.address(r,{fallback:'No address on file'})} · ${r.phone||'no phone'}</p></div><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
       <button class="btn ghost sm" onclick="openCustomerProfile(${id})">Full profile</button>
       ${jobStatusBadge(r)}
       ${canEditJobStatus(r)?`<select style="font-size:12px;padding:4px 8px;border-radius:980px" onchange="setManualStatus(${id},this.value)"><option value="">Change status…</option>${manualStatusOptions(r)}</select>`:''}
@@ -5063,10 +5123,12 @@ function openDetail(id){
       <div>
         ${jobScheduleCardHtml}
         <div class="panel"><h4>Contact <span class="eng-badge">Client</span></h4>
+          <!-- Address is already shown once, up in the page header — repeating
+               it here (same record, same screen) is exactly the kind of
+               duplicate-address rendering this panel used to have. -->
           <div class="contact-rows">
             <a class="contact-row" href="tel:${(r.phone||'').replace(/\s/g,'')}"><span class="ci"></span><div><div class="cl">Phone</div><div class="cv">${r.phone||'—'}</div></div></a>
             <a class="contact-row" href="mailto:${r.email||''}"><span class="ci"></span><div><div class="cl">Email</div><div class="cv">${r.email||'—'}</div></div></a>
-            <div class="contact-row"><span class="ci"></span><div><div class="cl">Address</div><div class="cv">${r.address||'—'}${r.suburb?', '+r.suburb:''}</div></div></div>
           </div>
           <div style="display:flex;gap:8px;margin-top:12px">
             <button class="btn ghost sm" onclick="pickCustomerPhoto(${id})">${r.hasCustomerPhoto?'Photo attached — replace':'Add customer photo'}</button>
@@ -5207,6 +5269,7 @@ async function completeJob(id,skipConfirm){
   if(!r.skipChecklist){ensureSopSized(r);r.sop=r.sop.map(()=>true);} // "mark checklist complete (if enabled)"
   r.stage='completed';r.jobStatus='completed';r.gps='checked';
   logStatusChange(r,'completed',null,{durationMin:r.durationMin});
+  logActivity(r.customerId,r.jobId,'job_completed',r.name+' — job completed'+(r.durationMin?' ('+fmtDur(r.durationMin)+' on site)':''),{durationMin:r.durationMin});
   render();renderAll();
   openDetail(id);
   toast('Job completed ✓'+(r.durationMin?' — '+fmtDur(r.durationMin)+' on site':''));
@@ -5247,6 +5310,7 @@ async function onPhotoChosen(input){
   }else if(kind==='customer_photo'){
     r.hasCustomerPhoto=true;r.customerPhotoPath=row.path;
   }
+  logActivity(r.customerId,r.jobId,'photo_added',kind==='job_photo'?(slot==='before'?'Before photo added':'After photo added'):'Property photo added');
   openDetail(id);
   toast('Photo added');
 }
@@ -5442,7 +5506,7 @@ function renderCustomers(){
         const latest=g.jobs.reduce((a,b)=>(b.createdAt||0)>(a.createdAt||0)?b:a,g.jobs[0]);
         return `<button class="customer-card" onclick="openCustomerProfile(${g.firstId})">
           <div class="cc-top"><div class="cc-name">${g.name}</div>${g.jobs.length>1?`<span class="pill">${g.jobs.length} jobs</span>`:jobStatusBadge(latest)}</div>
-          <div class="cc-sub">${[g.address,g.suburb].filter(Boolean).join(', ')||'No address on file'}</div>
+          <div class="cc-sub">${TK_FORMAT.address(g,{fallback:'No address on file'})}</div>
           <div class="cc-contact">
             ${g.phone?`<a href="tel:${g.phone.replace(/\s/g,'')}" onclick="event.stopPropagation()">${g.phone}</a>`:''}
             ${g.email?`<a href="mailto:${g.email}" onclick="event.stopPropagation()">${g.email}</a>`:''}
@@ -5498,13 +5562,13 @@ function cardHtml(r){
 // .cp-timeline-dot) instead of an emoji glyph — positive (won/paid),
 // negative (declined), or neutral (everything else, the default).
 const ACTIVITY_META={
-  note:{label:'Note'},quote_sent:{label:'Quote sent'},
+  note:{label:'Note'},lead_created:{label:'Lead created',tone:'pos'},quote_sent:{label:'Quote sent'},
   quote_viewed:{label:'Quote viewed'},quote_accepted:{label:'Quote accepted',tone:'pos'},
   quote_declined:{label:'Quote declined',tone:'neg'},quote_updated:{label:'Quote amount changed'},job_scheduled:{label:'Job scheduled'},
   job_completed:{label:'Job completed',tone:'pos'},invoice_sent:{label:'Invoice sent'},
   invoice_paid:{label:'Invoice paid',tone:'pos'},follow_up_sent:{label:'Follow-up sent'},
   email_sent:{label:'Email sent'},email_received:{label:'Email received'},
-  status_change:{label:'Status change'}
+  status_change:{label:'Status change'},photo_added:{label:'Photo added'}
 };
 // Explicit actor attribution for the timeline — "Customer" for anything
 // created through the public quote-approval RPC (which never has a staff
@@ -5518,10 +5582,13 @@ function activityActorLabel(a){
   return '';
 }
 let customerProfileCtx=null;
+let cpActiveTab='overview'; // which tab of the redesigned Customer Profile is showing
+function cpSwitchTab(tab){cpActiveTab=tab;renderCustomerProfile();}
 async function openCustomerProfile(recordId){
   const r=records.find(x=>x.id===recordId);
   if(!r){toast('Could not find that customer');return;}
   openModal('customer-overlay');
+  cpActiveTab='overview'; // always land on Overview, regardless of which tab a previously-viewed customer was left on
   document.getElementById('customer-body').innerHTML='<div class="iw-running"><div class="iw-spinner"></div><p>Loading customer profile…</p></div>';
   await ensureRecordSynced(r);
   const customerId=r.customerId;
@@ -5537,9 +5604,22 @@ async function openCustomerProfile(recordId){
     customerProfileCtx.activity=acts||[];
   }
   renderCustomerProfile();
-  iwLoadCustomerPhotos();
 }
 function closeCustomerProfile(){closeModal('customer-overlay');customerProfileCtx=null;}
+// A close-up, pinned property photo for the profile's Contact & property
+// panel — prefers a mapped job's outline (auto-fit + centroid pin, see
+// map-snapshot.js), else falls back to a geocoded address-only close-up so
+// every customer gets a "this is my house" photo, not just the ones a quote
+// happened to be drawn on the map for.
+function cpPropertyImageHtml(c,jobs){
+  const mapsKey=(window.TURNKEY_CONFIG&&window.TURNKEY_CONFIG.mapsKey)||'';
+  if(!window.TK_MAP_SNAPSHOT||!mapsKey)return '';
+  const withMap=jobs.find(r=>r.areaPolys&&r.areaPolys.length);
+  const fallbackAddress=TK_FORMAT.address(c);
+  const url=TK_MAP_SNAPSHOT.buildUrl(withMap?withMap.areaPolys:null,mapsKey,{size:'640x360',scale:2,fallbackAddress});
+  if(!url)return '';
+  return `<div class="cp-property-img"><img src="${url}" alt="Property photo" loading="lazy"></div>`;
+}
 function renderCustomerProfile(){
   const ctx=customerProfileCtx;if(!ctx)return;
   const jobs=records.filter(r=>r.customerId===ctx.customerId);
@@ -5551,6 +5631,11 @@ function renderCustomerProfile(){
   const upcoming=jobs.filter(isBooked).sort((a,b)=>(a.scheduledDateISO||'9999').localeCompare(b.scheduledDateISO||'9999'));
   const photos=ctx.attachments.filter(a=>a.kind==='before_photo'||a.kind==='after_photo');
   const files=ctx.attachments.filter(a=>a.kind!=='before_photo'&&a.kind!=='after_photo');
+  // Most recently COMPLETED job (not just most recently created) is what
+  // "Last job date" means to a business owner — falls back to the most
+  // recent booking if nothing's been completed yet.
+  const lastDoneJob=jobs.filter(r=>r.finishedAt).sort((a,b)=>b.finishedAt-a.finishedAt)[0];
+  const lastJobDate=lastDoneJob?(lastDoneJob.scheduledDate||isoToLabel(lastDoneJob.scheduledDateISO)):null;
 
   const latestJob=jobs.reduce((a,b)=>(b.createdAt||0)>(a.createdAt||0)?b:a,jobs[0]);
   // The single nearest booked (not yet completed) job, shown as a prominent
@@ -5563,7 +5648,7 @@ function renderCustomerProfile(){
     const tl=dayTimeline(nextBooked.scheduledDateISO);
     const me=tl.find(s=>s.job.id===nextBooked.id);
     const wx=weatherForDate(nextBooked.scheduledDateISO);
-    const addr=[nextBooked.address,nextBooked.suburb].filter(Boolean).join(', ');
+    const addr=TK_FORMAT.address(nextBooked);
     bookedHeroHtml=`<div class="booked-hero">
       <div class="booked-tag">Booked</div>
       <div class="booked-grid">
@@ -5581,77 +5666,115 @@ function renderCustomerProfile(){
       </div>
     </div>`;
   }
-  document.getElementById('customer-body').innerHTML=`
-    <div class="cp-head">
-      <div><div class="cp-name">${c.name} ${jobStatusBadge(latestJob)}</div><div class="cp-sub">${c.suburb||c.address||'No address on file'}</div></div>
-      <div class="cp-actions">
-        <button class="btn ghost sm" onclick="openNewJobModal('${ctx.customerId}')">+ New job</button>
-        ${c.phone?`<a class="btn ghost sm" href="tel:${c.phone.replace(/\s/g,'')}">Call</a>`:''}
-        ${c.email?`<a class="btn ghost sm" href="mailto:${c.email}">Email</a>`:''}
-      </div>
-    </div>
+  // Outstanding balance — the one number an owner most wants to know at a
+  // glance ("does this customer owe me money") — surfaced as its own banner
+  // rather than buried inside the Invoices tab's list.
+  const outstandingTotal=jobs.filter(r=>r.invoiceId&&invoiceDisplayStatus(r)!=='paid').reduce((s,r)=>s+paymentBalance(r),0);
+  const initials=(c.name||'').trim().split(/\s+/).map(w=>w[0]||'').slice(0,2).join('').toUpperCase()||'?';
+  const cleanPhone=(c.phone||'').replace(/\s/g,'');
+  const tabs=[
+    ['overview','Overview',null],
+    ['jobs','Jobs',jobs.length],
+    ['quotes','Quotes',ctx.quotes.length],
+    ['invoices','Invoices',jobs.filter(r=>r.invoiceId).length],
+    ['photos','Photos',photos.length],
+    ['files','Files',files.length],
+    ['activity','Activity',ctx.activity.length]
+  ];
+  const tabsHtml=`<div class="cp-tabs" role="tablist">${tabs.map(([key,label,count])=>
+    `<button type="button" class="cp-tab ${cpActiveTab===key?'sel':''}" role="tab" aria-selected="${cpActiveTab===key}" onclick="cpSwitchTab('${key}')">${label}${count!=null?`<span class="ct">${count}</span>`:''}</button>`
+  ).join('')}</div>`;
 
+  const overviewHtml=`
     ${bookedHeroHtml}
-
-    <div class="cp-stats">
-      <div class="cp-stat"><div class="cp-stat-v">${money(lifetimeValue)}</div><div class="cp-stat-l">Lifetime value (paid)</div></div>
+    <div class="cp-stats cp-stats-secondary">
       <div class="cp-stat"><div class="cp-stat-v">${money(totalQuoted)}</div><div class="cp-stat-l">Total quoted</div></div>
-      <div class="cp-stat"><div class="cp-stat-v">${jobs.length}</div><div class="cp-stat-l">Job${jobs.length!==1?'s':''}</div></div>
       <div class="cp-stat"><div class="cp-stat-v">${wonCount}</div><div class="cp-stat-l">Won</div></div>
     </div>
+    <div class="panel" style="margin-bottom:14px"><h4>Contact &amp; property</h4>
+      ${cpPropertyImageHtml(c,jobs)}
+      <div class="field"><label>Name</label><input id="cp-name" value="${c.name.replace(/"/g,'&quot;')}"></div>
+      <div class="field-row"><div class="field"><label>Phone</label><input id="cp-phone" value="${(c.phone||'').replace(/"/g,'&quot;')}"></div><div class="field"><label>Email</label><input id="cp-email" value="${(c.email||'').replace(/"/g,'&quot;')}"></div></div>
+      <div class="field"><label>Address</label><input id="cp-address" value="${(c.address||'').replace(/"/g,'&quot;')}"></div>
+      <div class="field"><label>Suburb</label><input id="cp-suburb" value="${(c.suburb||'').replace(/"/g,'&quot;')}"></div>
+      <button class="btn accent sm" onclick="saveCustomerContact(this)">Save</button>
+    </div>
+    <div class="panel"><h4>Notes</h4>
+      <textarea id="cp-notes" rows="4" placeholder="Access instructions, gate codes, dog on site, preferences…">${(c.notes||'').replace(/</g,'&lt;')}</textarea>
+      <button class="btn accent sm" style="margin-top:8px" onclick="saveCustomerNotes(this)">Save notes</button>
+    </div>`;
 
+  const jobsHtml=`
     ${upcoming.length?`<div class="panel" style="margin-bottom:14px"><h4>Upcoming work</h4>
       ${upcoming.map(r=>`<div class="kv"><span class="k">${r.name} — ${r.scheduledDate||'Date TBC'}</span><span class="v">${jobStatusBadge(r)}${r.stage==='scheduled'?` <button class="btn ghost sm" style="padding:2px 9px;font-size:11px" onclick="openSchedule(${r.id})">↻ Reschedule</button>`:''}</span></div>`).join('')}
     </div>`:''}
-
-    <div class="cp-grid">
-      <div>
-        <div class="panel" style="margin-bottom:14px"><h4>Contact &amp; property</h4>
-          <div class="field"><label>Name</label><input id="cp-name" value="${c.name.replace(/"/g,'&quot;')}"></div>
-          <div class="field-row"><div class="field"><label>Phone</label><input id="cp-phone" value="${(c.phone||'').replace(/"/g,'&quot;')}"></div><div class="field"><label>Email</label><input id="cp-email" value="${(c.email||'').replace(/"/g,'&quot;')}"></div></div>
-          <div class="field"><label>Address</label><input id="cp-address" value="${(c.address||'').replace(/"/g,'&quot;')}"></div>
-          <div class="field"><label>Suburb</label><input id="cp-suburb" value="${(c.suburb||'').replace(/"/g,'&quot;')}"></div>
-          <button class="btn accent sm" onclick="saveCustomerContact(this)">Save</button>
-        </div>
-        <div class="panel" style="margin-bottom:14px"><h4>Notes</h4>
-          <textarea id="cp-notes" rows="4" placeholder="Access instructions, gate codes, dog on site, preferences…">${(c.notes||'').replace(/</g,'&lt;')}</textarea>
-          <button class="btn accent sm" style="margin-top:8px" onclick="saveCustomerNotes(this)">Save notes</button>
-        </div>
-        <div class="panel" style="margin-bottom:14px"><h4>Service history <span class="demo-tag">${jobs.length}</span></h4>
-          ${jobs.map(r=>`<div class="kv" style="cursor:pointer" onclick="closeCustomerProfile();openDetail(${r.id})"><span class="k">${r.scheduledDate||'Not scheduled'}${r.tech&&r.tech!=='Unassigned'?' · '+r.tech:''}</span><span class="v">${jobStatusBadge(r)} ${r.total?money(r.total):''}</span></div>`).join('')}
-        </div>
-        <div class="panel"><h4>Quotes <span class="demo-tag">${ctx.quotes.length}</span></h4>
-          ${ctx.quotes.length?ctx.quotes.map(q=>`<div class="kv"><span class="k">${new Date(q.created_at).toLocaleDateString('en-NZ',{day:'numeric',month:'short',year:'numeric'})}</span><span class="v">${money(q.amount||0)} · <span class="pill">${q.status||'sent'}</span></span></div>`).join(''):'<div class="empty-state" style="padding:16px"><div class="sm">No quotes recorded yet.</div></div>'}
-        </div>
-      </div>
-      <div>
-        <div class="panel" style="margin-bottom:14px"><h4>Invoices</h4>
-          ${jobs.filter(r=>r.invoiceId).length?jobs.filter(r=>r.invoiceId).map(r=>{
-            const ds=invoiceDisplayStatus(r);
-            const pillCls=ds==='paid'?'paid':(ds==='overdue'?'bad':(ds==='partial'?'partial':''));
-            const pillLabel=ds==='partial'?'Partially Paid':ds.charAt(0).toUpperCase()+ds.slice(1);
-            const balance=paymentBalance(r);
-            return `<div class="kv"><span class="k">${r.name} job${r.scheduledDate?' · '+r.scheduledDate:''}${r.dueDate?' · due '+isoToLabel(r.dueDate):''}${ds==='partial'?' · '+money(balance)+' owing':''}${r.paymentLinkUrl?' · <a href="'+r.paymentLinkUrl+'" target="_blank" style="color:var(--teal)">payment link</a>':''}</span><span class="v">${money(r.total||0)} · <span class="pill ${pillCls}">${pillLabel}</span>${ds!=='paid'?` <button class="btn accent sm" style="padding:2px 10px;font-size:11px" onclick="openPaymentModal(${r.id})">Record payment</button><select style="margin-left:6px;font-size:11px" onchange="setPaymentMethod(${r.id},this.value)"><option value="">Method…</option>${['Cash','Bank transfer','Card','Other'].map(m=>`<option ${r.paymentMethod===m?'selected':''}>${m}</option>`).join('')}</select> <button class="btn ghost sm" style="padding:2px 8px;font-size:11px" onclick="sendPaymentLink(${r.id})">${r.paymentLinkUrl?'New link':'Payment link'}</button>`:(r.paymentMethod?` · ${r.paymentMethod}`:'')}${(r.payments&&r.payments.length)?` · <button class="btn ghost sm" style="padding:2px 8px;font-size:11px" onclick="openPaymentModal(${r.id})">${r.payments.length} payment${r.payments.length>1?'s':''}</button>`:''}</span></div>`;
-          }).join(''):'<div class="empty-state" style="padding:16px"><div class="sm">No invoices yet.</div></div>'}
-        </div>
-        <div class="panel" style="margin-bottom:14px"><h4>Before / after photos</h4>
-          <div id="cp-photo-grid" class="cp-photo-grid">${photos.length?photos.map(p=>`<div class="cp-photo" data-path="${p.path}"><span class="cp-photo-tag">${p.kind==='before_photo'?'Before':'After'}</span></div>`).join(''):'<div class="empty-state" style="padding:16px"><div class="sm">No before/after photos yet — add them from a job.</div></div>'}</div>
-        </div>
-        <div class="panel" style="margin-bottom:14px"><h4>Attachments <span class="demo-tag">${files.length}</span></h4>
-          ${files.length?files.map(f=>`<div class="kv"><span class="k">${f.filename||f.path.split('/').pop()}</span><span class="v">${new Date(f.created_at).toLocaleDateString('en-NZ',{day:'numeric',month:'short'})}</span></div>`).join(''):'<div class="empty-state" style="padding:16px"><div class="sm">No files attached yet.</div></div>'}
-        </div>
-        <div class="panel"><h4>Communication timeline <span class="demo-tag">${ctx.activity.length}</span></h4>
-          <div style="max-height:340px;overflow-y:auto">
-          ${ctx.activity.length?ctx.activity.map(a=>{
-            const m=ACTIVITY_META[a.type]||{label:a.type};
-            const actor=activityActorLabel(a);
-            const when=new Date(a.created_at).toLocaleString('en-NZ',{day:'numeric',month:'short',hour:'numeric',minute:'2-digit'});
-            return `<div class="cp-timeline-row"><span class="cp-timeline-dot ${m.tone||''}"></span><div><div class="cp-timeline-sum">${a.summary}</div><div class="cp-timeline-when">${when}${actor?' · '+actor:''}</div></div></div>`;
-          }).join(''):'<div class="empty-state" style="padding:16px"><div class="sm">Nothing logged yet — sending a quote, booking a job or connecting email will show up here.</div></div>'}
-          </div>
-        </div>
-      </div>
+    <div class="panel"><h4>Service history</h4>
+      ${jobs.map(r=>`<div class="kv" style="cursor:pointer" onclick="closeCustomerProfile();openDetail(${r.id})"><span class="k">${r.scheduledDate||'Not scheduled'}${r.tech&&r.tech!=='Unassigned'?' · '+r.tech:''}</span><span class="v">${jobStatusBadge(r)} ${r.total?money(r.total):''}</span></div>`).join('')}
     </div>`;
+
+  const quotesHtml=`<div class="panel">${ctx.quotes.length?ctx.quotes.map(q=>{const s=TK_FORMAT.submitted(q.created_at);return `<div class="kv"><span class="k">Submitted ${s?s.full:'—'}</span><span class="v">${money(q.amount||0)} · <span class="pill">${q.status||'sent'}</span></span></div>`;}).join(''):'<div class="empty-state" style="padding:16px"><div class="sm">No quotes recorded yet.</div></div>'}</div>`;
+
+  const invoicesHtml=`
+    ${outstandingTotal>0?`<div class="cp-outstanding"><div><div class="l">Outstanding balance</div><div class="v">${money(outstandingTotal)}</div></div></div>`:''}
+    <div class="panel">
+      ${jobs.filter(r=>r.invoiceId).length?jobs.filter(r=>r.invoiceId).map(r=>{
+        const ds=invoiceDisplayStatus(r);
+        const pillCls=ds==='paid'?'paid':(ds==='overdue'?'bad':(ds==='partial'?'partial':''));
+        const pillLabel=ds==='partial'?'Partially Paid':ds.charAt(0).toUpperCase()+ds.slice(1);
+        const balance=paymentBalance(r);
+        return `<div class="kv"><span class="k">${r.name} job${r.scheduledDate?' · '+r.scheduledDate:''}${r.dueDate?' · due '+isoToLabel(r.dueDate):''}${ds==='partial'?' · '+money(balance)+' owing':''}${r.paymentLinkUrl?' · <a href="'+r.paymentLinkUrl+'" target="_blank" style="color:var(--teal)">payment link</a>':''}</span><span class="v">${money(r.total||0)} · <span class="pill ${pillCls}">${pillLabel}</span>${ds!=='paid'?` <button class="btn accent sm" style="padding:2px 10px;font-size:11px" onclick="openPaymentModal(${r.id})">Record payment</button><select style="margin-left:6px;font-size:11px" onchange="setPaymentMethod(${r.id},this.value)"><option value="">Method…</option>${['Cash','Bank transfer','Card','Other'].map(m=>`<option ${r.paymentMethod===m?'selected':''}>${m}</option>`).join('')}</select> <button class="btn ghost sm" style="padding:2px 8px;font-size:11px" onclick="sendPaymentLink(${r.id})">${r.paymentLinkUrl?'New link':'Payment link'}</button>`:(r.paymentMethod?` · ${r.paymentMethod}`:'')}${(r.payments&&r.payments.length)?` · <button class="btn ghost sm" style="padding:2px 8px;font-size:11px" onclick="openPaymentModal(${r.id})">${r.payments.length} payment${r.payments.length>1?'s':''}</button>`:''}</span></div>`;
+      }).join(''):'<div class="empty-state" style="padding:16px"><div class="sm">No invoices yet.</div></div>'}
+    </div>`;
+
+  const photosHtml=`
+    <div class="panel"><h4>Before / after photos</h4>
+      <div id="cp-photo-grid" class="cp-photo-grid">${photos.length?photos.map(p=>`<div class="cp-photo" data-path="${p.path}"><span class="cp-photo-tag">${p.kind==='before_photo'?'Before':'After'}</span></div>`).join(''):'<div class="empty-state" style="padding:16px"><div class="sm">No before/after photos yet — add them from a job.</div></div>'}</div>
+    </div>`;
+
+  const filesHtml=`
+    <div class="panel"><h4>Files &amp; attachments</h4>
+      ${files.length?files.map(f=>`<div class="kv" style="cursor:pointer" onclick="viewAttachmentPath('${f.path}')"><span class="k">${f.filename||f.path.split('/').pop()}</span><span class="v">${new Date(f.created_at).toLocaleDateString('en-NZ',{day:'numeric',month:'short'})}</span></div>`).join(''):'<div class="empty-state" style="padding:16px"><div class="sm">No files attached yet — quote attachments and other documents show up here.</div></div>'}
+    </div>`;
+
+  const activityHtml=`<div class="panel">
+    ${ctx.activity.length?ctx.activity.map(a=>{
+      const m=ACTIVITY_META[a.type]||{label:a.type};
+      const actor=activityActorLabel(a);
+      const when=new Date(a.created_at).toLocaleString('en-NZ',{day:'numeric',month:'short',hour:'numeric',minute:'2-digit'});
+      return `<div class="cp-timeline-row"><span class="cp-timeline-dot ${m.tone||''}"></span><div><div class="cp-timeline-sum">${a.summary}</div><div class="cp-timeline-when">${when}${actor?' · '+actor:''}</div></div></div>`;
+    }).join(''):'<div class="empty-state" style="padding:16px"><div class="sm">Nothing logged yet — sending a quote, booking a job or connecting email will show up here.</div></div>'}
+  </div>`;
+
+  const tabContent={overview:overviewHtml,jobs:jobsHtml,quotes:quotesHtml,invoices:invoicesHtml,photos:photosHtml,files:filesHtml,activity:activityHtml}[cpActiveTab]||overviewHtml;
+
+  document.getElementById('customer-body').innerHTML=`
+    <div class="cp-hero">
+      <div class="cp-avatar">${initials}</div>
+      <div class="cp-hero-main">
+        <div class="cp-name">${c.name} ${jobStatusBadge(latestJob)}</div>
+        <div class="cp-sub">${TK_FORMAT.address(c,{fallback:'No address on file'})}</div>
+        ${(c.phone||c.email)?`<div class="cp-hero-contact">${[c.phone,c.email].filter(Boolean).join(' · ')}</div>`:''}
+      </div>
+    </div>
+
+    <div class="cp-stats">
+      <div class="cp-stat"><div class="cp-stat-v">${money(lifetimeValue)}</div><div class="cp-stat-l">Lifetime spend</div></div>
+      <div class="cp-stat"><div class="cp-stat-v">${jobs.length}</div><div class="cp-stat-l">Total job${jobs.length!==1?'s':''}</div></div>
+      <div class="cp-stat"><div class="cp-stat-v">${lastJobDate||'—'}</div><div class="cp-stat-l">Last job</div></div>
+    </div>
+
+    <div class="cp-quick-actions">
+      ${c.phone?`<a class="cp-qa primary" href="tel:${cleanPhone}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/></svg>Call</a>`:''}
+      ${c.phone?`<a class="cp-qa" href="sms:${cleanPhone}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-4.5 7.5 8.5 8.5 0 0 1-8.9-.3L3 21l1.9-5.7A8.38 8.38 0 0 1 3 11.5a8.5 8.5 0 0 1 8.5-8.5h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>Text</a>`:''}
+      ${c.email?`<a class="cp-qa" href="mailto:${c.email}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 6-10 7L2 6"/></svg>Email</a>`:''}
+      <button type="button" class="cp-qa" onclick="closeCustomerProfile();openQuoteModal(${c.id})"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="16" y2="12"/><line x1="4" y1="18" x2="12" y2="18"/></svg>Quote</button>
+      <button type="button" class="cp-qa" onclick="openNewJobModal('${ctx.customerId}')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 9l2 2 4-4"/><line x1="8" y1="15" x2="16" y2="15"/></svg>New job</button>
+    </div>
+
+    ${tabsHtml}
+    ${tabContent}`;
+
+  if(cpActiveTab==='photos')iwLoadCustomerPhotos();
 }
 async function saveCustomerContact(btn){
   const ctx=customerProfileCtx;if(!ctx||!sb)return;
@@ -5840,7 +5963,7 @@ function renderOps(){
         <div class="panel" style="margin-bottom:0"><h4>Today's jobs — ${stops.length} stop${stops.length!==1?'s':''}</h4>
           ${stops.length?stops.map((s,i)=>{
             const r=s.r;
-            const addr=[r.address,r.suburb].filter(Boolean).join(', ');
+            const addr=TK_FORMAT.address(r);
             const notStarted=r.stage==='scheduled'&&!r.startedAt;
             return `<div class="route-stop ${isTech&&r.assignedStaffId===currentUserId?'mine':''}" style="cursor:pointer" onclick="openDetail(${r.id})">
               <div class="route-num" style="background:${PIN_COLORS[i%5]}22;color:${PIN_COLORS[i%5]}">${i+1}</div>
@@ -6562,7 +6685,7 @@ function renderJobScheduleCard(r){
   const weatherLabel=isHistory&&snap
     ?(snap.type==='unavailable'?null:`${ratingLabel[snap.rating]||'—'} conditions (at time of booking)`)
     :(wx&&wx.type!=='unavailable'?wx.label:null);
-  const addr=[r.address,r.suburb].filter(Boolean).join(', ');
+  const addr=TK_FORMAT.address(r);
   const notStarted=r.stage==='scheduled'&&!r.startedAt;
   return `<div class="panel booked-hero">
     <div class="booked-tag">Booked</div>
@@ -6593,7 +6716,7 @@ function renderJobToolbar(r){
     ?`<button class="jt-primary" onclick="resumeJob(${r.id})">▶ Resume</button>`
     :`<button onclick="pauseJob(${r.id})">⏸ Pause</button>`;
   const nextPhotoSlot=!r.photoBefore?'before':'after';
-  const addr=[r.address,r.suburb].filter(Boolean).join(', ');
+  const addr=TK_FORMAT.address(r);
   return `<div class="job-toolbar">
     <span class="jt-status">${status.label}${r.startedAt?' · started '+timeAgo(r.startedAt):''}</span>
     <button class="jt-primary" onclick="completeJob(${r.id})">✓ Complete</button>
@@ -7182,12 +7305,19 @@ try{window.addEventListener('focus',syncGoogleCalendarBackground);}catch(e){}
    destinations (iOS "More" tab convention) rather than duplicating
    Settings' content; most rows just open the relevant existing screen. ===== */
 function openMoreSheet(){
-  const row=(label,onclick,danger)=>`<button class="more-row${danger?' danger':''}" onclick="closeModal('more-overlay');${onclick}"><span class="mr-label">${label}</span><span class="mr-chev">›</span></button>`;
+  const row=(label,onclick,danger,badge)=>`<button class="more-row${danger?' danger':''}" onclick="closeModal('more-overlay');${onclick}"><span class="mr-label">${label}</span><span style="display:flex;align-items:center;gap:8px">${badge?`<span class="bell-badge" style="position:static">${badge>9?'9+':badge}</span>`:''}<span class="mr-chev">›</span></span></button>`;
   const isTech=currentUserRole==='technician';
+  // Calendar graduated to a primary bottom-nav tab, so it's gone from here;
+  // Jobs took the opposite trip (bumped OUT of the primary bar to make room
+  // for Create) so it needs to stay easy to find, especially for
+  // technicians — this is their actual home view (see handleAuthedSession's
+  // auto-switchView('jobsflow') for a tech login), so it's never gated
+  // behind !isTech the way the owner/manager-only rows below are.
   document.getElementById('more-body').innerHTML=`
     <div class="more-group-label">Overview</div>
     ${!isTech?row('Dashboard',"switchView('dashboard')"):''}
-    ${row('Calendar',"switchView('calendar')")}
+    ${row('Jobs',"switchView('jobsflow')")}
+    ${row('Notifications',"openNotificationCentre()",false,notificationCentre.unread)}
     ${!isTech?`<div class="more-group-label">Work</div>${row('Operations',"switchView('ops')")}${row('Pricing',"switchView('pricing')")}${row('Goals',"switchView('goals')")}`:''}
     <div class="more-group-label">Business</div>
     ${row('Settings',"openSettings()")}
@@ -7343,6 +7473,8 @@ function openSettings(){
    business ever needs to actively connect. Everything else works
    automatically. ===== */
 function openConnections(){
+  // TEMPORARY debugging — see loadEmailAccountStatus()'s matching note.
+  console.log('[Connections] rendering — emailAccount at render time:',{userId:currentUserId,businessId:currentBusinessId,connected:!!emailAccount,email:emailAccount?emailAccount.email_address:null});
   const hasGoogleCal=calendarConnections.some(c=>c.provider==='google');
   const icalConns=calendarConnections.filter(c=>c.provider==='ical');
   document.getElementById('conn-body').innerHTML=`
@@ -7420,9 +7552,18 @@ function onBizLogoChosen(el){
    its own Supabase session token — never the shared SYNC_KEY, since email
    is per-staff-member and must stay strictly isolated per business. ===== */
 let emailAccount=null; // this signed-in user's own connected Gmail account, or null
+// TEMPORARY debugging (Gmail "connects successfully but still shows Not
+// Connected" investigation) — remove once confirmed fixed in production.
+// Logs the exact identity this query runs as and what it got back, so a
+// mismatch between what the OAuth callback saved (see backend's [OAuth]
+// database save successful log) and what this query sees is immediately
+// visible instead of just "it shows Not Connected" with no further signal.
 async function loadEmailAccountStatus(){
-  if(!sb||!currentUserId)return;
+  if(!sb||!currentUserId){console.log('[Connections] loadEmailAccountStatus skipped — no sb client or no currentUserId',{hasSb:!!sb,currentUserId});return;}
+  console.log('[Connections] querying email_accounts_status',{userId:currentUserId,businessId:currentBusinessId,provider:'gmail'});
   const {data,error}=await sb.from('email_accounts_status').select('*').eq('user_id',currentUserId).eq('provider','gmail').maybeSingle();
+  if(error)console.error('[Connections] email_accounts_status query FAILED',{userId:currentUserId,businessId:currentBusinessId,error});
+  else console.log('[Connections] email_accounts_status query result',{userId:currentUserId,found:!!data,email:data?data.email_address:null,rowBusinessId:data?data.business_id:null});
   if(!error)emailAccount=data||null;
 }
 // A fetch() to /api/*/oauth/start can fail for two very different reasons
@@ -7572,7 +7713,7 @@ async function pushJobToGoogleCalendar(r){
   const startDate=new Date(r.scheduledDateISO+'T00:00:00');
   startDate.setMinutes(startMin);
   const endDate=new Date(startDate.getTime()+durMin*60000);
-  const addr=[r.address,r.suburb].filter(Boolean).join(', ');
+  const addr=TK_FORMAT.address(r);
   try{
     const res=await fetch(`${url}/api/calendar/push-job`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.access_token},body:JSON.stringify({
       googleEventId:r.googleEventId||null,
@@ -9144,8 +9285,9 @@ async function handleActivityRealtimeEvent(payload){
   const r=records.find(x=>x.customerId===row.customer_id);
   const name=(r&&r.name)||'A customer';
   toast(row.type==='quote_accepted'
-    ?name+' approved their quote'+(r&&r.total?' — '+money(r.total):'')+'.'
-    :name+' said they’re not ready to go ahead yet.',4500);
+    ?name+' approved their quote'+(r&&r.total?' — '+money(r.total):'')+'. Tap to schedule.'
+    :name+' said they’re not ready to go ahead yet. Tap to view.',4500,
+    ()=>openCustomerProfileByCustomerId(row.customer_id));
   // A silent reload mid-edit would be worse than a one-cycle delay — if
   // anything is open right now, the next natural reload/sync picks this up
   // instead of yanking the operator's in-progress work out from under them.
@@ -9515,6 +9657,10 @@ function ingestQuoteRequest(payload){
     :(payload.windowsRequested?'windows quote requested':'quick quote request')+' — build a quote when ready';
   if(fb){fb.textContent='✓ New lead from '+rec.name+' ('+flashDetail+')';fb.classList.add('show');setTimeout(()=>fb.classList.remove('show'),5000);}
   if(rec.pendingPhotos.length)flushPendingPhotos(rec); // fire-and-forget — don't block ingest on uploads
+  // fire-and-forget — the record has no customerId yet (only assigned once
+  // synced to Supabase), so this activity-log entry rides along after that
+  // sync instead of blocking the rest of ingest on it.
+  ensureRecordSynced(rec).then(()=>logActivity(rec.customerId,rec.jobId||null,'lead_created','New lead from '+rec.name+(rec.suburb?' — '+rec.suburb:'')));
   sendLifecycleEmail(rec,'new_lead');
   const notifyDetail=rec.selfPriced
     ?'('+services.length+' area'+(services.length!==1?'s':'')+', '+money(total)+' self-estimated'+(payload.windowsRequested?' + windows requested':'')+').'

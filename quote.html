@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <script src="config.js"></script>
 <script src="pricing-engine.js"></script>
+<script src="format-utils.js"></script>
+<script src="map-snapshot.js"></script>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>Your quote</title>
 <meta name="theme-color" content="#2e9486">
@@ -64,6 +66,7 @@
   .qmeta b{color:var(--ink-soft);font-weight:600}
   .greeting{font-size:21px;font-weight:650;letter-spacing:-.02em;margin-bottom:4px}
   .addr{font-size:13.5px;color:var(--ink-soft);margin-bottom:16px}
+  .submitted{font-size:12px;color:var(--ink-faint);margin:-10px 0 14px}
   .dur-badge{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;color:var(--teal);background:var(--teal-wash);padding:4px 10px;border-radius:999px;margin-bottom:16px}
 
   /* ---- property map ---- */
@@ -72,6 +75,8 @@
      overlay then scale together pixel-for-pixel, with no cover/slice
      cropping mismatch that would make shapes drift off their true position. */
   .qmap-wrap{position:relative;width:100%;aspect-ratio:4/3;border-radius:var(--radius-sm);overflow:hidden;background:var(--surface-2);margin-bottom:8px;touch-action:none;border:1px solid var(--line)}
+  .qmap-fallback{width:100%;aspect-ratio:4/3;border-radius:var(--radius-sm);overflow:hidden;background:var(--surface-2);margin-bottom:8px;border:1px solid var(--line)}
+  .qmap-fallback img{width:100%;height:100%;object-fit:cover;display:block}
   .qmap-visual{position:absolute;inset:0;background-size:cover;background-position:center;cursor:grab}
   .qmap-visual.dragging{cursor:grabbing}
   .qmap-svg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
@@ -197,7 +202,7 @@ function renderState(icon,title,body,cls){
    nothing at all if a quote has no georeferenced areas (older quotes, or
    ones drawn on a plain non-geo grid) rather than showing a broken map. ===== */
 const PUB_ZOOM_MIN=15, PUB_ZOOM_MAX=22, PUB_OSM_TILES=3;
-const PMAP={lat:null,lng:null,zoom:19,scale:1,mapsKey:'',areas:[],loadToken:0};
+const PMAP={lat:null,lng:null,zoom:19,scale:1,mapsKey:'',areas:[],loadToken:0,origLat:null,origLng:null};
 function pubAreasWithGeo(areaPolys){
   return (areaPolys||[]).filter(a=>a.geoPts&&a.points&&a.geoPts.length===a.points.length&&a.geoPts.length>=2&&a.geoPts.every(Boolean));
 }
@@ -274,7 +279,15 @@ function pubShapeSvg(area){
 }
 function pubRenderAreas(){
   const svg=document.getElementById('qmap-svg'); if(!svg)return;
-  svg.innerHTML=PMAP.areas.map(pubShapeSvg).join('');
+  let out=PMAP.areas.map(pubShapeSvg).join('');
+  // The geocoded property location, pinned once when the map first mounts
+  // and reprojected on every pan/zoom — same approach as the staff-side
+  // quote editor (index.html's qe.originLat/Lng) and the booking widget.
+  if(PMAP.origLat!=null){
+    const op=pubLatLngToSvg({lat:PMAP.origLat,lng:PMAP.origLng});
+    out+=`<g class="origin-pin" style="pointer-events:none"><path d="M${op.x} ${op.y+2} c-7-10-11-16-11-22a11 11 0 1 1 22 0c0 6-4 12-11 22z" fill="#e0483a" stroke="#fff" stroke-width="2"/><circle cx="${op.x}" cy="${op.y-20}" r="4" fill="#fff"/></g>`;
+  }
+  svg.innerHTML=out;
 }
 function pubZoom(delta){
   pubReloadAt(PMAP.lat,PMAP.lng,PMAP.zoom+delta);
@@ -324,6 +337,18 @@ function pubMapLegend(areas){
   areas.forEach(a=>{const svc=TK_PRICING.SERVICES[a.service];if(svc)seen[a.service]=svc;});
   return Object.values(seen).map(svc=>`<span><i style="background:${svc.color}"></i>${svc.label}</span>`).join('');
 }
+// No mapped outline for this quote (quick-quote/windows-only requests, or
+// older quotes drawn before the map tool existed) — previously left
+// #qmap-zone empty, so the customer saw no property image at all. Falls
+// back to a flat, close-up, pinned satellite photo centered on the address
+// itself (Google geocodes the string server-side — no separate lookup).
+function pubMountFallbackImage(cust){
+  const zone=document.getElementById('qmap-zone'); if(!zone)return;
+  const mapsKey=(window.TURNKEY_CONFIG&&window.TURNKEY_CONFIG.mapsKey)||'';
+  const addr=TK_FORMAT.address(cust);
+  const url=(window.TK_MAP_SNAPSHOT&&mapsKey&&addr)?TK_MAP_SNAPSHOT.buildUrl(null,mapsKey,{size:'640x400',scale:2,fallbackAddress:addr}):null;
+  zone.innerHTML=url?`<div class="qmap-fallback"><img src="${url}" alt="Property photo" loading="lazy"></div>`:'';
+}
 function pubMountMap(areaPolys){
   const withGeo=pubAreasWithGeo(areaPolys);
   const zone=document.getElementById('qmap-zone'); if(!zone)return;
@@ -339,7 +364,7 @@ function pubMountMap(areaPolys){
     </div>
     <div class="qmap-legend">${pubMapLegend(withGeo)}</div>`;
   const fit=pubComputeFit(withGeo);
-  if(fit){pubInitPan();pubReloadAt(fit.lat,fit.lng,fit.zoom);}
+  if(fit){PMAP.origLat=fit.lat;PMAP.origLng=fit.lng;pubInitPan();pubReloadAt(fit.lat,fit.lng,fit.zoom);}
 }
 
 /* ===== property summary + price breakdown — sourced from the same
@@ -400,7 +425,7 @@ function renderQuote(q){
   const notesHtml=q.notes?`<div class="notes-box">${q.notes.replace(/</g,'&lt;')}</div>`:'';
   const introHtml=q.status!=='accepted'&&q.status!=='declined'&&biz.quoteIntroMessage
     ?`<div class="quote-intro">${biz.quoteIntroMessage.replace(/</g,'&lt;').replace(/\n/g,'<br>')}</div>`:'';
-  const addrLine=[cust.address,cust.suburb].filter(Boolean).join(', ');
+  const addrLine=TK_FORMAT.address(cust);
   const durMin=parseInt(q.estimatedDurationMin,10);
   const durBadge=durMin?`<div class="dur-badge">⏱ Estimated ${fmtDur(durMin)} on site</div>`:'';
   const withGeo=pubAreasWithGeo(q.areaPolys);
@@ -453,6 +478,7 @@ function renderQuote(q){
       ${(q.quoteNumber||q.validUntil)?`<div class="qmeta">${q.quoteNumber?`<span>Quote <b>${q.quoteNumber}</b></span>`:'<span></span>'}${q.validUntil?`<span>Valid until <b>${fmtDate(q.validUntil)}</b></span>`:''}</div>`:''}
       <div class="greeting">Quote for ${cust.name||'you'}</div>
       ${addrLine?`<div class="addr">${addrLine}</div>`:''}
+      ${(()=>{const s=window.TK_FORMAT&&TK_FORMAT.submitted(q.createdAt);return s?`<div class="submitted">Submitted ${s.full}</div>`:'';})()}
       ${durBadge}
       ${introHtml}
       <div id="qmap-zone"></div>
@@ -463,6 +489,7 @@ function renderQuote(q){
     </div>`;
   document.getElementById('foot').style.display='';
   if(withGeo.length)pubMountMap(q.areaPolys);
+  else pubMountFallbackImage(cust);
 }
 function toggleQuestion(){
   document.getElementById('question-box').classList.toggle('open');
