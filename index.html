@@ -803,6 +803,9 @@
   .fc-card-tech{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .fc-card-compact{padding:4px 8px}
   .fc-card-compact .fc-card-row1{font-size:12px}
+  .fc-card-block{border-left:3px solid #6b5620;background-image:repeating-linear-gradient(135deg,rgba(0,0,0,.06) 0 6px,transparent 6px 12px)}
+  .fc-card-external{color:var(--ink-soft);font-style:italic}
+  .fc-card-external .fc-card-name{opacity:.85}
   @media(max-width:640px){.fc-wrap .fc-daygrid-day-frame{min-height:90px}.fc-card-compact{padding:3px 6px}.fc-card-compact .fc-card-row1{font-size:11px}.fc-card-time{display:none}}
   .fc-wrap .fc-daygrid-more-link{font-size:11px;font-weight:600;color:var(--ink-soft)}
   /* The primary "this day is busy" signal — deliberately bigger and bolder
@@ -833,6 +836,22 @@
   .cal-legend span{display:inline-flex;align-items:center;gap:5px}
   .cal-legend i{width:9px;height:9px;border-radius:50%;display:inline-block}
   .fc-wrap .fc-button{box-shadow:none!important;text-transform:capitalize}
+  /* Calendar: +Add sheet, employee filter chips, conflict warnings */
+  .cal-add-grid{display:flex;flex-direction:column;gap:10px}
+  .cal-add-opt{display:flex;align-items:center;gap:14px;padding:14px 16px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--surface);text-align:left;min-height:60px}
+  .cal-add-opt:hover{border-color:var(--teal);background:var(--teal-wash)}
+  .cao-ico{width:38px;height:38px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;color:#fff}
+  .cao-label{font-weight:700;font-size:14.5px;color:var(--ink);display:block}
+  .cao-sub{font-size:12px;color:var(--ink-faint);display:block;margin-top:1px}
+  .cal-filter-row{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+  .cal-chip{padding:6px 13px;border-radius:980px;border:1px solid var(--line);background:var(--surface);font-size:12.5px;font-weight:600;color:var(--ink-soft);min-height:32px}
+  .cal-chip.sel{border-color:var(--teal);color:#fff;background:var(--teal)}
+  .cal-conflict-warn{font-size:12.5px;color:var(--amber,#9a7a32);background:var(--amber-wash,#faf1de);border-radius:8px;padding:9px 12px;margin-top:4px;line-height:1.5}
+  .cal-conflict-row{font-size:13.5px;color:var(--ink);padding:8px 0;border-bottom:1px solid var(--line)}
+  .cal-conflict-row:last-child{border-bottom:none}
+  .cb-allday-row{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-soft);margin:10px 0;min-height:28px}
+  .cal-ev-external{opacity:.75}
+  @media(max-width:640px){.cal-add-grid{gap:8px}.cao-ico{width:34px;height:34px;font-size:16px}}
   @media(max-width:640px){
     .fc-wrap{padding:10px}
     .fc-wrap .fc-toolbar{flex-direction:column;gap:8px;align-items:stretch}
@@ -1431,8 +1450,101 @@
       <div class="field"><label>Returning customer?</label><select id="l-repeat"><option value="no">No — new</option><option value="yes">Yes — repeat</option></select></div>
     </div>
     <div class="field"><label>Job notes</label><textarea id="l-notes" rows="2" placeholder="e.g. Big mossy driveway about 120sqm, plus gutters look blocked"></textarea></div>
+    <!-- Only shown when opened from Calendar's "+ Create Job" — see
+         openCalendarJobModal(). Same underlying newRecord()/Supabase save as
+         every other lead/job path (saveLead()) — this is not a second
+         scheduling system, just extra fields on the one job form. -->
+    <div id="l-schedule-fields" style="display:none">
+      <div class="field-row">
+        <div class="field"><label>Service</label><select id="l-svc"><option value="">— none yet —</option></select></div>
+        <div class="field"><label>Status</label><select id="l-status">
+          <option value="new">Quote</option>
+          <option value="scheduled" selected>Scheduled</option>
+        </select></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Date</label><input id="l-date" type="date" onchange="previewJobConflict()"></div>
+        <div class="field"><label>Start time</label><input id="l-start" type="time" value="09:00" onchange="previewJobConflict()"></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Duration</label><select id="l-duration" onchange="previewJobConflict()">
+          <option value="30">30 min</option><option value="60">1 hour</option>
+          <option value="90">1.5 hours</option><option value="120" selected>2 hours</option>
+          <option value="180">3 hours</option><option value="240">4 hours</option>
+          <option value="480">Full day</option>
+        </select></div>
+        <div class="field"><label>Assigned to</label><select id="l-assign" onchange="previewJobConflict()"><option value="">Unassigned</option></select></div>
+      </div>
+      <div class="cal-conflict-warn" id="l-conflict-warn" style="display:none"></div>
+    </div>
   </div>
-  <div class="modal-foot"><button class="btn ghost" onclick="closeModal('lead-overlay')">Cancel</button><button class="btn primary" onclick="saveLead()">Save lead</button></div>
+  <div class="modal-foot"><button class="btn ghost" onclick="closeModal('lead-overlay')">Cancel</button><button class="btn primary" id="l-save-btn" onclick="saveLead()">Save lead</button></div>
+</div></div>
+
+<div class="overlay" id="cal-add-overlay"><div class="modal">
+  <div class="modal-head"><div><h3>Add to calendar</h3><p>Google Calendar is optional — everything here saves straight into TurnKey.</p></div><button class="x" aria-label="Close" onclick="closeModal('cal-add-overlay')">×</button></div>
+  <div class="modal-body cal-add-grid">
+    <button type="button" class="cal-add-opt" onclick="closeModal('cal-add-overlay');openCalendarJobModal(calAddPresetISO)">
+      <span class="cao-ico" style="background:#3a5e9c">📋</span><span class="cao-label">Job</span><span class="cao-sub">Book a customer job</span>
+    </button>
+    <button type="button" class="cal-add-opt" onclick="closeModal('cal-add-overlay');openCalEventModal(calAddPresetISO)">
+      <span class="cao-ico" style="background:#7a5bbf">🗓</span><span class="cao-label">Event</span><span class="cao-sub">Meeting, maintenance, anything non-job</span>
+    </button>
+    <button type="button" class="cal-add-opt" onclick="closeModal('cal-add-overlay');openCalBlockModal(calAddPresetISO)">
+      <span class="cao-ico" style="background:#8a9aa0">🚫</span><span class="cao-label">Blocked time</span><span class="cao-sub">Holiday, sick, training, closed</span>
+    </button>
+  </div>
+  <div class="modal-foot" style="justify-content:center"><button class="btn ghost sm" onclick="closeModal('cal-add-overlay');openCalPicker(calAddPresetISO)">View everything on this day instead →</button></div>
+</div></div>
+
+<div class="overlay" id="cal-event-overlay"><div class="modal">
+  <div class="modal-head"><div><h3>New event</h3><p>Shows on the calendar — not tied to a customer or job.</p></div><button class="x" aria-label="Close" onclick="closeModal('cal-event-overlay')">×</button></div>
+  <div class="modal-body">
+    <div class="field"><label>Title</label><input id="ce-title" placeholder="e.g. Equipment maintenance" autocomplete="off"></div>
+    <div class="field-row">
+      <div class="field"><label>Date</label><input id="ce-date" type="date"></div>
+      <div class="field"><label>Employee</label><select id="ce-user"><option value="">Whole business</option></select></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Start time</label><input id="ce-start" type="time" value="09:00"></div>
+      <div class="field"><label>End time</label><input id="ce-end" type="time" value="10:00"></div>
+    </div>
+    <div class="field"><label>Notes</label><textarea id="ce-notes" rows="2"></textarea></div>
+  </div>
+  <div class="modal-foot"><button class="btn ghost" onclick="closeModal('cal-event-overlay')">Cancel</button><button class="btn primary" onclick="saveCalEvent()">Create event</button></div>
+</div></div>
+
+<div class="overlay" id="cal-block-overlay"><div class="modal">
+  <div class="modal-head"><div><h3>Block availability</h3><p>Jobs won't be checked against this period without a warning.</p></div><button class="x" aria-label="Close" onclick="closeModal('cal-block-overlay')">×</button></div>
+  <div class="modal-body">
+    <div class="field-row">
+      <div class="field"><label>Who</label><select id="cb-user"><option value="">Whole business</option></select></div>
+      <div class="field"><label>Reason</label><select id="cb-type">
+        <option value="holiday">Holiday</option><option value="sick">Sick</option>
+        <option value="personal">Personal</option><option value="training">Training</option>
+        <option value="unavailable">Unavailable</option><option value="business_closed">Business closed</option>
+        <option value="public_holiday">Public holiday</option><option value="other">Other</option>
+      </select></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Start date</label><input id="cb-start-date" type="date"></div>
+      <div class="field"><label>End date</label><input id="cb-end-date" type="date"></div>
+    </div>
+    <label class="cb-allday-row"><input type="checkbox" id="cb-allday" checked onchange="toggleBlockAllDay(this.checked)"> Full day</label>
+    <div class="field-row" id="cb-time-row" style="display:none">
+      <div class="field"><label>Start time</label><input id="cb-start-time" type="time" value="09:00"></div>
+      <div class="field"><label>End time</label><input id="cb-end-time" type="time" value="17:00"></div>
+    </div>
+    <label class="cb-allday-row"><input type="checkbox" id="cb-recurring"> Repeats weekly</label>
+    <div class="field"><label>Notes (optional)</label><input id="cb-notes" placeholder="e.g. Annual leave — Fiji" autocomplete="off"></div>
+  </div>
+  <div class="modal-foot"><button class="btn ghost" onclick="closeModal('cal-block-overlay')">Cancel</button><button class="btn primary" onclick="saveAvailabilityBlock()">Block time</button></div>
+</div></div>
+
+<div class="overlay" id="cal-conflict-overlay"><div class="modal">
+  <div class="modal-head"><div><h3>Scheduling conflict</h3><p>Review before continuing — nothing's saved yet.</p></div><button class="x" aria-label="Close" onclick="resolveCalConflict(false)">×</button></div>
+  <div class="modal-body"><div id="cal-conflict-body"></div></div>
+  <div class="modal-foot"><button class="btn ghost" onclick="resolveCalConflict(false)">Cancel</button><button class="btn accent" onclick="resolveCalConflict(true)">Schedule anyway</button></div>
 </div></div>
 
 <div class="overlay" id="quote-overlay"><div class="modal wide">
@@ -2629,6 +2741,12 @@ function newRecord(d){return Object.assign({
   skipChecklist:!workflowConfig.requireChecklist,
   photoBefore:false,photoAfter:false,startedAt:null,repeat:'no',callback:false,email:'',
   tech:'Unassigned',gps:'pending',scheduledDate:null,scheduledIdx:null,scheduledDateISO:null,createdAt:Date.now(),follows:[],
+  // Explicit, user-chosen start time + planned duration for the calendar's
+  // time-grid views/drag/resize — distinct from durationMin (ACTUAL elapsed
+  // time once a job is finished, see completeJob()) and from
+  // estimateJob(services).labourMin (a pricing-driven estimate, used as the
+  // fallback when no explicit time has been set yet).
+  scheduledStartMin:null,scheduledDurationMin:null,
   quoteSentAt:null,clientResponded:false,paidAt:null,approvedAt:null,lastServiceDaysAgo:null,assumptions:null,areaPolys:null,selfPriced:false,windowsRequested:false,requestedServices:[],
   hasCustomerPhoto:false,customerPhotoPath:null,quoteAttachments:[],assignedStaffId:null,
   paymentStatus:'draft',paymentMethod:null,dueDate:null,payments:[],
@@ -2732,8 +2850,11 @@ function setAccent(v){
 let pendingNewJobCustomerId=null; // set by openNewJobModal() — reuses the same form to add a job to an EXISTING customer instead of creating a new one
 function openLeadModal(){
   pendingNewJobCustomerId=null;
+  leadModalSchedulingMode=false;
   document.getElementById('lead-modal-title').textContent='New lead';
   document.getElementById('lead-modal-sub').textContent='Capture the enquiry — quote comes next.';
+  document.getElementById('l-schedule-fields').style.display='none';
+  document.getElementById('l-save-btn').textContent='Save lead';
   ['l-name','l-phone','l-email','l-suburb','l-address','l-notes'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('l-source').selectedIndex=0;document.getElementById('l-repeat').selectedIndex=0;
   document.getElementById('l-customer-search').value='';
@@ -2820,13 +2941,44 @@ function openNewJobModal(customerId){
   // search for them again.
   document.getElementById('l-customer-search-field').style.display='none';
   document.getElementById('l-picked-customer').style.display='none';
+  // Same scheduling fields the calendar's own "+ Create Job" uses — a job
+  // started from a customer's profile can be booked straight onto the
+  // calendar in one step instead of a second trip through Schedule later.
+  leadModalSchedulingMode=true;
+  document.getElementById('l-schedule-fields').style.display='';
+  document.getElementById('l-save-btn').textContent='Create job';
+  const svcSel=document.getElementById('l-svc');
+  svcSel.innerHTML='<option value="">— none yet —</option>'+Object.entries(SERVICES).map(([k,v])=>`<option value="${k}">${v.label}</option>`).join('');
+  document.getElementById('l-assign').innerHTML=staffOptionsHtml(true);
+  document.getElementById('l-date').value=todayISO();
+  document.getElementById('l-status').value='new';
+  document.getElementById('l-conflict-warn').style.display='none';
   openModal('lead-overlay');
 }
-function saveLead(){
+async function saveLead(){
   const name=document.getElementById('l-name').value.trim();
   if(!name){toast('Add a customer name');return}
   const customerId=pendingNewJobCustomerId;
   const jobNotes=document.getElementById('l-notes').value.trim();
+
+  // Scheduling fields (Calendar's "+ Create Job" / Customer Profile's "New
+  // job") — checked for conflicts BEFORE the job is created, same
+  // warn-don't-silently-double-book flow as dragging an existing job.
+  let scheduling=null;
+  if(leadModalSchedulingMode){
+    const svc=document.getElementById('l-svc').value;
+    const status=document.getElementById('l-status').value;
+    const dateISO=document.getElementById('l-date').value;
+    const startMin=timeStrToMin(document.getElementById('l-start').value);
+    const durationMin=parseInt(document.getElementById('l-duration').value,10)||60;
+    const assignedStaffId=document.getElementById('l-assign').value||null;
+    scheduling={svc,status,dateISO,startMin,durationMin,assignedStaffId};
+    if(status==='scheduled'&&dateISO){
+      const warnings=await checkScheduleConflict({userId:assignedStaffId,dateISO,startMin,endMin:startMin+durationMin});
+      if(warnings.length&&!await confirmCalConflict(warnings))return; // left open — user can adjust and retry
+    }
+  }
+
   const rec=newRecord({
     name,phone:document.getElementById('l-phone').value.trim(),
     email:document.getElementById('l-email').value.trim(),
@@ -2844,11 +2996,44 @@ function saveLead(){
     jobNotes,
     customerId:customerId||null // pre-set → syncs against the existing customer row instead of creating a new one
   });
+  if(scheduling){
+    if(scheduling.svc){
+      // Tags which service this job is for display on the calendar/job
+      // card. Deliberately NOT priced here (qty:1 has no real measurement
+      // behind it) — total stays 0 and reads as "not quoted yet", same as
+      // any other unmeasured lead; Build/Edit quote is still where a real
+      // price comes from.
+      rec.services=[{svc:scheduling.svc,qty:1,fixedPrice:0}];
+    }
+    if(scheduling.status==='scheduled'&&scheduling.dateISO){
+      rec.stage='scheduled';rec.jobStatus='scheduled';
+      rec.scheduledDateISO=scheduling.dateISO;
+      rec.scheduledDate=isoToLabel(scheduling.dateISO);
+      rec.scheduledStartMin=scheduling.startMin;
+      rec.scheduledDurationMin=scheduling.durationMin;
+    }
+    if(scheduling.assignedStaffId){
+      rec.assignedStaffId=scheduling.assignedStaffId;
+      rec.tech=(staff.find(u=>u.id===scheduling.assignedStaffId)||{}).name||'Unassigned';
+    }
+  }
   records.push(rec);
   pendingNewJobCustomerId=null;
+  const wasScheduling=leadModalSchedulingMode;
+  leadModalSchedulingMode=false;
   closeModal('lead-overlay');render();renderAll();
-  toast(customerId?'New job added for '+name:'Lead captured — follow-up sequence armed');
-  if(customerId){logActivity(customerId,null,'note','New job added: '+name);openCustomerProfile(rec.id);}
+  if(wasScheduling&&rec.scheduledDateISO){
+    toast('Job created and scheduled ✓');
+    // fire-and-forget — a brand-new customer has no customerId/jobId until
+    // synced (see ensureRecordSynced), so this activity-log entry rides
+    // along after that sync instead of blocking the rest of save on it.
+    ensureRecordSynced(rec).then(()=>logActivity(rec.customerId,rec.jobId,'job_scheduled',rec.name+' booked for '+rec.scheduledDate+(rec.tech!=='Unassigned'?' · '+rec.tech:'')));
+    pushJobToGoogleCalendar(rec);
+    triggerPush({type:'job_booked',title:'New job booked',message:rec.name+' booked for '+rec.scheduledDate,url:'/index.html?open=calendar'});
+  }else{
+    toast(customerId?'New job added for '+name:'Lead captured — follow-up sequence armed');
+    if(customerId){logActivity(customerId,null,'note','New job added: '+name);openCustomerProfile(rec.id);}
+  }
 }
 
 /* ---------- QUOTE BUILDER ---------- */
@@ -6877,45 +7062,157 @@ function calJobStartTime(r){
   const mine=tl.find(s=>s.job.id===r.id);
   return mine?fmtTime(mine.start):null;
 }
+// Real start/end for a job — explicit scheduledStartMin/scheduledDurationMin
+// (set by the calendar's own Create Job form, or by dragging/resizing) when
+// present, otherwise the same back-to-back running-order estimate the app
+// already computed everywhere else (dayTimeline). Either way this is now a
+// REAL datetime range fed to FullCalendar, not an allDay chip — that's what
+// makes the week/day time-grid views, drag-to-a-specific-hour, and resize
+// mean anything at all.
+function jobStartEndMin(r){
+  if(r.scheduledStartMin!=null){
+    const dur=r.scheduledDurationMin!=null?r.scheduledDurationMin:(r.services.length?estimateJob(r.services).labourMin:60);
+    return {start:r.scheduledStartMin,end:r.scheduledStartMin+Math.max(15,dur)};
+  }
+  const tl=dayTimeline(r.scheduledDateISO);
+  const mine=tl.find(s=>s.job.id===r.id);
+  return mine?{start:mine.start,end:mine.end}:{start:DAY_START_MIN,end:DAY_START_MIN+60};
+}
+function minToIso(dateISO,min){
+  const h=Math.floor(min/60),m=min%60;
+  return dateISO+'T'+String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')+':00';
+}
+let calendarEventsRaw=[]; // native ('turnkey') + external (Google/iCal) rows from calendar_events
+let availabilityBlocksRaw=[];
+let calEmployeeFilter=new Set(); // empty = show everyone
+async function loadCalendarExtras(){
+  if(!sb||!currentBusinessId)return;
+  const [{data:evs,error:ee},{data:blocks,error:be}]=await Promise.all([
+    sb.from('calendar_events').select('*').eq('business_id',currentBusinessId),
+    sb.from('availability_blocks').select('*').eq('business_id',currentBusinessId)
+  ]);
+  if(ee)console.error('Load calendar_events failed',ee);
+  if(be)console.error('Load availability_blocks failed',be);
+  calendarEventsRaw=evs||[];
+  availabilityBlocksRaw=blocks||[];
+}
+function calPassesFilter(userId){
+  if(!calEmployeeFilter.size)return true; // no filter = everyone
+  if(!userId)return calEmployeeFilter.has('unassigned');
+  return calEmployeeFilter.has(userId);
+}
 function buildCalendarEvents(){
-  return records.filter(r=>isCalendarJob(r)).map(r=>{
+  const jobEvents=records.filter(r=>isCalendarJob(r)&&calPassesFilter(r.assignedStaffId)).map(r=>{
     const key=jobStatusKeyOf(r);
     const color=JOB_STATUS_CAL_COLOR[key]||'#3a5e9c';
     const status=jobStatusOf(r);
-    const start=calJobStartTime(r);
+    const {start,end}=jobStartEndMin(r);
     return {
-      id:String(r.id),
-      title:r.name+(start?' · '+start:'')+(r.tech&&r.tech!=='Unassigned'?' · '+r.tech:''),
-      start:r.scheduledDateISO,
-      allDay:true,
+      id:'job-'+r.id,
+      title:r.name+' · '+fmtTime(start)+(r.tech&&r.tech!=='Unassigned'?' · '+r.tech:''),
+      start:minToIso(r.scheduledDateISO,start),
+      end:minToIso(r.scheduledDateISO,end),
+      allDay:false,
       backgroundColor:color,borderColor:color,
-      // Structured fields for fcEventContent() — kept alongside the plain
-      // `title` string above (used by list/agenda views and screen readers)
-      // rather than replacing it, so nothing regresses for views that don't
-      // call our custom renderer. No separate status icon — the event's own
-      // backgroundColor (JOB_STATUS_CAL_COLOR) already is the status signal.
-      extendedProps:{recordId:r.id,customerName:r.name,statusLabel:status.label,tech:r.tech,startTime:start}
+      classNames:['cal-ev-job'],
+      extendedProps:{kind:'job',recordId:r.id,customerName:r.name,statusLabel:status.label,tech:r.tech,startTime:fmtTime(start)}
     };
   });
+  const nativeEvents=calendarEventsRaw.filter(e=>e.source==='turnkey'&&calPassesFilter(e.user_id)).map(e=>({
+    id:'ev-'+e.id,
+    title:e.title||'Event',
+    start:e.start_time,end:e.end_time,allDay:false,
+    backgroundColor:'#7a5bbf',borderColor:'#7a5bbf',
+    classNames:['cal-ev-event'],
+    extendedProps:{kind:'event',eventId:e.id,notes:e.notes,userId:e.user_id}
+  }));
+  const externalEvents=calendarEventsRaw.filter(e=>e.source!=='turnkey'&&calPassesFilter(e.user_id)).map(e=>({
+    id:'ext-'+e.id,
+    title:'Busy'+(e.title?' · '+e.title:''),
+    start:e.start_time,end:e.end_time,allDay:false,
+    backgroundColor:'#c7cdd1',borderColor:'#c7cdd1',textColor:'#48555c',
+    classNames:['cal-ev-external'],
+    extendedProps:{kind:'external'}
+  }));
+  const blockEvents=availabilityBlocksRaw.filter(b=>calPassesFilter(b.user_id)).map(b=>({
+    id:'block-'+b.id,
+    title:'🚫 '+(BLOCK_TYPE_LABEL[b.block_type]||'Blocked')+(b.user_id?'':' (business)'),
+    start:b.start_at,end:b.end_at,allDay:!!b.all_day,
+    backgroundColor:'#efe3c9',borderColor:'#9a7a32',textColor:'#6b5620',
+    classNames:['cal-ev-block'],
+    extendedProps:{kind:'block',blockId:b.id,userId:b.user_id,reason:b.reason}
+  }));
+  return [...jobEvents,...nativeEvents,...externalEvents,...blockEvents];
 }
+const BLOCK_TYPE_LABEL={holiday:'Holiday',sick:'Sick',personal:'Personal',training:'Training',unavailable:'Unavailable',business_closed:'Business closed',public_holiday:'Public holiday',other:'Blocked'};
 function fcHandleEventDrop(info){
+  const kind=info.event.extendedProps.kind;
+  if(kind==='event'){moveCalEvent(info);return;}
+  if(kind==='block'){moveAvailabilityBlock(info);return;}
+  if(kind==='external'){info.revert();toast('External calendar events can’t be moved from TurnKey');return;}
   const r=records.find(x=>x.id===info.event.extendedProps.recordId);
   if(!r){info.revert();return;}
   const newIso=info.event.startStr.slice(0,10);
+  const newStartMin=Math.round((info.event.start.getHours()*60+info.event.start.getMinutes())/5)*5;
+  applyJobMove(r,newIso,newStartMin,info);
+}
+async function applyJobMove(r,newIso,newStartMin,info){
+  const warnings=await checkScheduleConflict({userId:r.assignedStaffId,dateISO:newIso,startMin:newStartMin,
+    endMin:newStartMin+(r.scheduledDurationMin!=null?r.scheduledDurationMin:(r.services.length?estimateJob(r.services).labourMin:60)),excludeJobId:r.id});
+  if(warnings.length&&!await confirmCalConflict(warnings)){if(info)info.revert();return;}
   r.scheduledDateISO=newIso;
   r.scheduledDate=isoToLabel(newIso);
+  r.scheduledStartMin=newStartMin;
   snapshotWeatherFor(r,newIso);
   render();renderAll();
   renderCalendarSidebar();
-  toast('Moved '+r.name+' to '+r.scheduledDate);
-  logActivity(r.customerId,r.jobId,'status_change',r.name+' rescheduled to '+r.scheduledDate);
+  toast('Moved '+r.name+' to '+r.scheduledDate+' · '+fmtTime(newStartMin));
+  logActivity(r.customerId,r.jobId,'status_change',r.name+' rescheduled to '+r.scheduledDate+' · '+fmtTime(newStartMin));
   pushJobToGoogleCalendar(r);
 }
+function fcHandleEventResize(info){
+  const r=records.find(x=>x.id===info.event.extendedProps.recordId);
+  if(!r||info.event.extendedProps.kind!=='job'){info.revert();return;}
+  const startMin=Math.round((info.event.start.getHours()*60+info.event.start.getMinutes()));
+  const endMin=Math.round((info.event.end.getHours()*60+info.event.end.getMinutes()));
+  r.scheduledStartMin=startMin;
+  r.scheduledDurationMin=Math.max(15,endMin-startMin);
+  render();renderAll();
+  toast('Updated duration — '+fmtDur(r.scheduledDurationMin));
+  logActivity(r.customerId,r.jobId,'status_change',r.name+' duration changed to '+fmtDur(r.scheduledDurationMin));
+  pushJobToGoogleCalendar(r);
+}
+async function moveCalEvent(info){
+  const id=info.event.extendedProps.eventId;
+  const {error}=await sb.from('calendar_events').update({start_time:info.event.start.toISOString(),end_time:info.event.end.toISOString()}).eq('id',id);
+  if(error){console.error('Move event failed',error);toast('Could not move event');info.revert();return;}
+  const row=calendarEventsRaw.find(e=>e.id===id);
+  if(row){row.start_time=info.event.start.toISOString();row.end_time=info.event.end.toISOString();}
+  toast('Event moved');
+}
+async function moveAvailabilityBlock(info){
+  const id=info.event.extendedProps.blockId;
+  const {error}=await sb.from('availability_blocks').update({start_at:info.event.start.toISOString(),end_at:(info.event.end||info.event.start).toISOString()}).eq('id',id);
+  if(error){console.error('Move block failed',error);toast('Could not move block');info.revert();return;}
+  const row=availabilityBlocksRaw.find(b=>b.id===id);
+  if(row){row.start_at=info.event.start.toISOString();row.end_at=(info.event.end||info.event.start).toISOString();}
+  toast('Block moved');
+}
 function fcHandleEventClick(info){
-  openDetail(info.event.extendedProps.recordId);
+  const kind=info.event.extendedProps.kind;
+  if(kind==='job'){openDetail(info.event.extendedProps.recordId);return;}
+  if(kind==='event'){openCalEventDetail(info.event.extendedProps.eventId);return;}
+  if(kind==='block'){openCalBlockDetail(info.event.extendedProps.blockId);return;}
+  toast('Busy — synced from an external calendar, not editable in TurnKey');
 }
 function fcHandleDateClick(info){
-  openCalPicker(info.dateStr.slice(0,10));
+  const dateISO=info.dateStr.slice(0,10);
+  let presetMin=null;
+  if(info.dateStr.length>10){ // a timeGrid click carries a real time-of-day
+    const d=info.date;
+    presetMin=Math.round((d.getHours()*60+d.getMinutes())/15)*15;
+  }
+  openCalAddSheet(dateISO,presetMin);
 }
 // Real coloured job cards instead of FullCalendar's default single-line
 // text pill (11.5px font, 3px padding — customer name/status/tech all
@@ -6928,6 +7225,17 @@ function fcHandleDateClick(info){
 function fcEventContent(arg){
   const p=arg.event.extendedProps;
   const compact=arg.view.type==='dayGridMonth';
+  const timeStr=arg.event.start?fmtTime(arg.event.start.getHours()*60+arg.event.start.getMinutes()):'';
+  if(p.kind==='event'||p.kind==='block'||p.kind==='external'){
+    // Deliberately distinct markup (not just a colour) from a job card — a
+    // glance should never leave someone unsure whether they're looking at
+    // a booked customer job or something else on the calendar.
+    const icon=p.kind==='event'?'🗓':p.kind==='block'?'🚫':'●';
+    return {html:`<div class="fc-card fc-card-${p.kind} ${compact?'fc-card-compact':''}">
+      <div class="fc-card-row1"><span class="fc-card-name">${icon} ${(arg.event.title||'').replace(/</g,'&lt;')}</span></div>
+      ${compact?'':`<div class="fc-card-row2"><span class="fc-card-status">${timeStr}</span></div>`}
+    </div>`};
+  }
   const techBit=p.tech&&p.tech!=='Unassigned'?`<span class="fc-card-tech">${p.tech}</span>`:'';
   const timeBit=p.startTime?`<span class="fc-card-time">${p.startTime}</span>`:'';
   return {html:`<div class="fc-card ${compact?'fc-card-compact':''}">
@@ -7082,9 +7390,17 @@ function renderCalendarSidebar(){
 function renderCalendar(){
   if(!document.getElementById('fc-calendar')){
     document.getElementById('view-calendar').innerHTML=`
-      <div class="view-head"><div><h2>Calendar</h2><p>Unlimited future scheduling — drag a job to reschedule, click any date to book, click a job to open it. Weather-aware where data exists.</p></div><span class="eng-badge">Scheduling</span></div>
+      <div class="view-head"><div><h2>Calendar</h2><p>Drag a job to reschedule, resize to change duration, click any empty slot or job to open it. Works fully without Google Calendar connected — connect one in Settings → Connections to also sync outward.</p></div>
+        <button class="btn accent" onclick="openCalAddSheet()">+ Add</button>
+      </div>
       <div class="info-strip" id="cal-info-strip"></div>
-      <div class="cal-legend">${Object.entries({scheduled:'Scheduled',in_progress:'In Progress',completed:'Completed',invoiced:'Invoiced',paid:'Paid'}).map(([k,label])=>`<span><i style="background:${JOB_STATUS_CAL_COLOR[k]}"></i>${label}</span>`).join('')}</div>
+      <div class="cal-filter-row" id="cal-filter-row"></div>
+      <div class="cal-legend">
+        ${Object.entries({scheduled:'Scheduled',in_progress:'In Progress',completed:'Completed',invoiced:'Invoiced',paid:'Paid'}).map(([k,label])=>`<span><i style="background:${JOB_STATUS_CAL_COLOR[k]}"></i>${label}</span>`).join('')}
+        <span><i style="background:#7a5bbf"></i>Event</span>
+        <span><i style="background:#9a7a32"></i>Blocked</span>
+        <span><i style="background:#c7cdd1"></i>External (busy)</span>
+      </div>
       <div class="fc-wrap"><div id="fc-calendar"></div></div>
       <div class="panel" style="margin-top:18px"><h4>Live forecast${currentBusinessProfile&&currentBusinessProfile.region?' — '+currentBusinessProfile.region:''}</h4>
         <div class="wx-row" id="cal-wx-strip"></div>
@@ -7098,6 +7414,7 @@ function renderCalendar(){
       <div class="panel" style="margin-top:18px"><h4>Suggested job pairings</h4><div id="cal-pairings"></div></div>`;
   }
   renderCalendarSidebar();
+  renderCalFilterRow();
   if(!fcCalendarInstance){
     fcCalendarInstance=new FullCalendar.Calendar(document.getElementById('fc-calendar'),{
       initialView:'dayGridMonth',
@@ -7105,6 +7422,7 @@ function renderCalendar(){
       height:'auto',
       editable:true,
       dayMaxEvents:true,
+      selectable:true,
       // NOT `events:()=>buildCalendarEvents()`. FullCalendar 6.1.15 silently
       // drops a zero-argument function passed as `events:` — it never calls
       // it, getEvents() stays permanently empty, and refetchEvents() is a
@@ -7118,6 +7436,7 @@ function renderCalendar(){
       events:buildCalendarEvents(),
       eventContent:fcEventContent,
       eventDrop:fcHandleEventDrop,
+      eventResize:fcHandleEventResize,
       eventClick:fcHandleEventClick,
       dateClick:fcHandleDateClick,
       dayCellDidMount:fcDayCellDidMount
@@ -7126,6 +7445,22 @@ function renderCalendar(){
   }else{
     refreshCalendarEvents();
   }
+  loadCalendarExtras().then(refreshCalendarEvents);
+}
+// Employee filter chips above the calendar — "All" (default, empty set),
+// individual employees, multi-select, and "Unassigned". Filtering happens in
+// buildCalendarEvents()/calPassesFilter() so every event source (jobs,
+// native events, blocks, external busy) respects the same selection.
+function renderCalFilterRow(){
+  const zone=document.getElementById('cal-filter-row');if(!zone)return;
+  const chip=(id,label,color)=>`<button type="button" class="cal-chip ${calEmployeeFilter.has(id)?'sel':''}" style="${calEmployeeFilter.has(id)?`background:${color||'var(--teal)'};border-color:${color||'var(--teal)'};color:#fff`:''}" onclick="toggleCalFilter('${id}')">${label}</button>`;
+  zone.innerHTML=`<button type="button" class="cal-chip ${!calEmployeeFilter.size?'sel':''}" onclick="calEmployeeFilter.clear();renderCalFilterRow();refreshCalendarEvents()">All</button>`+
+    staff.map(u=>chip(u.id,(u.name||u.email||'Unnamed').split(' ')[0],u.color)).join('')+
+    chip('unassigned','Unassigned');
+}
+function toggleCalFilter(id){
+  if(calEmployeeFilter.has(id))calEmployeeFilter.delete(id);else calEmployeeFilter.add(id);
+  renderCalFilterRow();refreshCalendarEvents();
 }
 // FullCalendar's own refetchEvents() — the documented way to re-pull from a
 // function-type `events:` source — verified empirically (both before and
@@ -7139,6 +7474,200 @@ function refreshCalendarEvents(){
   if(!fcCalendarInstance)return;
   fcCalendarInstance.removeAllEventSources();
   fcCalendarInstance.addEventSource(buildCalendarEvents());
+}
+
+/* =====================================================================
+   CALENDAR: create Job / Event / Blocked time directly, no Google Calendar
+   required — TurnKey is the source of truth. Google Calendar (pushJobTo-
+   GoogleCalendar, calendar_connections) stays a purely optional, additive
+   sync layer on top of everything below, exactly as it already was for
+   jobs; nothing here depends on a connection existing.
+   ===================================================================== */
+let calAddPresetISO=null, calAddPresetMin=null;
+function staffOptionsHtml(includeUnassigned){
+  return (includeUnassigned?'<option value="">Unassigned</option>':'')+
+    staff.map(u=>`<option value="${u.id}">${(u.name||u.email||'Unnamed').replace(/</g,'&lt;')}</option>`).join('');
+}
+function openCalAddSheet(presetISO,presetMin){
+  calAddPresetISO=presetISO||todayISO();
+  calAddPresetMin=presetMin!=null?presetMin:null;
+  openModal('cal-add-overlay');
+}
+
+/* ----- Create Job (extends the existing lead/job modal — same
+   newRecord()/saveLead()/syncRecordToSupabase() pipeline used by Pipeline's
+   "+ New lead", a Customer Profile's "New job", and Quote → Schedule. One
+   underlying job system, not a second one bolted onto the calendar. ----- */
+let leadModalSchedulingMode=false;
+function openCalendarJobModal(presetISO){
+  openLeadModal();
+  leadModalSchedulingMode=true;
+  document.getElementById('lead-modal-title').textContent='Create job';
+  document.getElementById('lead-modal-sub').textContent='Saves straight to the calendar — no Google account needed.';
+  document.getElementById('l-schedule-fields').style.display='';
+  document.getElementById('l-save-btn').textContent='Create job';
+  const svcSel=document.getElementById('l-svc');
+  svcSel.innerHTML='<option value="">— none yet —</option>'+Object.entries(SERVICES).map(([k,v])=>`<option value="${k}">${v.label}</option>`).join('');
+  document.getElementById('l-assign').innerHTML=staffOptionsHtml(true);
+  document.getElementById('l-date').value=presetISO||todayISO();
+  if(calAddPresetMin!=null)document.getElementById('l-start').value=fmtTime24(calAddPresetMin);
+  document.getElementById('l-conflict-warn').style.display='none';
+}
+function fmtTime24(min){return String(Math.floor(min/60)).padStart(2,'0')+':'+String(min%60).padStart(2,'0');}
+function timeStrToMin(hhmm){if(!hhmm)return null;const[h,m]=hhmm.split(':').map(Number);return h*60+m;}
+
+/* ----- Conflict detection: existing jobs (same employee, overlapping time)
+   + availability blocks (that employee, or business-wide). Warn, never
+   silently block — the exact "Cancel / Schedule anyway" flow requested. ----- */
+async function checkScheduleConflict({userId,dateISO,startMin,endMin,excludeJobId}){
+  if(!dateISO||startMin==null)return [];
+  const warnings=[];
+  if(userId){
+    const sameDay=records.filter(r=>r.assignedStaffId===userId&&r.scheduledDateISO===dateISO&&r.stage!=='cancelled'&&r.id!==excludeJobId);
+    sameDay.forEach(r=>{
+      const {start:oStart,end:oEnd}=jobStartEndMin(r);
+      if(startMin<oEnd&&endMin>oStart){
+        const who=(staff.find(u=>u.id===userId)||{}).name||'This employee';
+        warnings.push(`${who} already has a job scheduled from ${fmtTime(oStart)}–${fmtTime(oEnd)} (${r.name}).`);
+      }
+    });
+  }
+  const dayStart=new Date(dateISO+'T00:00:00'), dayEnd=new Date(dateISO+'T23:59:59');
+  availabilityBlocksRaw.filter(b=>(!b.user_id||b.user_id===userId)).forEach(b=>{
+    const bs=new Date(b.start_at), be=new Date(b.end_at);
+    if(bs<=dayEnd&&be>=dayStart){
+      const who=b.user_id?((staff.find(u=>u.id===b.user_id)||{}).name||'This employee'):'The whole business';
+      warnings.push(`${who} ${b.user_id?'is':'is'} marked ${(BLOCK_TYPE_LABEL[b.block_type]||'unavailable').toLowerCase()} covering ${isoToLabel(dateISO)}.`);
+    }
+  });
+  return warnings;
+}
+let calConflictResolver=null;
+function confirmCalConflict(warnings){
+  document.getElementById('cal-conflict-body').innerHTML=warnings.map(w=>`<div class="cal-conflict-row">⚠ ${w.replace(/</g,'&lt;')}</div>`).join('');
+  openModal('cal-conflict-overlay');
+  return new Promise(resolve=>{calConflictResolver=resolve;});
+}
+function resolveCalConflict(proceed){
+  closeModal('cal-conflict-overlay');
+  if(calConflictResolver){calConflictResolver(proceed);calConflictResolver=null;}
+}
+// Live preview inside the Create Job modal — checked on every relevant
+// field change, purely informational until Save is actually clicked (which
+// re-checks and blocks-with-confirmation via checkScheduleConflict above).
+async function previewJobConflict(){
+  if(!leadModalSchedulingMode)return;
+  const userId=document.getElementById('l-assign').value||null;
+  const dateISO=document.getElementById('l-date').value;
+  const startMin=timeStrToMin(document.getElementById('l-start').value);
+  const dur=parseInt(document.getElementById('l-duration').value,10)||60;
+  const warn=document.getElementById('l-conflict-warn');
+  if(!userId||!dateISO||startMin==null){warn.style.display='none';return;}
+  const warnings=await checkScheduleConflict({userId,dateISO,startMin,endMin:startMin+dur});
+  warn.style.display=warnings.length?'':'none';
+  warn.innerHTML=warnings.map(w=>`⚠ ${w.replace(/</g,'&lt;')}`).join('<br>');
+}
+
+/* ----- Create Event ----- */
+function openCalEventModal(presetISO){
+  ['ce-title','ce-notes'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('ce-user').innerHTML=staffOptionsHtml(false);
+  document.getElementById('ce-date').value=presetISO||todayISO();
+  document.getElementById('ce-start').value=calAddPresetMin!=null?fmtTime24(calAddPresetMin):'09:00';
+  document.getElementById('ce-end').value=calAddPresetMin!=null?fmtTime24(calAddPresetMin+60):'10:00';
+  openModal('cal-event-overlay');
+}
+async function saveCalEvent(){
+  const title=document.getElementById('ce-title').value.trim();
+  if(!title){toast('Add a title');return;}
+  const dateISO=document.getElementById('ce-date').value;
+  const startMin=timeStrToMin(document.getElementById('ce-start').value);
+  const endMin=timeStrToMin(document.getElementById('ce-end').value);
+  if(!dateISO||startMin==null||endMin==null){toast('Pick a date and time');return;}
+  if(endMin<=startMin){toast('End time must be after start time');return;}
+  const userId=document.getElementById('ce-user').value||null;
+  const notes=document.getElementById('ce-notes').value.trim();
+  if(!sb||!currentBusinessId){toast('Not connected yet — try refreshing the page');return;}
+  const payload={
+    business_id:currentBusinessId,user_id:userId||currentUserId,source:'turnkey',
+    title,notes:notes||null,created_by:currentUserId,
+    start_time:new Date(dateISO+'T00:00:00').getTime()+startMin*60000,
+    end_time:new Date(dateISO+'T00:00:00').getTime()+endMin*60000
+  };
+  payload.start_time=new Date(payload.start_time).toISOString();
+  payload.end_time=new Date(payload.end_time).toISOString();
+  const {data,error}=await sb.from('calendar_events').insert(payload).select('*').single();
+  if(error){console.error('Create event failed',error);toast('Could not create event: '+error.message);return;}
+  calendarEventsRaw.push(data);
+  closeModal('cal-event-overlay');
+  refreshCalendarEvents();
+  toast('Event created ✓');
+}
+function openCalEventDetail(id){
+  const e=calendarEventsRaw.find(x=>x.id===id);if(!e)return;
+  if(confirm((e.title||'Event')+'\n'+new Date(e.start_time).toLocaleString('en-NZ')+' – '+new Date(e.end_time).toLocaleString('en-NZ')+(e.notes?'\n\n'+e.notes:'')+'\n\nDelete this event?'))deleteCalEvent(id);
+}
+async function deleteCalEvent(id){
+  const {error}=await sb.from('calendar_events').delete().eq('id',id);
+  if(error){console.error('Delete event failed',error);toast('Could not delete event');return;}
+  calendarEventsRaw=calendarEventsRaw.filter(e=>e.id!==id);
+  refreshCalendarEvents();
+  toast('Event deleted');
+}
+
+/* ----- Block availability ----- */
+function toggleBlockAllDay(isAllDay){document.getElementById('cb-time-row').style.display=isAllDay?'none':'';}
+function openCalBlockModal(presetISO){
+  document.getElementById('cb-user').innerHTML=staffOptionsHtml(false);
+  document.getElementById('cb-start-date').value=presetISO||todayISO();
+  document.getElementById('cb-end-date').value=presetISO||todayISO();
+  document.getElementById('cb-allday').checked=true;
+  document.getElementById('cb-time-row').style.display='none';
+  document.getElementById('cb-recurring').checked=false;
+  document.getElementById('cb-notes').value='';
+  openModal('cal-block-overlay');
+}
+async function saveAvailabilityBlock(){
+  const startDate=document.getElementById('cb-start-date').value;
+  const endDate=document.getElementById('cb-end-date').value||startDate;
+  if(!startDate){toast('Pick a start date');return;}
+  if(endDate<startDate){toast('End date is before the start date');return;}
+  const allDay=document.getElementById('cb-allday').checked;
+  const startTime=allDay?'00:00':(document.getElementById('cb-start-time').value||'00:00');
+  const endTime=allDay?'23:59':(document.getElementById('cb-end-time').value||'23:59');
+  const userId=document.getElementById('cb-user').value||null;
+  const blockType=document.getElementById('cb-type').value;
+  const reason=document.getElementById('cb-notes').value.trim();
+  const recurring=document.getElementById('cb-recurring').checked;
+  if(!sb||!currentBusinessId){toast('Not connected yet — try refreshing the page');return;}
+  // "Multiple days" = the date range itself. "Recurring" (weekly) generates
+  // the same range again for the following 11 weeks — a bounded, honest
+  // expansion rather than a full RRULE engine that nothing else here has.
+  const occurrences=[0].concat(recurring?Array.from({length:11},(_,i)=>(i+1)*7):[]);
+  const rows=occurrences.map(offsetDays=>({
+    business_id:currentBusinessId,user_id:userId,block_type:blockType,
+    all_day:allDay,reason:reason||null,created_by:currentUserId,
+    start_at:new Date(addDaysISO(startDate,offsetDays)+'T'+startTime+':00').toISOString(),
+    end_at:new Date(addDaysISO(endDate,offsetDays)+'T'+endTime+':00').toISOString()
+  }));
+  const {data,error}=await sb.from('availability_blocks').insert(rows).select('*');
+  if(error){console.error('Create block failed',error);toast('Could not block time: '+error.message);return;}
+  availabilityBlocksRaw.push(...(data||[]));
+  closeModal('cal-block-overlay');
+  refreshCalendarEvents();
+  toast('Time blocked ✓'+(recurring?' (12 weeks)':''));
+}
+function openCalBlockDetail(id){
+  const b=availabilityBlocksRaw.find(x=>x.id===id);if(!b)return;
+  const who=b.user_id?((staff.find(u=>u.id===b.user_id)||{}).name||'Employee'):'Whole business';
+  if(confirm(who+' — '+(BLOCK_TYPE_LABEL[b.block_type]||'Blocked')+'\n'+new Date(b.start_at).toLocaleString('en-NZ')+' – '+new Date(b.end_at).toLocaleString('en-NZ')+(b.reason?'\n\n'+b.reason:'')+'\n\nRemove this block?'))deleteAvailabilityBlock(id);
+}
+async function deleteAvailabilityBlock(id){
+  const {error}=await sb.from('availability_blocks').delete().eq('id',id);
+  if(error){console.error('Delete block failed',error);toast('Could not remove block');return;}
+  availabilityBlocksRaw=availabilityBlocksRaw.filter(b=>b.id!==id);
+  refreshCalendarEvents();
+  toast('Block removed');
 }
 
 /* ---------- GOALS: targets, rewards & perks ---------- */
