@@ -2747,7 +2747,7 @@ function newRecord(d){return Object.assign({
   // estimateJob(services).labourMin (a pricing-driven estimate, used as the
   // fallback when no explicit time has been set yet).
   scheduledStartMin:null,scheduledDurationMin:null,
-  quoteSentAt:null,clientResponded:false,paidAt:null,approvedAt:null,lastServiceDaysAgo:null,assumptions:null,areaPolys:null,selfPriced:false,windowsRequested:false,requestedServices:[],
+  quoteSentAt:null,clientResponded:false,paidAt:null,approvedAt:null,lastServiceDaysAgo:null,assumptions:null,areaPolys:null,selfPriced:false,windowsRequested:false,requestedServices:[],requestSubmittedAt:null,
   hasCustomerPhoto:false,customerPhotoPath:null,quoteAttachments:[],assignedStaffId:null,
   paymentStatus:'draft',paymentMethod:null,dueDate:null,payments:[],
   jobStatus:null,statusHistory:[],jobNotes:null,weatherSnapshot:null
@@ -5727,11 +5727,15 @@ function cardHtml(r){
       <button class="btn ghost sm card-resched" onclick="event.stopPropagation();openSchedule(${r.id})">↻ Reschedule</button>
     </div>`;
   }
+  // Only incoming online quote requests carry requestSubmittedAt — leads
+  // added manually through the CRM have nothing to show here.
+  const submittedLine=r.requestSubmittedAt?(()=>{const s=TK_FORMAT.submitted(r.requestSubmittedAt);return s?`<div class="meta submitted-at">Submitted ${s.full}</div>`:'';})():'';
   return `<button class="card${flag?' has-flag flag-'+flag.tone:''}" onclick="openDetail(${r.id})">
     ${flag?`<div class="card-flag ${flag.tone}">${flag.label}</div>`:''}
     <div class="name">${r.name}${invoiceBadge}${jobStatusChip}</div>
     <div class="meta">${r.suburb||r.address||'—'}</div>
     ${tags?`<div class="svc-tags">${tags}</div>`:''}
+    ${submittedLine}
     <div class="foot"><span class="price">${r.total?money(r.total):'No quote'}</span><span class="meta">${r.source||''}</span></div>
   </button>`;
 }
@@ -10174,6 +10178,11 @@ function ingestQuoteRequest(payload){
   // svcRows already shows with real measurements/pricing, so the UI doesn't
   // repeat it there.
   rec.requestedServices=(Array.isArray(payload.requestedServices)?payload.requestedServices:[]).map(normalizeReqSvc);
+  // The customer's own submit-time, kept distinct from createdAt (when this
+  // ingest ran) so cardHtml/openDetail can show exactly when they hit
+  // "Send" — sid is the same value, but that field only exists for the
+  // dedup check above and isn't meant to be read as a display timestamp.
+  rec.requestSubmittedAt=sid;
   if(sid)rec._submittedAt=sid;
   records.unshift(rec);
   render();renderAll();
