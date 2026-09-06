@@ -1,0 +1,45 @@
+/* Same token set as content/panel/panel.css (copied from index.html's :root) — kept as a duplicate rather than a shared import since the popup and content-script panel load in separate contexts with no bundler to share a module between them. */
+:root {
+  --ink:#0a1c2b; --ink-soft:#5b6b78; --ink-faint:#9aa7b1;
+  --paper:#fbfcfd; --surface:#ffffff; --surface-2:#f4f6f8;
+  --line:#e9edf1; --line-soft:#f0f3f6;
+  --teal:#0f7d6b; --teal-bright:#13a085; --teal-wash:#eef7f5;
+  --coral:#b5573e; --coral-wash:#f7efec;
+  --radius:16px; --radius-sm:11px;
+  --shadow-lg:0 10px 40px rgba(10,28,43,.10);
+}
+* { box-sizing:border-box; }
+body {
+  margin:0; width:300px; background:var(--paper); color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text",Helvetica Neue,Helvetica,Arial,sans-serif;
+  font-size:13.5px;
+}
+button { font-family:inherit; cursor:pointer; }
+.tk-popup { padding:18px; }
+.tk-popup-logo { font-weight:700; font-size:13px; letter-spacing:.08em; color:var(--ink); margin-bottom:14px; }
+.tk-field { margin-bottom:12px; }
+.tk-field label { display:block; font-size:11px; font-weight:600; color:var(--ink-faint); text-transform:uppercase; letter-spacing:.04em; margin-bottom:5px; }
+.tk-field input, .tk-field select {
+  width:100%; border:1px solid var(--line); border-radius:var(--radius-sm);
+  padding:9px 10px; font-size:13px; color:var(--ink); background:var(--surface);
+}
+.tk-field input:focus, .tk-field select:focus { outline:2px solid var(--teal-wash); border-color:var(--teal); }
+.tk-btn {
+  width:100%; border:1px solid var(--line); background:var(--surface-2); color:var(--ink);
+  border-radius:var(--radius-sm); padding:10px; font-size:13px; font-weight:600; margin-top:4px;
+}
+.tk-btn:hover:not(:disabled) { background:var(--line-soft); }
+.tk-btn:disabled { opacity:.5; cursor:not-allowed; }
+.tk-btn-accent { background:var(--teal); border-color:var(--teal); color:#fff; }
+.tk-btn-accent:hover:not(:disabled) { background:var(--teal-bright); }
+.tk-btn-danger { color:var(--coral); }
+.tk-error { color:var(--coral); font-size:12px; margin:-4px 0 10px; }
+.tk-hint { color:var(--ink-soft); font-size:12px; margin:6px 0 14px; line-height:1.5; }
+.tk-connected-card { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); padding:14px; margin-bottom:14px; }
+.tk-connected-label { font-size:11px; color:var(--ink-faint); font-weight:600; text-transform:uppercase; }
+.tk-connected-name { font-size:16px; font-weight:700; margin-top:2px; }
+.tk-divider { height:1px; background:var(--line); margin:14px 0; }
+.tk-row { display:flex; align-items:center; justify-content:space-between; padding:8px 0; font-size:13px; }
+.tk-row-ok { color:var(--teal); font-weight:600; font-size:12.5px; }
+.tk-back-link { border:none; background:none; color:var(--ink-soft); font-size:12px; padding:0 0 12px; }
+.tk-back-link:hover { color:var(--ink); }

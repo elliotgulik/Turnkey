@@ -1,0 +1,185 @@
+/* Design tokens copied verbatim from index.html's :root (see index.html:46-96)
+   — TurnKey has no shared theme file to import (no build step, no Tailwind),
+   so every page that needs the look copies the block by hand; this is that
+   same copy, scoped inside the extension's own shadow root. */
+:host, .tk-root {
+  --ink:#0a1c2b; --ink-soft:#5b6b78; --ink-faint:#9aa7b1;
+  --paper:#fbfcfd; --surface:#ffffff; --surface-2:#f4f6f8;
+  --line:#e9edf1; --line-soft:#f0f3f6;
+  --teal:#0f7d6b; --teal-bright:#13a085; --teal-wash:#eef7f5;
+  --coral:#b5573e; --coral-wash:#f7efec;
+  --radius:16px; --radius-sm:11px;
+  --shadow:0 1px 1px rgba(10,28,43,.03),0 6px 20px rgba(10,28,43,.05);
+  --shadow-lg:0 10px 40px rgba(10,28,43,.10);
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text",Helvetica Neue,Helvetica,Arial,sans-serif;
+  color:var(--ink);
+  font-size:14px;
+  line-height:1.4;
+}
+.tk-root * { box-sizing:border-box; }
+.tk-root button { font-family:inherit; cursor:pointer; }
+
+/* ── Toolbar ─────────────────────────────────────────────────────────── */
+.tk-toolbar {
+  position:fixed;
+  width:250px;
+  background:var(--surface);
+  border:1px solid var(--line);
+  border-radius:var(--radius);
+  box-shadow:var(--shadow-lg);
+  overflow:hidden;
+  pointer-events:auto;
+}
+.tk-toolbar-head {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:12px 14px;
+  background:var(--ink);
+  cursor:grab;
+  touch-action:none;
+}
+.tk-toolbar-head:active { cursor:grabbing; }
+.tk-logo { color:#fff; font-weight:700; font-size:12px; letter-spacing:.08em; }
+.tk-icon-btn {
+  border:none; background:transparent; color:#fff; opacity:.8;
+  width:22px; height:22px; border-radius:6px; font-size:15px; line-height:1;
+}
+.tk-icon-btn:hover { opacity:1; background:rgba(255,255,255,.12); }
+.tk-toolbar-body { padding:14px; }
+.tk-status { font-size:12px; color:var(--ink-soft); margin-bottom:12px; display:flex; align-items:center; gap:6px; }
+.tk-status-dot { width:7px; height:7px; border-radius:50%; background:var(--ink-faint); flex:none; }
+.tk-status-dot.on { background:var(--teal-bright); }
+.tk-status-dot.off { background:var(--coral); }
+.tk-actions { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.tk-btn {
+  border:1px solid var(--line); background:var(--surface-2); color:var(--ink);
+  border-radius:var(--radius-sm); padding:9px 10px; font-size:13px; font-weight:600;
+  display:flex; align-items:center; justify-content:center; gap:6px;
+}
+.tk-btn:hover:not(:disabled) { background:var(--line-soft); }
+.tk-btn:disabled { opacity:.45; cursor:not-allowed; }
+.tk-btn-accent { background:var(--teal); border-color:var(--teal); color:#fff; grid-column:1 / -1; }
+.tk-btn-accent:hover:not(:disabled) { background:var(--teal-bright); }
+.tk-btn-ico { font-size:14px; }
+.tk-divider { height:1px; background:var(--line); margin:14px 0; }
+.tk-property label { display:block; font-size:11px; color:var(--ink-faint); font-weight:600; text-transform:uppercase; letter-spacing:.04em; margin-bottom:5px; }
+.tk-input {
+  width:100%; border:1px solid var(--line); border-radius:var(--radius-sm);
+  padding:8px 10px; font-size:13px; color:var(--ink); background:var(--surface);
+}
+.tk-input:focus { outline:2px solid var(--teal-wash); border-color:var(--teal); }
+.tk-measurements { margin-top:12px; display:flex; flex-direction:column; gap:6px; }
+.tk-meas-row {
+  display:flex; align-items:center; gap:6px; font-size:12.5px;
+  background:var(--surface-2); border-radius:8px; padding:6px 8px;
+}
+.tk-meas-label { flex:1; color:var(--ink); font-weight:600; }
+.tk-meas-value { color:var(--teal); font-weight:700; }
+.tk-meas-remove { border:none; background:none; color:var(--ink-faint); font-size:15px; line-height:1; padding:0 2px; }
+.tk-meas-remove:hover { color:var(--coral); }
+
+.tk-minimized-fab {
+  position:fixed; top:96px; right:20px;
+  width:44px; height:44px; border-radius:50%;
+  background:var(--ink); color:#fff; border:none; box-shadow:var(--shadow-lg);
+  font-weight:700; font-size:12px; pointer-events:auto;
+}
+
+/* ── Toast ───────────────────────────────────────────────────────────── */
+.tk-toast {
+  position:fixed; bottom:24px; left:50%; transform:translate(-50%,12px);
+  background:var(--ink); color:#fff; padding:10px 16px; border-radius:10px;
+  font-size:13px; box-shadow:var(--shadow-lg); opacity:0; transition:opacity .2s,transform .2s;
+  pointer-events:none; max-width:360px; text-align:center;
+}
+.tk-toast.show { opacity:1; transform:translate(-50%,0); }
+.tk-toast-error { background:var(--coral); }
+
+/* ── Modals ──────────────────────────────────────────────────────────── */
+.tk-modal-layer { position:fixed; inset:0; pointer-events:none; }
+.tk-modal-backdrop {
+  position:fixed; inset:0; background:rgba(10,28,43,.45);
+  display:flex; align-items:center; justify-content:center;
+  pointer-events:auto; z-index:1;
+}
+.tk-modal {
+  background:var(--surface); border-radius:var(--radius); box-shadow:var(--shadow-lg);
+  width:460px; max-width:calc(100vw - 40px); max-height:calc(100vh - 60px);
+  display:flex; flex-direction:column; overflow:hidden;
+}
+.tk-modal-head {
+  display:flex; align-items:flex-start; justify-content:space-between;
+  padding:18px 20px; border-bottom:1px solid var(--line);
+}
+.tk-modal-head h3 { margin:0; font-size:16px; }
+.tk-modal-head .tk-icon-btn { color:var(--ink-soft); }
+.tk-modal-head .tk-icon-btn:hover { background:var(--surface-2); }
+.tk-modal-sub { margin:4px 0 0; font-size:12.5px; color:var(--ink-soft); }
+.tk-modal-body { padding:18px 20px; overflow-y:auto; }
+.tk-modal-foot { display:flex; gap:10px; justify-content:flex-end; padding:16px 20px; border-top:1px solid var(--line); }
+.tk-modal-foot .tk-btn { flex:none; padding:9px 16px; }
+.tk-error { color:var(--coral); font-size:12.5px; margin-right:auto; align-self:center; }
+
+/* Category picker */
+.tk-category-grid { padding:8px 20px 20px; display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.tk-category-btn {
+  border:1px solid var(--line); background:var(--surface-2); border-radius:var(--radius-sm);
+  padding:14px 10px; font-size:13px; font-weight:600; color:var(--ink);
+}
+.tk-category-btn:hover { border-color:var(--teal); background:var(--teal-wash); color:var(--teal); }
+
+/* Tracer */
+.tk-tracer-modal { width:600px; }
+.tk-tracer-host { padding:0 20px; }
+.tk-tracer { position:relative; width:100%; aspect-ratio:520/380; border-radius:var(--radius-sm); overflow:hidden; border:1px solid var(--line); background:#e4e8eb; }
+.tk-tracer-tiles { position:absolute; inset:0; overflow:hidden; }
+.tk-tracer-tilefail {
+  position:absolute; inset:0; z-index:1; display:flex; align-items:center; justify-content:center;
+  text-align:center; padding:24px; font-size:12.5px; color:var(--ink-soft); background:var(--surface-2);
+}
+.tk-tracer-svg { position:absolute; inset:0; width:100%; height:100%; cursor:crosshair; }
+.tk-tracer-pt { cursor:grab; }
+.tk-tracer-zoom { position:absolute; bottom:10px; right:10px; display:flex; flex-direction:column; border-radius:8px; overflow:hidden; box-shadow:var(--shadow); }
+.tk-tracer-zoom button { width:30px; height:28px; border:none; background:#fff; font-size:16px; color:var(--ink); }
+.tk-tracer-zoom button:hover { background:var(--surface-2); }
+.tk-tracer-readout { padding:12px 20px 0; font-size:13px; color:var(--ink-soft); }
+.tk-tracer-readout strong { color:var(--teal); font-size:15px; }
+
+/* Quote panel */
+.tk-quote-modal { width:520px; }
+.tk-section-label { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--ink-faint); margin:16px 0 8px; }
+.tk-section-label:first-child { margin-top:0; }
+.tk-lines { display:flex; flex-direction:column; gap:6px; }
+.tk-line-row { display:flex; align-items:center; gap:8px; padding:6px 0; }
+.tk-line-cat { flex:1; font-weight:600; font-size:13px; }
+.tk-select { border:1px solid var(--line); border-radius:8px; padding:6px 8px; font-size:12.5px; background:var(--surface); color:var(--ink); }
+.tk-line-qty { font-size:12.5px; color:var(--ink-soft); min-width:56px; text-align:right; }
+.tk-qty-input { width:64px; border:1px solid var(--line); border-radius:8px; padding:6px 8px; font-size:12.5px; }
+.tk-link-btn { border:none; background:none; color:var(--teal); font-size:13px; font-weight:600; padding:6px 0; }
+.tk-link-btn:hover { text-decoration:underline; }
+.tk-customer-picker { display:flex; flex-direction:column; gap:8px; }
+.tk-customer-results { display:flex; flex-direction:column; gap:4px; }
+.tk-customer-result { text-align:left; border:1px solid var(--line); background:var(--surface-2); border-radius:8px; padding:8px 10px; font-size:13px; }
+.tk-customer-result:hover { border-color:var(--teal); }
+.tk-customer-chip { display:flex; align-items:center; gap:10px; background:var(--teal-wash); color:var(--teal); border-radius:8px; padding:8px 10px; font-weight:600; font-size:13px; }
+.tk-customer-chip button { border:none; background:none; color:var(--teal); font-weight:600; font-size:12px; text-decoration:underline; }
+.tk-new-customer { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.tk-new-customer input:first-child { grid-column:1 / -1; }
+.tk-price-block { margin-top:18px; padding-top:14px; border-top:1px solid var(--line); }
+.tk-price-line { display:flex; justify-content:space-between; font-size:12.5px; color:var(--ink-soft); padding:2px 0; }
+.tk-price-total { display:flex; justify-content:space-between; font-size:22px; font-weight:700; color:var(--ink); margin-top:6px; }
+.tk-price-total span:last-child { color:var(--teal); }
+
+/* Quote created */
+.tk-quote-created { width:400px; padding:28px 24px; text-align:center; }
+.tk-created-badge { width:44px; height:44px; border-radius:50%; background:var(--teal-wash); color:var(--teal); font-size:22px; font-weight:700; display:flex; align-items:center; justify-content:center; margin:0 auto 12px; }
+.tk-quote-created h3 { margin:0 0 4px; }
+.tk-created-total { font-size:32px; font-weight:700; color:var(--teal); margin:14px 0; }
+.tk-created-lines { text-align:left; border-top:1px solid var(--line); border-bottom:1px solid var(--line); padding:10px 0; margin-bottom:16px; }
+.tk-kv { display:flex; justify-content:space-between; font-size:13px; padding:4px 0; }
+.tk-created-foot { border:none; padding:0; margin-bottom:10px; }
+.tk-created-foot .tk-btn { flex:1; }
+
+/* Screenshot */
+.tk-screenshot-modal { width:560px; }
+.tk-screenshot-img { width:100%; border-radius:var(--radius-sm); border:1px solid var(--line); display:block; }
+.tk-hint { font-size:12px; color:var(--ink-soft); margin:10px 0 0; }
