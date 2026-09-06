@@ -50,6 +50,8 @@ guess.
 
 **`20260728130000_email_accounts_updated_at.sql`** — small real fix, needs to be run against production. Adds `email_accounts.updated_at` (the table otherwise already matches what a Gmail-OAuth audit expects — see `backend/supabase/schema-email.sql` — tokens are stored encrypted, not plaintext, deliberately).
 
+**`20260728140000_email_accounts_read_policy.sql`** — important real fix, needs to be run against production. This is the actual reason Gmail showed "Not Connected" even after a successful OAuth save: `email_accounts_status` (the view the Connections page reads) has `security_invoker = on`, so it inherits the base table's RLS — and `email_accounts` had zero SELECT policies for `authenticated` at all. The view was never able to return a row to any frontend query, for any business, ever. Adds the missing "read own business" policy (same shape used everywhere else in this schema).
+
 ## What's NOT in here yet
 
 Everything else — `customers`, `users`, `businesses`, `attachments`,
