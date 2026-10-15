@@ -19,7 +19,13 @@ window.TK_COST = (function(){
     rooftreatment:{ m2ph:70, chem:'softWash', litrePerM2:0.06 },
     gutter:   { m2ph:45, chem:'degreaser',  litrePerM2:0.010 }, // per linear metre
     fence:    { m2ph:55, chem:'sodiumHypo', litrePerM2:0.020 }, // per linear metre
-    patio:    { m2ph:50, chem:'sodiumHypo', litrePerM2:0.028 }
+    patio:    { m2ph:50, chem:'sodiumHypo', litrePerM2:0.028 },
+    // deck and windows previously had no cost entry at all, so their lines
+    // were silently dropped from costBreakdown() — their revenue counted
+    // against the other lines' cost and inflated the job's margin. These
+    // are starting assumptions; tune them in Pricing → Productivity.
+    deck:     { m2ph:40, chem:'sodiumHypo', litrePerM2:0.030 },
+    windows:  { m2ph:20, chem:'none',       litrePerM2:0 }       // panes per hour
   };
   // Chemical prices per litre (concentrate) — editable in the Pricing tab.
   const CHEMICALS = {
@@ -38,9 +44,47 @@ window.TK_COST = (function(){
     avgKm:14,       // avg round-trip drive to a job (tune this to your area)
     equipmentPerJob:8,   // equipment wear/maintenance allowance per job
     consumablesPerJob:5, // PPE, rags, misc supplies per job
-    targetMargin:0.55,   // owner's target gross margin → drives every recommended price
-    calloutMin:120  // no recommended price is ever suggested below this, however small the job
+    targetMargin:0.55,   // owner's target margin, measured on EX-GST revenue
+    calloutMin:120, // no recommended price is ever suggested below this, however small the job (GST-incl)
+    // Every customer-facing price in TK_PRICING is GST-inclusive. When the
+    // business is GST-registered, 15% of every dollar quoted goes to IRD,
+    // so margin and the recommended price are computed on the ex-GST
+    // amount. Costs here are treated as ex-GST (wages carry no GST; GST on
+    // chemicals/fuel/equipment is claimed back).
+    gstRegistered:true,
+    // Fixed monthly overheads (OVERHEADS below) are spread evenly across
+    // this many jobs a month to give a per-job overhead charge.
+    jobsPerMonth:40
   };
+  // Fixed monthly running costs that aren't tied to any one job but every
+  // job has to pay for. Zero by default — set real figures in the Pricing
+  // tab. Monthly $ amounts, ex-GST.
+  const OVERHEADS = {
+    vehicle:   { label:'Vehicle (lease/finance, rego, WOF, servicing)', perMonth:0 },
+    insurance: { label:'Insurance (liability, vehicle, equipment)',     perMonth:0 },
+    software:  { label:'Software & subscriptions',                       perMonth:0 },
+    phone:     { label:'Phone & internet',                               perMonth:0 },
+    marketing: { label:'Marketing & advertising',                        perMonth:0 },
+    admin:     { label:'Admin / office wages',                           perMonth:0 },
+    other:     { label:'Other (accounting, storage, bank fees)',         perMonth:0 }
+  };
+  const GST_RATE=0.15;
+  function overheadsMonthly(){
+    return Object.values(OVERHEADS).reduce((s,o)=>s+(parseFloat(o.perMonth)||0),0);
+  }
+  function overheadPerJob(){
+    const jobs=parseFloat(COST_INPUTS.jobsPerMonth)||0;
+    return jobs>0?overheadsMonthly()/jobs:0;
+  }
+  // GST-inclusive customer price → the revenue the business actually keeps.
+  function exGst(amountIncl){
+    const a=parseFloat(amountIncl)||0;
+    return COST_INPUTS.gstRegistered?a/(1+GST_RATE):a;
+  }
+  function inclGst(amountEx){
+    const a=parseFloat(amountEx)||0;
+    return COST_INPUTS.gstRegistered?a*(1+GST_RATE):a;
+  }
 
   function lineCleanMin(line){
     const c=SVC_COST[line.svc]; if(!c)return 0;
@@ -79,7 +123,8 @@ window.TK_COST = (function(){
     const fuelCost=travelKm*COST_INPUTS.fuelPerKm;
     const equipmentCost=COST_INPUTS.equipmentPerJob||0;
     const consumablesCost=COST_INPUTS.consumablesPerJob||0;
-    const fixedExtras=fuelCost+equipmentCost+consumablesCost;
+    const overheadCost=active.length?overheadPerJob():0;
+    const fixedExtras=fuelCost+equipmentCost+consumablesCost+overheadCost;
 
     // Direct cost per line (wage share by clean-time + its own chemical
     // cost) — this is what each line's share of the total is based on.
@@ -91,7 +136,10 @@ window.TK_COST = (function(){
     });
     const totalDirectCost=lineDirect.reduce((s,d)=>s+d.directCost,0);
     const totalCost=totalDirectCost+fixedExtras;
-    const rawRecommended=COST_INPUTS.targetMargin<1?totalCost/(1-COST_INPUTS.targetMargin):totalCost;
+    // Target margin is hit on ex-GST revenue, then GST is added on top so
+    // the recommended figure is the GST-inclusive price the customer sees.
+    const recommendedExGst=COST_INPUTS.targetMargin<1?totalCost/(1-COST_INPUTS.targetMargin):totalCost;
+    const rawRecommended=inclGst(recommendedExGst);
     const recommendedTotal=Math.max(Math.round(rawRecommended/5)*5, totalCost>0?COST_INPUTS.calloutMin:0);
 
     let allocated=0;
@@ -115,19 +163,26 @@ window.TK_COST = (function(){
       lines:perLine,
       labourMin:Math.round(totalLabourMin), labourHrs:totalLabourHrs,
       wageCost:totalWageCost, chem:totalChemCost, litres:totalLitres,
-      fuelCost, equipmentCost, consumablesCost,
+      fuelCost, equipmentCost, consumablesCost, overheadCost,
       travelKm, travelMins, travelIsEstimate:!(travel&&isFinite(travel.km)),
       cost:Math.round(totalCost),
       recommended:recommendedTotal,
       targetMargin:COST_INPUTS.targetMargin
     };
   }
-  // Margin % for a given final price against a given cost — the one place
-  // "revenue vs cost vs margin" is ever computed, used identically by the
-  // Quote Builder's live panel and the Reporting tab.
-  function marginPct(revenue,cost){
-    if(!revenue||revenue<=0)return 0;
-    return (revenue-cost)/revenue*100;
+  // Margin % for a given GST-inclusive final price against a given cost —
+  // the one place "revenue vs cost vs margin" is ever computed, used
+  // identically by the Quote Builder's live panel and the Reporting tab.
+  // Revenue is converted to ex-GST first: the GST portion was never the
+  // business's money.
+  function marginPct(revenueIncl,cost){
+    const rev=exGst(revenueIncl);
+    if(!rev||rev<=0)return 0;
+    return (rev-cost)/rev*100;
   }
-  return {SVC_COST,CHEMICALS,COST_INPUTS,lineCleanMin,lineLitres,lineChemCost,costBreakdown,marginPct};
+  // Profit in dollars on a GST-inclusive price.
+  function profit(revenueIncl,cost){
+    return exGst(revenueIncl)-(cost||0);
+  }
+  return {SVC_COST,CHEMICALS,COST_INPUTS,OVERHEADS,GST_RATE,lineCleanMin,lineLitres,lineChemCost,costBreakdown,marginPct,profit,exGst,inclGst,overheadsMonthly,overheadPerJob};
 })();
