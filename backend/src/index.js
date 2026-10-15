@@ -10,6 +10,7 @@ import { createSupabaseStorage } from './storage/supabase.js'
 import { encryptToken, decryptToken } from './crypto.js'
 import { validateLeadPayload } from './leadValidation.js'
 import { hashWixToken, generateWixToken, handleWixLead } from './wixLeads.js'
+import { createServiceM8Router } from './servicem8Routes.js'
 import * as gmail from './providers/gmail.js'
 import * as googleCalendar from './providers/googleCalendar.js'
 import { fetchIcs } from './ical.js'
@@ -1406,6 +1407,18 @@ app.post('/api/ai/marketing', requireBusiness, async (req, res) => {
     res.status(500).json({ error: 'Could not reach the AI assistant' })
   }
 })
+
+// ServiceM8 integration — all routes/logic in servicem8Routes.js,
+// servicem8Sync.js, servicem8Webhooks.js and providers/servicem8.js;
+// mounted here as a self-contained router so this file's own diff stays
+// minimal. requireBusiness/authClient/OAUTH_STATE_SECRET are the same
+// instances every other integration above already uses.
+app.use('/api/servicem8', createServiceM8Router({
+  authClient,
+  requireBusiness,
+  oauthStateSecret: OAUTH_STATE_SECRET,
+  backendPublicUrl: (req) => `https://${req.get('host')}`
+}))
 
 app.listen(PORT, () => {
   console.log(`🚀 TurnKey backend running on port ${PORT}`)
