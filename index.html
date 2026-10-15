@@ -10,6 +10,7 @@
 <script src="config.js"></script>
 <script src="pricing-engine.js"></script>
 <script src="cost-engine.js"></script>
+<script src="sales-engine.js"></script>
 <script src="map-snapshot.js"></script>
 <script src="format-utils.js"></script>
 <!-- OneSignal Web Push SDK — harmless to load even when onesignalAppId is
@@ -490,6 +491,30 @@
   .dash-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:26px}
   @media(max-width:720px){.dash-grid{grid-template-columns:1fr 1fr}.stat-row{grid-template-columns:1fr 1fr}}
   @media(max-width:480px){.dash-grid{grid-template-columns:1fr}}
+  .sales-table{width:100%;border-collapse:collapse;font-size:13.5px}
+  .sales-table th{font-size:11px;font-weight:600;letter-spacing:.02em;text-transform:uppercase;color:var(--ink-faint);text-align:right;padding:0 8px 9px;border-bottom:1px solid var(--line);white-space:nowrap}
+  .sales-table th:first-child,.sales-table td:first-child{text-align:left;padding-left:0}
+  .sales-table td{text-align:right;padding:10px 8px;border-bottom:1px solid var(--line-soft);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .sales-table tr:last-child td{border-bottom:none}
+  .sales-table input{width:78px;text-align:right;padding:4px 6px;font-size:13px}
+  .sales-table .pc-green{color:#16745f;font-weight:600}.sales-table .pc-orange{color:#8a6212;font-weight:600}.sales-table .pc-red{color:#a4472f;font-weight:600}
+  .sales-scroll{overflow-x:auto;margin:0 -4px;padding:0 4px}
+  .funnel-row{display:grid;grid-template-columns:110px 1fr 110px;align-items:center;gap:12px;padding:7px 0}
+  .funnel-row .fr-l{font-size:13px;color:var(--ink-soft)}
+  .funnel-row .fr-bar{height:26px;background:var(--surface-2);border-radius:7px;overflow:hidden}
+  .funnel-row .fr-bar div{height:100%;background:var(--accent);border-radius:7px;min-width:2px}
+  .funnel-row .fr-v{font-size:13px;text-align:right;font-variant-numeric:tabular-nums}
+  .funnel-row .fr-v small{color:var(--ink-faint)}
+  .sales-2col{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px}
+  #view-sales .panel{min-width:0;max-width:100%}
+  #view-sales .sales-scroll{max-width:100%}
+  .sales-periods{flex-wrap:wrap;max-width:100%}
+  @media(max-width:860px){.sales-2col{grid-template-columns:minmax(0,1fr)}.funnel-row{grid-template-columns:84px 1fr 92px}}
+  .attn-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line-soft);font-size:13.5px;cursor:pointer}
+  .attn-row:last-child{border-bottom:none}
+  .attn-row:hover .attn-name{color:var(--accent)}
+  .attn-tag{font-size:11px;font-weight:600;padding:2px 8px;border-radius:980px;background:var(--amber-wash);color:var(--amber);white-space:nowrap}
+  .attn-tag.bad{background:var(--coral-wash);color:var(--coral)}
   .metric{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:20px 22px}
   .metric .m-label{font-size:12.5px;color:var(--ink-faint);display:flex;align-items:center;justify-content:space-between}
   .metric .m-val{font-size:33px;font-weight:600;letter-spacing:-.03em;margin-top:7px;color:var(--ink)}
@@ -1391,6 +1416,7 @@
       <div class="sidebar-nav">
         <button data-view="dashboard"><span class="nav-ico" data-icon="dashboard"></span>Dashboard</button>
         <div class="sidebar-label">Sales</div>
+        <button data-view="sales"><span class="nav-ico" data-icon="sales"></span>Sales Manager</button>
         <button data-view="pipeline" class="active"><span class="nav-ico" data-icon="pipeline"></span>Pipeline</button>
         <button data-view="leads"><span class="nav-ico" data-icon="leads"></span>Leads <span class="count" id="cnt-leads">0</span></button>
         <button data-view="customers"><span class="nav-ico" data-icon="customers"></span>Customers</button>
@@ -1428,6 +1454,7 @@
     <section class="view" id="view-ops"></section>
     <section class="view" id="view-pricing"></section>
     <section class="view" id="view-dashboard"></section>
+    <section class="view" id="view-sales"></section>
     <section class="view" id="view-goals"></section>
     <section class="view" id="view-detail"></section>
   </main>
@@ -1703,6 +1730,15 @@
   <div class="modal-foot"><button class="btn ghost" onclick="closeModal('cancel-job-overlay')">Never mind</button><button class="btn primary" style="background:var(--coral);border-color:var(--coral)" onclick="confirmCancelJob()">Cancel job</button></div>
 </div></div>
 
+<div class="overlay" id="lost-quote-overlay"><div class="modal">
+  <div class="modal-head"><div><h3>Mark quote as lost</h3><p>Why didn't it go ahead? This feeds the lost-reasons report in Sales.</p></div><button class="x" aria-label="Close" onclick="closeModal('lost-quote-overlay')">×</button></div>
+  <div class="modal-body">
+    <div class="field"><label>Reason</label><select id="lost-reason"></select></div>
+    <div class="field"><label>Notes <span style="color:var(--ink-faint);font-weight:400">(optional)</span></label><textarea id="lost-note" rows="2" placeholder="e.g. competitor quoted $350, wants it done after Christmas..."></textarea></div>
+  </div>
+  <div class="modal-foot"><button class="btn ghost" onclick="closeModal('lost-quote-overlay')">Never mind</button><button class="btn primary" style="background:var(--coral);border-color:var(--coral)" onclick="confirmMarkLost()">Mark lost</button></div>
+</div></div>
+
 <div class="overlay" id="payment-overlay"><div class="modal">
   <div class="modal-head"><div><h3>Record payment</h3><p id="pay-modal-sub">—</p></div><button class="x" aria-label="Close" onclick="closeModal('payment-overlay')">×</button></div>
   <div class="modal-body">
@@ -1783,6 +1819,7 @@
 // instead, consistent with "clean status badges, subtle indicators" rather
 // than a second icon system to maintain.
 const NAV_ICONS={
+  sales:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 17 9 11 13 15 21 7"/><polyline points="15 7 21 7 21 13"/></svg>',
   dashboard:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>',
   pipeline:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="16" y2="12"/><line x1="4" y1="18" x2="12" y2="18"/></svg>',
   leads:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8"/><path d="M3 8l9 6 9-6"/><path d="M3 8l6-5h6l6 5"/></svg>',
@@ -1884,6 +1921,22 @@ function isPaid(r){return r.stage==='paid'}                                     
 function isBooked(r){return r.stage==='scheduled'||r.stage==='completed'}                // has a day on the calendar
 function isJob(r){return r.stage!=='new'&&r.stage!=='quoted'&&r.stage!=='followup'&&r.stage!=='cancelled'}      // past the sales stages, still an active job
 function isCancelled(r){return r.stage==='cancelled'}
+// A lost quote rides on the existing 'cancelled' stage (so pipeline columns
+// and the ServiceM8 importer's lost→cancelled mapping stay as they are),
+// told apart from a cancelled JOB by never having been won.
+function isSalesStage(r){return r.stage==='new'||r.stage==='quoted'||r.stage==='followup'}
+function isLost(r){return r.stage==='cancelled'&&(!!r.lostAt||!(r.wonAt||r.approvedAt))}
+const LOST_REASONS=[
+  {key:'price',label:'Price too high'},
+  {key:'competitor',label:'Went with a competitor'},
+  {key:'timing',label:'Not now / timing'},
+  {key:'no_response',label:'Stopped responding'},
+  {key:'diy',label:'Doing it themselves'},
+  {key:'scope',label:'Not a job we do / out of area'},
+  {key:'other',label:'Other'}
+];
+function lostReasonLabel(k){const f=LOST_REASONS.find(x=>x.key===k);return f?f.label:(k||'Not recorded');}
+function escapeHtmlSafe(t){return String(t==null?'':t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function isOpenSale(r){return r.stage==='new'||r.stage==='quoted'||r.stage==='followup'} // still selling
 
 /* ===== Job status: the full customer-facing lifecycle badge, richer than
@@ -2172,6 +2225,10 @@ function snapshotWeatherFor(r,iso){
 /* ===== Goals: targets + the reward you promised yourself ===== */
 let goals = [];
 let goalSeq = 1;
+// Sales Manager: monthly ad/marketing spend per lead source (persisted in
+// pricing_config.sourceSpend) and the currently selected reporting period.
+let salesSourceSpend = {};
+let salesPeriod = '90d';
 const GOAL_PERKS = [
   {at:10000,perk:'Buy the second pressure unit'},
   {at:50000,perk:'Hire a part-time crew member'},
@@ -2823,6 +2880,7 @@ function switchView(v){
   if(v==='ops')renderOps();
   if(v==='pricing')renderPricing();
   if(v==='dashboard')renderDashboard();
+  if(v==='sales')renderSales();
   if(v==='goals')renderGoals();
   if(v==='customers')renderCustomers();
   window.scrollTo({top:0,behavior:'smooth'});
@@ -2830,6 +2888,7 @@ function switchView(v){
 const MODULE_ACCENT={
   pipeline:['--m-sales','--m-sales-wash'], leads:['--m-sales','--m-sales-wash'],
   jobsflow:['--m-sales','--m-sales-wash'], customers:['--m-sales','--m-sales-wash'],
+  sales:['--m-sales','--m-sales-wash'],
   calendar:['--m-cal','--m-cal-wash'],
   inbox:['--m-money','--m-money-wash'],
   ops:['--m-ops','--m-ops-wash'],
@@ -4029,7 +4088,7 @@ function reviewQuote(){
   const r=records.find(x=>x.id===activeLeadId);
   const e=estimateJob(lines.map(l=>({svc:l.svc,qty:parseFloat(l.qty)||0})));
   const total=quoteTotal();
-  const margin=total>0?Math.round((total-e.cost)/total*100):0;
+  const margin=Math.round(TK_COST.marginPct(total,e.cost));
   const a=quoteAssumptions;
   const marginTone=margin>=50?'good':margin>=40?'ok':'low';
   document.getElementById('review-body').innerHTML=`
@@ -4269,8 +4328,9 @@ function renderEstimate(){
   if(!lines.length){zone.innerHTML='';return;}
   const e=estimateJob(lines.map(l=>({svc:l.svc,qty:parseFloat(l.qty)||0})),quoteTravelInfo);
   const finalTotal=quoteTotal();
-  const profit=finalTotal-e.cost;
+  const profit=TK_COST.profit(finalTotal,e.cost);
   const marginPct=TK_COST.marginPct(finalTotal,e.cost);
+  const gstNote=COST_INPUTS.gstRegistered?' (ex-GST)':'';
   const targetPct=Math.round(COST_INPUTS.targetMargin*100);
   const diff=finalTotal-e.recommended;
   let warnBanner='';
@@ -4290,15 +4350,16 @@ function renderEstimate(){
         <div class="est-r"><span>${quoteTravelInfo?`Travel — ${e.travelKm.toFixed(1)}km round trip${e.travelMins?' · ~'+fmtDur(Math.round(e.travelMins))+' drive':''}${quoteTravelInfo.source==='estimate'?' (estimated)':''}`:`Fuel (${e.travelKm}km round trip — add a home address in Settings for an accurate estimate)`}</span><span>${money(e.fuelCost)}</span></div>
         <div class="est-r"><span>Equipment wear</span><span>${money(e.equipmentCost)}</span></div>
         <div class="est-r"><span>Consumables</span><span>${money(e.consumablesCost)}</span></div>
+        <div class="est-r"><span>${e.overheadCost>0?`Overheads (${money(TK_COST.overheadsMonthly())}/mo ÷ ${COST_INPUTS.jobsPerMonth} jobs)`:`Overheads <a href="#" onclick="switchView('pricing');return false" style="color:var(--accent)">not set</a>`}</span><span>${money(e.overheadCost)}</span></div>
         <div class="est-r est-total"><span>Total cost to deliver</span><span>${money(e.cost)}</span></div>
       </div>
       <div class="est-rec">
-        <div><div class="est-rec-l">Recommended Price</div><div class="est-rec-sub">for your ${targetPct}% target margin${e.recommended<=COST_INPUTS.calloutMin?' \u00b7 minimum call-out applied':''}</div></div>
+        <div><div class="est-rec-l">Recommended Price</div><div class="est-rec-sub">incl. GST, for your ${targetPct}% target margin${gstNote}${e.recommended<=COST_INPUTS.calloutMin?' \u00b7 minimum call-out applied':''}</div></div>
         <div class="est-rec-amt">${money(e.recommended)}</div>
       </div>
       <div class="est-rec-detail">
         <span>Estimated Costs <b>${money(e.cost)}</b></span>
-        <span>Estimated Gross Profit <b>${money(e.recommended-e.cost)}</b></span>
+        <span>Estimated Profit${gstNote} <b>${money(TK_COST.profit(e.recommended,e.cost))}</b></span>
         <span>Estimated Margin <b>${targetPct}%</b></span>
       </div>
     </div>
@@ -4315,9 +4376,10 @@ function renderEstimate(){
       <div class="ps-row"><span>Recommended Total</span><span>${money(e.recommended)}</span></div>
       <div class="ps-row"><span>Final Total</span><span>${money(finalTotal)}</span></div>
       <div class="ps-row"><span>Difference</span><span class="${diff>0?'pc-green':diff<0?'pc-orange':'pc-grey'}">${diff>=0?'+':'-'}${money(Math.abs(diff))}</span></div>
+      ${COST_INPUTS.gstRegistered?`<div class="ps-row"><span>GST to IRD</span><span>${money(finalTotal-TK_COST.exGst(finalTotal))}</span></div>`:''}
       <div class="ps-row"><span>Estimated Costs</span><span>${money(e.cost)}</span></div>
-      <div class="ps-row"><span>Estimated Gross Profit</span><span>${money(profit)}</span></div>
-      <div class="ps-row total"><span>Estimated Margin</span><span class="${marginPct<40?'pc-red':marginPct<targetPct?'pc-orange':'pc-green'}">${marginPct.toFixed(1)}%</span></div>
+      <div class="ps-row"><span>Estimated Profit${gstNote}</span><span>${money(profit)}</span></div>
+      <div class="ps-row total"><span>Estimated Margin${gstNote}</span><span class="${marginPct<40?'pc-red':marginPct<targetPct?'pc-orange':'pc-green'}">${marginPct.toFixed(1)}%</span></div>
       ${warnBanner}
     </div>`;
 }
@@ -5302,7 +5364,7 @@ function openDetail(id){
       <button class="btn ghost sm" onclick="openCustomerProfile(${id})">Full profile</button>
       ${jobStatusBadge(r)}
       ${canEditJobStatus(r)?`<select style="font-size:12px;padding:4px 8px;border-radius:980px" onchange="setManualStatus(${id},this.value)"><option value="">Change status…</option>${manualStatusOptions(r)}</select>`:''}
-      ${r.stage!=='cancelled'&&r.stage!=='paid'?`<button class="btn ghost sm" onclick="cancelJob(${id})" title="Mark this job as cancelled">Cancel</button>`:''}
+      ${isSalesStage(r)?`<button class="btn ghost sm" onclick="markLost(${id})" title="Customer didn't go ahead">Mark lost</button>`:r.stage!=='cancelled'&&r.stage!=='paid'?`<button class="btn ghost sm" onclick="cancelJob(${id})" title="Mark this job as cancelled">Cancel</button>`:''}
     </div></div>
     <div class="detail-grid">
       <div>
@@ -5378,6 +5440,7 @@ function openDetail(id){
           <div class="kv"><span class="k">Crew</span><span class="v">${r.tech}</span></div>
           <div class="kv"><span class="k">GPS check-in</span><span class="v">${r.gps==='checked'?'On site ✓':r.gps==='enroute'?'En route':'Not started'}</span></div>
           ${r.finishedAt&&r.durationMin!=null?`<div class="kv"><span class="k">Job duration</span><span class="v">${fmtDur(r.durationMin)}</span></div>`:''}
+          ${r.lostReason?`<div class="kv"><span class="k">Lost — reason</span><span class="v">${escapeHtmlSafe(lostReasonLabel(r.lostReason))}${r.lostNote?' · '+escapeHtmlSafe(r.lostNote):''}</span></div>`:''}
           ${r.cancelReason?`<div class="kv"><span class="k">Cancel reason</span><span class="v">${r.cancelReason}</span></div>`:''}
           ${r.signatureDataUrl?`<div style="margin-top:10px"><div class="k" style="font-size:12px;color:var(--ink-faint);margin-bottom:4px">Customer signature</div><img src="${r.signatureDataUrl}" alt="Customer signature" style="max-width:200px;border:1px solid var(--line);border-radius:var(--radius-sm);background:#fff"></div>`:''}
         </div>
@@ -5521,10 +5584,10 @@ function computeAlerts(){
   records.filter(r=>r.stage==='quoted'||r.stage==='followup').forEach(r=>{
     if(!r.services.length||!r.total)return;
     const est=estimateJob(r.services);
-    const margin=r.total>0?(r.total-est.cost)/r.total:0;
-    if(margin<0.45){
+    const margin=TK_COST.marginPct(r.total,est.cost)/100;
+    if(margin<COST_INPUTS.targetMargin-0.10){
       alerts.push({tone:'warn',title:'Quote margin low',
-        text:`${r.name}'s quote runs ~${Math.round(margin*100)}% margin (target 55%). Consider +${Math.max(5,Math.round((est.recommended-r.total)/r.total*100))}%.`,
+        text:`${r.name}'s quote runs ~${Math.round(margin*100)}% margin (target ${Math.round(COST_INPUTS.targetMargin*100)}%). Consider +${Math.max(5,Math.round((est.recommended-r.total)/r.total*100))}%.`,
         action:{label:'Open quote',fn:`openDetail(${r.id})`}});
     }
   });
@@ -6312,11 +6375,49 @@ function renderPricing(){
       <div class="rate-tier" style="padding:9px 0;border-bottom:1px solid var(--line-soft)"><label>Avg round-trip drive</label><div class="ri"><input type="number" value="${COST_INPUTS.avgKm}" onchange="setCostInput('avgKm',this.value)"><span>km per job</span></div></div>
       <div class="rate-tier" style="padding:9px 0;border-bottom:1px solid var(--line-soft)"><label>Equipment</label><div class="ri"><span>$</span><input type="number" value="${COST_INPUTS.equipmentPerJob}" onchange="setCostInput('equipmentPerJob',this.value)"><span>/job (wear &amp; maintenance)</span></div></div>
       <div class="rate-tier" style="padding:9px 0;border-bottom:1px solid var(--line-soft)"><label>Consumables</label><div class="ri"><span>$</span><input type="number" value="${COST_INPUTS.consumablesPerJob}" onchange="setCostInput('consumablesPerJob',this.value)"><span>/job (PPE, misc supplies)</span></div></div>
-      <div class="rate-tier" style="padding:9px 0;border-bottom:1px solid var(--line-soft)"><label>Target profit margin</label><div class="ri"><input type="number" value="${Math.round(COST_INPUTS.targetMargin*100)}" onchange="setCostInput('targetMargin',this.value/100)"><span>% — drives the recommended price on every quote</span></div></div>
+      <div class="rate-tier" style="padding:9px 0;border-bottom:1px solid var(--line-soft)"><label>Target profit margin</label><div class="ri"><input type="number" value="${Math.round(COST_INPUTS.targetMargin*100)}" onchange="setCostInput('targetMargin',this.value/100)"><span>%${COST_INPUTS.gstRegistered?' of ex-GST revenue':''} — drives the recommended price on every quote</span></div></div>
       <div class="rate-tier" style="padding:9px 0"><label>Minimum call-out</label><div class="ri"><span>$</span><input type="number" value="${COST_INPUTS.calloutMin}" onchange="setCostInput('calloutMin',this.value)"><span>lowest recommended price, however small the job</span></div></div>
+      <div class="rate-tier" style="padding:9px 0;border-top:1px solid var(--line-soft)"><label>GST registered</label><div class="ri"><input type="checkbox" ${COST_INPUTS.gstRegistered?'checked':''} onchange="setCostFlag('gstRegistered',this.checked)" style="width:auto"><span>quoted prices include 15% GST — margin is worked out on what you keep</span></div></div>
     </div>
+    ${renderOverheadsPanel()}
+    ${renderProductivityPanel()}
     ${renderPricingStats()}`;
 }
+// Fixed monthly costs → a per-job overhead charge added to every quote's
+// cost to deliver, so the recommended price covers the whole business,
+// not just the hours on site.
+function renderOverheadsPanel(){
+  const monthly=TK_COST.overheadsMonthly(), perJob=TK_COST.overheadPerJob();
+  // Real throughput, for a sanity check against the jobs/month figure:
+  // completed or paid jobs over the last 90 days.
+  const since=Date.now()-90*864e5;
+  const done90=records.filter(r=>(r.stage==='completed'||r.stage==='paid')&&r.scheduledDateISO&&new Date(r.scheduledDateISO).getTime()>=since).length;
+  const actualPerMonth=Math.round(done90/3);
+  const row=(k,o)=>`<div class="rate-tier" style="padding:9px 0;border-bottom:1px solid var(--line-soft)"><label>${o.label}</label><div class="ri"><span>$</span><input type="number" value="${o.perMonth}" onchange="setOverhead('${k}',this.value)"><span>/month</span></div></div>`;
+  return `<div class="panel" style="margin-top:14px"><h4>Overheads <span class="demo-tag">monthly, ex-GST</span></h4>
+    <p style="font-size:13px;color:var(--ink-soft);margin:-4px 0 14px">Costs the business pays every month regardless of jobs. They're spread across your jobs so every quote covers its share.</p>
+    ${Object.entries(TK_COST.OVERHEADS).map(([k,o])=>row(k,o)).join('')}
+    <div class="rate-tier" style="padding:9px 0;border-bottom:1px solid var(--line-soft)"><label>Jobs per month</label><div class="ri"><input type="number" min="1" value="${COST_INPUTS.jobsPerMonth}" onchange="setCostInput('jobsPerMonth',this.value);renderPricing()"><span>${done90?`last 90 days averaged ${actualPerMonth}/month`:'how many jobs you typically complete'}</span></div></div>
+    <div class="kv" style="padding-top:10px"><span class="k" style="font-weight:600">Overhead per job</span><span class="v">${monthly>0?`${money(monthly)}/mo ÷ ${COST_INPUTS.jobsPerMonth} = <b>$${perJob.toFixed(2)}</b>`:'Not set — quotes currently ignore overheads'}</span></div>
+  </div>`;
+}
+// How fast a crew covers each service and how much chemical it uses — the
+// two numbers that turn a measured area into labour hours and litres.
+function renderProductivityPanel(){
+  const rows=Object.entries(SERVICES).map(([k,v])=>{
+    const sc=SVC_COST[k]; if(!sc)return '';
+    return `<div class="rate-tier" style="padding:9px 0;border-bottom:1px solid var(--line-soft)"><label>${v.label}</label>
+      <div class="ri"><input type="number" min="1" value="${sc.m2ph}" onchange="setSvcCost('${k}','m2ph',this.value)"><span>${v.unit}/hr</span>
+      ${sc.chem!=='none'?`<input type="number" step="1" min="0" value="${Math.round(sc.litrePerM2*1000)}" onchange="setSvcCost('${k}','litrePerM2',this.value/1000)" style="margin-left:10px"><span>mL/${v.unit}</span>`:''}</div></div>`;
+  }).join('');
+  return `<div class="panel" style="margin-top:14px"><h4>Productivity <span class="demo-tag">per crew</span></h4>
+    <p style="font-size:13px;color:var(--ink-soft);margin:-4px 0 14px">How much the crew gets through per hour and how much chemical each unit uses. If jobs keep running over the estimated time, lower the rate here.</p>
+    ${rows}
+  </div>`;
+}
+function setOverhead(k,val){TK_COST.OVERHEADS[k].perMonth=parseFloat(val)||0;saveState();savePricingConfig();renderPricing();toast('Overhead updated');}
+function setSvcCost(k,field,val){const n=parseFloat(val);if(!(n>=0)||(field==='m2ph'&&!(n>0))){toast('Enter a number above zero');renderPricing();return;}SVC_COST[k][field]=n;saveState();savePricingConfig();toast(SERVICES[k].label+' productivity updated');}
+function setCostFlag(key,on){COST_INPUTS[key]=!!on;saveState();savePricingConfig();renderPricing();toast('Pricing input updated');}
 // Per-service statistics: real counts from records, not fabricated —
 // how often each service has been quoted, its win rate, and the average
 // price it's actually gone out at, so pricing decisions use real history.
@@ -6327,8 +6428,12 @@ function renderPricingStats(){
   // quarter's chemical prices should keep showing what its margin actually
   // was. Older quotes sent before this feature existed simply don't carry
   // that data and are excluded from the margin average, not guessed at.
-  const wonWithMargin=records.filter(r=>isWon(r)&&r.estimatedMarginPct!=null);
-  const overallAvgMargin=wonWithMargin.length?wonWithMargin.reduce((s,r)=>s+r.estimatedMarginPct,0)/wonWithMargin.length:null;
+  // Recomputed from the persisted total + estimatedCost (both snapshotted
+  // at send time) rather than the stored estimatedMarginPct, which older
+  // quotes calculated on GST-inclusive revenue and so overstate by ~7-13pts.
+  const recMargin=r=>r.estimatedCost!=null&&r.total?TK_COST.marginPct(r.total,r.estimatedCost):r.estimatedMarginPct;
+  const wonWithMargin=records.filter(r=>isWon(r)&&recMargin(r)!=null);
+  const overallAvgMargin=wonWithMargin.length?wonWithMargin.reduce((s,r)=>s+recMargin(r),0)/wonWithMargin.length:null;
   const headline=overallAvgMargin!=null?`<div class="kv" style="border-bottom:1px solid var(--line);padding-bottom:10px;margin-bottom:4px"><span class="k" style="font-weight:600">Average margin (won quotes)</span><span class="v ${overallAvgMargin<40?'pc-red':overallAvgMargin<Math.round(COST_INPUTS.targetMargin*100)?'pc-orange':'pc-green'}" style="font-weight:700">${overallAvgMargin.toFixed(1)}%</span></div>`:'';
   const rows=Object.entries(SERVICES).map(([k,v])=>{
     const withSvc=records.filter(r=>r.services.some(s=>s.svc===k));
@@ -6359,7 +6464,10 @@ async function savePricingConfig(){
   const config={
     rates:Object.fromEntries(Object.entries(SERVICES).map(([k,v])=>[k,v.rate])),
     chemicals:Object.fromEntries(Object.entries(CHEMICALS).map(([k,v])=>[k,v.perL])),
-    costInputs:Object.assign({},COST_INPUTS)
+    costInputs:Object.assign({},COST_INPUTS),
+    overheads:Object.fromEntries(Object.entries(TK_COST.OVERHEADS).map(([k,v])=>[k,v.perMonth])),
+    svcCost:Object.fromEntries(Object.entries(SVC_COST).map(([k,v])=>[k,{m2ph:v.m2ph,litrePerM2:v.litrePerM2}])),
+    sourceSpend:Object.assign({},salesSourceSpend)
   };
   const {error}=await sb.from('businesses').upsert({id:currentBusinessId,pricing_config:config});
   if(error)console.error('Save pricing config failed',error);
@@ -6369,6 +6477,9 @@ function applyPricingConfig(config){
   if(config.rates)Object.entries(config.rates).forEach(([k,v])=>{if(SERVICES[k])SERVICES[k].rate=v;});
   if(config.chemicals)Object.entries(config.chemicals).forEach(([k,v])=>{if(CHEMICALS[k])CHEMICALS[k].perL=v;});
   if(config.costInputs)Object.assign(COST_INPUTS,config.costInputs);
+  if(config.overheads)Object.entries(config.overheads).forEach(([k,v])=>{if(TK_COST.OVERHEADS[k]&&typeof v==='number')TK_COST.OVERHEADS[k].perMonth=v;});
+  if(config.sourceSpend&&typeof config.sourceSpend==='object')salesSourceSpend=Object.assign({},config.sourceSpend);
+  if(config.svcCost)Object.entries(config.svcCost).forEach(([k,v])=>{if(SVC_COST[k]&&v){if(typeof v.m2ph==='number'&&v.m2ph>0)SVC_COST[k].m2ph=v.m2ph;if(typeof v.litrePerM2==='number')SVC_COST[k].litrePerM2=v.litrePerM2;}});
 }
 
 function toggleWorkflowSetting(key){workflowConfig[key]=!workflowConfig[key];openSettings();}
@@ -6384,6 +6495,113 @@ async function saveWorkflowConfig(btn){
 function applyWorkflowConfig(config){
   if(!config)return;
   workflowConfig=Object.assign({requireChecklist:false,requirePhotos:false,requireSignoff:false},config);
+}
+
+/* ---------- SALES MANAGER ---------- */
+// Every figure here comes from TK_SALES.report() (sales-engine.js) over the
+// same `records` the pipeline uses — nothing is estimated or made up. Leads
+// are grouped by the period they ARRIVED in, so a conversion rate means
+// "of the leads that came in, how many became paying jobs".
+const SALES_PERIODS=[{k:'month',l:'This month'},{k:'30d',l:'30 days'},{k:'90d',l:'90 days'},{k:'year',l:'This year'},{k:'all',l:'All time'}];
+const SALES_KNOWN_SOURCES=['Facebook','Google search','Website','Referral','Repeat customer','Flyer / local','Other'];
+function salesPct(v,digits){return v==null?'—':(v.toFixed(digits||0)+'%');}
+function salesHours(h){
+  if(h==null)return '—';
+  if(h<1)return Math.max(1,Math.round(h*60))+' min';
+  if(h<48)return (h<10?h.toFixed(1):Math.round(h))+' hrs';
+  return (h/24).toFixed(1)+' days';
+}
+function setSalesPeriod(k){salesPeriod=k;renderSales();}
+function setSourceSpend(src,val){
+  const n=parseFloat(val);
+  if(n>0)salesSourceSpend[src]=n;else delete salesSourceSpend[src];
+  savePricingConfig();renderSales();toast(src+' spend updated');
+}
+function renderSales(){
+  const el=document.getElementById('view-sales'); if(!el)return;
+  const rep=TK_SALES.report(records,{period:salesPeriod,sourceSpend:salesSourceSpend,lostLabel:lostReasonLabel});
+  const t=rep.totals;
+  const periodLabel=(SALES_PERIODS.find(p=>p.k===salesPeriod)||{}).l||'';
+  const metric=(label,val,note)=>`<div class="metric"><div class="m-label">${label}</div><div class="m-val">${val}</div>${note?`<div class="m-note">${note}</div>`:''}</div>`;
+
+  // ---- Funnel ----
+  const fmax=Math.max(1,t.leads);
+  const frow=(label,n,sub)=>`<div class="funnel-row"><span class="fr-l">${label}</span><div class="fr-bar"><div style="width:${n/fmax*100}%;${n?'':'min-width:0'}"></div></div><span class="fr-v"><b>${n}</b> ${sub?`<small>${sub}</small>`:''}</span></div>`;
+  const funnelHtml=t.leads?`
+    ${frow('Leads in',t.leads,'')}
+    ${frow('Quoted',t.quoted,salesPct(t.leadToQuotePct))}
+    ${frow('Won',t.won,salesPct(t.conversionPct))}
+    ${frow('Lost',t.lost,'')}
+    ${frow('Still open',t.open,'')}
+    <p style="font-size:12px;color:var(--ink-faint);margin-top:10px">Of quotes that have been decided, <b style="color:var(--ink)">${salesPct(t.winRateDecidedPct)}</b> were won. ${t.lostValue?`${money(t.lostValue)} in quotes was lost.`:''}</p>`
+    :'<div class="empty-state" style="padding:16px"><div class="sm">No leads came in during this period.</div></div>';
+
+  // ---- Monthly trend ----
+  const monthlyHtml=`<div class="sales-scroll"><table class="sales-table">
+    <thead><tr><th>Month</th><th>Leads</th><th>Quoted</th><th>Won</th><th>Conversion</th><th>Won revenue</th></tr></thead>
+    <tbody>${rep.monthly.map(m=>`<tr><td>${m.label}</td><td>${m.leads}</td><td>${m.quoted}</td><td>${m.won}</td><td>${salesPct(m.conversionPct)}</td><td>${m.wonValue?money(m.wonValue):'—'}</td></tr>`).join('')}</tbody>
+  </table></div>`;
+
+  // ---- Lead sources ----
+  const srcNames=[...new Set([...rep.sources.map(x=>x.source),...SALES_KNOWN_SOURCES])];
+  const srcRows=srcNames.map(name=>{
+    const x=rep.sources.find(y=>y.source===name)||{source:name,leads:0,won:0,wonValue:0,conversionPct:null,spend:0,costPerLead:null,costPerWin:null,returnX:null};
+    const monthly=salesSourceSpend[name]||'';
+    const ret=x.returnX==null?'—':`<span class="${x.returnX>=3?'pc-green':x.returnX>=1?'pc-orange':'pc-red'}">${x.returnX.toFixed(1)}×</span>`;
+    return `<tr><td>${escapeHtmlSafe(name)}</td><td>${x.leads}</td><td>${x.won}</td><td>${salesPct(x.conversionPct)}</td><td>${x.wonValue?money(x.wonValue):'—'}</td>
+      <td><input type="number" min="0" step="10" placeholder="0" value="${monthly}" onchange="setSourceSpend('${escapeHtmlSafe(name).replace(/'/g,"\\'")}',this.value)"></td>
+      <td>${x.costPerLead!=null?money(x.costPerLead):'—'}</td><td>${x.costPerWin!=null?money(x.costPerWin):'—'}</td><td>${ret}</td></tr>`;
+  }).join('');
+  const sourcesHtml=`<div class="sales-scroll"><table class="sales-table">
+    <thead><tr><th>Source</th><th>Leads</th><th>Won</th><th>Conv.</th><th>Revenue</th><th>Spend /mo</th><th>Per lead</th><th>Per job</th><th>Return</th></tr></thead>
+    <tbody>${srcRows}</tbody></table></div>
+    <p style="font-size:12px;color:var(--ink-faint);margin-top:10px">Enter what you spend a month on each channel. Return = won revenue ÷ spend over ${periodLabel.toLowerCase()} (${rep.months.toFixed(1)} months). Above 3× is healthy for most service businesses.</p>`;
+
+  // ---- Lost reasons ----
+  const lostMax=Math.max(1,...rep.lost.map(x=>x.count));
+  const lostHtml=rep.lost.length?rep.lost.map(x=>`<div class="funnel-row"><span class="fr-l">${escapeHtmlSafe(x.label)}</span><div class="fr-bar"><div style="width:${x.count/lostMax*100}%;background:var(--coral)"></div></div><span class="fr-v"><b>${x.count}</b> <small>${x.value?money(x.value):''}</small></span></div>`).join('')
+    +(()=>{const p=rep.lost.find(x=>x.key==='price');return p&&rep.lost.reduce((s,x)=>s+x.count,0)>=4&&p.count/rep.lost.reduce((s,x)=>s+x.count,0)>=0.4
+      ?`<p style="font-size:12px;color:var(--ink-soft);margin-top:10px">Price is behind ${Math.round(p.count/rep.lost.reduce((s,x)=>s+x.count,0)*100)}% of lost quotes. Check those quotes' margins in Pricing before cutting rates — the problem may be how the value is presented rather than the number.</p>`:'';})()
+    :'<div class="empty-state" style="padding:16px"><div class="sm">No lost quotes in this period. Use <b>Mark lost</b> on a quote to record why it didn\'t go ahead.</div></div>';
+
+  // ---- Speed to quote ----
+  const sp=rep.speed;
+  const speedHtml=sp.sample?`
+    <div class="kv"><span class="k" style="font-weight:600">Median time to send a quote</span><span class="v"><b>${salesHours(sp.medianHours)}</b> <small style="color:var(--ink-faint)">${sp.sample} quote${sp.sample!==1?'s':''}</small></span></div>
+    ${sp.buckets.map(b=>`<div class="kv"><span class="k">${b.label}</span><span class="v">${b.quotes} quoted · ${b.decided?salesPct(b.winRatePct)+' won':'none decided yet'}</span></div>`).join('')}
+    <p style="font-size:12px;color:var(--ink-faint);margin-top:10px">Win rate counts only quotes that have been won or lost.</p>`
+    :'<div class="empty-state" style="padding:16px"><div class="sm">No quotes sent in this period yet.</div></div>';
+
+  // ---- Needs attention ----
+  const attn=rep.attention.slice(0,12);
+  const attnHtml=attn.length?attn.map(a=>`<div class="attn-row" onclick="openDetail(${a.r.id})">
+      <span><span class="attn-name" style="font-weight:600">${escapeHtmlSafe(a.r.name||'Unnamed lead')}</span> <span style="color:var(--ink-faint)">· ${escapeHtmlSafe(TK_SALES.sourceOf(a.r))}${a.r.total?' · '+money(a.r.total):''}</span></span>
+      <span class="attn-tag ${a.ageH>72?'bad':''}">${a.kind==='unquoted'?'No quote · '+salesHours(a.ageH):'Quote quiet · '+salesHours(a.ageH)}</span></div>`).join('')
+    +(rep.attention.length>attn.length?`<p style="font-size:12px;color:var(--ink-faint);margin-top:8px">+${rep.attention.length-attn.length} more in the pipeline.</p>`:'')
+    :'<div class="empty-state" style="padding:16px"><div class="sm">Nothing waiting. Every lead has a quote and no sent quote has gone quiet for more than 5 days.</div></div>';
+
+  el.innerHTML=`
+    <div class="view-head"><div><h2>Sales Manager</h2><p>Where your leads come from, how many turn into jobs, and why the rest don't.</p></div>
+      <div class="seg sales-periods">${SALES_PERIODS.map(p=>`<button class="seg-btn ${p.k===salesPeriod?'sel':''}" onclick="setSalesPeriod('${p.k}')">${p.l}</button>`).join('')}</div></div>
+    <div class="dash-grid">
+      ${metric('Leads in',t.leads,periodLabel)}
+      ${metric('Conversion rate',salesPct(t.conversionPct),`${t.won} of ${t.leads} leads became jobs`)}
+      ${metric('Quote win rate',salesPct(t.winRateDecidedPct),`${t.won} won · ${t.lost} lost`)}
+      ${metric('Won revenue',money(t.wonValue),t.avgWonValue?'avg '+money(t.avgWonValue)+' per job':'')}
+      ${metric('Open quotes',money(t.pipelineValue),`${t.openQuotes} quote${t.openQuotes!==1?'s':''} awaiting a decision`)}
+      ${metric('Time to quote',salesHours(sp.medianHours),'median, lead in → quote sent')}
+    </div>
+    <div class="panel"><h4>Needs attention <span class="demo-tag">${rep.attention.length}</span></h4>${attnHtml}</div>
+    <div class="sales-2col">
+      <div class="panel"><h4>Funnel <span class="demo-tag">${periodLabel}</span></h4>${funnelHtml}</div>
+      <div class="panel"><h4>Lost reasons</h4>${lostHtml}</div>
+    </div>
+    <div class="panel"><h4>Lead sources</h4>${sourcesHtml}</div>
+    <div class="sales-2col">
+      <div class="panel"><h4>Last 6 months</h4>${monthlyHtml}</div>
+      <div class="panel"><h4>Speed to quote</h4>${speedHtml}</div>
+    </div>
+    ${rep.excludedImported?`<p style="font-size:12px;color:var(--ink-faint)">${rep.excludedImported} imported ServiceM8 record${rep.excludedImported!==1?'s are':' is'} left out — they don't carry reliable lead dates.</p>`:''}`;
 }
 
 /* ---------- D. DASHBOARD ---------- */
@@ -6680,7 +6898,7 @@ function renderJobsFlow(){
     </div>`;
 }
 // workflow transition helpers
-function markWon(id){const r=records.find(x=>x.id===id);if(!r.services.length){toast('Build a quote first');openQuoteModal(id);return;}r.stage='won';r.clientResponded=true;render();renderAll();openSchedule(id);notifyOwner('quote_accepted','Quote accepted — '+r.name,r.name+' accepted their quote for '+money(r.total||0)+'. Time to book it in.');triggerPush({type:'quote_accepted',title:'Quote approved',message:r.name+' approved your quote',url:'/index.html?open=pipeline'});}
+function markWon(id){const r=records.find(x=>x.id===id);if(!r.services.length){toast('Build a quote first');openQuoteModal(id);return;}r.stage='won';r.clientResponded=true;if(!r.wonAt)r.wonAt=Date.now();render();renderAll();openSchedule(id);notifyOwner('quote_accepted','Quote accepted — '+r.name,r.name+' accepted their quote for '+money(r.total||0)+'. Time to book it in.');triggerPush({type:'quote_accepted',title:'Quote approved',message:r.name+' approved your quote',url:'/index.html?open=pipeline'});}
 function markPaid(id,method){const r=records.find(x=>x.id===id);r.stage='paid';r.paidAt=Date.now();r.paymentStatus='paid';r.paymentMethod=method||r.paymentMethod||'Not specified';render();renderAll();if(document.getElementById('view-jobsflow').classList.contains('active'))renderJobsFlow();toast(`${r.name} marked paid ✓`);sendLifecycleEmail(r,'review_request');notifyOwner('payment_received','Payment received — '+money(r.total||0),r.name+' paid '+money(r.total||0)+' ('+(method||'method not specified')+').');triggerPush({type:'payment_received',title:'Payment received',message:'Payment received from '+r.name,url:'/index.html?open=pipeline'});}
 
 /* ===== Payments ledger — supports partial/multiple payments per job.
@@ -6744,6 +6962,25 @@ function recordPayment(id,amount,date,method,notes){
 // Cancelled jobs leave the active Pipeline board (it isn't one of STAGES'
 // board columns) but keep their full history — reachable from the customer
 // profile and dashboard the same as any other job, just visually distinct.
+let pendingLostId=null;
+function markLost(id){
+  pendingLostId=id;
+  const sel=document.getElementById('lost-reason');
+  if(sel)sel.innerHTML=LOST_REASONS.map(x=>`<option value="${x.key}">${x.label}</option>`).join('');
+  const note=document.getElementById('lost-note');if(note)note.value='';
+  openModal('lost-quote-overlay');
+}
+function confirmMarkLost(){
+  const r=records.find(x=>x.id===pendingLostId);if(!r)return;
+  const reason=document.getElementById('lost-reason').value;
+  const note=(document.getElementById('lost-note').value||'').trim();
+  r.lostFromStage=r.stage;
+  r.stage='cancelled';r.jobStatus=null;r.lostAt=Date.now();r.lostReason=reason;r.lostNote=note||null;
+  logStatusChange(r,'cancelled','Lost — '+lostReasonLabel(reason)+(note?': '+note:''));
+  closeModal('lost-quote-overlay');
+  render();renderAll();
+  toast(r.name+' marked lost');
+}
 let pendingCancelId=null;
 function cancelJob(id){
   pendingCancelId=id;
@@ -6961,6 +7198,7 @@ function setManualStatus(id,key){
   const target=MANUAL_STATUS_MAP[key];
   if(!target){toast('That status follows automatically — nothing to set manually');return;}
   r.stage=target.stage;r.jobStatus=target.jobStatus;
+  if(isWon(r)&&!r.wonAt)r.wonAt=Date.now();
   logStatusChange(r,key,'manually changed');
   render();renderAll();openDetail(id);
   toast('Status updated');
@@ -7739,6 +7977,7 @@ function removeGoal(id){goals=goals.filter(g=>g.id!==id);renderGoals();saveState
 function renderAll(){
   if(typeof saveState==='function')saveState();
   if(document.getElementById('view-dashboard').classList.contains('active'))renderDashboard();
+  if(document.getElementById('view-sales').classList.contains('active'))renderSales();
   if(document.getElementById('view-ops').classList.contains('active'))renderOps();
   // Scheduling a job (or dragging one) while the Calendar tab is already
   // open used to never show up there — render()/renderAll() run after every
@@ -7849,6 +8088,7 @@ function openMoreSheet(){
   document.getElementById('more-body').innerHTML=`
     <div class="more-group-label">Overview</div>
     ${!isTech?row('Dashboard',"switchView('dashboard')"):''}
+    ${!isTech?row('Sales Manager',"switchView('sales')"):''}
     ${row('Jobs',"switchView('jobsflow')")}
     ${row('Notifications',"openNotificationCentre()",false,notificationCentre.unread)}
     ${!isTech?`<div class="more-group-label">Work</div>${row('Operations',"switchView('ops')")}${row('Pricing',"switchView('pricing')")}${row('Goals',"switchView('goals')")}`:''}
@@ -8034,6 +8274,27 @@ function openConnections(){
         ?`<p><b>Ready.</b> Every invoice can generate a payment link — customers pay by card, and the invoice ${stripeStatus.webhookConfigured?'marks itself paid automatically':'still needs marking paid manually once you see the payment come through'}.</p>`
         :`<p>Let customers pay their invoice online by card. This is a one-time setup on the server your TurnKey runs on, not something to configure per business — ask whoever manages your deployment to add a Stripe key. Invoices can still be marked paid manually until then.</p>`}
     </div>
+    <div class="conn-card ${wixStatus.connected?'live':''}">
+      <div class="conn-top"><span class="conn-name">Wix — form leads</span><span class="conn-badge ${wixStatus.connected?'on':'off'}">${wixStatus.connected?'● CONNECTED':'not connected'}</span></div>
+      ${wixStatus.pendingUrl?`
+        <p><b>Copy this URL now</b> — for security it's shown only this once and can't be retrieved again (Regenerate makes a new one if you lose it).</p>
+        <div class="conn-keyrow"><input id="conn-wix-url" readonly value="${wixStatus.pendingUrl}" onclick="this.select()">
+          <button class="btn accent sm" onclick="copyEmbedField('conn-wix-url','conn-wix-url-btn','Copy URL')" id="conn-wix-url-btn">Copy URL</button>
+        </div>
+        <p style="font-size:12px;color:var(--ink-faint);margin-top:12px">In Wix: Automations → create a rule → trigger "Form submitted" → action "Send a webhook" → paste the URL above. Submissions land straight in Leads.</p>
+        <button class="btn ghost sm" style="margin-top:8px" onclick="connectWix()">Regenerate URL</button> <button class="btn ghost sm" onclick="disconnectWix()">Disconnect</button>`
+      :wixStatus.connected
+        ?`<p><b>Connected.</b> Submissions from the Wix Automation using this webhook land straight in Leads.</p><button class="btn ghost sm" onclick="connectWix()">Regenerate URL</button> <button class="btn ghost sm" onclick="disconnectWix()">Disconnect</button>`
+        :`<p>Get a webhook URL to paste into a Wix Automation ("When a form is submitted → Send a webhook") — submissions land straight in Leads, no manual copy-paste.</p><button class="btn accent sm" onclick="connectWix()">Connect Wix</button>`}
+    </div>
+    <div class="conn-card ${metaStatus.connected?'live':''}">
+      <div class="conn-top"><span class="conn-name">Meta — Facebook &amp; Instagram lead ads</span><span class="conn-badge ${metaStatus.connected?'on':'off'}">${metaStatus.connected?'● CONNECTED':'not connected'}</span></div>
+      ${metaStatus.connected
+        ?`<p><b>Connected</b> to Page ${metaStatus.pageId}. New Lead Ads submissions land straight in Leads.</p><button class="btn ghost sm" onclick="disconnectMeta()">Disconnect</button>`
+        :`<p>Connect a Facebook Page to pull its Lead Ads submissions straight into Leads. Needs a Meta App with the <code>leads_retrieval</code> permission (Meta App Review required) and a long-lived Page Access Token — paste them below.</p>
+          <div class="conn-keyrow"><input id="conn-meta-pageid" placeholder="Page ID"></div>
+          <div class="conn-keyrow" style="margin-top:6px"><input id="conn-meta-token" placeholder="Page Access Token" type="password"><button class="btn accent sm" onclick="connectMeta()">Connect</button></div>`}
+    </div>
     <div class="conn-note">${emailAccount?"You're fully connected. Nice.":"Connect Gmail to send quotes and invoices straight from Turnkey."}</div>`;
   openModal('conn-overlay');
 }
@@ -8167,6 +8428,83 @@ async function loadStripeStatus(){
     const j=await res.json();
     if(res.ok)stripeStatus={configured:!!j.configured,webhookConfigured:!!j.webhookConfigured};
   }catch(e){console.error('Load Stripe status failed',e);}
+}
+/* ===== Wix + Meta lead webhooks: both land straight into the existing
+   Leads pipeline (same backend storage.addLead() the booking page already
+   uses) — these Connections cards only manage the credential, not the
+   lead flow itself. ===== */
+let wixStatus={connected:false};
+let metaStatus={connected:false,pageId:null};
+async function loadWixStatus(){
+  const url=backendUrl();
+  const {data:{session}}=await sb.auth.getSession();
+  if(!url||!session)return;
+  try{
+    const res=await fetch(`${url}/api/connections/wix/status`,{headers:{Authorization:'Bearer '+session.access_token}});
+    const j=await res.json();
+    if(res.ok)wixStatus={connected:!!j.connected};
+  }catch(e){console.error('Load Wix status failed',e);}
+}
+async function loadMetaStatus(){
+  const url=backendUrl();
+  const {data:{session}}=await sb.auth.getSession();
+  if(!url||!session)return;
+  try{
+    const res=await fetch(`${url}/api/connections/meta/status`,{headers:{Authorization:'Bearer '+session.access_token}});
+    const j=await res.json();
+    if(res.ok)metaStatus={connected:!!j.connected,pageId:j.pageId||null};
+  }catch(e){console.error('Load Meta status failed',e);}
+}
+// The webhook token is only ever returned in THIS response — only its hash
+// is stored server-side, so it can't be shown again later. Prompting here
+// (rather than a toast) keeps it on screen long enough to actually copy.
+async function connectWix(){
+  const url=backendUrl();
+  const {data:{session}}=await sb.auth.getSession();
+  if(!url||!session){toast('Please sign in again');return;}
+  try{
+    const res=await fetch(`${url}/api/connections/wix/connect`,{method:'POST',headers:{Authorization:'Bearer '+session.access_token}});
+    const j=await res.json();
+    if(!res.ok||!j.webhookUrl){toast(j.error||'Could not generate a webhook URL');return;}
+    // The URL is only ever returned in THIS response — only its hash is
+    // stored server-side, so it can't be fetched again later. Kept in
+    // wixStatus just long enough to render the one-time copyable field
+    // below; it's gone the next time Connections is opened fresh.
+    wixStatus={connected:true,pendingUrl:j.webhookUrl};
+    openConnections();
+  }catch(e){toast(describeConnectError(e));}
+}
+async function disconnectWix(){
+  if(!confirm('Disconnect Wix? The current webhook URL will stop working immediately.'))return;
+  const url=backendUrl();
+  const {data:{session}}=await sb.auth.getSession();
+  if(!url||!session)return;
+  await fetch(`${url}/api/connections/wix/disconnect`,{method:'POST',headers:{Authorization:'Bearer '+session.access_token}}).catch(()=>{});
+  wixStatus={connected:false};openConnections();toast('Wix disconnected');
+}
+async function connectMeta(){
+  const pageId=(document.getElementById('conn-meta-pageid')?.value||'').trim();
+  const pageToken=(document.getElementById('conn-meta-token')?.value||'').trim();
+  if(!pageId||!pageToken){toast('Enter both the Page ID and the Page Access Token');return;}
+  const url=backendUrl();
+  const {data:{session}}=await sb.auth.getSession();
+  if(!url||!session){toast('Please sign in again');return;}
+  try{
+    const res=await fetch(`${url}/api/connections/meta/connect`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.access_token},body:JSON.stringify({pageId,pageToken})});
+    const j=await res.json();
+    if(!res.ok){toast(j.error||'Could not connect this Meta Page');return;}
+    metaStatus={connected:true,pageId};
+    openConnections();
+    toast('Meta Page connected'+(j.pageName?' — '+j.pageName:''));
+  }catch(e){toast(describeConnectError(e));}
+}
+async function disconnectMeta(){
+  if(!confirm('Disconnect this Meta Page? New leads from it will stop arriving until reconnected.'))return;
+  const url=backendUrl();
+  const {data:{session}}=await sb.auth.getSession();
+  if(!url||!session)return;
+  await fetch(`${url}/api/connections/meta/disconnect`,{method:'POST',headers:{Authorization:'Bearer '+session.access_token}}).catch(()=>{});
+  metaStatus={connected:false,pageId:null};openConnections();toast('Meta Page disconnected');
 }
 async function loadCalendarConnections(){
   const url=backendUrl();
@@ -8579,6 +8917,8 @@ async function handleAuthedSession(session){
   loadCalendarBusyBlocks();
   loadNotificationPrefs();
   loadStripeStatus();
+  loadWixStatus();
+  loadMetaStatus();
   retryPendingPhotos();
   initOneSignal();
   loadNotificationCentre();
@@ -8612,7 +8952,7 @@ function stopLastSeenHeartbeat(){
    Cosmetic tab-hiding only — same precedent as the Marketing/Accounting tabs
    already hidden for everyone ("code intact, just hidden"). Actual data
    access is governed by RLS regardless of what's shown in the nav. */
-const TECH_HIDDEN_VIEWS=['pipeline','leads','customers','pricing','dashboard','goals'];
+const TECH_HIDDEN_VIEWS=['pipeline','leads','customers','pricing','dashboard','goals','sales'];
 function applyRoleVisibility(){
   const hide=currentUserRole==='technician';
   TECH_HIDDEN_VIEWS.forEach(v=>{
@@ -9854,7 +10194,7 @@ async function syncRecordToSupabase(r){
   // A quote exists once services/total have been built (stage moved past 'new'),
   // even before it's won — mirrors the `quotes` table that otherwise sits unused.
   if(r.total>0&&r.stage!=='new'){
-    const quotePayload={business_id:currentBusinessId,lead_id:r.customerId,amount:r.total,status:isWon(r)?'accepted':'sent'};
+    const quotePayload={business_id:currentBusinessId,lead_id:r.customerId,amount:r.total,status:isWon(r)?'accepted':isLost(r)?'declined':'sent'};
     if(r.quoteId){
       const {data,error}=await sb.from('quotes').update(quotePayload).eq('id',r.quoteId).select('public_token').single();
       if(error)throw error;

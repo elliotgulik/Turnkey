@@ -62,10 +62,22 @@ With `STORAGE=file`, data persists in `backend/data/` on the instance disk. Fine
 | POST | `/api/leads` | — | Receive booking page submissions. Body must include `business_id` (the CRM's booking link puts this in `?biz=`). |
 | GET | `/api/leads/pending` | Supabase session (`Authorization: Bearer <token>`) | Poll for new leads, scoped to the caller's own business — the bearer token is verified against Supabase and the business_id is derived server-side from `public.users`, never trusted from the client. |
 | POST | `/api/leads/ack` | Supabase session (`Authorization: Bearer <token>`) | Mark leads collected — scoped server-side to the caller's own `business_id`, so acking someone else's lead IDs is a no-op. |
+| POST | `/api/leads/wix/:token` | Shared token in the URL path (SHA-256 hash compared against `lead_sources`) | A Wix Automation calls this directly, not the CRM — no Supabase session involved. Converts the form submission into a lead the same way `/api/leads` does. |
+| GET | `/api/leads/meta` | Meta webhook verification (`hub.verify_token` must match `META_VERIFY_TOKEN`) | One-time handshake Meta's Webhooks product performs before it will send real events. |
+| POST | `/api/leads/meta` | Meta signature (`X-Hub-Signature-256` header, verified against `META_APP_SECRET`) | Meta calls this directly on every new Lead Ads submission — no Supabase session involved. Only a `leadgen_id`/`page_id` ping; the actual lead data is then fetched from the Graph API using the matching business's stored Page token. |
+| GET/POST | `/api/connections/wix/*`, `/api/connections/meta/*` | Supabase session | Connect/disconnect/status for the two lead sources above — generates the Wix webhook token, or verifies+stores a Meta Page ID + Page Access Token. |
 | POST | `/api/email/*`, `/api/calendar/*`, `/api/ai/marketing` | Supabase session (`Authorization: Bearer <token>`) | Gmail, Google Calendar and AI marketing — all resolve `business_id`/`user_id` server-side from the caller's own session. |
 | GET | `/api/payments/status` | Supabase session | Whether Stripe (and its webhook) are configured on this deployment — lets the CRM show accurate connected/not-set-up state. |
 | POST | `/api/payments/create-link` | Supabase session | Creates a Stripe Payment Link for an invoice. |
 | POST | `/api/payments/webhook` | Stripe signature (`Stripe-Signature` header, verified against `STRIPE_WEBHOOK_SECRET`) | Stripe calls this directly, not the CRM — no Supabase session involved. On a paid checkout, marks the matching invoice and job paid automatically. |
+
+## Wix & Meta lead webhooks (optional)
+
+Both land straight into the same Leads pipeline the booking page already feeds — no changes needed anywhere else in the CRM.
+
+**Wix**: in the CRM, Settings → Connections → Wix → Connect generates a one-time webhook URL (shown once — copy it immediately, regenerating invalidates the old one). Paste it into a Wix Automation: *When a form is submitted → Send a webhook*. No server-wide env var needed; the secret is per-business.
+
+**Meta**: requires `META_APP_SECRET` and `META_VERIFY_TOKEN` set on this server (see `.env.example`), plus, on Meta's side: a Meta App with the Webhooks + Marketing API products, the `leads_retrieval` permission (needs Meta App Review for production use), and a webhook subscribed to the `leadgen` field pointing at `https://<this-backend>/api/leads/meta`. Then in the CRM's Connections panel, paste the Facebook Page ID and a long-lived Page Access Token for that page — it's verified against the Graph API before saving.
 
 ## Stripe (optional)
 

@@ -1,6 +1,26 @@
 # TurnKey CRM
 
-TurnKey is a CRM built with React + Vite, Supabase (backend), and Netlify (hosting).
+TurnKey is a field-service CRM for pressure-washing businesses. **The live app
+in this repo is plain HTML/JS with no build step** (`index.html`, `booking.html`,
+`quote.html`) on Supabase + Netlify. The React + Vite sections below describe a
+planned rewrite that is not in this repo yet.
+
+## Engines (single sources of truth, loaded by index.html)
+
+- `pricing-engine.js` (`TK_PRICING`) — customer-facing rates and quote totals.
+  Loaded by public pages too, so it must never contain cost or margin data.
+- `cost-engine.js` (`TK_COST`) — internal cost to deliver: wages, chemicals,
+  travel, equipment, consumables and monthly overheads spread per job.
+  Prices are GST-inclusive; margin and recommended price are computed on
+  ex-GST revenue (`COST_INPUTS.gstRegistered`). index.html only.
+- `sales-engine.js` (`TK_SALES`) — Sales Manager stats: cohort funnel by lead
+  arrival date, lead-source spend/return, lost reasons, speed to quote.
+  index.html only.
+
+Lost quotes use the existing `cancelled` stage plus `lostAt`/`lostReason`;
+`isLost()` tells them apart from won jobs that were later cancelled. Per-business
+settings (rates, costs, overheads, productivity, source spend) persist in
+`businesses.pricing_config`.
 
 ## Stack
 
