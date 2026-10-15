@@ -52,4 +52,15 @@
   # Google Maps API key (see config.js's own header comment) — without this,
   # Netlify's build-time secrets scanner flags it as a leaked secret (it
   # matches the TURNKEY_MAPS_KEY env var value) and can fail the deploy.
-  SECRETS_SCAN_OMIT_PATHS = "config.js,.netlify-dist/config.js"
+  # archive/** is the pre-overhaul recovery snapshot (application.tar) —
+  # it contains the OLD committed config.js, with the same public Maps key
+  # baked in, so it trips the same false positive; config.js isn't even
+  # published (build-static.js never copies archive/ into .netlify-dist),
+  # but the scanner checks the full repo checkout, not just the publish dir.
+  SECRETS_SCAN_OMIT_PATHS = "config.js,.netlify-dist/config.js,archive/**"
+  # Belt-and-suspenders on top of the path list above: TURNKEY_MAPS_KEY is
+  # the one env var that's genuinely fine to find anywhere in the repo (by
+  # design — see config.js's header comment), so stop scanning for its
+  # value entirely rather than having to keep enumerating every new path
+  # it might turn up in (this build already missed archive/** once).
+  SECRETS_SCAN_OMIT_KEYS = "TURNKEY_MAPS_KEY"
