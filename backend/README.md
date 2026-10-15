@@ -66,6 +66,13 @@ With `STORAGE=file`, data persists in `backend/data/` on the instance disk. Fine
 | GET | `/api/leads/meta` | Meta webhook verification (`hub.verify_token` must match `META_VERIFY_TOKEN`) | One-time handshake Meta's Webhooks product performs before it will send real events. |
 | POST | `/api/leads/meta` | Meta signature (`X-Hub-Signature-256` header, verified against `META_APP_SECRET`) | Meta calls this directly on every new Lead Ads submission — no Supabase session involved. Only a `leadgen_id`/`page_id` ping; the actual lead data is then fetched from the Graph API using the matching business's stored Page token. |
 | GET/POST | `/api/connections/wix/*`, `/api/connections/meta/*` | Supabase session | Connect/disconnect/status for the two lead sources above — generates the Wix webhook token, or verifies+stores a Meta Page ID + Page Access Token. |
+| GET | `/api/servicem8/status` | Supabase session | Whether this business has a ServiceM8 connection (API key or OAuth) and whether webhooks are subscribed. |
+| POST | `/api/servicem8/connect/api-key`, `/oauth/start`, `/disconnect` | Supabase session | Connect via a pasted Private API Key (verified against ServiceM8 before saving), start the OAuth flow, or disconnect. |
+| GET | `/api/servicem8/oauth/callback` | ServiceM8 redirects here (signed `state` param, same `signState`/`verifyState` shape as the Gmail/Calendar OAuth callbacks) | Completes the OAuth token exchange. |
+| POST | `/api/servicem8/subscribe` | Supabase session | Registers this business's webhook subscriptions (Job, JobPayment) with a fresh per-business callback URL/token. |
+| POST | `/api/servicem8/handoff/:jobId`, `/api/servicem8/handoffs/:jobId/retry` | Supabase session | Idempotently creates/links a ServiceM8 Company + Job (+ line items + quote PDF, best-effort) for a Won TurnKey job. Retry is the exact same code path — safe to call repeatedly. |
+| GET | `/api/servicem8/handoffs` | Supabase session | Transfer history/status for the Connections card (pending/synced/failed). |
+| POST | `/api/servicem8/webhook/:token` | Per-business token in the URL path (SHA-256 hash compared against `servicem8_connections`) | ServiceM8 calls this directly on Job/JobPayment changes — no Supabase session involved. Handles both the one-time verification handshake and real events; payload only ever carries an object uuid, so every event means re-fetching it via our own stored credential. |
 | POST | `/api/email/*`, `/api/calendar/*`, `/api/ai/marketing` | Supabase session (`Authorization: Bearer <token>`) | Gmail, Google Calendar and AI marketing — all resolve `business_id`/`user_id` server-side from the caller's own session. |
 | GET | `/api/payments/status` | Supabase session | Whether Stripe (and its webhook) are configured on this deployment — lets the CRM show accurate connected/not-set-up state. |
 | POST | `/api/payments/create-link` | Supabase session | Creates a Stripe Payment Link for an invoice. |
@@ -78,6 +85,22 @@ Both land straight into the same Leads pipeline the booking page already feeds �
 **Wix**: in the CRM, Settings → Connections → Wix → Connect generates a one-time webhook URL (shown once — copy it immediately, regenerating invalidates the old one). Paste it into a Wix Automation: *When a form is submitted → Send a webhook*. No server-wide env var needed; the secret is per-business.
 
 **Meta**: requires `META_APP_SECRET` and `META_VERIFY_TOKEN` set on this server (see `.env.example`), plus, on Meta's side: a Meta App with the Webhooks + Marketing API products, the `leads_retrieval` permission (needs Meta App Review for production use), and a webhook subscribed to the `leadgen` field pointing at `https://<this-backend>/api/leads/meta`. Then in the CRM's Connections panel, paste the Facebook Page ID and a long-lived Page Access Token for that page — it's verified against the Graph API before saving.
+
+## ServiceM8 (optional, in progress)
+
+Handles the handoff when a TurnKey sale is won: creates/links a Company and Job in the business's connected ServiceM8 account, attaches the approved quote's line items and PDF, and stores the mapping so a repeated "Won" event never creates a duplicate. Inbound webhooks (Job/JobPayment changes) are received and durably logged; writing a status change back onto the right TurnKey record is scaffolded but not yet implemented (see `servicem8Routes.js`'s `onObjectChanged`).
+
+**Connect** (either path, in Settings → Connections → ServiceM8):
+- **Private API Key** — paste a key from the business's own ServiceM8 account (Settings → API Keys). No server-wide config needed, works immediately.
+- **OAuth** — needs `SERVICEM8_CLIENT_ID`/`SERVICEM8_CLIENT_SECRET` set on this server (see `.env.example`), which requires registering as a ServiceM8 Development Partner first. Required for connecting separate customer accounts rather than just this one.
+
+**Enable live sync**: after connecting, `POST /api/servicem8/subscribe` registers the webhook subscriptions and generates this business's unique callback URL/token — needed because ServiceM8's webhook payload carries no account identifier at all, so without a per-business URL there'd be no way to tell two connected businesses' events apart.
+
+**Known gaps, called out deliberately rather than papered over:**
+- Record **update** semantics (editing an existing ServiceM8 Company/Job after creation) are not implemented — developer-forum reports disagree on whether PATCH works at all, and this wasn't independently verified against a live sandbox. `providers/servicem8.js` exports `updateObjectUnverified()` but nothing calls it.
+- No company-lookup-by-email before creating a new one — if a business already had a customer in ServiceM8 before connecting TurnKey, the first handoff creates a second Company rather than finding the existing one. ServiceM8's `$filter` query syntax wasn't verified against the live API.
+- ServiceM8 doesn't document a signature header on webhook event deliveries (unlike Meta's `X-Hub-Signature-256` or Stripe's `Stripe-Signature`) — mitigated architecturally rather than cryptographically: a forged callback can only trigger a re-fetch of whatever object uuid it names, using this server's own stored credential, scoped to the one connected account; it can't inject data directly. Revisit if ServiceM8's docs turn out to describe a scheme this pass didn't find.
+- One ServiceM8 connection per business (`servicem8_connections.business_id` is unique) — correct for this integration's intended shape, just noting it's an assumption, not a documented ServiceM8 constraint.
 
 ## Stripe (optional)
 
@@ -97,3 +120,7 @@ There is no shared access-code / `SYNC_KEY` anywhere in this backend — every r
 Set `TURNKEY_BACKEND_URL` in Netlify (or edit `config.js`) so customer quote requests POST to `/api/leads` without needing localStorage on their device.
 
 Each business shares its own link: `https://your-site.netlify.app/booking.html?biz=<their business_id>` (find it in the CRM's Connections panel). The `?biz=` value is what tags submitted leads so they land in the right business's pipeline — a generic `/booking.html` link with no `?biz=` will be rejected by `/api/leads`.
+
+## Sales platform integration adapter
+
+The current frontend uses `/api/sales/servicem8/*`, with durable tasks, browser-bound OAuth state, connection role checks and generation-scoped mappings. The tokened webhook remains `/api/servicem8/webhook/:token`; other legacy ServiceM8 router endpoints listed above return HTTP 410. The original implementation files remain unchanged for provenance. Apply the canonical schema followed by both sales-platform migrations, and configure PUBLIC_BACKEND_URL / FRONTEND_URL. See [the connection guide](../docs/CONNECTIONS_SETUP.md) and [release report](../docs/DEPLOYMENT_REPORT.md) for exact setup and verified deployment state.
