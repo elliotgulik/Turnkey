@@ -17,3 +17,8 @@ backend/node_modules/
 .vscode/*
 !.vscode/extensions.json
 .idea
+
+# Local verification artefacts and CLI cache
+.artifacts/
+supabase/.temp/
+.netlify-dist/

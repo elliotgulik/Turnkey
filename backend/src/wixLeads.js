@@ -20,14 +20,8 @@ export function hashWixToken(token) {
   return crypto.createHash('sha256').update(String(token || '')).digest('hex')
 }
 
-// Wix Automations' "Send a webhook" action lets the business pick which
-// fields to send — there is no single fixed schema across every form type,
-// so this stays defensive: try the field names Wix's default trigger data
-// commonly uses, fall back to anything with an obvious name, and never
-// reject a submission just because it doesn't match one of these shapes —
-// an unrecognised payload still becomes a lead (with whatever we could
-// find); validateCustomerFromWixPayload below is what actually rejects a
-// submission, and only for concrete reasons (no name, malformed email, …).
+// Preserve flat, data and contact wrappers; missing or non-scalar names
+// stay empty so validation rejects them rather than creating fake leads.
 export function mapWixPayload(body) {
   const b = body || {}
   const data = (b.data && typeof b.data === 'object') ? b.data
@@ -35,15 +29,15 @@ export function mapWixPayload(body) {
     : b
   const field = (...names) => {
     for (const n of names) {
-      if (data[n] != null && data[n] !== '') return String(data[n])
-      if (b[n] != null && b[n] !== '') return String(b[n])
+      if (typeof data[n] === 'string' && data[n].trim()) return data[n].trim()
+      if (typeof b[n] === 'string' && b[n].trim()) return b[n].trim()
     }
     return ''
   }
   const name = field('name', 'fullName', 'full_name', 'contactName') ||
     [field('firstName', 'first_name'), field('lastName', 'last_name')].filter(Boolean).join(' ')
   return {
-    name: name || 'Wix lead',
+    name,
     email: field('email', 'emailAddress', 'email_address') || undefined,
     phone: field('phone', 'phoneNumber', 'phone_number') || undefined,
     address: field('address', 'streetAddress', 'street_address') || undefined,
@@ -58,8 +52,9 @@ export function mapWixPayload(body) {
 // one, there's nothing safe to dedupe on, so the lead is still accepted —
 // just without redelivery protection for that one submission.
 function extractExternalId(body) {
-  const id = body?.submissionId ?? body?.id ?? body?._id
-  return id != null ? String(id).slice(0, 200) : null
+  const data = body?.data || body?.contact
+  const id = body?.submissionId ?? body?.id ?? body?._id ?? data?.submissionId ?? data?.id ?? data?._id
+  return (typeof id === 'string' || typeof id === 'number') && String(id).trim() ? String(id).trim().slice(0, 200) : null
 }
 
 // The actual decision logic, as a plain async function: given the raw
@@ -116,7 +111,7 @@ export async function handleWixLead({ token, body, lookupSource, addLead }) {
   }
 
   return {
-    status: 201,
+    status: 200,
     body: { ok: true, id: lead.id },
     businessId: source.business_id,
     customerName: customer.name,

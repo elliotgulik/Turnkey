@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>TurnKey | Service Business CRM</title>
+<title>TurnKey | Sales, Quotes & Growth</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
@@ -39,7 +39,7 @@
      URL); update to a hardcoded absolute URL if this is ever hosted at a
      fixed known domain. -->
 <meta property="og:title" content="TurnKey — Service Business CRM">
-<meta property="og:description" content="Run your service business smarter — quotes, jobs, scheduling and invoicing in one platform.">
+<meta property="og:description" content="Win more work. Quote with confidence. — quotes, jobs, scheduling and invoicing in one platform.">
 <meta property="og:image" content="icon-512.png">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary">
@@ -1365,13 +1365,14 @@
   .conn-note{font-size:12px;color:var(--ink-faint);text-align:center;padding:8px 4px 2px}
 
 </style>
+<link rel="stylesheet" href="sales-platform.css">
 </head>
 <body>
 <div id="auth-overlay" class="auth-shell">
   <div class="auth-hero">
     <div class="auth-hero-badge"><img src="icon-192.png" alt="" width="26" height="26">Turnkey</div>
-    <div class="auth-hero-title">Run your service business smarter</div>
-    <p class="auth-hero-sub">Create professional quotes, manage jobs, send invoices, and organise your entire operation from one simple platform.</p>
+    <div class="auth-hero-title">Win more work. Quote with confidence.</div>
+    <p class="auth-hero-sub">Capture leads, build profitable quotes and understand your sales performance. Send approved work to ServiceM8 for delivery.</p>
     <ul class="auth-hero-benefits">
       <li class="auth-hero-benefit"><span class="hb-ico" style="color:var(--m-sales)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v13H7l-3 3z"/><line x1="8" y1="9" x2="16" y2="9"/><line x1="8" y1="13" x2="13" y2="13"/></svg></span>Instant professional quotes</li>
       <li class="auth-hero-benefit"><span class="hb-ico" style="color:var(--m-cal)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="3" x2="8" y2="7"/><line x1="16" y1="3" x2="16" y2="7"/></svg></span>Online booking requests</li>
@@ -1380,7 +1381,7 @@
       <li class="auth-hero-benefit"><span class="hb-ico" style="color:var(--m-ops)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 9l2 2 4-4"/><line x1="8" y1="15" x2="16" y2="15"/></svg></span>Job scheduling</li>
       <li class="auth-hero-benefit"><span class="hb-ico" style="color:var(--m-insight)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s7-6.4 7-12a7 7 0 1 0-14 0c0 5.6 7 12 7 12z"/><circle cx="12" cy="9" r="2.4"/></svg></span>Built for service businesses</li>
     </ul>
-    <p class="auth-hero-trust">Used by pressure washing, cleaning and other service businesses to run quotes, jobs and invoicing end to end — no spreadsheets, no chasing paper quotes.</p>
+    <p class="auth-hero-trust">Built for service businesses: TurnKey gets the sale. ServiceM8 gets the job done.</p>
   </div>
   <div class="auth-cards">
   <div class="auth-card" id="auth-card-normal">
@@ -1406,28 +1407,25 @@
 </div>
 <div class="app" style="display:none">
   <nav class="tabs" id="tabs">
+    <button class="sale-sidebar-toggle" data-sale-action="collapse" aria-label="Collapse or expand sidebar" aria-expanded="true">☰ <span>Navigation</span></button>
     <div class="sidebar-brand">
       <div class="logo">
         <img src="icon-192.png" alt="Turnkey logo" width="38" height="38" style="display:block">
-        <div><h1>Turnkey</h1><span class="phase">Pressure washing CRM</span></div>
+        <div><h1>Turnkey</h1><span class="phase">Sales & growth platform</span></div>
       </div>
     </div>
     <div class="sidebar-scroll">
       <div class="sidebar-nav">
-        <button data-view="dashboard"><span class="nav-ico" data-icon="dashboard"></span>Dashboard</button>
-        <div class="sidebar-label">Sales</div>
-        <button data-view="sales"><span class="nav-ico" data-icon="sales"></span>Sales Manager</button>
-        <button data-view="pipeline" class="active"><span class="nav-ico" data-icon="pipeline"></span>Pipeline</button>
+        <button data-view="dashboard" class="active"><span class="nav-ico" data-icon="dashboard"></span>Dashboard</button>
         <button data-view="leads"><span class="nav-ico" data-icon="leads"></span>Leads <span class="count" id="cnt-leads">0</span></button>
-        <button data-view="customers"><span class="nav-ico" data-icon="customers"></span>Customers</button>
-        <div class="sidebar-label">Jobs</div>
-        <button data-view="jobsflow"><span class="nav-ico" data-icon="jobsflow"></span>Jobs Flow</button>
-        <button data-view="calendar"><span class="nav-ico" data-icon="calendar"></span>Calendar</button>
-        <button data-view="ops"><span class="nav-ico" data-icon="ops"></span>Operations</button>
-        <div class="sidebar-label">Business</div>
-        <button data-view="pricing"><span class="nav-ico" data-icon="pricing"></span>Pricing</button>
-        <button data-view="inbox"><span class="nav-ico" data-icon="inbox"></span>Inbox <span class="count" id="cnt-inbox">0</span></button>
+        <button data-view="pipeline"><span class="nav-ico" data-icon="pipeline"></span>Pipeline</button>
+        <button data-view="quote-builder"><span class="nav-ico" data-icon="pricing"></span>Quote Builder</button>
+        <button data-view="sales"><span class="nav-ico" data-icon="sales"></span>Analytics</button>
         <button data-view="goals"><span class="nav-ico" data-icon="goals"></span>Goals</button>
+        <button onclick="openConnections()"><span class="nav-ico" data-icon="settings"></span>Connections</button>
+        <div class="sidebar-label">Sales tools</div>
+        <button data-view="inbox"><span class="nav-ico" data-icon="inbox"></span>Conversations <span class="count" id="cnt-inbox">0</span></button>
+        <button onclick="openImportWizard()"><span class="nav-ico" data-icon="customers"></span>Import records</button>
       </div>
     </div>
     <div class="sidebar-foot">
@@ -1439,13 +1437,13 @@
   </nav>
   <nav class="bottom-nav" id="bottom-nav">
     <button data-view="pipeline" class="active"><span class="bn-ico" data-icon="pipeline"></span>Pipeline</button>
-    <button data-view="calendar"><span class="bn-ico" data-icon="calendar"></span>Calendar</button>
+    <button data-view="leads"><span class="bn-ico" data-icon="leads"></span>Leads</button>
     <button class="bn-create" id="bn-create-btn" onclick="openLeadModal()" aria-label="Create new lead"><span class="bn-create-plus">+</span></button>
-    <button data-view="customers"><span class="bn-ico" data-icon="customers"></span>Customers</button>
+    <button data-view="sales"><span class="bn-ico" data-icon="sales"></span>Analytics</button>
     <button onclick="openMoreSheet()"><span class="bn-ico" data-icon="more"></span>More</button>
   </nav>
   <main>
-    <section class="view active" id="view-pipeline"></section>
+    <section class="view" id="view-pipeline"></section>
     <section class="view" id="view-jobsflow"></section>
     <section class="view" id="view-leads"></section>
     <section class="view" id="view-customers"></section>
@@ -1453,7 +1451,8 @@
     <section class="view" id="view-inbox"></section>
     <section class="view" id="view-ops"></section>
     <section class="view" id="view-pricing"></section>
-    <section class="view" id="view-dashboard"></section>
+    <section class="view" id="view-quote-builder"></section>
+    <section class="view active" id="view-dashboard"></section>
     <section class="view" id="view-sales"></section>
     <section class="view" id="view-goals"></section>
     <section class="view" id="view-detail"></section>
@@ -1639,7 +1638,7 @@
 </div></div>
 
 <div class="overlay" id="conn-overlay"><div class="modal">
-  <div class="modal-head"><div><h3>Connections</h3><p>Connect Gmail, Calendar and Stripe — everything else here works automatically.</p></div><button class="x" aria-label="Close" onclick="closeModal('conn-overlay')">×</button></div>
+  <div class="modal-head"><div><h3>Connections</h3><p>Connect your sales inbox, lead sources and ServiceM8 operations account.</p></div><button class="x" aria-label="Close" onclick="closeModal('conn-overlay')">×</button></div>
   <div class="modal-body" id="conn-body"></div>
   <div class="modal-foot"><button class="btn primary" onclick="closeModal('conn-overlay')">Done</button></div>
 </div></div>
@@ -1937,7 +1936,7 @@ const LOST_REASONS=[
 ];
 function lostReasonLabel(k){const f=LOST_REASONS.find(x=>x.key===k);return f?f.label:(k||'Not recorded');}
 function escapeHtmlSafe(t){return String(t==null?'':t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
-function isOpenSale(r){return r.stage==='new'||r.stage==='quoted'||r.stage==='followup'} // still selling
+function isOpenSale(r){return ['new','contacted','qualified','quoting','quoted','followup'].includes(r.stage)} // still selling
 
 /* ===== Job status: the full customer-facing lifecycle badge, richer than
    the 7-column Pipeline stage. `r.stage` still drives the kanban board
@@ -2244,6 +2243,7 @@ function goalProgress(g){
 }
 
 let records=[], seq=1, draftLines=[], activeLeadId=null;
+const recordBusinesses=new WeakMap();
 // Business Settings → Workflows — all default off (optional/helpful tools,
 // never a hard gate), loaded from businesses.workflow_config (see
 // applyWorkflowConfig/saveWorkflowConfig near savePricingConfig, same
@@ -2789,7 +2789,7 @@ async function disablePushNotifications(btn){
 function money(n){const v=Math.round(n||0);return (v<0?'-$':'$')+Math.abs(v).toLocaleString('en-NZ');}
 function segOf(t){return t>=1200?'Large':t>=500?'Mid':'Small'}
 
-function newRecord(d){return Object.assign({
+function newRecord(d){const r=Object.assign({
   id:seq++,stage:'new',services:[],total:0,sop:[],
   // A business that hasn't turned on "Require job checklist completion"
   // (Settings → Workflows, default off) gets new jobs pre-set to skip it —
@@ -2808,7 +2808,7 @@ function newRecord(d){return Object.assign({
   hasCustomerPhoto:false,customerPhotoPath:null,quoteAttachments:[],assignedStaffId:null,
   paymentStatus:'draft',paymentMethod:null,dueDate:null,payments:[],
   jobStatus:null,statusHistory:[],jobNotes:null,weatherSnapshot:null
-},d)}
+},d);recordBusinesses.set(r,currentBusinessId);return r;}
 
 let followSeq=1;
 function defaultFollows(){
@@ -2864,12 +2864,14 @@ function buildFollowBody(r,f){
 
 function resetAll(){
   if(!confirm("Clear this device's local view? Your customers, jobs, quotes and invoices already saved to your account are not affected — signing back in reloads them. This only clears what's cached on this browser."))return;
-  records=[];seq=1;goals=[];try{localStorage.removeItem(STORE_KEY)}catch(e){};render();renderAll();toast('Local view cleared — sign in again to reload your data');
+  records=[];seq=1;goals=[];try{localStorage.removeItem(businessStoreKey())}catch(e){};render();renderAll();toast('Local view cleared — sign in again to reload your data');
 }
 
 document.getElementById('tabs').addEventListener('click',e=>{const b=e.target.closest('button[data-view]');if(b)switchView(b.dataset.view)});
 document.getElementById('bottom-nav').addEventListener('click',e=>{const b=e.target.closest('button[data-view]');if(b)switchView(b.dataset.view)});
 function switchView(v){
+  if(!['dashboard','leads','pipeline','quote-builder','sales','goals','inbox','pricing','detail'].includes(v)||!document.getElementById('view-'+v))v='dashboard';
+  if(v==="quote-builder")renderQuoteBuilderHome();
   document.querySelectorAll('nav.tabs button[data-view], .bottom-nav button[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===v));
   document.querySelectorAll('.view').forEach(s=>s.classList.remove('active'));
   document.getElementById('view-'+v).classList.add('active');
@@ -3096,6 +3098,17 @@ async function saveLead(){
 }
 
 /* ---------- QUOTE BUILDER ---------- */
+// Keep the proven quote editor and its internal cost/pricing tools intact.
+function renderQuoteBuilderHome(){
+  const host=document.getElementById('view-quote-builder');
+  host.innerHTML='<div class="panel"><h2>Quote Builder</h2><p>Select an opportunity to measure the property, build services and review estimated profitability.</p><label for="quote-builder-lead">Opportunity</label><select id="quote-builder-lead"></select><p><button class="btn accent" id="quote-builder-open">Build quote</button> <button class="btn ghost" onclick="openLeadModal()">New lead</button> <button class="btn ghost" onclick="switchView(\'pricing\')">Pricing &amp; costs</button></p></div>';
+  const select=document.getElementById('quote-builder-lead');
+  records.forEach(r=>{const option=document.createElement('option');option.value=r.id;option.textContent=(r.name||'Unnamed lead')+(r.address?' · '+r.address:'');select.appendChild(option);});
+  const button=document.getElementById('quote-builder-open');
+  button.disabled=!records.length;
+  button.onclick=()=>{const r=records.find(r=>String(r.id)===select.value);if(r)openQuoteModal(r.id);};
+  if(!records.length){const option=document.createElement('option');option.textContent='Create a lead to start quoting';select.appendChild(option);}
+}
 function openQuoteModal(id){
   activeLeadId=id;
   quoteTotalOverride = null;
@@ -5361,7 +5374,7 @@ function openDetail(id){
   document.getElementById('view-detail').innerHTML=`
     <a class="back-link" onclick="render();switchView('pipeline')">← Back to pipeline</a>
     <div class="view-head"><div><h2>${r.name}</h2><p>${TK_FORMAT.address(r,{fallback:'No address on file'})} · ${r.phone||'no phone'}</p></div><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-      <button class="btn ghost sm" onclick="openCustomerProfile(${id})">Full profile</button>
+      <button class="btn ghost sm" onclick="openCustomerProfile(${id})">Sales details</button>
       ${jobStatusBadge(r)}
       ${canEditJobStatus(r)?`<select style="font-size:12px;padding:4px 8px;border-radius:980px" onchange="setManualStatus(${id},this.value)"><option value="">Change status…</option>${manualStatusOptions(r)}</select>`:''}
       ${isSalesStage(r)?`<button class="btn ghost sm" onclick="markLost(${id})" title="Customer didn't go ahead">Mark lost</button>`:r.stage!=='cancelled'&&r.stage!=='paid'?`<button class="btn ghost sm" onclick="cancelJob(${id})" title="Mark this job as cancelled">Cancel</button>`:''}
@@ -6125,7 +6138,7 @@ function renderThreadPane(thread){
   return `
     <div class="ib-thread-head">
       <div><div class="ib-thread-subj">${last.subject||'(no subject)'}</div>${custRecord?`<div class="ib-thread-cust">${custRecord.name}</div>`:'<div class="ib-thread-cust">Not linked to a customer</div>'}</div>
-      ${custRecord?`<div class="cp-actions"><button class="btn ghost sm" onclick="openCustomerProfile(${custRecord.id})">Full profile</button><button class="btn ghost sm" onclick="openQuoteModal(${custRecord.id})">Build quote</button><button class="btn ghost sm" onclick="openNewJobModal('${custRecord.customerId}')">+ New job</button></div>`:''}
+      ${custRecord?`<div class="cp-actions"><button class="btn ghost sm" onclick="openCustomerProfile(${custRecord.id})">Sales details</button><button class="btn ghost sm" onclick="openQuoteModal(${custRecord.id})">Build quote</button><button class="btn ghost sm" onclick="openNewJobModal('${custRecord.customerId}')">+ New opportunity</button></div>`:''}
     </div>
     <div class="ib-msgs">${msgs}</div>
     <div class="ib-reply">
@@ -6898,7 +6911,7 @@ function renderJobsFlow(){
     </div>`;
 }
 // workflow transition helpers
-function markWon(id){const r=records.find(x=>x.id===id);if(!r.services.length){toast('Build a quote first');openQuoteModal(id);return;}r.stage='won';r.clientResponded=true;if(!r.wonAt)r.wonAt=Date.now();render();renderAll();openSchedule(id);notifyOwner('quote_accepted','Quote accepted — '+r.name,r.name+' accepted their quote for '+money(r.total||0)+'. Time to book it in.');triggerPush({type:'quote_accepted',title:'Quote approved',message:r.name+' approved your quote',url:'/index.html?open=pipeline'});}
+async function markWon(id){const r=records.find(x=>x.id===id);if(!r)return;if(!sb||!currentBusinessId||!r.quoteId||!r.jobId||!(r.total>0)){toast('Save a sent quote on this opportunity before marking it won.');return;}try{await syncRecordToSupabase(r);}catch(e){toast('Could not save quote: '+e.message);return;}if(isWon(r))return;if(!r.services.length){toast('Build a quote first');openQuoteModal(id);return;}r.stage='won';r.clientResponded=true;if(!r.wonAt)r.wonAt=Date.now();render();renderAll();openSchedule(id);notifyOwner('quote_accepted','Quote accepted — '+r.name,r.name+' accepted their quote for '+money(r.total||0)+'. Time to book it in.');triggerPush({type:'quote_accepted',title:'Quote approved',message:r.name+' approved your quote',url:'/index.html?open=pipeline'});}
 function markPaid(id,method){const r=records.find(x=>x.id===id);r.stage='paid';r.paidAt=Date.now();r.paymentStatus='paid';r.paymentMethod=method||r.paymentMethod||'Not specified';render();renderAll();if(document.getElementById('view-jobsflow').classList.contains('active'))renderJobsFlow();toast(`${r.name} marked paid ✓`);sendLifecycleEmail(r,'review_request');notifyOwner('payment_received','Payment received — '+money(r.total||0),r.name+' paid '+money(r.total||0)+' ('+(method||'method not specified')+').');triggerPush({type:'payment_received',title:'Payment received',message:'Payment received from '+r.name,url:'/index.html?open=pipeline'});}
 
 /* ===== Payments ledger — supports partial/multiple payments per job.
@@ -8058,8 +8071,8 @@ async function pollBackendLeads(){
   }).catch(()=>{backendOnline=false;});
 }
 // poll for website leads every 30s + when the app regains focus
-setInterval(pollBackendLeads,30000);
-try{window.addEventListener('focus',pollBackendLeads);}catch(e){}
+setInterval(()=>pollBackendLeads(),30000);
+try{window.addEventListener('focus',()=>pollBackendLeads());}catch(e){}
 // poll connected email every 90s + on focus — less time-critical than leads, and gentler on API quotas
 setInterval(syncEmail,90000);
 try{window.addEventListener('focus',syncEmail);}catch(e){}
@@ -8088,10 +8101,10 @@ function openMoreSheet(){
   document.getElementById('more-body').innerHTML=`
     <div class="more-group-label">Overview</div>
     ${!isTech?row('Dashboard',"switchView('dashboard')"):''}
-    ${!isTech?row('Sales Manager',"switchView('sales')"):''}
-    ${row('Jobs',"switchView('jobsflow')")}
+    ${!isTech?row('Analytics',"switchView('sales')"):''}
+    ${row('Quote Builder',"switchView('quote-builder')")}
     ${row('Notifications',"openNotificationCentre()",false,notificationCentre.unread)}
-    ${!isTech?`<div class="more-group-label">Work</div>${row('Operations',"switchView('ops')")}${row('Pricing',"switchView('pricing')")}${row('Goals',"switchView('goals')")}`:''}
+    ${!isTech?`<div class="more-group-label">Work</div>${row('Pricing',"switchView('pricing')")}${row('Goals',"switchView('goals')")}`:''}
     <div class="more-group-label">Business</div>
     ${row('Settings',"openSettings()")}
     ${row('Connections',"openConnections()")}
@@ -8701,10 +8714,20 @@ let pendingEmailConnectSuccess=false;
 })();
 /* ===== PERSISTENCE: everything auto-saves locally on this device ===== */
 const STORE_KEY='turnkey-app-v1';
-function saveState(){
+function businessStoreKey(){return currentBusinessId?STORE_KEY+':business:'+encodeURIComponent(currentBusinessId):null;}
+function preserveLegacyState(){
   try{
-    localStorage.setItem(STORE_KEY,JSON.stringify({
-      v:1,records,seq,goals,goalSeq,followSeq,docTemplate,
+    const raw=localStorage.getItem(STORE_KEY);
+    if(raw&&!localStorage.getItem(STORE_KEY+':legacy-unassigned'))localStorage.setItem(STORE_KEY+':legacy-unassigned',raw);
+  }catch(e){}
+}
+
+function saveState(){
+  if(!currentBusinessId||!businessStateReady)return;
+  try{
+    preserveLegacyState();
+    localStorage.setItem(businessStoreKey(),JSON.stringify({
+      v:1,businessId:currentBusinessId,records,seq,goals,goalSeq,followSeq,docTemplate,
       chemicals:Object.fromEntries(Object.entries(CHEMICALS).map(([k,c])=>[k,c.perL])),
       rates:Object.fromEntries(Object.entries(SERVICES).map(([k,s])=>[k,s.rate])),
       costInputs:COST_INPUTS,
@@ -8723,6 +8746,8 @@ const sb=(window.TURNKEY_CONFIG&&window.TURNKEY_CONFIG.supabaseUrl&&window.TURNK
   ?window.supabase.createClient(window.TURNKEY_CONFIG.supabaseUrl,window.TURNKEY_CONFIG.supabaseAnonKey)
   :null;
 let currentBusinessId=null;
+let businessStateReady=false;
+let businessSessionVersion=0;
 let currentBusinessProfile=null;
 let supabaseSyncTimer=null;
 
@@ -8875,19 +8900,34 @@ async function resolveProfile(userId){
   return {businessId:data.business_id,role:data.role||'owner'};
 }
 async function handleAuthedSession(session){
+  const version=++businessSessionVersion;
+  businessStateReady=false;
+  clearTimeout(supabaseSyncTimer);
+  showAuth();
   currentUserId=session.user.id;
   const profile=await resolveProfile(session.user.id);
+  if(version!==businessSessionVersion||currentUserId!==session.user.id)return;
+  if(currentBusinessId!==profile.businessId){
+    records=[];goals=[];seq=1;goalSeq=1;followSeq=1;
+    staff=[];pendingInvites=[];currentBusinessProfile=null;
+    window.TK_SALES_PLATFORM?.reset();
+  }
   currentBusinessId=profile.businessId;
   currentUserRole=profile.role;
+  loadState();
   applyRoleVisibility();
+  const loaded=await loadFromSupabase();
+  if(version!==businessSessionVersion||!loaded)return;
+  businessStateReady=true;
   showApp();
-  await loadFromSupabase();
   subscribeRealtime();
   await loadStaffAndInvites();
+  if(version!==businessSessionVersion)return;
   await loadBusinessProfile();
+  if(version!==businessSessionVersion)return;
   seedDocTemplateFromProfile();
   preloadLogoDataUrl();
-  if(currentUserRole==='technician')switchView('jobsflow');
+  switchView('dashboard');
   // A push notification's url (e.g. /index.html?open=pipeline — see
   // sendNotification() call sites) lands here when the app was closed and
   // the OS notification click opened it fresh — takes priority over the
@@ -8901,6 +8941,7 @@ async function handleAuthedSession(session){
   loadChecklistTemplates();
   pollBackendLeads();
   await loadEmailAccountStatus();
+  if(version!==businessSessionVersion)return;
   if(pendingEmailConnectSuccess){
     pendingEmailConnectSuccess=false;
     // emailAccount is now fresh (just loaded above) — open straight to
@@ -8920,6 +8961,8 @@ async function handleAuthedSession(session){
   loadWixStatus();
   loadMetaStatus();
   retryPendingPhotos();
+  if(window.TK_SALES_PLATFORM)await window.TK_SALES_PLATFORM.refresh();
+  if(version!==businessSessionVersion)return;
   initOneSignal();
   loadNotificationCentre();
   startLastSeenHeartbeat();
@@ -10060,7 +10103,8 @@ async function iwUndoBatch(batchId){
 }
 
 async function loadFromSupabase(){
-  if(!sb||!currentBusinessId)return;
+  if(!sb||!currentBusinessId)return false;
+  const biz=currentBusinessId,version=businessSessionVersion;
   try{
     // Explicit business_id filter on all three, even though RLS already
     // scopes these — defense-in-depth so a gap in one RLS policy can't
@@ -10069,10 +10113,11 @@ async function loadFromSupabase(){
     // already does the same (checklist_templates, notifications, etc.),
     // these three were the exceptions.
     const [{data:customers,error:ce},{data:jobs,error:je},{data:invoices,error:ie}]=await Promise.all([
-      sb.from('customers').select('*').eq('business_id',currentBusinessId),
-      sb.from('jobs').select('*').eq('business_id',currentBusinessId),
-      sb.from('invoices').select('*').eq('business_id',currentBusinessId)
+      sb.from('customers').select('*').eq('business_id',biz),
+      sb.from('jobs').select('*').eq('business_id',biz),
+      sb.from('invoices').select('*').eq('business_id',biz)
     ]);
+    if(biz!==currentBusinessId||version!==businessSessionVersion)return false;
     if(ce)throw ce; if(je)throw je; if(ie)throw ie;
     const custById=Object.fromEntries((customers||[]).map(c=>[c.id,c]));
     records=(jobs||[]).map(j=>{
@@ -10083,7 +10128,7 @@ async function loadFromSupabase(){
         address:c.address||'',suburb:c.suburb||'',notes:c.notes||'',source:c.source||''
       });
       return Object.assign(base,j.details||{},{
-        stage:j.status||base.stage,
+        stage:j.status||base.stage,createdAt:j.details?.createdAt||j.created_at,
         scheduledDateISO:j.scheduled_date||base.scheduledDateISO,
         scheduledDate:j.scheduled_date?isoToLabel(j.scheduled_date):((j.details&&j.details.scheduledDate)||base.scheduledDate),
         // quoteId MUST be restored here — it's a real column (jobs.quote_id)
@@ -10102,18 +10147,25 @@ async function loadFromSupabase(){
         paymentLinkUrl:inv?(inv.payment_link_url||null):null
       });
     });
+    records.forEach(r=>recordBusinesses.set(r,biz));
     render();renderAll();
     toast(records.length?`Loaded ${records.length} job${records.length===1?'':'s'}`:'Connected — no jobs yet, add a lead to get started');
+    return true;
   }catch(e){
+    if(biz!==currentBusinessId||version!==businessSessionVersion)return false;
     console.error('Supabase load failed',e);
+    businessStateReady=false;
     toast('Couldn\u2019t load your data \u2014 check your connection and try again');
+    return false;
   }
 }
 
 function scheduleSupabaseSync(){
   if(!sb||!currentBusinessId)return;
   clearTimeout(supabaseSyncTimer);
-  supabaseSyncTimer=setTimeout(syncAllToSupabase,900);
+  if(!businessStateReady)return;
+  const biz=currentBusinessId,version=businessSessionVersion;
+  supabaseSyncTimer=setTimeout(()=>{if(biz===currentBusinessId&&version===businessSessionVersion)syncAllToSupabase();},900);
 }
 
 /* ===== Realtime: hear about a customer's quote response the moment it
@@ -10167,8 +10219,10 @@ async function handleActivityRealtimeEvent(payload){
   if(!document.querySelector('.overlay.open'))await loadFromSupabase();
 }
 async function syncAllToSupabase(){
+  const biz=currentBusinessId,version=businessSessionVersion;
   const failed=[];
-  for(const r of records){
+  for(const r of [...records]){
+    if(biz!==currentBusinessId||version!==businessSessionVersion)return;
     try{await syncRecordToSupabase(r);}
     catch(e){console.error('Supabase sync failed for record',r.id,e);failed.push(r.name||'a record');}
   }
@@ -10178,36 +10232,72 @@ async function syncAllToSupabase(){
   if(failed.length)toast('Could not save '+(failed.length===1?failed[0]:failed.length+' records')+' — check your connection and try again');
 }
 async function syncRecordToSupabase(r){
+  const biz=currentBusinessId,version=businessSessionVersion;
+  const assertSession=()=>{if(!biz||biz!==currentBusinessId||version!==businessSessionVersion||recordBusinesses.get(r)!==biz)throw new Error('Business session changed. Reload before saving.');};
+  assertSession();
   const customerPayload={
-    business_id:currentBusinessId,name:r.name||'',email:r.email||'',phone:r.phone||'',
+    business_id:biz,name:r.name||'',email:r.email||'',phone:r.phone||'',
     address:r.address||'',suburb:r.suburb||'',notes:r.notes||'',source:r.source||''
   };
   if(r.customerId){
-    const {error}=await sb.from('customers').update(customerPayload).eq('id',r.customerId);
+    const {error}=await sb.from('customers').update(customerPayload).eq('id',r.customerId).eq('business_id',biz);
+    assertSession();
     if(error)throw error;
   }else{
     const {data,error}=await sb.from('customers').insert(customerPayload).select('id').single();
+    assertSession();
     if(error)throw error;
     r.customerId=data.id;
   }
 
-  // A quote exists once services/total have been built (stage moved past 'new'),
-  // even before it's won — mirrors the `quotes` table that otherwise sits unused.
-  if(r.total>0&&r.stage!=='new'){
-    const quotePayload={business_id:currentBusinessId,lead_id:r.customerId,amount:r.total,status:isWon(r)?'accepted':isLost(r)?'declined':'sent'};
+  // Read accepted state before writing: another browser may have approved
+  // this quote while this device still holds an editable copy.
+  async function reconcileAccepted(quote){
+    const {data:job,error}=await sb.from('jobs').select('id,customer_id,quote_id,status,details').eq('business_id',biz).eq('quote_id',quote.id).maybeSingle();
+    assertSession();
+    if(error)throw error;
+    if(!job||r.jobId&&r.jobId!==job.id)throw new Error('Approved quote needs its original saved opportunity. Reload before saving.');
+    const editable={};
+    for(const key of ['salesNotes','nextFollowUpAt','assignedSalespersonId','salespersonName'])if(Object.hasOwn(r,key))editable[key]=r[key];
+    // Restore the complete server snapshot, including removed commercial fields.
+    const excluded=['id','customerId','jobId','invoiceId','quoteId','assignedStaffId','stage','scheduledDate','scheduledDateISO','name','email','phone','address','suburb','notes','source','paymentStatus','paymentMethod','dueDate','_mapSnapshotDataUrl'];
+    for(const key of Object.keys(r))if(!excluded.includes(key))delete r[key];
+    Object.assign(r,job.details||{},editable,{jobId:job.id,customerId:job.customer_id,quoteId:quote.id,quotePublicToken:quote.public_token,total:Number(quote.amount),stage:job.status});
+    return {...job.details,...editable};
+  }
+  let acceptedDetails=null;
+  if(r.quoteId){
+    const {data:quote,error}=await sb.from('quotes').select('id,amount,status,public_token').eq('business_id',biz).eq('id',r.quoteId).single();
+    assertSession();
+    if(error)throw error;
+    if(quote.status==='accepted')acceptedDetails=await reconcileAccepted(quote);
+  }
+  if(!acceptedDetails&&r.total>0&&r.stage!=='new'){
+    if(isWon(r)&&(!r.quoteId||!r.jobId))throw new Error('Save a sent quote on this opportunity before marking it won.');
+    const quotePayload={business_id:biz,lead_id:r.customerId,amount:r.total,status:isWon(r)?'accepted':isLost(r)?'declined':'sent'};
     if(r.quoteId){
-      const {data,error}=await sb.from('quotes').update(quotePayload).eq('id',r.quoteId).select('public_token').single();
-      if(error)throw error;
-      r.quotePublicToken=data.public_token;
+      // The predicate closes the read/update race with public acceptance.
+      const {data,error}=await sb.from('quotes').update(quotePayload).eq('id',r.quoteId).eq('business_id',biz).neq('status','accepted').select('public_token').maybeSingle();
+      assertSession();
+    if(error)throw error;
+      if(data)r.quotePublicToken=data.public_token;
+      else{
+        const {data:quote,error:readError}=await sb.from('quotes').select('id,amount,status,public_token').eq('business_id',biz).eq('id',r.quoteId).single();
+        assertSession();
+        if(readError)throw readError;
+        if(quote.status!=='accepted')throw new Error('Quote changed while saving. Reload and retry.');
+        acceptedDetails=await reconcileAccepted(quote);
+      }
     }else{
       const {data,error}=await sb.from('quotes').insert(quotePayload).select('id,public_token').single();
-      if(error)throw error;
+      assertSession();
+    if(error)throw error;
       r.quoteId=data.id;
       r.quotePublicToken=data.public_token;
     }
   }
 
-  const details=Object.assign({},r);
+  const details=acceptedDetails||Object.assign({},r);
   // 'notes' is excluded here on purpose — it's the CUSTOMER-level field
   // (access instructions, gate codes; edited from the customer profile and
   // shared across every job for that customer, written to customers.notes
@@ -10226,28 +10316,32 @@ async function syncRecordToSupabase(r){
   ['id','customerId','jobId','invoiceId','quoteId','assignedStaffId','stage','scheduledDate','scheduledDateISO','name','email','phone','address','suburb','notes','source','paymentStatus','paymentMethod','dueDate','_mapSnapshotDataUrl']
     .forEach(k=>delete details[k]);
   const jobPayload={
-    business_id:currentBusinessId,customer_id:r.customerId,quote_id:r.quoteId||null,assigned_to:r.assignedStaffId||null,
+    business_id:biz,customer_id:r.customerId,quote_id:r.quoteId||null,assigned_to:r.assignedStaffId||null,
     status:r.stage,scheduled_date:r.scheduledDateISO||null,details
   };
   if(r.jobId){
-    const {error}=await sb.from('jobs').update(jobPayload).eq('id',r.jobId);
+    const {error}=await sb.from('jobs').update(jobPayload).eq('id',r.jobId).eq('business_id',biz);
+    assertSession();
     if(error)throw error;
   }else{
     const {data,error}=await sb.from('jobs').insert(jobPayload).select('id').single();
+    assertSession();
     if(error)throw error;
     r.jobId=data.id;
   }
 
   if(r.stage==='completed'||r.stage==='paid'){
-    const invoicePayload={business_id:currentBusinessId,job_id:r.jobId,amount:r.total||0,paid:r.stage==='paid',
+    const invoicePayload={business_id:biz,job_id:r.jobId,amount:r.total||0,paid:r.stage==='paid',
       payment_status:invoiceDisplayStatus(r),payment_date:r.stage==='paid'&&r.paidAt?new Date(r.paidAt).toISOString():null,
       payment_method:r.paymentMethod||null,due_date:r.dueDate||null};
     if(r.invoiceId){
-      const {error}=await sb.from('invoices').update(invoicePayload).eq('id',r.invoiceId);
-      if(error)throw error;
+      const {error}=await sb.from('invoices').update(invoicePayload).eq('id',r.invoiceId).eq('business_id',biz);
+      assertSession();
+    if(error)throw error;
     }else{
       const {data,error}=await sb.from('invoices').insert(invoicePayload).select('id').single();
-      if(error)throw error;
+      assertSession();
+    if(error)throw error;
       r.invoiceId=data.id;
     }
   }
@@ -10321,11 +10415,14 @@ async function signedUrlFor(path){
 }
 
 function loadState(){
+  if(!currentBusinessId)return false;
   try{
-    const raw=localStorage.getItem(STORE_KEY);
+    preserveLegacyState();
+    const raw=localStorage.getItem(businessStoreKey());
     if(!raw)return false;
     const d=JSON.parse(raw);
-    records=d.records||[];seq=d.seq||1;
+    if(d.businessId!==currentBusinessId)return false;
+    records=d.records||[];records.forEach(r=>recordBusinesses.set(r,currentBusinessId));seq=d.seq||1;
     goals=d.goals||[];goalSeq=d.goalSeq||1;followSeq=d.followSeq||1;
     if(d.docTemplate)docTemplate=d.docTemplate;
     if(d.chemicals)Object.entries(d.chemicals).forEach(([k,v])=>{if(CHEMICALS[k])CHEMICALS[k].perL=v});
@@ -10335,7 +10432,7 @@ function loadState(){
   }catch(e){return false;}
 }
 function exportData(){
-  const raw=localStorage.getItem(STORE_KEY)||JSON.stringify({records,goals,docTemplate});
+  const raw=(currentBusinessId&&localStorage.getItem(businessStoreKey()))||JSON.stringify({businessId:currentBusinessId,records,goals,docTemplate});
   const blob=new Blob([raw],{type:'application/json'});
   const a=document.createElement('a');
   a.href=URL.createObjectURL(blob);
@@ -10345,12 +10442,17 @@ function exportData(){
 }
 function importData(input){
   const file=input.files&&input.files[0];if(!file)return;
+  const biz=currentBusinessId,version=businessSessionVersion;
+  if(!biz)return;
   const reader=new FileReader();
   reader.onload=()=>{
+    if(biz!==currentBusinessId||version!==businessSessionVersion)return;
     try{
       const d=JSON.parse(reader.result);
       if(!d.records)throw new Error('not a Turnkey backup');
-      localStorage.setItem(STORE_KEY,JSON.stringify(d));
+      if(d.businessId!==biz)throw new Error('Backup belongs to a different or unknown business');
+      preserveLegacyState();
+      localStorage.setItem(businessStoreKey(),JSON.stringify(d));
       loadState();render();renderAll();
       toast('Backup restored — '+records.length+' records');
     }catch(e){toast('That file isn\u2019t a valid Turnkey backup');}
@@ -10360,7 +10462,7 @@ function importData(input){
 }
 
 setAccent('pipeline');
-if(!goals.length)loadState(); // pick up cached goals/template/rates while waiting on auth
+preserveLegacyState(); // Keep unassigned device backups; never load them into a business automatically.
 if(sb){
   sb.auth.getSession().then(({data:{session}})=>{
     if(session)handleAuthedSession(session);else showAuth();
@@ -10368,7 +10470,7 @@ if(sb){
   sb.auth.onAuthStateChange((event,session)=>{
     if(event==='PASSWORD_RECOVERY'){showPasswordRecovery();return;}
     if(event==='SIGNED_IN'&&session)handleAuthedSession(session);
-    if(event==='SIGNED_OUT'){unsubscribeRealtime();stopLastSeenHeartbeat();records=[];currentBusinessId=null;currentUserId=null;currentUserRole='owner';staff=[];pendingInvites=[];render();renderAll();showAuth();}
+    if(event==='SIGNED_OUT'){++businessSessionVersion;businessStateReady=false;clearTimeout(supabaseSyncTimer);goals=[];goalSeq=1;seq=1;followSeq=1;window.TK_SALES_PLATFORM?.reset();unsubscribeRealtime();stopLastSeenHeartbeat();records=[];currentBusinessId=null;currentUserId=null;currentUserRole='owner';staff=[];pendingInvites=[];render();renderAll();showAuth();}
   });
 }else{
   setAuthMsg('Turnkey isn\u2019t finished setting up yet \u2014 contact support');
@@ -10581,5 +10683,7 @@ async function retryPendingPhotos(){
   }
 }
 </script>
+<script src="sales-metrics.js"></script>
+<script src="sales-platform.js"></script>
 </body>
 </html>

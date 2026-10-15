@@ -5,7 +5,10 @@
   "scripts": {
     "config": "node scripts/generate-config.js",
     "backend": "cd backend && npm run dev",
-    "backend:install": "cd backend && npm install"
+    "backend:install": "cd backend && npm install",
+    "build": "node scripts/build-static.js",
+    "test": "node --test tests/*.test.cjs && npm --prefix backend test",
+    "test:browser": "node tests/sales-browser.cjs"
   },
   "engines": {
     "node": ">=20"
@@ -13,5 +16,9 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.110.6",
     "dotenv": "^17.4.2"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.10",
+    "playwright": "1.64.1"
   }
 }

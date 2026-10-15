@@ -13,7 +13,7 @@
 // ever requests it directly — see netlify.toml's explicit passthrough rule
 // for why that file has to exist as a real, non-redirected file.
 importScripts('https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.sw.js');
-const CACHE='turnkey-v5'; // bumped from v4 — new brand icon/favicon/apple-touch-icon assets replaced the old ones under the SAME filenames; static assets are served stale-while-revalidate below, so without this bump an already-installed PWA/returning browser would keep showing the old cached icon bytes indefinitely instead of picking up the new mark
+const CACHE='turnkey-sales-v6'; // bumped from v4 — new brand icon/favicon/apple-touch-icon assets replaced the old ones under the SAME filenames; static assets are served stale-while-revalidate below, so without this bump an already-installed PWA/returning browser would keep showing the old cached icon bytes indefinitely instead of picking up the new mark
 // Note: HTML pages are deliberately NOT precached here — they're handled by the
 // network-first navigate branch below so refreshes always pick up the newest deploy.
 const SHELL=['./config.js','./manifest.webmanifest','./icon-192.png','./icon-512.png'];
@@ -43,7 +43,9 @@ function cachePut(req,res){
 }
 self.addEventListener('fetch',e=>{
   const req=e.request;
-  if(req.method!=='GET')return; // let the browser handle it normally — nothing here applies to writes
+  if(req.method!=='GET')return;
+  const requestUrl=new URL(req.url);
+  if(requestUrl.origin!==self.location.origin||requestUrl.pathname.startsWith('/api/'))return; // let the browser handle it normally — nothing here applies to writes
   // Page loads (index.html, booking.html, /) — always try the network first so
   // deployments show up on refresh; fall back to the last cached copy when offline.
   if(req.mode==='navigate'){

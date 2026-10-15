@@ -29,16 +29,16 @@ describe('mapWixPayload', () => {
     assert.equal(c.name, 'Jane Doe')
     assert.equal(c.email, 'jane@example.com')
   })
-  test('falls back to a placeholder name rather than throwing on an unrecognised shape', () => {
+  test('leaves name empty for an unrecognised shape', () => {
     const c = mapWixPayload({ someWeirdField: 'whatever' })
-    assert.equal(c.name, 'Wix lead')
+    assert.equal(c.name, '')
   })
 })
 
 describe('handleWixLead', () => {
   const okSource = { business_id: 'biz-123' }
 
-  test('valid submission is saved via addLead and returns 201', async () => {
+  test('valid submission is saved via addLead and returns 200', async () => {
     const addLeadCalls = []
     const result = await handleWixLead({
       token: 'good-token',
@@ -46,7 +46,7 @@ describe('handleWixLead', () => {
       lookupSource: async () => okSource,
       addLead: async (payload) => { addLeadCalls.push(payload); return { id: 'lead-1' } }
     })
-    assert.equal(result.status, 201)
+    assert.equal(result.status, 200)
     assert.equal(result.body.ok, true)
     assert.equal(result.body.id, 'lead-1')
     assert.equal(addLeadCalls.length, 1)
@@ -92,14 +92,14 @@ describe('handleWixLead', () => {
     assert.equal(addLeadCalled, false)
   })
 
-  test('duplicate delivery (addLead reports deduped) is still a 201 but flagged so the caller skips re-notifying', async () => {
+  test('duplicate delivery (addLead reports deduped) is still a 200 but flagged so the caller skips re-notifying', async () => {
     const result = await handleWixLead({
       token: 'good-token',
       body: { name: 'Jane Doe', submissionId: 'sub-1' },
       lookupSource: async () => okSource,
       addLead: async () => ({ id: 'lead-1', deduped: true })
     })
-    assert.equal(result.status, 201)
+    assert.equal(result.status, 200)
     assert.equal(result.deduped, true)
   })
 
@@ -151,4 +151,47 @@ describe('handleWixLead', () => {
     assert.equal(result.status, 500)
     assert.ok(result.cause instanceof Error)
   })
+})
+
+test('empty, missing-name, whitespace and structured-name payloads never reach storage', async () => {
+  for (const body of [undefined, null, {}, [], { message: 'hello' }, { email: 'jane@example.com' }, { name: '  ' }, { name: {} }, { data: {} }, { contact: { name: [] } }]) {
+    const result = await handleWixLead({ token: 'test', body, lookupSource: async () => ({ business_id: 'A' }), addLead: async () => { assert.fail('invalid lead persisted') } })
+    assert.equal(result.status, 400)
+    assert.match(result.body.error, /name/i)
+  }
+})
+
+test('supported wrappers preserve contact fields and nested submission identity', async () => {
+  for (const wrapper of ['flat', 'data', 'contact']) {
+    const fields = { first_name: ' Jane ', last_name: 'Doe', email_address: 'jane@example.com', phone_number: '0211234567', street_address: '1 Test St', comments: 'Please call', submissionId: 'sub-123' }
+    const result = await handleWixLead({ token: 'test', body: wrapper === 'flat' ? fields : { [wrapper]: fields }, lookupSource: async () => ({ business_id: 'A' }), addLead: async payload => {
+      assert.equal(payload.customer.name, 'Jane Doe'); assert.equal(payload.customer.email, 'jane@example.com'); assert.equal(payload.customer.phone, '0211234567'); assert.equal(payload.customer.notes, 'Please call'); assert.equal(payload.external_id, 'sub-123'); return { id: 'saved' }
+    } })
+    assert.equal(result.status, 200)
+  }
+})
+
+test('concurrent Wix deliveries converge through Supabase unique violation recovery', async () => {
+  const { createSupabaseStorage } = await import('./storage/supabase.js')
+  const rows = new Map()
+  const client = { from() { return {
+    insert(row) { return { select() { return { async single() {
+      // Both handlers race through the storage adapter. The unique index is
+      // represented by one atomic insert check, as PostgreSQL provides.
+      await new Promise(resolve => setImmediate(resolve))
+      const key = [row.business_id, row.source, row.external_id].join(':')
+      if (rows.has(key)) return { data: null, error: { code: '23505' } }
+      const saved = { ...row, id: 'saved-' + rows.size, created_at: '2026-10-15T00:00:00Z' }; rows.set(key, saved)
+      return { data: saved, error: null }
+    } } } } },
+    select() { const filters = []; const chain = { eq(key, value) { filters.push([key,value]); return chain }, async maybeSingle() { return { data: [...rows.values()].find(row => filters.every(([key,value]) => row[key] === value)), error: null } } }; return chain }
+  } } }
+  const storage = createSupabaseStorage('unused', 'unused', { client })
+  const invoke = token => handleWixLead({ token, body: { data: { name: 'Jane', submissionId: 'same-submission' } }, lookupSource: async () => ({ business_id: token }), addLead: payload => storage.addLead(payload) })
+  const results = await Promise.all([invoke('A'), invoke('A'), invoke('B')])
+  assert.deepEqual(results.map(r => r.status), [200,200,200])
+  assert.equal(results[0].body.id, results[1].body.id)
+  assert.equal(results.filter(r => r.deduped).length, 1)
+  assert.notEqual(results[0].body.id, results[2].body.id)
+  assert.equal(rows.size, 2)
 })

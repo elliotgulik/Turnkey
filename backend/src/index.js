@@ -1,3 +1,5 @@
+import { createServiceM8Router } from './servicem8Routes.js'
+import { installSalesPlatform } from './salesPlatform.js'
 import dotenv from 'dotenv'
 dotenv.config()
 
@@ -9,7 +11,9 @@ import { createFileStorage } from './storage/file.js'
 import { createSupabaseStorage } from './storage/supabase.js'
 import { encryptToken, decryptToken } from './crypto.js'
 import { validateLeadPayload } from './leadValidation.js'
-import { hashWixToken, generateWixToken, handleWixLead } from './wixLeads.js'
+import { handleWixLead } from './wixLeads.js'
+import { fetchMetaObject } from './metaGraph.js'
+import { installLeadConnections, installWixBodyParser } from './leadConnections.js'
 import * as gmail from './providers/gmail.js'
 import * as googleCalendar from './providers/googleCalendar.js'
 import { fetchIcs } from './ical.js'
@@ -84,7 +88,14 @@ const storage =
 const app = express()
 
 app.set('trust proxy', 1) // needed for req.ip to reflect the real client (behind Render's proxy), not the proxy itself
-app.use(cors())
+app.use((req,res,next)=>{
+  if((req.path.startsWith('/api/servicem8')||req.path.startsWith('/api/sales/servicem8')))return cors({origin:(process.env.FRONTEND_URL||'https://turnkeycrm.net').replace(/\/$/,''),credentials:true})(req,res,next)
+  return cors()(req,res,next)
+})
+// Parse Wix before the general upload parser so public form submissions are bounded.
+installWixBodyParser(app)
+app.use('/api/sales',express.json({limit:'256kb'}))
+app.use('/api/servicem8/webhook', express.json({limit:'256kb',verify:(req,res,buf)=>{req.rawBody=buf}}), express.urlencoded({extended:false,limit:'256kb'}))
 // `verify` captures the exact raw request bytes into req.rawBody alongside
 // the normal parsed req.body — needed for the Stripe webhook below, which
 // must verify its signature against the untouched raw payload, not a
@@ -445,7 +456,7 @@ app.post('/api/leads/wix/:token', leadsRateLimit, async (req, res) => {
     addLead: (payload) => storage.addLead(payload)
   })
   if (result.cause) console.error('POST /api/leads/wix/:token', result.cause)
-  if (result.status === 201 && !result.deduped) {
+  if (result.status === 200 && !result.deduped) {
     sendNotification(authClient, {
       business_id: result.businessId, type: 'new_lead',
       title: 'New Wix lead received',
@@ -476,7 +487,7 @@ async function ingestMetaLead(pageId, leadgenId) {
   if (srcErr) throw srcErr
   if (!source) { console.warn('[Meta leads] no business connected for page', pageId); return }
   const pageToken = decryptToken(source.token_enc)
-  const graphRes = await fetch(`https://graph.facebook.com/v19.0/${leadgenId}?access_token=${encodeURIComponent(pageToken)}`)
+  const graphRes = await fetchMetaObject(leadgenId, { token: pageToken, fields: 'id,field_data' })
   if (!graphRes.ok) { console.error('[Meta leads] Graph API fetch failed', leadgenId, await graphRes.text()); return }
   const leadData = await graphRes.json()
   const fields = {}
@@ -534,75 +545,7 @@ app.post('/api/leads/meta', async (req, res) => {
 /* ----- Connections management (requireBusiness-gated — these configure
    the mapping above, distinct from the public webhook routes themselves) ----- */
 
-app.get('/api/connections/wix/status', requireBusiness, async (req, res) => {
-  const { data } = await authClient.from('lead_sources').select('id')
-    .eq('business_id', req.businessId).eq('provider', 'wix').maybeSingle()
-  res.json({ connected: !!data })
-})
-
-// Generates a brand-new webhook token, replacing any existing one for this
-// business — the old URL stops working immediately, same "regenerating
-// invalidates the old key" behavior as a typical API key. The raw token is
-// returned ONLY in this response; only its SHA-256 hash is stored, so it
-// can never be shown again after this — the frontend must tell the user to
-// copy it now.
-app.post('/api/connections/wix/connect', requireBusiness, async (req, res) => {
-  try {
-    const token = generateWixToken()
-    const hash = hashWixToken(token)
-    await authClient.from('lead_sources').delete().eq('business_id', req.businessId).eq('provider', 'wix')
-    const { error } = await authClient.from('lead_sources').insert({
-      business_id: req.businessId, provider: 'wix', external_id: hash
-    })
-    if (error) throw error
-    res.json({ ok: true, webhookUrl: `https://${req.get('host')}/api/leads/wix/${token}` })
-  } catch (err) {
-    console.error('POST /api/connections/wix/connect', err)
-    res.status(500).json({ error: 'Could not generate a webhook URL' })
-  }
-})
-
-app.post('/api/connections/wix/disconnect', requireBusiness, async (req, res) => {
-  await authClient.from('lead_sources').delete().eq('business_id', req.businessId).eq('provider', 'wix')
-  res.json({ ok: true })
-})
-
-app.get('/api/connections/meta/status', requireBusiness, async (req, res) => {
-  const { data } = await authClient.from('lead_sources').select('external_id')
-    .eq('business_id', req.businessId).eq('provider', 'meta').maybeSingle()
-  res.json({ connected: !!data, pageId: data ? data.external_id : null })
-})
-
-app.post('/api/connections/meta/connect', requireBusiness, async (req, res) => {
-  const pageId = String(req.body?.pageId || '').trim()
-  const pageToken = String(req.body?.pageToken || '').trim()
-  if (!pageId || !pageToken) return res.status(400).json({ error: 'Page ID and Page Access Token are required' })
-  try {
-    // Verify the token actually works and matches the claimed page before
-    // saving it — catches a pasted token for the wrong Page immediately
-    // instead of silently failing on the first real webhook event.
-    const check = await fetch(`https://graph.facebook.com/v19.0/${encodeURIComponent(pageId)}?fields=id,name&access_token=${encodeURIComponent(pageToken)}`)
-    const checkJson = await check.json()
-    if (!check.ok || checkJson.id !== pageId) {
-      return res.status(400).json({ error: checkJson.error?.message || 'That Page ID / token combination could not be verified with Meta' })
-    }
-    await authClient.from('lead_sources').delete().eq('business_id', req.businessId).eq('provider', 'meta')
-    await authClient.from('lead_sources').delete().eq('provider', 'meta').eq('external_id', pageId)
-    const { error } = await authClient.from('lead_sources').insert({
-      business_id: req.businessId, provider: 'meta', external_id: pageId, token_enc: encryptToken(pageToken)
-    })
-    if (error) throw error
-    res.json({ ok: true, pageName: checkJson.name || null })
-  } catch (err) {
-    console.error('POST /api/connections/meta/connect', err)
-    res.status(500).json({ error: 'Could not connect this Meta Page' })
-  }
-})
-
-app.post('/api/connections/meta/disconnect', requireBusiness, async (req, res) => {
-  await authClient.from('lead_sources').delete().eq('business_id', req.businessId).eq('provider', 'meta')
-  res.json({ ok: true })
-})
+installLeadConnections(app,{db:authClient,requireBusiness})
 
 
 /* =====================================================================
@@ -1406,6 +1349,20 @@ app.post('/api/ai/marketing', requireBusiness, async (req, res) => {
     res.status(500).json({ error: 'Could not reach the AI assistant' })
   }
 })
+
+installSalesPlatform(app,{db:authClient,requireBusiness,sendNotification})
+
+// ServiceM8 integration — all routes/logic in servicem8Routes.js,
+// servicem8Sync.js, servicem8Webhooks.js and providers/servicem8.js;
+// mounted here as a self-contained router so this file's own diff stays
+// minimal. requireBusiness/authClient/OAUTH_STATE_SECRET are the same
+// instances every other integration above already uses.
+app.use('/api/servicem8', createServiceM8Router({
+  authClient,
+  requireBusiness,
+  oauthStateSecret: OAUTH_STATE_SECRET,
+  backendPublicUrl: (req) => `https://${req.get('host')}`
+}))
 
 app.listen(PORT, () => {
   console.log(`🚀 TurnKey backend running on port ${PORT}`)
