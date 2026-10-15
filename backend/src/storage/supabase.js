@@ -1,19 +1,54 @@
 import { createClient } from '@supabase/supabase-js'
 
-export function createSupabaseStorage(url, serviceRoleKey) {
-  const supabase = createClient(url, serviceRoleKey, {
+// The optional `client` override exists purely for tests (see
+// supabase.test.js) to inject a fake Supabase client and exercise the
+// dedupe/error-handling branches without a real database — every real
+// caller (backend/src/index.js) omits it and gets the same client this
+// always created.
+export function createSupabaseStorage(url, serviceRoleKey, { client } = {}) {
+  const supabase = client || createClient(url, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   })
 
   return {
     async addLead(payload) {
+      const row = {
+        payload,
+        business_id: payload.business_id ?? null,
+        source: payload.source ?? null,
+        external_id: payload.external_id ?? null,
+      }
       const { data, error } = await supabase
         .from('leads')
-        .insert({ payload, business_id: payload.business_id ?? null })
+        .insert(row)
         .select('id, payload, created_at')
         .single()
 
-      if (error) throw error
+      if (error) {
+        // Unique violation on (business_id, source, external_id) means a
+        // webhook redelivered an event already ingested (Wix Automations
+        // and Meta's leadgen webhook both retry on anything but a fast
+        // 2xx) — idempotent no-op: return the existing row instead of
+        // erroring, so a redelivery never creates a duplicate lead.
+        if (error.code === '23505' && row.external_id) {
+          const { data: existing, error: findErr } = await supabase
+            .from('leads')
+            .select('id, payload, created_at')
+            .eq('business_id', row.business_id)
+            .eq('source', row.source)
+            .eq('external_id', row.external_id)
+            .maybeSingle()
+          if (!findErr && existing) {
+            return {
+              id: existing.id,
+              payload: existing.payload,
+              createdAt: new Date(existing.created_at).getTime(),
+              deduped: true,
+            }
+          }
+        }
+        throw error
+      }
       return {
         id: data.id,
         payload: data.payload,

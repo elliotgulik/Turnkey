@@ -26,6 +26,16 @@ export function createFileStorage(dataDir) {
   return {
     async addLead(payload) {
       const leads = await readJson(leadsPath, [])
+      // Same redelivery dedupe as the Supabase storage's unique index —
+      // local/file mode has no DB constraint to lean on, so check by hand.
+      if (payload.external_id && payload.source) {
+        const dup = leads.find((l) =>
+          l.businessId === (payload.business_id ?? null) &&
+          l.payload?.source === payload.source &&
+          l.payload?.external_id === payload.external_id
+        )
+        if (dup) return dup
+      }
       const lead = {
         id: crypto.randomUUID(),
         payload,

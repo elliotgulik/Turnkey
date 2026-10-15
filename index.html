@@ -8274,6 +8274,27 @@ function openConnections(){
         ?`<p><b>Ready.</b> Every invoice can generate a payment link — customers pay by card, and the invoice ${stripeStatus.webhookConfigured?'marks itself paid automatically':'still needs marking paid manually once you see the payment come through'}.</p>`
         :`<p>Let customers pay their invoice online by card. This is a one-time setup on the server your TurnKey runs on, not something to configure per business — ask whoever manages your deployment to add a Stripe key. Invoices can still be marked paid manually until then.</p>`}
     </div>
+    <div class="conn-card ${wixStatus.connected?'live':''}">
+      <div class="conn-top"><span class="conn-name">Wix — form leads</span><span class="conn-badge ${wixStatus.connected?'on':'off'}">${wixStatus.connected?'● CONNECTED':'not connected'}</span></div>
+      ${wixStatus.pendingUrl?`
+        <p><b>Copy this URL now</b> — for security it's shown only this once and can't be retrieved again (Regenerate makes a new one if you lose it).</p>
+        <div class="conn-keyrow"><input id="conn-wix-url" readonly value="${wixStatus.pendingUrl}" onclick="this.select()">
+          <button class="btn accent sm" onclick="copyEmbedField('conn-wix-url','conn-wix-url-btn','Copy URL')" id="conn-wix-url-btn">Copy URL</button>
+        </div>
+        <p style="font-size:12px;color:var(--ink-faint);margin-top:12px">In Wix: Automations → create a rule → trigger "Form submitted" → action "Send a webhook" → paste the URL above. Submissions land straight in Leads.</p>
+        <button class="btn ghost sm" style="margin-top:8px" onclick="connectWix()">Regenerate URL</button> <button class="btn ghost sm" onclick="disconnectWix()">Disconnect</button>`
+      :wixStatus.connected
+        ?`<p><b>Connected.</b> Submissions from the Wix Automation using this webhook land straight in Leads.</p><button class="btn ghost sm" onclick="connectWix()">Regenerate URL</button> <button class="btn ghost sm" onclick="disconnectWix()">Disconnect</button>`
+        :`<p>Get a webhook URL to paste into a Wix Automation ("When a form is submitted → Send a webhook") — submissions land straight in Leads, no manual copy-paste.</p><button class="btn accent sm" onclick="connectWix()">Connect Wix</button>`}
+    </div>
+    <div class="conn-card ${metaStatus.connected?'live':''}">
+      <div class="conn-top"><span class="conn-name">Meta — Facebook &amp; Instagram lead ads</span><span class="conn-badge ${metaStatus.connected?'on':'off'}">${metaStatus.connected?'● CONNECTED':'not connected'}</span></div>
+      ${metaStatus.connected
+        ?`<p><b>Connected</b> to Page ${metaStatus.pageId}. New Lead Ads submissions land straight in Leads.</p><button class="btn ghost sm" onclick="disconnectMeta()">Disconnect</button>`
+        :`<p>Connect a Facebook Page to pull its Lead Ads submissions straight into Leads. Needs a Meta App with the <code>leads_retrieval</code> permission (Meta App Review required) and a long-lived Page Access Token — paste them below.</p>
+          <div class="conn-keyrow"><input id="conn-meta-pageid" placeholder="Page ID"></div>
+          <div class="conn-keyrow" style="margin-top:6px"><input id="conn-meta-token" placeholder="Page Access Token" type="password"><button class="btn accent sm" onclick="connectMeta()">Connect</button></div>`}
+    </div>
     <div class="conn-note">${emailAccount?"You're fully connected. Nice.":"Connect Gmail to send quotes and invoices straight from Turnkey."}</div>`;
   openModal('conn-overlay');
 }
@@ -8407,6 +8428,83 @@ async function loadStripeStatus(){
     const j=await res.json();
     if(res.ok)stripeStatus={configured:!!j.configured,webhookConfigured:!!j.webhookConfigured};
   }catch(e){console.error('Load Stripe status failed',e);}
+}
+/* ===== Wix + Meta lead webhooks: both land straight into the existing
+   Leads pipeline (same backend storage.addLead() the booking page already
+   uses) — these Connections cards only manage the credential, not the
+   lead flow itself. ===== */
+let wixStatus={connected:false};
+let metaStatus={connected:false,pageId:null};
+async function loadWixStatus(){
+  const url=backendUrl();
+  const {data:{session}}=await sb.auth.getSession();
+  if(!url||!session)return;
+  try{
+    const res=await fetch(`${url}/api/connections/wix/status`,{headers:{Authorization:'Bearer '+session.access_token}});
+    const j=await res.json();
+    if(res.ok)wixStatus={connected:!!j.connected};
+  }catch(e){console.error('Load Wix status failed',e);}
+}
+async function loadMetaStatus(){
+  const url=backendUrl();
+  const {data:{session}}=await sb.auth.getSession();
+  if(!url||!session)return;
+  try{
+    const res=await fetch(`${url}/api/connections/meta/status`,{headers:{Authorization:'Bearer '+session.access_token}});
+    const j=await res.json();
+    if(res.ok)metaStatus={connected:!!j.connected,pageId:j.pageId||null};
+  }catch(e){console.error('Load Meta status failed',e);}
+}
+// The webhook token is only ever returned in THIS response — only its hash
+// is stored server-side, so it can't be shown again later. Prompting here
+// (rather than a toast) keeps it on screen long enough to actually copy.
+async function connectWix(){
+  const url=backendUrl();
+  const {data:{session}}=await sb.auth.getSession();
+  if(!url||!session){toast('Please sign in again');return;}
+  try{
+    const res=await fetch(`${url}/api/connections/wix/connect`,{method:'POST',headers:{Authorization:'Bearer '+session.access_token}});
+    const j=await res.json();
+    if(!res.ok||!j.webhookUrl){toast(j.error||'Could not generate a webhook URL');return;}
+    // The URL is only ever returned in THIS response — only its hash is
+    // stored server-side, so it can't be fetched again later. Kept in
+    // wixStatus just long enough to render the one-time copyable field
+    // below; it's gone the next time Connections is opened fresh.
+    wixStatus={connected:true,pendingUrl:j.webhookUrl};
+    openConnections();
+  }catch(e){toast(describeConnectError(e));}
+}
+async function disconnectWix(){
+  if(!confirm('Disconnect Wix? The current webhook URL will stop working immediately.'))return;
+  const url=backendUrl();
+  const {data:{session}}=await sb.auth.getSession();
+  if(!url||!session)return;
+  await fetch(`${url}/api/connections/wix/disconnect`,{method:'POST',headers:{Authorization:'Bearer '+session.access_token}}).catch(()=>{});
+  wixStatus={connected:false};openConnections();toast('Wix disconnected');
+}
+async function connectMeta(){
+  const pageId=(document.getElementById('conn-meta-pageid')?.value||'').trim();
+  const pageToken=(document.getElementById('conn-meta-token')?.value||'').trim();
+  if(!pageId||!pageToken){toast('Enter both the Page ID and the Page Access Token');return;}
+  const url=backendUrl();
+  const {data:{session}}=await sb.auth.getSession();
+  if(!url||!session){toast('Please sign in again');return;}
+  try{
+    const res=await fetch(`${url}/api/connections/meta/connect`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.access_token},body:JSON.stringify({pageId,pageToken})});
+    const j=await res.json();
+    if(!res.ok){toast(j.error||'Could not connect this Meta Page');return;}
+    metaStatus={connected:true,pageId};
+    openConnections();
+    toast('Meta Page connected'+(j.pageName?' — '+j.pageName:''));
+  }catch(e){toast(describeConnectError(e));}
+}
+async function disconnectMeta(){
+  if(!confirm('Disconnect this Meta Page? New leads from it will stop arriving until reconnected.'))return;
+  const url=backendUrl();
+  const {data:{session}}=await sb.auth.getSession();
+  if(!url||!session)return;
+  await fetch(`${url}/api/connections/meta/disconnect`,{method:'POST',headers:{Authorization:'Bearer '+session.access_token}}).catch(()=>{});
+  metaStatus={connected:false,pageId:null};openConnections();toast('Meta Page disconnected');
 }
 async function loadCalendarConnections(){
   const url=backendUrl();
@@ -8819,6 +8917,8 @@ async function handleAuthedSession(session){
   loadCalendarBusyBlocks();
   loadNotificationPrefs();
   loadStripeStatus();
+  loadWixStatus();
+  loadMetaStatus();
   retryPendingPhotos();
   initOneSignal();
   loadNotificationCentre();

@@ -8,6 +8,8 @@ import { createClient } from '@supabase/supabase-js'
 import { createFileStorage } from './storage/file.js'
 import { createSupabaseStorage } from './storage/supabase.js'
 import { encryptToken, decryptToken } from './crypto.js'
+import { validateLeadPayload } from './leadValidation.js'
+import { hashWixToken, generateWixToken, handleWixLead } from './wixLeads.js'
 import * as gmail from './providers/gmail.js'
 import * as googleCalendar from './providers/googleCalendar.js'
 import { fetchIcs } from './ical.js'
@@ -158,31 +160,6 @@ app.get('/api/health', (_req, res) => {
 // sets a sync key from Connections any more); real sync goes through the
 // per-business Supabase tables under RLS instead.
 
-
-// Basic shape/size validation for the one route the public can post to
-// without any auth — rejects obviously-malformed or abusive payloads before
-// they ever reach storage. Deliberately permissive on content (this isn't
-// the place to second-guess a legitimate customer's address or notes), just
-// bounds the shape so a scripted attacker can't stuff huge arrays/strings
-// into a single quote request.
-function validateLeadPayload(payload) {
-  if (!payload || typeof payload !== 'object') return 'Invalid lead payload'
-  const c = payload.customer
-  if (!c || typeof c !== 'object') return 'Invalid lead payload'
-  if (!c.name || typeof c.name !== 'string' || c.name.length > 200) return 'A valid name is required'
-  if (c.email && (typeof c.email !== 'string' || c.email.length > 320 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c.email))) return 'That email address doesn\'t look right'
-  if (c.phone && (typeof c.phone !== 'string' || c.phone.length > 40)) return 'That phone number doesn\'t look right'
-  if (c.address && (typeof c.address !== 'string' || c.address.length > 500)) return 'That address is too long'
-  if (c.notes && (typeof c.notes !== 'string' || c.notes.length > 4000)) return 'Notes are too long'
-  if (payload.areas) {
-    if (!Array.isArray(payload.areas) || payload.areas.length > 100) return 'Too many mapped areas'
-    for (const a of payload.areas) {
-      if (a && Array.isArray(a.points) && a.points.length > 500) return 'A mapped area has too many points'
-    }
-  }
-  if (payload.photos && (!Array.isArray(payload.photos) || payload.photos.length > 12)) return 'Too many photos'
-  return null
-}
 
 app.post('/api/leads', leadsRateLimit, async (req, res) => {
   try {
@@ -419,6 +396,212 @@ app.post('/api/leads/ack', requireBusiness, async (req, res) => {
       error: 'Failed to ack leads'
     })
   }
+})
+
+
+/* =====================================================================
+   EXTERNAL LEAD SOURCES — Wix (shared-secret webhook) and Meta Lead Ads
+   (Graph API, Page-token based). Both map an incoming event to a
+   business_id via lead_sources (schema-lead-webhooks.sql) and then call
+   storage.addLead() exactly like POST /api/leads above — the CRM frontend
+   needs no changes to pick these up, it already polls
+   GET /api/leads/pending and ingests via ingestQuoteRequest(), and already
+   reads payload.customer.source for the Sales dashboard's source
+   breakdown.
+
+   Wix — no OAuth. A per-business random token is generated in Connections
+   (POST /api/connections/wix/connect) and pasted into a Wix Automation
+   ("When a form is submitted → Send a webhook"). Only the token's SHA-256
+   hash is ever stored — the raw token is returned once, at generation
+   time, the same way most API-key UIs work, so there's nothing to decrypt
+   or leak later.
+
+   Meta — requires the business to create a Meta App (Webhooks + Marketing
+   API products, leads_retrieval permission, App Review for production),
+   generate a long-lived Page Access Token, and paste the Page ID + token
+   into Connections. Meta's webhook only sends a lightweight ping
+   ({leadgen_id, page_id}) — the actual field data is fetched separately
+   via the Graph API using the stored Page token.
+   ===================================================================== */
+const META_APP_SECRET = process.env.META_APP_SECRET || ''
+const META_VERIFY_TOKEN = process.env.META_VERIFY_TOKEN || ''
+const isMetaConfigured = () => !!(META_APP_SECRET && META_VERIFY_TOKEN)
+
+// Field mapping, token hashing, validation and business-lookup wiring all
+// live in wixLeads.js as a plain, dependency-injected function — see that
+// file's handleWixLead() for the actual decision logic and wixLeads.test.js
+// for its test coverage. This route is a thin adapter: give it how to look
+// a hashed token up and how to persist a lead, read back the result.
+app.post('/api/leads/wix/:token', leadsRateLimit, async (req, res) => {
+  const result = await handleWixLead({
+    token: req.params.token,
+    body: req.body,
+    lookupSource: async (hash) => {
+      const { data, error } = await authClient
+        .from('lead_sources').select('business_id').eq('provider', 'wix').eq('external_id', hash).maybeSingle()
+      if (error) throw error
+      return data
+    },
+    addLead: (payload) => storage.addLead(payload)
+  })
+  if (result.cause) console.error('POST /api/leads/wix/:token', result.cause)
+  if (result.status === 201 && !result.deduped) {
+    sendNotification(authClient, {
+      business_id: result.businessId, type: 'new_lead',
+      title: 'New Wix lead received',
+      message: (result.customerName || 'A customer') + ' submitted a form on your Wix site',
+      url: '/index.html?open=pipeline'
+    }).catch((err) => console.error('new_lead (wix) notification failed', err))
+  }
+  res.status(result.status).json(result.body)
+})
+
+// Meta calls this once (and whenever the webhook config is re-verified) to
+// confirm this endpoint is genuinely controlled by whoever set up the
+// subscription, before it will send any real events — echo the challenge
+// back only if the verify token matches what's configured on the server.
+app.get('/api/leads/meta', (req, res) => {
+  const mode = req.query['hub.mode']
+  const token = req.query['hub.verify_token']
+  const challenge = req.query['hub.challenge']
+  if (META_VERIFY_TOKEN && mode === 'subscribe' && token === META_VERIFY_TOKEN) {
+    return res.status(200).send(challenge)
+  }
+  res.sendStatus(403)
+})
+
+async function ingestMetaLead(pageId, leadgenId) {
+  const { data: source, error: srcErr } = await authClient
+    .from('lead_sources').select('business_id, token_enc').eq('provider', 'meta').eq('external_id', pageId).maybeSingle()
+  if (srcErr) throw srcErr
+  if (!source) { console.warn('[Meta leads] no business connected for page', pageId); return }
+  const pageToken = decryptToken(source.token_enc)
+  const graphRes = await fetch(`https://graph.facebook.com/v19.0/${leadgenId}?access_token=${encodeURIComponent(pageToken)}`)
+  if (!graphRes.ok) { console.error('[Meta leads] Graph API fetch failed', leadgenId, await graphRes.text()); return }
+  const leadData = await graphRes.json()
+  const fields = {}
+  for (const f of (leadData.field_data || [])) fields[f.name] = (f.values || [])[0] || ''
+  const name = fields.full_name || [fields.first_name, fields.last_name].filter(Boolean).join(' ') || 'Meta lead'
+  const payload = {
+    business_id: source.business_id,
+    customer: {
+      name,
+      email: fields.email || undefined,
+      phone: fields.phone_number || fields.phone || undefined,
+      address: [fields.street_address, fields.city].filter(Boolean).join(', ') || undefined,
+      source: 'Meta'
+    },
+    source: 'meta', external_id: String(leadgenId), submittedAt: Date.now()
+  }
+  const lead = await storage.addLead(payload)
+  if (!lead.deduped) {
+    sendNotification(authClient, {
+      business_id: source.business_id, type: 'new_lead',
+      title: 'New Meta lead received',
+      message: name + ' submitted a lead ad on Facebook/Instagram',
+      url: '/index.html?open=pipeline'
+    }).catch((err) => console.error('new_lead (meta) notification failed', err))
+  }
+}
+
+// Meta calls this directly (no CRM session), same as Stripe's webhook —
+// deliberately not behind requireBusiness, verified by signature instead.
+// Always acks fast (before the real work) so a downstream failure doesn't
+// make Meta retry-storm an event we may have already partially processed —
+// same reasoning as the Stripe webhook handler above.
+app.post('/api/leads/meta', async (req, res) => {
+  res.status(200).json({ received: true })
+  try {
+    if (!isMetaConfigured()) { console.warn('[Meta leads] webhook received but META_APP_SECRET/META_VERIFY_TOKEN not configured'); return }
+    const sig = req.get('x-hub-signature-256') || ''
+    const expected = 'sha256=' + crypto.createHmac('sha256', META_APP_SECRET).update(req.rawBody).digest('hex')
+    const a = Buffer.from(sig), b = Buffer.from(expected)
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) { console.warn('[Meta leads] signature verification failed'); return }
+
+    for (const entry of (req.body?.entry || [])) {
+      for (const change of (entry.changes || [])) {
+        if (change.field !== 'leadgen') continue
+        const { leadgen_id: leadgenId, page_id: pageId } = change.value || {}
+        if (!leadgenId || !pageId) continue
+        await ingestMetaLead(pageId, leadgenId).catch((err) => console.error('[Meta leads] ingest failed', leadgenId, err))
+      }
+    }
+  } catch (err) {
+    console.error('POST /api/leads/meta', err)
+  }
+})
+
+/* ----- Connections management (requireBusiness-gated — these configure
+   the mapping above, distinct from the public webhook routes themselves) ----- */
+
+app.get('/api/connections/wix/status', requireBusiness, async (req, res) => {
+  const { data } = await authClient.from('lead_sources').select('id')
+    .eq('business_id', req.businessId).eq('provider', 'wix').maybeSingle()
+  res.json({ connected: !!data })
+})
+
+// Generates a brand-new webhook token, replacing any existing one for this
+// business — the old URL stops working immediately, same "regenerating
+// invalidates the old key" behavior as a typical API key. The raw token is
+// returned ONLY in this response; only its SHA-256 hash is stored, so it
+// can never be shown again after this — the frontend must tell the user to
+// copy it now.
+app.post('/api/connections/wix/connect', requireBusiness, async (req, res) => {
+  try {
+    const token = generateWixToken()
+    const hash = hashWixToken(token)
+    await authClient.from('lead_sources').delete().eq('business_id', req.businessId).eq('provider', 'wix')
+    const { error } = await authClient.from('lead_sources').insert({
+      business_id: req.businessId, provider: 'wix', external_id: hash
+    })
+    if (error) throw error
+    res.json({ ok: true, webhookUrl: `https://${req.get('host')}/api/leads/wix/${token}` })
+  } catch (err) {
+    console.error('POST /api/connections/wix/connect', err)
+    res.status(500).json({ error: 'Could not generate a webhook URL' })
+  }
+})
+
+app.post('/api/connections/wix/disconnect', requireBusiness, async (req, res) => {
+  await authClient.from('lead_sources').delete().eq('business_id', req.businessId).eq('provider', 'wix')
+  res.json({ ok: true })
+})
+
+app.get('/api/connections/meta/status', requireBusiness, async (req, res) => {
+  const { data } = await authClient.from('lead_sources').select('external_id')
+    .eq('business_id', req.businessId).eq('provider', 'meta').maybeSingle()
+  res.json({ connected: !!data, pageId: data ? data.external_id : null })
+})
+
+app.post('/api/connections/meta/connect', requireBusiness, async (req, res) => {
+  const pageId = String(req.body?.pageId || '').trim()
+  const pageToken = String(req.body?.pageToken || '').trim()
+  if (!pageId || !pageToken) return res.status(400).json({ error: 'Page ID and Page Access Token are required' })
+  try {
+    // Verify the token actually works and matches the claimed page before
+    // saving it — catches a pasted token for the wrong Page immediately
+    // instead of silently failing on the first real webhook event.
+    const check = await fetch(`https://graph.facebook.com/v19.0/${encodeURIComponent(pageId)}?fields=id,name&access_token=${encodeURIComponent(pageToken)}`)
+    const checkJson = await check.json()
+    if (!check.ok || checkJson.id !== pageId) {
+      return res.status(400).json({ error: checkJson.error?.message || 'That Page ID / token combination could not be verified with Meta' })
+    }
+    await authClient.from('lead_sources').delete().eq('business_id', req.businessId).eq('provider', 'meta')
+    await authClient.from('lead_sources').delete().eq('provider', 'meta').eq('external_id', pageId)
+    const { error } = await authClient.from('lead_sources').insert({
+      business_id: req.businessId, provider: 'meta', external_id: pageId, token_enc: encryptToken(pageToken)
+    })
+    if (error) throw error
+    res.json({ ok: true, pageName: checkJson.name || null })
+  } catch (err) {
+    console.error('POST /api/connections/meta/connect', err)
+    res.status(500).json({ error: 'Could not connect this Meta Page' })
+  }
+})
+
+app.post('/api/connections/meta/disconnect', requireBusiness, async (req, res) => {
+  await authClient.from('lead_sources').delete().eq('business_id', req.businessId).eq('provider', 'meta')
+  res.json({ ok: true })
 })
 
 
@@ -1255,5 +1438,14 @@ app.listen(PORT, () => {
       ? 'Connect Gmail will fail immediately with a 503, before reaching Google.'
       : 'Connect Gmail will reach Google and get approved, then fail silently from the browser side when the callback tries to encrypt the token — see [OAuth] callback FAILED in these logs when that happens.'
     console.warn(`⚠️  Gmail OAuth NOT fully configured — missing ${missing.join(', ')} in this server's environment. ${consequence} See .env.example for where to get each value.`)
+  }
+  // Wix needs no server-wide config (its secret is generated per-business
+  // in Connections) so there's nothing to diagnose at boot for it. Meta
+  // does need two server-wide values before ANY business can connect a Page.
+  if (isMetaConfigured()) {
+    console.log('✅ Meta Lead Ads configured (META_APP_SECRET + META_VERIFY_TOKEN both set)')
+  } else {
+    const missing = [!META_APP_SECRET && 'META_APP_SECRET', !META_VERIFY_TOKEN && 'META_VERIFY_TOKEN'].filter(Boolean)
+    console.warn(`⚠️  Meta Lead Ads NOT configured — missing ${missing.join(' and ')} in this server's environment. The webhook verification handshake and signature checks will both fail until these are set. See .env.example for where to get each value.`)
   }
 })
