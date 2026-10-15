@@ -456,6 +456,16 @@ app.post('/api/leads/wix/:token', leadsRateLimit, async (req, res) => {
     addLead: (payload) => storage.addLead(payload)
   })
   if (result.cause) console.error('POST /api/leads/wix/:token', result.cause)
+  // A 400 here is almost always a real Wix Automation's field names not
+  // matching mapWixPayload's expected list (there's no single fixed Wix
+  // schema — see wixLeads.js's own comment on this) — without logging the
+  // actual keys sent, a validation failure is undiagnosable from Render's
+  // logs alone. Logs top-level key names only, never values (no PII in
+  // the log), which is enough to see e.g. "Full Name" / "Email Address"
+  // arriving instead of the expected "name" / "email".
+  if (result.status === 400) {
+    console.warn('[Wix webhook] 400:', result.body?.error, '— payload keys received:', Object.keys(req.body || {}), req.body?.data ? 'data keys: ' + Object.keys(req.body.data) : '', req.body?.contact ? 'contact keys: ' + Object.keys(req.body.contact) : '')
+  }
   if (result.status === 200 && !result.deduped) {
     sendNotification(authClient, {
       business_id: result.businessId, type: 'new_lead',
