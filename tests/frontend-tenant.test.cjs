@@ -40,10 +40,10 @@ test('late database response cannot replace the next business records',async()=>
 test('switch during a save prevents subsequent writes and rejects old records',async()=>{
  let release;const requests=[];
  const ctx=context({sb:{from(table){requests.push(table);const q={update(){return q},eq(){return q},then(resolve){return new Promise(r=>release=r).then(resolve);}};return q;}}});
- vm.runInContext(section('async function syncRecordToSupabase(r){','/* ===== Supabase Storage:'),ctx);
+ vm.runInContext(section('const recordSaveQueue = new WeakMap();','/* ===== Supabase Storage:'),ctx);
  const record={customerId:'customer-A',stage:'new',total:0};ctx.recordBusinesses.set(record,'A');
  const save=ctx.syncRecordToSupabase(record);
- await Promise.resolve();ctx.currentBusinessId='B';ctx.businessSessionVersion++;release({});
+ await new Promise(resolve=>setImmediate(resolve));ctx.currentBusinessId='B';ctx.businessSessionVersion++;release({});
  await assert.rejects(save,/Business session changed/);assert.deepEqual(requests,['customers']);
  await assert.rejects(ctx.syncRecordToSupabase(record),/Business session changed/);assert.deepEqual(requests,['customers']);
 });

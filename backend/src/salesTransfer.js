@@ -16,10 +16,12 @@ export function stableUuid(...parts) {
   return `${s.slice(0, 8)}-${s.slice(8, 12)}-${s.slice(12, 16)}-${s.slice(16, 20)}-${s.slice(20)}`;
 }
 export class ServiceM8Error extends Error {
-  constructor(status) {
+  constructor(status, authMode = "oauth") {
     super(
       status === 401
-        ? "ServiceM8 access expired. Reconnect the account."
+        ? authMode === "api_key"
+          ? "ServiceM8 rejected this API key. Check that the key is valid, active and copied in full."
+          : "ServiceM8 access expired. Reconnect the account."
         : status === 403
           ? "ServiceM8 permissions are insufficient. Reconnect with the required scopes."
           : status === 429
@@ -27,6 +29,10 @@ export class ServiceM8Error extends Error {
             : `ServiceM8 request failed (${status}).`,
     );
     this.status = status;
+    this.code = status === 401
+      ? authMode === "api_key" ? "SERVICEM8_API_KEY_REJECTED" : "SERVICEM8_RECONNECT_REQUIRED"
+      : status === 403 ? "SERVICEM8_PERMISSION_DENIED"
+      : status === 429 ? "SERVICEM8_RATE_LIMITED" : "SERVICEM8_REQUEST_FAILED";
   }
 }
 export async function request(
@@ -54,7 +60,7 @@ export async function request(
     redirect: "error",
     signal: AbortSignal.timeout(20000),
   });
-  if (!res.ok) throw new ServiceM8Error(res.status);
+  if (!res.ok) throw new ServiceM8Error(res.status, credentials.apiKey ? "api_key" : "oauth");
   const text = await res.text();
   let data = {};
   try {
@@ -65,10 +71,13 @@ export async function request(
   if (
     (data.errorCode != null && String(data.errorCode) !== "0") ||
     data.success === false
-  )
+  ) {
+    const code = Number(data.errorCode);
+    if ([401, 403, 429].includes(code)) throw new ServiceM8Error(code, credentials.apiKey ? "api_key" : "oauth");
     throw Error(
       "ServiceM8 rejected the request. Review the account permissions and supplied fields.",
     );
+  }
   return {
     data,
     recordUuid: res.headers.get("x-record-uuid"),
@@ -85,6 +94,9 @@ export function approvedLines(snapshot) {
     throw Error(
       "This historical quote has no GST snapshot. Review its approved tax treatment before transfer.",
     );
+  if (lines.some((line) => line.priceSnapshot != null &&
+      (!Number.isFinite(Number(line.priceSnapshot)) || Number(line.priceSnapshot) < 0)))
+    throw Error("The approved quote contains an invalid service price");
   const sum = lines.reduce(
     (s, l) => s + Math.max(0, Number(l.priceSnapshot) || 0),
     0,

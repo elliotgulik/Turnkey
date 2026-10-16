@@ -114,59 +114,52 @@ function encodeHeaderValue(v) {
   return '=?UTF-8?B?' + Buffer.from(v, 'utf8').toString('base64') + '?='
 }
 
-function buildRawMessage({ from, to, subject, bodyText, bodyHtml, inReplyTo, references, attachment }) {
-  const headers = [
-    `From: ${from}`, `To: ${to}`, `Subject: ${encodeHeaderValue(subject || '')}`, 'MIME-Version: 1.0'
-  ]
-  if (inReplyTo) headers.push(`In-Reply-To: ${inReplyTo}`)
-  if (references) headers.push(`References: ${references}`)
-
-  // multipart/alternative: plain-text fallback first, HTML second — the
-  // standard shape for a "professional" HTML email that still degrades
-  // gracefully in text-only clients.
-  const altBoundary = 'turnkey_alt_' + Math.random().toString(36).slice(2)
-  const altLines = [
-    `--${altBoundary}`, 'Content-Type: text/plain; charset="UTF-8"', '',
-    bodyText || (bodyHtml || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(),
-    `--${altBoundary}`, 'Content-Type: text/html; charset="UTF-8"', '',
-    bodyHtml || '', `--${altBoundary}--`
-  ]
-
-  if (attachment && attachment.contentBase64) {
-    // multipart/mixed: the alternative text+html body as one part, the PDF
-    // (or whatever) attachment as another — this is what makes "attach the
-    // quote/invoice PDF automatically" possible without asking the user to
-    // download anything first and reattach it by hand.
-    const mixedBoundary = 'turnkey_mix_' + Math.random().toString(36).slice(2)
-    headers.push(`Content-Type: multipart/mixed; boundary="${mixedBoundary}"`)
-    const filename = (attachment.filename || 'attachment.pdf').replace(/[^\w.\- ]/g, '_')
-    const mimeType = attachment.mimeType || 'application/pdf'
-    const base64 = String(attachment.contentBase64).replace(/\r?\n/g, '')
-    const wrapped = base64.match(/.{1,76}/g)?.join('\r\n') || base64
-    const parts = [
-      '', `--${mixedBoundary}`, `Content-Type: multipart/alternative; boundary="${altBoundary}"`, '',
-      ...altLines,
-      `--${mixedBoundary}`,
-      `Content-Type: ${mimeType}; name="${filename}"`,
-      `Content-Disposition: attachment; filename="${filename}"`,
-      'Content-Transfer-Encoding: base64', '',
-      wrapped,
-      `--${mixedBoundary}--`
-    ]
-    return Buffer.from(headers.join('\r\n') + parts.join('\r\n'), 'utf8').toString('base64url')
-  }
-
-  if (bodyHtml) {
-    headers.push(`Content-Type: multipart/alternative; boundary="${altBoundary}"`)
-    return Buffer.from(headers.join('\r\n') + '\r\n' + altLines.join('\r\n'), 'utf8').toString('base64url')
-  }
-
-  headers.push('Content-Type: text/plain; charset="UTF-8"')
-  return Buffer.from(headers.join('\r\n') + '\r\n\r\n' + (bodyText || ''), 'utf8').toString('base64url')
+export const MAX_ATTACHMENT_BYTES = 12 * 1024 * 1024
+export function validateAttachments(attachments = []) {
+  if (!Array.isArray(attachments) || attachments.length > 10) throw new Error('Use at most 10 attachments')
+  let total = 0
+  return attachments.map(a => {
+    if (!a || typeof a.contentBase64 !== 'string' || (a.contentBase64.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(a.contentBase64))) throw new Error('Invalid attachment data')
+    if (a.contentBase64.length > Math.ceil(MAX_ATTACHMENT_BYTES / 3) * 4) throw new Error('Attachments must total at most 12 MB')
+    const bytes = Buffer.from(a.contentBase64, 'base64')
+    if (bytes.toString('base64') !== a.contentBase64) throw new Error('Invalid attachment data')
+    total += bytes.length
+    if (!bytes.length || total > MAX_ATTACHMENT_BYTES) throw new Error('Attachments must total at most 12 MB')
+    const mimeType = a.mimeType || 'application/octet-stream'
+    if (!/^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/i.test(mimeType)) throw new Error('Invalid attachment type')
+    return { filename: String(a.filename || 'attachment').slice(0, 180).replace(/[^\w.\- ]/g, '_'), mimeType, contentBase64: bytes.toString('base64') }
+  })
 }
 
-export async function sendMessage(accessToken, { from, to, subject, bodyText, bodyHtml, threadId, inReplyTo, references, attachment }) {
-  const raw = buildRawMessage({ from, to, subject, bodyText, bodyHtml, inReplyTo, references, attachment })
+export function buildRawMessage({ from, to, subject, bodyText, bodyHtml, inReplyTo, references, attachment, attachments = [] }) {
+  for (const v of [from, to, subject, inReplyTo, references]) {
+    if (v != null && (typeof v !== 'string' || /[\r\n]/.test(v))) throw new Error('Invalid email header')
+  }
+  const files = validateAttachments(attachment ? [...attachments, attachment] : attachments)
+  const headers = [`From: ${from}`, `To: ${to}`, `Subject: ${encodeHeaderValue(subject || '')}`, 'MIME-Version: 1.0']
+  if (inReplyTo) headers.push(`In-Reply-To: ${inReplyTo}`)
+  if (references) headers.push(`References: ${references}`)
+  const alt = 'turnkey_alt_' + Math.random().toString(36).slice(2)
+  const encoded = v => (Buffer.from(v || '', 'utf8').toString('base64').match(/.{1,76}/g) || []).join('\r\n')
+  const plain = bodyText || (bodyHtml || '').replace(/<[^>]+>/g, ' ')
+  const alternatives = [
+    `--${alt}`, 'Content-Type: text/plain; charset=UTF-8', 'Content-Transfer-Encoding: base64', '', encoded(plain),
+    `--${alt}`, 'Content-Type: text/html; charset=UTF-8', 'Content-Transfer-Encoding: base64', '', encoded(bodyHtml || '<pre>' + plain.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</pre>'), `--${alt}--`
+  ]
+  if (!files.length) {
+    headers.push(`Content-Type: multipart/alternative; boundary="${alt}"`)
+    return Buffer.from([...headers, '', ...alternatives].join('\r\n')).toString('base64url')
+  }
+  const mix = 'turnkey_mix_' + Math.random().toString(36).slice(2)
+  headers.push(`Content-Type: multipart/mixed; boundary="${mix}"`)
+  const parts = [`--${mix}`, `Content-Type: multipart/alternative; boundary="${alt}"`, '', ...alternatives]
+  for (const file of files) parts.push(`--${mix}`, `Content-Type: ${file.mimeType}; name="${file.filename}"`, `Content-Disposition: attachment; filename="${file.filename}"`, 'Content-Transfer-Encoding: base64', '', file.contentBase64.match(/.{1,76}/g).join('\r\n'))
+  parts.push(`--${mix}--`)
+  return Buffer.from([...headers, '', ...parts].join('\r\n')).toString('base64url')
+}
+
+export async function sendMessage(accessToken, { from, to, subject, bodyText, bodyHtml, threadId, inReplyTo, references, attachment, attachments }) {
+  const raw = buildRawMessage({ from, to, subject, bodyText, bodyHtml, inReplyTo, references, attachment, attachments })
   const body = { raw }
   if (threadId) body.threadId = threadId
   const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
@@ -174,6 +167,11 @@ export async function sendMessage(accessToken, { from, to, subject, bodyText, bo
     headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body)
   })
-  if (!res.ok) throw new Error('Gmail send failed: ' + await res.text())
-  return res.json()
+  if (!res.ok) {
+    const err = new Error(res.status === 401 ? 'Gmail connection expired; reconnect in Connections' : 'Gmail rejected the message (' + res.status + ')')
+    err.code = 'SEND_REJECTED'; err.status = res.status; throw err
+  }
+  const sent = await res.json()
+  if (!sent.id) throw new Error('Gmail did not confirm a message ID')
+  return sent
 }

@@ -14,7 +14,9 @@ const unwrap = async (q) => {
 const safeError = (e) =>
   e instanceof SM.ServiceM8Error
     ? e.message
-    : e.publicMessage ||
+    : e.code === "AUTH_EXPIRED"
+      ? "ServiceM8 access expired. Reconnect the account."
+      : e.publicMessage ||
       "The sales database or integration request failed. Check that the sales migration is applied, then retry.";
 const fail = (message, status = 400) =>
   Object.assign(new Error(message), { publicMessage: message, status });
@@ -49,10 +51,18 @@ export function installSalesPlatform(
       /\/$/,
       "",
     );
+  const encryptionReady = (() => {
+    if (!env.EMAIL_TOKEN_KEY) return false;
+    try { encryptToken("servicem8-configuration-check"); return true; }
+    catch { return false; }
+  })();
+  const oauthClientReady = !!(env.SERVICEM8_CLIENT_ID && env.SERVICEM8_CLIENT_SECRET) &&
+    (typeof oauthProvider.isConfigured !== "function" || oauthProvider.isConfigured());
+  const privateReady = encryptionReady && env.ENABLE_SERVICEM8_PRIVATE !== "false";
+  const integrationKinds = ["handoff", "webhook", "refresh_job"];
   const oauthReady = !!(
-    env.SERVICEM8_CLIENT_ID &&
-    env.SERVICEM8_CLIENT_SECRET &&
-    env.EMAIL_TOKEN_KEY &&
+    oauthClientReady &&
+    encryptionReady &&
     backend.startsWith("https://")
   );
   const wrap = (fn) => async (req, res) => {
@@ -60,7 +70,9 @@ export function installSalesPlatform(
       await fn(req, res);
     } catch (e) {
       console.error("[Sales platform]", e.code || e.status || e.name);
-      res.status(e.status || 503).json({ error: safeError(e) });
+      res.status(e.status || 503).json({ error: safeError(e),
+        ...(e instanceof SM.ServiceM8Error ? { code: e.code, providerStatus: e.status,
+          ...(e.stage ? { stage: e.stage } : {}) } : {}) });
     }
   };
   const admin = async (req, res, next) => {
@@ -90,22 +102,47 @@ export function installSalesPlatform(
         .eq("business_id", businessId)
         .maybeSingle(),
     );
+  function connectionHealth(c) {
+    const configurationMissing = [
+      !encryptionReady && "EMAIL_TOKEN_KEY",
+      c?.auth_mode === "oauth" && (!env.SERVICEM8_CLIENT_ID || !oauthClientReady) && "SERVICEM8_CLIENT_ID",
+      c?.auth_mode === "oauth" && (!env.SERVICEM8_CLIENT_SECRET || !oauthClientReady) && "SERVICEM8_CLIENT_SECRET",
+    ].filter(Boolean);
+    let credentialsReady = !!c && encryptionReady;
+    if (credentialsReady) {
+      try {
+        credentialsReady = c.auth_mode === "api_key" ? !!decryptToken(c.api_key_enc)
+          : c.auth_mode === "oauth" && !!decryptToken(c.access_token_enc) && !!decryptToken(c.refresh_token_enc);
+      } catch { credentialsReady = false; }
+    }
+    const reconnectRequired = !!c && (!credentialsReady ||
+      /ServiceM8 access expired|ServiceM8 rejected this API key|permissions are insufficient|credentials cannot be read|incomplete credentials|before refreshed credentials could be saved/i.test(c.last_error || ""));
+    return { encryptionConfigured: encryptionReady, serverConfigured: !configurationMissing.length,
+      configurationMissing, credentialsReady, reconnectRequired };
+  }
   async function credentials(businessId) {
     let c = await conn(businessId);
     if (!c)
       throw fail("ServiceM8 is disconnected. Connect it in Connections.", 409);
-    let creds =
-      c.auth_mode === "api_key"
-        ? { apiKey: decryptToken(c.api_key_enc) }
-        : {
-            access_token: decryptToken(c.access_token_enc),
-            refresh_token: decryptToken(c.refresh_token_enc),
-          };
+    const readCredentials = (row) => {
+      try {
+        const creds = row.auth_mode === "api_key"
+          ? { apiKey: decryptToken(row.api_key_enc) }
+          : { access_token: decryptToken(row.access_token_enc), refresh_token: decryptToken(row.refresh_token_enc) };
+        if (row.auth_mode === "api_key" ? !creds.apiKey : !creds.access_token || !creds.refresh_token)
+          throw Error("Empty credentials");
+        return creds;
+      } catch {
+        throw fail("ServiceM8 credentials cannot be read. Check EMAIL_TOKEN_KEY and reconnect the account.", 409);
+      }
+    };
+    let creds = readCredentials(c);
     if (
       c.auth_mode === "api_key" ||
       Date.parse(c.token_expiry) > Date.now() + 60000
     )
       return { c, creds };
+    const generation = c.generation;
     const lease = new Date(Date.now() + 60000).toISOString();
     const claimed = await unwrap(
       db
@@ -120,13 +157,15 @@ export function installSalesPlatform(
       throw fail("ServiceM8 credentials are refreshing. Retry shortly.", 409);
     try {
       c = await conn(businessId);
-      creds = {
-        access_token: decryptToken(c.access_token_enc),
-        refresh_token: decryptToken(c.refresh_token_enc),
-      };
+      if (!c || c.generation !== generation || Date.parse(c.lease_until) !== Date.parse(lease))
+        throw fail("ServiceM8 connection changed during credential refresh. Retry from Connections.", 409);
+      creds = readCredentials(c);
       if (!(Date.parse(c.token_expiry) > Date.now() + 60000)) {
         creds = await oauthProvider.refreshAccessToken(creds.refresh_token);
-        await unwrap(
+        if (!creds?.access_token || !creds?.refresh_token ||
+            !Number.isFinite(Number(creds.expires_in || 3600)) || Number(creds.expires_in || 3600) <= 0)
+          throw fail("ServiceM8 returned incomplete credentials. Reconnect the account.", 409);
+        const saved = await unwrap(
           db
             .from("servicem8_connections")
             .update({
@@ -137,9 +176,12 @@ export function installSalesPlatform(
               ).toISOString(),
             })
             .eq("business_id", businessId)
-            .eq("generation", c.generation)
-            .eq("lease_until", lease),
+            .eq("generation", generation)
+            .eq("lease_until", lease)
+            .select("business_id"),
         );
+        if (!saved.length)
+          throw fail("ServiceM8 connection changed before refreshed credentials could be saved. Reconnect the account.", 409);
       }
       return { c, creds };
     } finally {
@@ -148,6 +190,7 @@ export function installSalesPlatform(
           .from("servicem8_connections")
           .update({ lease_until: null })
           .eq("business_id", businessId)
+          .eq("generation", generation)
           .eq("lease_until", lease),
       );
     }
@@ -161,10 +204,13 @@ export function installSalesPlatform(
     return SM.request(path, { credentials: creds, fetchImpl, ...opts });
   };
   async function account(creds) {
-    const { data } = await SM.request("/vendor.json", {
-      credentials: creds,
-      fetchImpl,
-    });
+    let data;
+    try {
+      ({ data } = await SM.request("/vendor.json", { credentials: creds, fetchImpl }));
+    } catch (e) {
+      if (e instanceof SM.ServiceM8Error) e.stage = "account_verification";
+      throw e;
+    }
     const vendor = Array.isArray(data) ? data[0] : data;
     if (!vendor?.uuid)
       throw fail("ServiceM8 account identity could not be verified.");
@@ -220,6 +266,7 @@ export function installSalesPlatform(
             webhook_enc: encryptToken(token),
             generation,
             last_error: null,
+            webhook_subscribed_at: null,
             auto_handoff: prior?.auto_handoff || false,
           },
           { onConflict: "business_id" },
@@ -248,6 +295,9 @@ export function installSalesPlatform(
         }),
       });
     }
+    await unwrap(db.from("servicem8_connections")
+      .update({ webhook_subscribed_at: new Date().toISOString() })
+      .eq("business_id", businessId).eq("generation", c.generation));
   }
   async function enqueue(businessId, kind, key, payload) {
     const { error } = await db
@@ -264,13 +314,17 @@ export function installSalesPlatform(
         return res.json({
           connected: false,
           oauthConfigured: oauthReady,
-          privateEnabled: env.ENABLE_SERVICEM8_PRIVATE !== "false",
+          privateEnabled: privateReady,
+          ...connectionHealth(null),
+          webhookSubscribed: false,
+          retryAvailable: false,
         });
       const tasks = await unwrap(
         db
           .from("integration_tasks")
-          .select("state")
+          .select("state,attempts,next_attempt_at,last_error")
           .eq("business_id", req.businessId)
+          .in("kind", integrationKinds)
           .neq("state", "succeeded"),
       );
       const mappings = await unwrap(
@@ -281,8 +335,17 @@ export function installSalesPlatform(
           .eq("connection_generation", c.generation)
           .eq("object_type", "job"),
       );
+      const health = connectionHealth(c);
+      const failed = tasks.filter(x => x.state === "failed");
       res.json({
         connected: true,
+        privateEnabled: privateReady,
+        ...health,
+        webhookSubscribed: !!c.webhook_subscribed_at,
+        webhookSubscribedAt: c.webhook_subscribed_at || null,
+        retryAvailable: health.serverConfigured && health.credentialsReady && !health.reconnectRequired && failed.length > 0,
+        exhausted: failed.filter(x => x.attempts >= 12).length,
+        autoRetrying: failed.filter(x => x.attempts < 12).length,
         accountName: c.account_name,
         accountUuid: c.account_uuid,
         mode: c.auth_mode,
@@ -305,6 +368,8 @@ export function installSalesPlatform(
     wrap(async (req, res) => {
       if (env.ENABLE_SERVICEM8_PRIVATE === "false")
         throw fail("Private connections are disabled. Use OAuth.", 403);
+      if (!encryptionReady)
+        throw fail("Configure EMAIL_TOKEN_KEY on the backend before connecting ServiceM8.", 503);
       if (
         typeof req.body.apiKey !== "string" ||
         req.body.apiKey.length < 16 ||
@@ -472,9 +537,12 @@ export function installSalesPlatform(
           .update({
             state: "failed",
             attempts: 12,
+            lease_until: null,
+            lease_token: null,
             last_error: "ServiceM8 disconnected. Reconnect and manually retry.",
           })
           .eq("business_id", req.businessId)
+          .in("kind", integrationKinds)
           .neq("state", "succeeded"),
       );
       res.json({ ok: true });
@@ -487,13 +555,15 @@ export function installSalesPlatform(
     wrap(async (req, res) => {
       if (typeof req.body.autoHandoff !== "boolean")
         throw fail("Invalid handoff setting.");
-      await unwrap(
+      const updated = await unwrap(
         db
           .from("servicem8_connections")
           .update({ auto_handoff: req.body.autoHandoff })
-          .eq("business_id", req.businessId),
+          .eq("business_id", req.businessId)
+          .select("business_id"),
       );
-      res.json({ ok: true });
+      if (!updated.length) throw fail("Connect ServiceM8 before changing settings.", 409);
+      res.json({ ok: true, autoHandoff: req.body.autoHandoff });
     }),
   );
   app.post(
@@ -525,15 +595,24 @@ export function installSalesPlatform(
     requireBusiness,
     admin,
     wrap(async (req, res) => {
+      const c = await conn(req.businessId);
+      if (!c) throw fail("Connect ServiceM8 before retrying transfers.", 409);
+      const health = connectionHealth(c);
+      if (!health.serverConfigured) throw fail("Configure " + health.configurationMissing.join(", ") + " on the backend before retrying.", 503);
+      if (health.reconnectRequired) throw fail("Reconnect ServiceM8 before retrying transfers.", 409);
       await unwrap(
         db
           .from("integration_tasks")
           .update({
             state: "pending",
             attempts: 0,
+            lease_until: null,
+            lease_token: null,
+            last_error: null,
             next_attempt_at: new Date().toISOString(),
           })
           .eq("business_id", req.businessId)
+          .in("kind", integrationKinds)
           .eq("state", "failed"),
       );
       res.json({ ok: true });
@@ -708,6 +787,7 @@ export function installSalesPlatform(
         .select("snapshot")
         .eq("business_id", task.business_id)
         .eq("quote_id", q.id)
+        .eq("snapshot->>accepted", "true")
         .order("created_at", { ascending: false })
         .limit(1),
     );
@@ -716,7 +796,7 @@ export function installSalesPlatform(
         "No immutable approved quote snapshot exists. Review this legacy quote before transferring.",
       );
     const snapshot = versions[0].snapshot,
-      customer = await unwrap(
+      customer = snapshot.customer || await unwrap(
         db
           .from("customers")
           .select("*")
@@ -768,6 +848,13 @@ export function installSalesPlatform(
       });
       return { recordUuid: m.external_uuid };
     };
+    // The legacy decision engine catches errors. Retain the original adapter
+    // failure so auth expiry/permissions still reach the worker's health status.
+    let transferError;
+    const preserveError = (fn) => async (...args) => {
+      try { return await fn(...args); }
+      catch (e) { transferError = e; throw e; }
+    };
     const core = await performServiceM8Handoff({
       businessId: task.business_id,
       jobId: job.id,
@@ -813,12 +900,12 @@ export function installSalesPlatform(
                 { onConflict: "business_id,job_id" },
               ),
           ),
-        createCompany: companyCreator,
-        createJob: jobCreator,
+        createCompany: preserveError(companyCreator),
+        createJob: preserveError(jobCreator),
       },
     });
     if (core.status !== "synced")
-      throw fail(
+      throw transferError || fail(
         "ServiceM8 customer/job transfer failed. Review connection permissions and retry.",
       );
     const remote = { external_uuid: core.jobUuid };
@@ -840,7 +927,7 @@ export function installSalesPlatform(
       });
     const attachment = await mapping(c, "attachment", q.id);
     if (!attachment.synced_at) {
-      const business = await unwrap(
+      const business = snapshot.business || await unwrap(
         db
           .from("businesses")
           .select("name")
@@ -943,6 +1030,9 @@ export function installSalesPlatform(
     const snapshot = {
       status: job.status,
       completed: job.status === "Completed",
+      active: job.active == null ? null : Number(job.active) === 1,
+      invoiceSent: Number(job.invoice_sent) === 1,
+      paymentReceived: Number(job.payment_received) === 1,
       invoicedTotal:
         Number(job.invoice_sent) === 1 &&
         Number.isFinite(Number(job.total_invoice_amount))
@@ -968,15 +1058,19 @@ export function installSalesPlatform(
     );
   }
   async function listRemote(businessId, path, generation) {
+    const separator = path.includes("?") ? "&" : "?";
     let list = [],
-      next = path;
+      next = path + separator + "cursor=-1";
+    const seen = new Set();
     for (let page = 0; page < 1000; page++) {
       const { data, nextCursor } = await call(businessId, next, { generation });
       if (!Array.isArray(data))
         throw fail("ServiceM8 returned an unexpected list.");
       list.push(...data);
       if (!nextCursor) return list;
-      next = path + "&cursor=" + encodeURIComponent(nextCursor);
+      if (seen.has(nextCursor)) throw fail("ServiceM8 repeated a pagination cursor.");
+      seen.add(nextCursor);
+      next = path + separator + "cursor=" + encodeURIComponent(nextCursor);
     }
     throw fail("ServiceM8 pagination exceeded the safe processing limit.");
   }
@@ -1018,14 +1112,16 @@ export function installSalesPlatform(
               .update({
                 state: "succeeded",
                 completed_at: new Date().toISOString(),
+                last_error: null,
                 lease_until: null,
               })
               .eq("id", task.id)
-              .eq("lease_token", task.lease_token),
+              .eq("lease_token", task.lease_token)
+              .eq("state", "running"),
           );
         } catch (e) {
           const message = safeError(e);
-          await unwrap(
+          const failed = await unwrap(
             db
               .from("integration_tasks")
               .update({
@@ -1038,15 +1134,18 @@ export function installSalesPlatform(
                 lease_until: null,
               })
               .eq("id", task.id)
-              .eq("lease_token", task.lease_token),
+              .eq("lease_token", task.lease_token)
+              .eq("state", "running")
+              .select("id"),
           );
-          await unwrap(
+          if (!failed.length) continue;
+          if (task.kind !== "reminder") await unwrap(
             db
               .from("servicem8_connections")
               .update({ last_error: message })
               .eq("business_id", task.business_id),
           );
-          if (task.attempts === 1 && sendNotification)
+          if (task.kind !== "reminder" && task.attempts === 1 && sendNotification)
             await sendNotification(db, {
               business_id: task.business_id,
               type: "general",

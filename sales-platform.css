@@ -460,3 +460,15 @@ main {
     transition: none !important;
   }
 }
+
+/* Pipeline focuses on four open sales steps, with outcomes one tap away. */
+.sale-pipeline-toolbar {display:flex;align-items:end;gap:16px;flex-wrap:wrap;margin:0 0 16px;}
+.sale-scope-tabs {display:flex;gap:7px;flex-wrap:wrap;flex:1;}
+.sale-scope-tabs span {opacity:.75;margin-left:5px;}
+.sale-stage-jump {display:flex;gap:8px;overflow-x:auto;padding:0 0 14px;}
+.sale-stage-jump .btn {flex:none;}
+.sale-kanban {grid-template-columns:repeat(var(--pipeline-columns,4),minmax(245px,1fr));scroll-snap-type:x proximity;}
+.sale-column {scroll-snap-align:start;}
+.sale-column>header p {font-size:12px;line-height:1.5;color:var(--sale-muted);font-weight:400;min-height:36px;margin:10px 0 0;}
+.sale-next {width:100%;margin-top:9px;}
+@media(max-width:760px){.sale-pipeline-toolbar{align-items:stretch;}.sale-pipeline-toolbar>.sale-field{width:100%;}.sale-scope-tabs .btn{padding:9px 12px;}.sale-kanban{grid-template-columns:repeat(var(--pipeline-columns,4),minmax(275px,85vw));}.sale-stage-jump{position:sticky;top:0;z-index:2;background:var(--sale-bg,#f8fafc);padding-top:8px;}}

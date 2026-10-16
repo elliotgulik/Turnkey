@@ -22,29 +22,34 @@ export function hashWixToken(token) {
 
 // Preserve flat, data and contact wrappers; missing or non-scalar names
 // stay empty so validation rejects them rather than creating fake leads.
-export function mapWixPayload(body) {
-  const b = body || {}
-  const data = (b.data && typeof b.data === 'object') ? b.data
-    : (b.contact && typeof b.contact === 'object') ? b.contact
-    : b
-  const field = (...names) => {
-    for (const n of names) {
-      if (typeof data[n] === 'string' && data[n].trim()) return data[n].trim()
-      if (typeof b[n] === 'string' && b[n].trim()) return b[n].trim()
-    }
-    return ''
+const object = value => value && typeof value==='object' && !Array.isArray(value) ? value : {};
+const text = value => typeof value==='string' ? value.trim() : '';
+const labelKey = value => text(value).toLowerCase().replace(/[^a-z0-9]/g,'');
+function wixEvent(body) {
+  const b=object(body),data=Object.keys(object(b.data)).length?object(b.data):b;
+  const contact=object(data.contact),labels=Object.create(null);
+  // Native Old Wix Forms sends an array of label/value answers, not name/email keys.
+  for(const field of (Array.isArray(data.submissions)?data.submissions:[]).slice(0,100)){
+    const key=labelKey(field?.label);if(key&&key.length<=120&&!labels[key])labels[key]=text(field.value)|| (Array.isArray(field.value)?field.value.filter(v=>typeof v==='string').join(', '):'');
   }
-  const name = field('name', 'fullName', 'full_name', 'contactName') ||
-    [field('firstName', 'first_name'), field('lastName', 'last_name')].filter(Boolean).join(' ')
+  return {b,data,contact,labels};
+}
+export function mapWixPayload(body) {
+  const {b,data,contact,labels}=wixEvent(body);
+  const field=(...names)=>{for(const n of names){const v=text(data[n])||text(b[n])||text(contact[n])||text(labels[labelKey(n)]);if(v)return v;}return '';};
+  const person=object(contact.name),address=object(contact.address);
+  const name=field('name','fullName','full_name','contactName','Full name','Your name')||
+    [field('firstName','first_name','First name')||text(person.first),field('lastName','last_name','Last name')||text(person.last)].filter(Boolean).join(' ');
   return {
     name,
-    email: field('email', 'emailAddress', 'email_address') || undefined,
-    phone: field('phone', 'phoneNumber', 'phone_number') || undefined,
-    address: field('address', 'streetAddress', 'street_address') || undefined,
-    notes: field('message', 'notes', 'comment', 'comments') || undefined,
-    source: 'Wix'
-  }
+    email:field('email','emailAddress','email_address','Email address')||undefined,
+    phone:field('phone','phoneNumber','phone_number','Phone number','Mobile number')||undefined,
+    address:field('address','streetAddress','street_address','Property address')||text(address.formatted)||text(address.formattedAddress)||[text(address.addressLine1),text(address.city),text(address.subdivision),text(address.postalCode)].filter(Boolean).join(', ')||undefined,
+    notes:field('message','notes','comment','comments','Enquiry message','How can we help','Tell us about your job')||undefined,
+    source:'Wix'
+  };
 }
+function wixRequestedServices(body){const {data,labels}=wixEvent(body);const value=text(data.service)||text(data.requestedService)||text(labels.requestedservice)||text(labels.services)||text(labels.service);return value?[value.slice(0,500)]:[];}
 
 // A Wix submission's own id, if present, used as the idempotency key so a
 // redelivered webhook event (Wix Automations retries on failure, same as
@@ -53,7 +58,7 @@ export function mapWixPayload(body) {
 // just without redelivery protection for that one submission.
 function extractExternalId(body) {
   const data = body?.data || body?.contact
-  const id = body?.submissionId ?? body?.id ?? body?._id ?? data?.submissionId ?? data?.id ?? data?._id
+  const id = body?.submissionId ?? body?.submission_id ?? body?.id ?? body?._id ?? data?.submissionId ?? data?.submission_id ?? data?.id ?? data?._id
   return (typeof id === 'string' || typeof id === 'number') && String(id).trim() ? String(id).trim().slice(0, 200) : null
 }
 
@@ -94,6 +99,7 @@ export async function handleWixLead({ token, body, lookupSource, addLead }) {
     business_id: source.business_id,
     customer,
     source: 'wix',
+    requestedServices: wixRequestedServices(body),
     external_id: extractExternalId(body),
     submittedAt: Date.now()
   }

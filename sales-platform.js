@@ -16,16 +16,8 @@
       );
   const moneySafe = (v) => (v == null ? "Unavailable" : money(v)),
     pct = (v) => (v == null ? "—" : (v * 100).toFixed(1) + "%");
-  const defaults = [
-    ["new", "New Lead"],
-    ["contacted", "Contacted"],
-    ["qualified", "Qualified"],
-    ["quoting", "Quote in Progress"],
-    ["quoted", "Quote Sent"],
-    ["followup", "Follow-Up"],
-    ["won", "Won"],
-    ["lost", "Lost"],
-  ].map(([key, label]) => ({ key, label }));
+  const P=window.TK_PIPELINE;
+  const defaults=P.stages.map(x=>({...x}));
   let stages = defaults.map((x) => ({ ...x })),
     settings = {},
     cloudGoals = [],
@@ -41,7 +33,8 @@
     busy = false,
     serial = 0,
     activeId = null,
-    mappings = [];
+    mappings = [],
+    pipelineScope="open", pipelineSearch="", pipelineDueOnly=false;
   const oldRender = render,
     oldAll = renderAll,
     oldConnections = openConnections,
@@ -233,7 +226,7 @@
       header(
         "Analytics",
         "Understand what brings work in, what converts, and what it earns.",
-        button("Export report", "export") + button("Record ad spend", "spend"),
+        button("Export report", "export") + button("Record ad spend", "spend")+button("Marketing performance", "marketing"),
       ) +
       filters() +
       notice() +
@@ -317,26 +310,20 @@
     const age = M.leadTime(r);
     return `<article class="sale-card" draggable="true" data-record="${esc(r.id)}" tabindex="0" role="button" aria-label="Open ${esc(r.name)}"><div class="sale-card-top"><b>${esc(r.name || "Unnamed enquiry")}</b><span>${esc(money(r.total || r.opportunityValue || 0))}</span></div><p>${esc((r.requestedServices || []).map((x) => x.name || x).join(", ") || (r.services || []).map((x) => SERVICES[x.svc]?.label || x.svc).join(", ") || "Services to confirm")}</p><div class="sale-tags"><span>${esc(r.source || "Manual")}</span><span>${age ? Math.max(0, Math.floor((Date.now() - age) / 86400000)) + "d old" : "Age unknown"}</span></div><small>${esc(r.salespersonName || "Unassigned")}${r.nextFollowUpAt ? " · Follow-up " + esc(new Date(r.nextFollowUpAt).toLocaleDateString()) : ""}</small>${due ? '<strong class="sale-overdue">Follow-up overdue</strong>' : ""}<select data-sale-stage="${esc(r.id)}" aria-label="Sales stage">${options(
       stages.map((x) => [x.key, x.label]),
-      M.stage(r),
-    )}</select></article>`;
+      P.key(r),
+    )}</select><button class="btn ghost sm sale-next" data-sale-action="${P.next(r)}" data-id="${esc(r.id)}">${esc(defaults.find(s=>s.key===P.key(r))?.action||'View record')}</button></article>`;
   }
   render = function () {
     if (typeof saveState === "function") saveState();
-    document.getElementById("cnt-leads").textContent = records.filter(
-      (r) => r.stage === "new",
-    ).length;
-    document.getElementById("view-pipeline").innerHTML =
-      header(
-        "Pipeline",
-        "Move every enquiry toward a clear outcome.",
-        button("+ New lead", "new") + button("Configure stages", "stages"),
-      ) +
-      `<div class="sale-kanban">${stages
-        .map((s) => {
-          const rs = records.filter((r) => M.stage(r) === s.key);
-          return `<section class="sale-column" data-drop-stage="${esc(s.key)}"><header><h3>${esc(s.label)} <span>${rs.length}</span></h3><small>${esc(money(rs.reduce((n, x) => n + (Number(x.total || x.opportunityValue) || 0), 0)))}</small></header>${rs.map(card).join("") || empty("No opportunities")}</section>`;
-        })
-        .join("")}</div>`;
+    document.getElementById("cnt-leads").textContent=records.filter(r=>r.stage==='new').length;
+    const scopeStages=stages.filter(s=>pipelineScope==='all' || (pipelineScope==='open' ? !['won','lost'].includes(s.key) : s.key===pipelineScope));
+    let list=records.filter(r=>P.visible(r,pipelineScope));
+    if(pipelineSearch)list=list.filter(r=>[r.name,r.address,r.email,r.phone,r.source].join(' ').toLowerCase().includes(pipelineSearch.toLowerCase()));
+    if(pipelineDueOnly)list=list.filter(r=>r.nextFollowUpAt&&Date.parse(r.nextFollowUpAt)<Date.now()&&!M.won(r)&&!M.lost(r));
+    document.getElementById('view-pipeline').innerHTML=header('Sales pipeline','A clear next action for every enquiry. Won work moves to ServiceM8.',button('+ New lead','new')+button('Pipeline settings','stages'))+
+    `<div class="sale-pipeline-toolbar"><div class="sale-scope-tabs" role="group" aria-label="Pipeline outcomes">${[['open','Open opportunities'],['won','Confirmed'],['lost','Not proceeding'],['all','All']].map(([key,label])=>`<button class="btn ${pipelineScope===key?'accent':'ghost'}" data-sale-action="pipeline-scope" data-id="${key}" aria-pressed="${pipelineScope===key}">${label} <span>${records.filter(r=>P.visible(r,key)).length}</span></button>`).join('')}</div><label class="sale-field"><span>Search pipeline</span><input id="pipeline-search" type="search" value="${esc(pipelineSearch)}" placeholder="Customer, address or source"></label><label><input type="checkbox" id="pipeline-due" ${pipelineDueOnly?'checked':''}> Follow-ups overdue</label></div>`+
+    `<div class="sale-stage-jump" aria-label="Jump to stage">${scopeStages.map(s=>`<button class="btn ghost sm" data-sale-action="pipeline-jump" data-id="${s.key}">${esc(s.label)} · ${list.filter(r=>P.key(r)===s.key).length}</button>`).join('')}</div>`+
+    `<div class="sale-kanban" style="--pipeline-columns:${scopeStages.length}">${scopeStages.map(s=>{const rs=list.filter(r=>P.key(r)===s.key);return `<section class="sale-column" id="pipeline-${s.key}" data-drop-stage="${s.key}"><header><h3>${esc(s.label)} <span>${rs.length}</span></h3><small>${esc(money(rs.reduce((n,r)=>n+Number(r.total||r.opportunityValue||0),0)))}</small><p>${esc(defaults.find(d=>d.key===s.key)?.description||'')}</p></header>${rs.map(card).join('')||empty('No opportunities in this stage')}</section>`;}).join('')}</div>`;
     renderLeads();
   };
   function renderLeads() {
@@ -352,7 +339,7 @@
       );
     if (sourceFilter)
       rs = rs.filter((r) => (r.source || "Manual") === sourceFilter);
-    if (stageFilter) rs = rs.filter((r) => M.stage(r) === stageFilter);
+    if (stageFilter) rs = rs.filter((r) => P.key(r) === stageFilter);
     const sources = [
       ...new Set(records.map((r) => r.source || "Manual")),
     ].sort();
@@ -453,7 +440,7 @@
         "Sales stage",
         `<select data-sale-stage="${esc(r.id)}">${options(
           stages.map((s) => [s.key, s.label]),
-          M.stage(r),
+          P.key(r),
         )}</select>`,
       )}${field("Estimated opportunity value", `<input id="sale-opportunity" type="number" min="0" step="0.01" value="${esc(r.opportunityValue || 0)}">`)}${field("Salesperson", `<select id="sale-assignee">${options([["", "Unassigned"], ...staff.map((x) => [x.id, x.name || x.email])], r.assignedSalespersonId || "")}</select>`)}${field("Next follow-up", `<input id="sale-followup" type="datetime-local" value="${r.nextFollowUpAt ? esc(localDateTime(r.nextFollowUpAt)) : ""}">`)}${field("Sales notes", `<textarea id="sale-notes" rows="4">${esc(r.salesNotes || r.jobNotes || "")}</textarea>`)}${button("Save sales details", "save-details", r.id)}</section><section class="sale-panel"><h3>Quote &amp; profitability</h3>${table(
         ["Metric", "Value"],
@@ -469,7 +456,7 @@
           ["Quote sent", dates(r.quoteSentAt)],
           ["Sale won", dates(M.winTime(r))],
         ],
-      )}<p>${esc((r.services || []).map((x) => SERVICES[x.svc]?.label || x.svc).join(", "))}</p>${r.quotePublicToken ? `<a class="btn ghost" target="_blank" rel="noopener" href="quote.html?t=${encodeURIComponent(r.quotePublicToken)}">Open customer quote</a>` : ""}${button("Quote history", "versions", r.id)}<h3>ServiceM8 handoff</h3><p>TurnKey owns the sale. ServiceM8 owns scheduling, delivery, invoices and payments.</p>${map ? `<a class="btn accent" target="_blank" rel="noopener" href="https://go.servicem8.com/OpenJob/${encodeURIComponent(map.external_uuid)}">Open in ServiceM8</a><p class="sale-muted">Last checked ${esc(dates(map.synced_at))}</p>` : button("Transfer approved sale", "handoff", r.id, M.won(r) ? "" : "disabled")}<div id="sale-versions"></div></section></div><section class="sale-panel"><h3>Sales history</h3>${
+      )}<p>${esc((r.services || []).map((x) => SERVICES[x.svc]?.label || x.svc).join(", "))}</p>${r.quotePublicToken ? `<a class="btn ghost" target="_blank" rel="noopener" href="quote.html?t=${encodeURIComponent(r.quotePublicToken)}">Open customer quote</a>` : ""}${!M.won(r)&&r.quoteId&&r.total>0?button('Confirm quote accepted','confirm-sale',r.id):''}${button("Quote history", "versions", r.id)}<h3>ServiceM8 handoff</h3><p>TurnKey owns the sale. ServiceM8 owns scheduling, delivery, invoices and payments.</p>${map ? `<a class="btn accent" target="_blank" rel="noopener" href="https://go.servicem8.com/OpenJob/${encodeURIComponent(map.external_uuid)}">Open in ServiceM8</a><p class="sale-muted">ServiceM8: ${esc(map.snapshot?.status||'Transferred')} · Last checked ${esc(dates(map.synced_at))}</p>` : button("Transfer approved sale", "handoff", r.id, M.won(r) ? "" : "disabled")}<div id="sale-versions"></div></section></div><section class="sale-panel"><h3>Sales history</h3>${
         (r.salesHistory || []).length
           ? (r.salesHistory || [])
               .slice()
@@ -652,7 +639,13 @@
       `<button class="more-row" data-sale-action="connections">Connections</button><button class="more-row" data-sale-action="import">Import records</button><button class="more-row" onclick="closeModal('more-overlay');openSettings()">Settings</button><button class="more-row" onclick="handleLogout()">Log out</button>`;
     openModal("more-overlay");
   };
-  openConnections = function () {
+  let connectionOpenSerial=0;
+  openConnections = async function () {
+    const call=++connectionOpenSerial,biz=currentBusinessId,version=businessSessionVersion;
+    openModal('conn-overlay');
+    document.getElementById('conn-body').innerHTML='<p role="status">Checking saved connections…</p>';
+    await Promise.allSettled([loadEmailAccountStatus(),wixStatus.pendingUrl?Promise.resolve():loadWixStatus(),loadMetaStatus()]);
+    if(call!==connectionOpenSerial||biz!==currentBusinessId||version!==businessSessionVersion||!document.getElementById('conn-overlay').classList.contains('open'))return;
     oldConnections();
     document.querySelectorAll("#conn-body .conn-card").forEach((c) => {
       if (
@@ -675,7 +668,7 @@
         el = document.getElementById("sale-sm8");
       if (!el) return;
       mappings = s.mappings || [];
-      el.innerHTML = `<h3>ServiceM8 · operations handoff</h3><p>${s.connected ? "Connected to " + esc(s.accountName || s.accountUuid) : "Connect ServiceM8 to transfer approved work."}</p>${s.connected ? `<p>Pending: ${s.pending || 0} · Failed: ${s.failed || 0} · Last sync: ${esc(dates(s.lastSyncAt))}</p>${s.lastError ? `<p role="alert">${esc(s.lastError)}</p>` : ""}<label><input type="checkbox" data-sale-auto ${s.autoHandoff ? "checked" : ""}> Automatically transfer approved sales</label><div class="sale-actions">${button("Retry failed transfers", "retry")}${button("Refresh linked jobs", "refresh-jobs")}${button("Disconnect", "disconnect-sm8")}</div>` : `<div class="sale-actions">${button("Connect ServiceM8", "oauth-sm8", "", s.oauthConfigured ? "" : "disabled")}${s.privateEnabled ? button("Private API key (testing)", "private-sm8") : ""}</div><p>${s.oauthConfigured ? "Authorize access to your ServiceM8 account." : "ServiceM8 OAuth needs to be configured on the backend."}</p>`}`;
+      el.innerHTML = `<h3>ServiceM8 · operations handoff</h3><p>${s.connected ? "Connected to " + esc(s.accountName || s.accountUuid) : "Connect ServiceM8 to transfer approved work."}</p>${s.connected ? `<p>Pending: ${s.pending || 0} · Failed: ${s.failed || 0} · Last sync: ${esc(dates(s.lastSyncAt))} · Status updates: ${s.webhookSubscribed ? "connected" : "not subscribed"}</p>${s.lastError ? `<p role="alert">${esc(s.lastError)}</p>` : ""}<label><input type="checkbox" data-sale-auto ${s.autoHandoff ? "checked" : ""}> Automatically transfer approved sales</label><div class="sale-actions">${button("Retry failed transfers", "retry", "", s.retryAvailable ? "" : "disabled")}${button("Refresh linked jobs", "refresh-jobs")}${button("Disconnect", "disconnect-sm8")}</div>` : `<div class="sale-actions">${button("Connect ServiceM8", "oauth-sm8", "", s.oauthConfigured ? "" : "disabled")}${s.privateEnabled ? button("Private API key (testing)", "private-sm8") : ""}</div><p>${s.oauthConfigured ? "Authorize access to your ServiceM8 account." : "ServiceM8 OAuth needs to be configured on the backend."}</p>`}`;
     } catch (e) {
       const el = document.getElementById("sale-sm8");
       if (el) el.textContent = "ServiceM8: " + e.message;
@@ -906,6 +899,8 @@
       openDetail(record(e.target.dataset.record)?.id);
   });
   document.addEventListener("input", (e) => {
+    if(e.target.id==='pipeline-search'){pipelineSearch=e.target.value;const pos=e.target.selectionStart;render();const input=document.getElementById('pipeline-search');input.focus();input.setSelectionRange(pos,pos);return;}
+
     if (e.target.id === "sale-search") {
       search = e.target.value;
       const pos = e.target.selectionStart;
@@ -916,6 +911,8 @@
     }
   });
   document.addEventListener("change", async (e) => {
+    if(e.target.id==='pipeline-due'){pipelineDueOnly=e.target.checked;render();return;}
+
     if (e.target.dataset.saleStage) {
       await move(record(e.target.dataset.saleStage), e.target.value);
       if (
@@ -965,6 +962,11 @@
     const a = b.dataset.saleAction,
       r = record(b.dataset.id);
     try {
+      if(a==='pipeline-scope'){pipelineScope=b.dataset.id;render();return;}
+      if(a==='pipeline-jump'){document.getElementById('pipeline-'+b.dataset.id)?.scrollIntoView({behavior:'smooth',block:'nearest',inline:'start'});return;}
+      if(a==='contact'){openComposeModal({to:r.email||'',subject:P.key(r)==='quoted'?'Following up on your quote':'Your enquiry',customerId:r.customerId,jobId:r.jobId});return;}
+      if(a==='marketing'){window.TK_MARKETING?.open();return;}
+      if(a==='confirm-sale'){if(confirm('Record this quote as accepted? If automatic handoff is enabled, the approved work will be sent to ServiceM8.')){await move(r,'won');openDetail(r.id);}return;}
       if (a === "collapse") {
         const collapsed = document.body.classList.toggle(
           "sale-sidebar-collapsed",
@@ -1299,12 +1301,15 @@
     refresh: loadSales,
     report: currentReport,
     reset: () => {
+      pipelineScope="open"; pipelineSearch=""; pipelineDueOnly=false;
+      search=""; sourceFilter=""; stageFilter=""; activeId=null;
       cloudGoals = [];
       spend = [];
       settings = {};
       metrics = null;
       mappings = [];
       migrationError = "";
+      ++connectionOpenSerial;
       stages = defaults.map((x) => ({ ...x }));
     },
   };

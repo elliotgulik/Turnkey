@@ -195,3 +195,14 @@ test('concurrent Wix deliveries converge through Supabase unique violation recov
   assert.notEqual(results[0].body.id, results[2].body.id)
   assert.equal(rows.size, 2)
 })
+
+test('native Old Wix Forms answers and nested contact normalize without static placeholders', async()=>{
+ const body={data:{submissionId:'native-event-1',contact:{name:{first:'Test',last:'Customer'},email:'test@example.test',phone:'+6421000000'},submissions:[{label:'Address',value:'Test address'},{label:'Requested service',value:'House wash'},{label:'Enquiry message',value:'Please quote'}]}};
+ assert.deepEqual(mapWixPayload(body),{name:'Test Customer',email:'test@example.test',phone:'+6421000000',address:'Test address',notes:'Please quote',source:'Wix'});
+ let saved;const result=await handleWixLead({token:'valid-native-token',body,lookupSource:async()=>({business_id:'business-a'}),addLead:async p=>{saved=p;return {id:'id'};}});
+ assert.equal(result.status,200);assert.equal(saved.external_id,'native-event-1');assert.deepEqual(saved.requestedServices,['House wash']);
+});
+test('labelled native form values work without a contact object and reject structured identity',()=>{
+ const c=mapWixPayload({submissions:[{label:'First name',value:'Test'},{label:'Last name',value:'Customer'},{label:'Email',value:'test@example.test'}]});assert.equal(c.name,'Test Customer');assert.equal(c.email,'test@example.test');
+ assert.equal(mapWixPayload({data:{contact:{name:{first:{bad:true},last:[]}}}}).name,'');
+});

@@ -1366,6 +1366,9 @@
 
 </style>
 <link rel="stylesheet" href="sales-platform.css">
+<link rel="stylesheet" href="quote-workspace.css">
+<link rel="stylesheet" href="conversations.css">
+<link rel="stylesheet" href="marketing-analytics.css">
 </head>
 <body>
 <div id="auth-overlay" class="auth-shell">
@@ -10231,7 +10234,22 @@ async function syncAllToSupabase(){
   // surface it so the user knows to retry rather than trusting a stale screen.
   if(failed.length)toast('Could not save '+(failed.length===1?failed[0]:failed.length+' records')+' — check your connection and try again');
 }
-async function syncRecordToSupabase(r){
+// Serialize saves of the same record: intake, activity logging and the
+// debounced save can overlap before a new job ID has been assigned.
+const recordSaveQueue = new WeakMap();
+function syncRecordToSupabase(r){
+  const biz=currentBusinessId,version=businessSessionVersion;
+  const previous=recordSaveQueue.get(r)||Promise.resolve();
+  const pending=previous.catch(()=>{}).then(()=>{
+    if(!biz||biz!==currentBusinessId||version!==businessSessionVersion||recordBusinesses.get(r)!==biz)throw new Error('Business session changed. Reload before saving.');
+    return persistRecordToSupabase(r);
+  });
+  recordSaveQueue.set(r,pending);
+  const cleanup=()=>{if(recordSaveQueue.get(r)===pending)recordSaveQueue.delete(r);};
+  pending.then(cleanup,cleanup);
+  return pending;
+}
+async function persistRecordToSupabase(r){
   const biz=currentBusinessId,version=businessSessionVersion;
   const assertSession=()=>{if(!biz||biz!==currentBusinessId||version!==businessSessionVersion||recordBusinesses.get(r)!==biz)throw new Error('Business session changed. Reload before saving.');};
   assertSession();
@@ -10684,6 +10702,13 @@ async function retryPendingPhotos(){
 }
 </script>
 <script src="sales-metrics.js"></script>
+<script src="pipeline-model.js"></script>
 <script src="sales-platform.js"></script>
+<script src="quote-workspace.js"></script>
+<script src="conversations.js"></script>
+<script src="conversations-bridge.js"></script>
+<script src="servicem8-import.js"></script>
+<script src="marketing-analytics.js"></script>
+<footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a></footer>
 </body>
 </html>

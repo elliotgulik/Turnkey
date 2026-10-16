@@ -1,0 +1,4 @@
+const {test}=require('node:test'),assert=require('node:assert/strict'),P=require('../pipeline-model.js');
+test('legacy qualified and followup retain useful sales groups',()=>{assert.equal(P.key({stage:'qualified'}),'contacted');assert.equal(P.key({stage:'followup'}),'quoted');assert.equal(P.key({stage:'scheduled'}),'won');assert.equal(P.stages.length,6);});
+test('open work does not mix with outcomes or cancelled operations',()=>{assert.equal(P.visible({stage:'scheduled'}),false);assert.equal(P.visible({stage:'cancelled'}),false);assert.equal(P.visible({stage:'cancelled',lostAt:1},'lost'),true);assert.equal(P.visible({stage:'qualified'}),true);});
+test('next actions match the actual sales job',()=>{assert.equal(P.next({stage:'new'}),'contact');assert.equal(P.next({stage:'qualified'}),'quote');assert.equal(P.next({stage:'followup'}),'contact');assert.equal(P.next({stage:'won'}),'detail');});

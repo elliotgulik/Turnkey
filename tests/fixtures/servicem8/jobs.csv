@@ -1,0 +1,3 @@
+Job No,Status,Company Name,Site Address,Description of Work,Invoice Total,Payment Received,Payment Amount,Payment Received Date,Invoice Sent,Completion Date
+00123,Completed,Smith & Sons,12 Queen St,"Wash driveway, then rinse","$1,234.50",Yes,"$1,234.50",15/10/2026,True,2026-10-15 10:30:00
+00124,Work Order,Other Client,2 Main St,Wash,0,No,0,0000-00-00 00:00:00,False,

@@ -48,7 +48,7 @@ const { chromium } = require("playwright"),
       ? {}
       : { executablePath: cached }),
   });
-  const errors = [];
+  const errors = [], pipelineScopeErrors = [];
   try {
     for (const viewport of [
       { width: 1440, height: 1000 },
@@ -77,7 +77,7 @@ const { chromium } = require("playwright"),
         });
       });
       await page.goto(base + "/index.html");
-      await page.waitForFunction(() => !!window.TK_SALES_PLATFORM);
+      await page.waitForFunction(() => !!window.TK_SALES_PLATFORM && !!window.TK_PIPELINE && !!window.TK_QUOTE_WORKSPACE);
       await page.evaluate(() => {
         records = [
           newRecord({
@@ -110,6 +110,17 @@ const { chromium } = require("playwright"),
             ],
           }),
         ];
+        // Legacy identities must group correctly without being rewritten on render.
+        records.push(...[
+          {id:3,name:'Legacy qualified',stage:'qualified'},
+          {id:4,name:'Legacy follow-up',stage:'followup',email:'followup@example.test',nextFollowUpAt:new Date(Date.now()-86400000).toISOString()},
+          {id:5,name:'Scheduled operation',stage:'scheduled'},
+          {id:6,name:'Completed operation',stage:'completed'},
+          {id:7,name:'Paid operation',stage:'paid'},
+          {id:8,name:'Lost enquiry',stage:'cancelled',lostAt:Date.now(),lostReason:'Timing'},
+          {id:9,name:'Cancelled operation',stage:'cancelled'},
+          {id:10,name:'Legacy lost',stage:'lost'}
+        ].map(r=>newRecord({address:'Synthetic test property',createdAt:Date.now()-86400000,...r})));
         showApp();
         render();
         switchView("dashboard");
@@ -130,14 +141,53 @@ const { chromium } = require("playwright"),
       assert.equal(await page.locator("#view-leads .sale-card").count(), 1);
       await page
         .locator('#view-leads [data-sale-stage="1"]')
-        .selectOption("qualified");
-      await page.waitForFunction(() => records[0].stage === "qualified");
+        .selectOption("contacted");
+      await page.waitForFunction(() => records[0].stage === "contacted");
       await page.evaluate(() => {
         switchView("pipeline");
       });
-      assert.equal(await page.locator(".sale-column").count(), 8);
+      assert.deepEqual(await page.locator('#view-pipeline [data-drop-stage]').evaluateAll(els=>els.map(el=>el.dataset.dropStage)),['new','contacted','quoting','quoted']);
+      const columnIds=async stage=>page.locator(`#pipeline-${stage} [data-record]`).evaluateAll(els=>els.map(el=>Number(el.dataset.record)).sort((a,b)=>a-b));
+      assert.deepEqual(await columnIds('contacted'),[1,3]);
+      assert.deepEqual(await columnIds('quoted'),[4]);
+      assert.equal(await page.locator('#view-pipeline [data-record]').count(),3);
+      assert.equal(await page.locator('#pipeline-contacted [data-sale-stage="3"]').inputValue(),'contacted');
+      assert.equal(await page.locator('#pipeline-quoted [data-sale-stage="4"]').inputValue(),'quoted');
+      assert.deepEqual(await page.evaluate(()=>records.filter(r=>[3,4,5,6,7,8,9,10].includes(r.id)).map(r=>r.stage)),['qualified','followup','scheduled','completed','paid','cancelled','cancelled','lost']);
+      // Scope tabs are real filters, with terminal operational states grouped as confirmed.
+      await page.locator('[data-sale-action="pipeline-scope"][data-id="won"]').click();
+      assert.equal(await page.locator('#view-pipeline .sale-column').count(),1);
+      assert.deepEqual(await columnIds('won'),[2,5,6,7]);
+      await page.locator('#pipeline-won [data-sale-stage="5"]').selectOption('contacted');
+      assert.equal(await page.evaluate(()=>records.find(r=>r.id===5).stage),'scheduled','Won operational records must stay locked');
+      await page.locator('[data-sale-action="pipeline-scope"][data-id="lost"]').click();
+      assert.deepEqual(await columnIds('lost'),[8,10]);
+      await page.locator('[data-sale-action="pipeline-scope"][data-id="all"]').click();
+      assert.equal(await page.locator('#view-pipeline .sale-column').count(),6);
+      const allExpected=await page.evaluate(()=>records.filter(r=>TK_PIPELINE.visible(r,'all')).map(r=>r.id).sort((a,b)=>a-b));
+      const allActual=await page.locator('#view-pipeline [data-record]').evaluateAll(els=>els.map(el=>Number(el.dataset.record)).sort((a,b)=>a-b));
+      if(JSON.stringify(allActual)!==JSON.stringify(allExpected))pipelineScopeErrors.push({width:viewport.width,expected:allExpected,actual:allActual,reason:'All scope must render exactly the records included by pipeline-model.visible'});
+      assert.deepEqual(await columnIds('won'),[2,5,6,7]);
+      await page.locator('[data-sale-action="pipeline-scope"][data-id="open"]').click();
+      await page.locator('#pipeline-search').fill('Legacy qualified');
+      assert.equal(await page.locator('#view-pipeline [data-record]').count(),1);
+      assert.equal(await page.locator('#view-pipeline [data-record]').getAttribute('data-record'),'3');
+      await page.locator('#pipeline-search').fill('');
+      await page.locator('#pipeline-due').check();
+      assert.deepEqual(await columnIds('quoted'),[4]);
+      assert.equal(await page.locator('#view-pipeline [data-record]').count(),1);
+      await page.locator('#pipeline-due').uncheck();
+      // The mounted Conversations bridge guards contact actions in this offline session.
+      // Preparation still opens the real quote workspace without sending anything.
+      await page.locator('#pipeline-quoted [data-sale-action="contact"][data-id="4"]').click();
+      await page.waitForFunction(()=>document.getElementById('toast').textContent.includes('Sign in and wait for your business'));
+      assert.equal(await page.locator('#view-inbox .cv-composer').count(),0);
+      await page.locator('#pipeline-contacted [data-sale-action="quote"][data-id="3"]').click();
+      assert.equal(await page.locator('#qw-step-0').isVisible(),true);
+      await page.evaluate(()=>closeModal('quote-overlay'));
+      assert.equal(await page.evaluate(()=>records.find(r=>r.id===3).stage),'qualified');
       if (viewport.width > 760) {
-        const source=page.locator('#view-pipeline [data-record="1"]'),target=page.locator('[data-drop-stage="contacted"]');
+        const source=page.locator('#view-pipeline [data-record="1"]'),target=page.locator('[data-drop-stage="quoting"]');
         await source.scrollIntoViewIfNeeded();
         await page.locator('#view-pipeline').evaluate(el=>Promise.all(el.getAnimations().map(a=>a.finished)));
         const from=await source.boundingBox(),to=await target.boundingBox();
@@ -151,11 +201,15 @@ const { chromium } = require("playwright"),
       else
         await page
           .locator('#view-pipeline [data-sale-stage="1"]')
-          .selectOption("contacted");
-      try { await page.waitForFunction(() => records[0].stage === "contacted", null, {timeout:3000}); }
+          .selectOption("quoting");
+      try { await page.waitForFunction(() => records[0].stage === "quoting", null, {timeout:3000}); }
       catch(e) { fs.mkdirSync('.artifacts',{recursive:true}); await page.screenshot({path:'.artifacts/drag-failure.png',fullPage:true}); throw e; }
-      await page.evaluate(() => openDetail(1));
+      assert.equal(await page.evaluate(()=>records[0].salesHistory.at(-1).to),'quoting');
+      assert.deepEqual(await columnIds('quoting'),[1]);
+      await page.locator('#pipeline-quoting [data-record="1"]').click();
       await page.locator("#sale-notes").fill("Browser-only note");
+      await page.locator('#view-detail [data-sale-action="save-details"]').click();
+      assert.equal(await page.evaluate(()=>records[0].salesNotes),'Browser-only note');
       assert.match(
         await page.locator("#view-detail").innerText(),
         /ServiceM8 handoff/,
@@ -201,6 +255,9 @@ const { chromium } = require("playwright"),
         await page.locator("#quote-overlay").getAttribute("class"),
         /open/,
       );
+      assert.equal(await page.locator('#qw-step-0').isVisible(),true);
+      await page.locator('#qw-next').click();
+      assert.equal(await page.locator('#qw-step-1').isVisible(),true);
       await page.evaluate(() => closeModal("quote-overlay"));
       // Screenshots contain synthetic test records only.
       await page.evaluate(() => switchView("dashboard"));
@@ -225,9 +282,11 @@ const { chromium } = require("playwright"),
       await page.waitForLoadState("domcontentloaded");
       assert.ok((await page.title()).length);
       await context.close();
-      console.log("PASS desktop/mobile flows at " + viewport.width + "px");
+      console.log("Completed desktop/mobile flows at " + viewport.width + "px");
     }
     assert.deepEqual(errors, [], "browser runtime errors");
+    assert.deepEqual(pipelineScopeErrors, [], "Pipeline All scope disagrees with its model");
+    console.log("PASS assembled sales browser workflows");
   } finally {
     await browser.close();
     await new Promise((resolve) => server.close(resolve));

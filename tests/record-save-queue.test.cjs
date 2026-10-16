@@ -1,0 +1,12 @@
+const {test}=require('node:test');
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const vm=require('node:vm');
+const html=fs.readFileSync(require('node:path').join(__dirname,'../index.html'),'utf8');
+const code=html.slice(html.indexOf('const recordSaveQueue = new WeakMap();'),html.indexOf('async function persistRecordToSupabase(r){'));
+function setup(write){const scope={currentBusinessId:'a',businessSessionVersion:1,recordBusinesses:new WeakMap(),persistRecordToSupabase:write};vm.createContext(scope);vm.runInContext(code,scope);return scope;}
+const tick=()=>new Promise(resolve=>setImmediate(resolve));
+test('overlapping first saves create one job and preserve a later edit',async()=>{let release,calls=0,insertions=0;const gate=new Promise(r=>release=r),stored=[];const c=setup(async r=>{calls++;if(!r.jobId){await gate;r.jobId='job-'+(++insertions);}stored.push({jobId:r.jobId,note:r.note});});const r={note:'first'};c.recordBusinesses.set(r,'a');const first=c.syncRecordToSupabase(r);await tick();r.note='edited';const second=c.syncRecordToSupabase(r);await tick();assert.equal(calls,1);release();await Promise.all([first,second]);assert.equal(insertions,1);assert.equal(stored.at(-1).note,'edited');assert.equal(calls,2);});
+test('failed saves reject and do not block a later retry',async()=>{let calls=0;const c=setup(async()=>{if(++calls===1)throw Error('database unavailable');});const r={};c.recordBusinesses.set(r,'a');await assert.rejects(c.syncRecordToSupabase(r),/database unavailable/);await c.syncRecordToSupabase(r);assert.equal(calls,2);});
+test('queued save cannot run after a business session change',async()=>{let release,calls=0;const gate=new Promise(r=>release=r);const c=setup(async()=>{calls++;await gate;});const r={};c.recordBusinesses.set(r,'a');const first=c.syncRecordToSupabase(r);await tick();const second=c.syncRecordToSupabase(r);c.businessSessionVersion++;release();await first;await assert.rejects(second,/Business session changed/);assert.equal(calls,1);});
+test('independent records save without blocking each other',async()=>{let release;const gate=new Promise(r=>release=r),seen=[];const c=setup(async r=>{seen.push(r.id);if(r.id===1)await gate;});const a={id:1},b={id:2};c.recordBusinesses.set(a,'a');c.recordBusinesses.set(b,'a');const first=c.syncRecordToSupabase(a);await c.syncRecordToSupabase(b);assert.deepEqual(seen,[1,2]);release();await first;});
