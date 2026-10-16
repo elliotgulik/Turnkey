@@ -10231,7 +10231,22 @@ async function syncAllToSupabase(){
   // surface it so the user knows to retry rather than trusting a stale screen.
   if(failed.length)toast('Could not save '+(failed.length===1?failed[0]:failed.length+' records')+' — check your connection and try again');
 }
-async function syncRecordToSupabase(r){
+// Serialize saves of the same record: intake, activity logging and the
+// debounced save can overlap before a new job ID has been assigned.
+const recordSaveQueue = new WeakMap();
+function syncRecordToSupabase(r){
+  const biz=currentBusinessId,version=businessSessionVersion;
+  const previous=recordSaveQueue.get(r)||Promise.resolve();
+  const pending=previous.catch(()=>{}).then(()=>{
+    if(!biz||biz!==currentBusinessId||version!==businessSessionVersion||recordBusinesses.get(r)!==biz)throw new Error('Business session changed. Reload before saving.');
+    return persistRecordToSupabase(r);
+  });
+  recordSaveQueue.set(r,pending);
+  const cleanup=()=>{if(recordSaveQueue.get(r)===pending)recordSaveQueue.delete(r);};
+  pending.then(cleanup,cleanup);
+  return pending;
+}
+async function persistRecordToSupabase(r){
   const biz=currentBusinessId,version=businessSessionVersion;
   const assertSession=()=>{if(!biz||biz!==currentBusinessId||version!==businessSessionVersion||recordBusinesses.get(r)!==biz)throw new Error('Business session changed. Reload before saving.');};
   assertSession();
