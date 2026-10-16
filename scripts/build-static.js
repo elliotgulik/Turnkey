@@ -15,6 +15,7 @@ const assets = [
   "index.html",
   "booking.html",
   "quote.html",
+  "privacy.html",
   "404.html",
   "config.js",
   "pricing-engine.js",
