@@ -15,7 +15,7 @@ function database(tables = {}) {
         value,
         options = {},
         filters = [],
-        one = false;
+        one = false, orders = [], maxRows = Infinity, bounds;
       const q = {
         select() {
           return q;
@@ -40,12 +40,9 @@ function database(tables = {}) {
         or() {
           return q;
         },
-        order() {
-          return q;
-        },
-        limit() {
-          return q;
-        },
+        order(k, options = {}) { orders.push([k, options.ascending !== false]); return q; },
+        limit(n) { maxRows = n; return q; },
+        range(start, end) { bounds = [start, end]; return q; },
         maybeSingle() {
           one = true;
           return q;
@@ -111,6 +108,16 @@ function database(tables = {}) {
               if (op === "update") rows.forEach((r) => Object.assign(r, value));
               if (op === "delete")
                 tables[table] = tables[table].filter((r) => !rows.includes(r));
+              if (op === "select") {
+                rows = [...rows].sort((a, b) => {
+                  for (const [key, asc] of orders) {
+                    const cmp = String(a[key] ?? "").localeCompare(String(b[key] ?? ""));
+                    if (cmp) return asc ? cmp : -cmp;
+                  }
+                  return 0;
+                }).slice(0, maxRows);
+                if (bounds) rows = rows.slice(bounds[0], bounds[1] + 1);
+              }
               return { data: one ? rows[0] || null : rows, error: null };
             })
             .then(resolve, reject);
@@ -727,4 +734,328 @@ test('rejected private key identifies account verification without saving creden
   assert.equal(res.body.stage,'account_verification');assert.equal(res.body.providerStatus,401);
   assert.match(res.body.error,/valid, active and copied in full/);assert.doesNotMatch(res.body.error,/expired|synthetic-rejected|untrusted/);
   assert.equal(calls,1);assert.equal(db.tables.servicem8_connections,undefined);
+});
+const webhookConnection=(extra={})=>{
+  const token='d'.repeat(64);
+  return privateConnection({webhook_enc:encryptToken(token),webhook_token_hash:SM.hash(token),webhook_subscribed_at:null,auto_handoff:true,...extra});
+};
+test('webhooks route registers both subscriptions from stored credentials once, returning safe health',async()=>{
+  const connection=webhookConnection({last_error:'Connected; webhook registration failed. Use manual refresh.'});
+  const db=database({users:ownerRows,servicem8_connections:[connection]});const calls=[];
+  const before={api_key_enc:connection.api_key_enc,auto_handoff:connection.auto_handoff,webhook_enc:connection.webhook_enc,webhook_token_hash:connection.webhook_token_hash};
+  const {route}=setup(db,async(url,opts)=>{
+    calls.push({url,body:new URLSearchParams(opts.body)});
+    assert.equal(url,'https://api.servicem8.com/webhook_subscriptions/object');assert.equal(opts.method,'POST');
+    assert.equal(opts.headers['X-API-Key'],'synthetic-private-key');return response({});
+  });
+  let res=await route('POST','/api/sales/servicem8/webhooks',owner);
+  assert.equal(res.statusCode,200);assert.equal(res.body.webhookSubscribed,true);assert.ok(res.body.webhookSubscribedAt);
+  assert.equal(res.body.credentialsReady,true);assert.equal(res.body.lastError,null);
+  assert.deepEqual(calls.map(c=>c.body.get('object')),['job','jobpayment']);
+  assert.deepEqual(calls.map(c=>c.body.get('unique_id')),[`turnkey-${id(2)}-job`,`turnkey-${id(2)}-jobpayment`]);
+  assert.ok(calls.every(c=>c.body.get('callback_url').startsWith('https://backend.example/api/servicem8/webhook/')));
+  res=await route('POST','/api/sales/servicem8/webhooks',owner);
+  assert.equal(res.statusCode,200);assert.equal(calls.length,2);
+  for(const [key,value] of Object.entries(before))assert.equal(connection[key],value);
+  assert.equal(db.tables.integration_tasks,undefined);assert.equal(db.tables.jobs,undefined);
+  assert.doesNotMatch(JSON.stringify(res.body),/synthetic-private-key|_enc|webhook_token_hash|dddddddd/);
+});
+test('webhooks route rejects disconnected, foreign-role and unreadable credentials without provider calls',async()=>{
+  const db=database({users:ownerRows});const {route}=setup(db);
+  assert.equal((await route('POST','/api/sales/servicem8/webhooks',owner)).statusCode,409);
+  assert.equal((await route('POST','/api/sales/servicem8/webhooks',{userId:'u',businessId:'B'})).statusCode,403);
+  db.tables.servicem8_connections.push(webhookConnection({api_key_enc:'unreadable'}));
+  assert.equal((await route('POST','/api/sales/servicem8/webhooks',owner)).statusCode,409);
+  assert.equal(db.tables.servicem8_connections[0].webhook_subscribed_at,null);
+});
+test('partial webhook provider failure remains unsubscribed and retries with identical IDs and callback',async()=>{
+  const connection=webhookConnection(),db=database({users:ownerRows,servicem8_connections:[connection]});let failOnce=true;const calls=[];
+  const {route}=setup(db,async(url,opts)=>{
+    const body=new URLSearchParams(opts.body);calls.push(body.toString());
+    if(failOnce&&body.get('object')==='jobpayment'){failOnce=false;return response({},403);}
+    return response({});
+  });
+  let res=await route('POST','/api/sales/servicem8/webhooks',owner);
+  assert.equal(res.statusCode,403);assert.equal(res.body.code,'SERVICEM8_PERMISSION_DENIED');assert.equal(connection.webhook_subscribed_at,null);
+  assert.match(connection.last_error,/webhook registration failed/);assert.equal(connection.auto_handoff,true);
+  res=await route('POST','/api/sales/servicem8/webhooks',owner);
+  assert.equal(res.statusCode,200);assert.equal(res.body.webhookSubscribed,true);
+  assert.equal(calls[0],calls[2]);assert.equal(calls[1],calls[3]);assert.equal(res.body.lastError,null);
+  assert.equal(db.tables.integration_tasks,undefined);assert.equal(db.tables.jobs,undefined);
+});
+
+function quoteHandoffFixture() {
+  const jobId=id(100), quoteId=id(101), customerId=id(102);
+  const snapshot={amount:115,details:{gstRegistered:true,services:[{svc:'Wash',qty:1,priceSnapshot:115}],publicTerms:'Terms'},
+    customer:{id:customerId,business_id:'A',name:'Customer',address:'Property'},business:{id:'A',name:'Business'}};
+  const version={id:id(103),business_id:'A',quote_id:quoteId,fingerprint:'saved-revision-1',created_at:'2026-10-17T00:00:00Z',snapshot};
+  const db=database({users:ownerRows,servicem8_connections:[privateConnection()],
+    jobs:[{id:jobId,business_id:'A',quote_id:quoteId,customer_id:customerId,status:'followup',details:structuredClone(snapshot.details)}],
+    quotes:[{id:quoteId,business_id:'A',status:'sent',amount:115}],quote_versions:[version],
+    customers:[snapshot.customer],businesses:[snapshot.business]});
+  const objects=new Map(), calls=[], pdfs=[];
+  const fetchImpl=async(url,opts)=>{
+    const path=url.slice(SM.API.length); calls.push({path,method:opts.method});
+    if(path==='/taxrate.json')return response([{uuid:id(104),active:1,amount:15}]);
+    if(path.startsWith('/jobpayment.json?'))return response([]);
+    if(opts.method==='POST'){
+      if(opts.body instanceof FormData){
+        pdfs.push(await opts.body.get('file').text());
+        const key='/attachment/'+opts.body.get('uuid')+'.json';
+        assert.ok(!objects.has(key)); objects.set(key,{active:1}); return response({});
+      }
+      const body=JSON.parse(opts.body);
+      if(/^\/job\/.+\.json$/.test(path)){
+        assert.ok(objects.has(path));Object.assign(objects.get(path),body);return response({});
+      }
+      const key=path.replace('.json','/'+body.uuid+'.json');
+      assert.ok(!objects.has(key),'must never duplicate remote records');objects.set(key,{...body,active:1});return response({});
+    }
+    return objects.has(path)?response(objects.get(path)):response({},404);
+  };
+  return {db,jobId,quoteId,version,snapshot,objects,calls,pdfs,...setup(db,fetchImpl)};
+}
+const handoffRequest=(jobId,extra={})=>({...owner,body:{jobId,...extra}});
+
+test('explicit quote mode queues an immutable saved version, delivers Quote lines/PDF and repeats without duplicates',async()=>{
+  const f=quoteHandoffFixture(),before=JSON.stringify([f.db.tables.jobs,f.db.tables.quotes]);
+  let res=await f.route('POST','/api/sales/servicem8/handoff',handoffRequest(f.jobId,{mode:'quote'}));
+  assert.equal(res.statusCode,202);const task=structuredClone(f.db.tables.integration_tasks[0]);
+  assert.equal(task.payload.mode,'quote');assert.equal(task.payload.versionId,f.version.id);
+  assert.equal(task.payload.snapshot.accepted,undefined);
+  await f.worker.transfer(task);await f.worker.transfer(task);
+  res=await f.route('POST','/api/sales/servicem8/handoff',handoffRequest(f.jobId,{mode:'quote'}));
+  assert.equal(res.statusCode,202);assert.equal(f.db.tables.integration_tasks.length,1);
+  const remoteJob=[...f.objects.entries()].find(([p])=>p.startsWith('/job/'))[1];
+  assert.equal(remoteJob.status,'Quote');assert.match(remoteJob.job_description,/draft quote/);
+  assert.equal(f.calls.filter(c=>c.path==='/job.json'&&c.method==='POST').length,1);
+  assert.equal(f.calls.filter(c=>c.path==='/jobmaterial.json'&&c.method==='POST').length,1);
+  assert.equal(f.pdfs.length,1);assert.match(f.pdfs[0],/DRAFT QUOTE/);assert.doesNotMatch(f.pdfs[0],/APPROVED|Approved/);
+  assert.equal(JSON.stringify([f.db.tables.jobs,f.db.tables.quotes]),before);
+});
+
+test('approved handoff promotes SAME draft job and preserves Completed on repeated delivery',async()=>{
+  const f=quoteHandoffFixture();
+  await f.route('POST','/api/sales/servicem8/handoff',handoffRequest(f.jobId,{mode:'quote'}));
+  await f.worker.transfer(structuredClone(f.db.tables.integration_tasks[0]));
+  f.db.tables.jobs[0].status='scheduled';f.db.tables.quotes[0].status='accepted';
+  f.db.tables.quote_versions.push({...f.version,id:id(105),fingerprint:'accepted-revision',created_at:'2026-10-17T01:00:00Z',
+    snapshot:{...structuredClone(f.snapshot),accepted:true,approvedAt:123}});
+  const res=await f.route('POST','/api/sales/servicem8/handoff',handoffRequest(f.jobId));
+  assert.equal(res.statusCode,202);const task=structuredClone(f.db.tables.integration_tasks[1]);
+  await f.worker.transfer(task);
+  const [path,job]=[...f.objects.entries()].find(([p])=>p.startsWith('/job/'));
+  assert.equal(job.status,'Work Order');assert.equal(f.pdfs.length,2);assert.match(f.pdfs[1],/APPROVED QUOTE/);
+  job.status='Completed';await f.worker.transfer(task);assert.equal(f.objects.get(path).status,'Completed');
+  assert.equal(f.calls.filter(c=>c.path==='/job.json'&&c.method==='POST').length,1);
+  assert.equal(f.calls.filter(c=>c.path===path&&c.method==='POST').length,1);
+  assert.equal(f.db.tables.jobs[0].status,'scheduled');
+});
+
+test('edited quotes are fenced before writes, frozen deliveries do not read mutable edits, and tampering fails',async()=>{
+  const f=quoteHandoffFixture();
+  await f.route('POST','/api/sales/servicem8/handoff',handoffRequest(f.jobId,{mode:'quote'}));
+  const task=structuredClone(f.db.tables.integration_tasks[0]);
+  f.db.tables.jobs[0].details.services[0].priceSnapshot=230;f.db.tables.quotes[0].amount=230;
+  await f.worker.transfer(task); // Delivers the explicitly queued revision, not mutable job details.
+  const newVersion={...structuredClone(f.version),id:id(106),fingerprint:'edited',created_at:'2026-10-17T02:00:00Z'};
+  newVersion.snapshot.amount=230;newVersion.snapshot.details.services[0].priceSnapshot=230;
+  f.db.tables.quote_versions.push(newVersion);
+  assert.equal((await f.route('POST','/api/sales/servicem8/handoff',handoffRequest(f.jobId,{mode:'quote'}))).statusCode,202);
+  const before=f.calls.length;
+  await assert.rejects(f.worker.transfer(structuredClone(f.db.tables.integration_tasks[1])),/Reconcile/);
+  assert.equal(f.calls.length,before);
+  const tampered=structuredClone(task);tampered.payload.snapshot.amount=999;
+  await assert.rejects(f.worker.transfer(tampered),/does not match/);
+  const generation=structuredClone(task);generation.payload.generation=id(999);
+  await assert.rejects(f.worker.transfer(generation),/connection changed/);
+});
+
+test('quote handoff validates tenant, role, mode, connection, saved quote and revision',async()=>{
+  const f=quoteHandoffFixture();
+  const post=(extra={})=>f.route('POST','/api/sales/servicem8/handoff',handoffRequest(f.jobId,{mode:'quote',...extra}));
+  assert.equal((await post({mode:'invalid'})).statusCode,400);
+  assert.equal((await f.route('POST','/api/sales/servicem8/handoff',{...handoffRequest(f.jobId,{mode:'quote'}),businessId:'B'})).statusCode,403);
+  f.db.tables.jobs[0].business_id='B';assert.equal((await post()).statusCode,404);f.db.tables.jobs[0].business_id='A';
+  f.db.tables.quotes[0].business_id='B';assert.equal((await post()).statusCode,404);f.db.tables.quotes[0].business_id='A';
+  f.db.tables.servicem8_connections[0].api_key_enc='broken';assert.equal((await post()).statusCode,409);
+  f.db.tables.servicem8_connections[0]=privateConnection();
+  f.db.tables.jobs[0].quote_id=null;assert.equal((await post()).statusCode,409);f.db.tables.jobs[0].quote_id=f.quoteId;
+  f.db.tables.jobs[0].details={};assert.equal((await post()).statusCode,409);f.db.tables.jobs[0].details=f.snapshot.details;
+  f.db.tables.quote_versions=[];assert.equal((await post()).statusCode,409);
+  assert.equal(f.db.tables.integration_tasks,undefined);assert.equal(f.calls.length,0);
+});
+
+test('history is owned, read-only, newest first, paginated and strips secrets/costs',async()=>{
+  const f=quoteHandoffFixture();
+  f.version.snapshot.details.estimatedCost=91;f.version.snapshot.details.salesNotes='private';
+  f.version.snapshot.business.secret='secret';f.version.snapshot.customer.email='private-email';
+  for(let i=0;i<1001;i++)f.db.tables.quote_versions.push({...structuredClone(f.version),id:id(2000+i),created_at:'2026-10-18T00:00:00Z'});
+  f.db.tables.quote_versions.push({...structuredClone(f.version),id:id(9000),business_id:'B'});
+  const before=JSON.stringify(f.db.tables);
+  const res=await f.route('GET','/api/sales/quotes/:quoteId/history',{...owner,params:{quoteId:f.quoteId}});
+  assert.equal(res.statusCode,200);assert.equal(res.body.versions.length,1002);
+  assert.equal(res.body.versions[0].id,id(3000));assert.equal(res.body.versions.at(-1).id,f.version.id);
+  assert.doesNotMatch(JSON.stringify(res.body),/estimatedCost|salesNotes|secret|private-email|public_token/);
+  assert.equal(JSON.stringify(f.db.tables),before);assert.equal(f.calls.length,0);
+});
+
+test('history distinguishes invalid/missing/foreign quotes, empty versions, and safe database failures',async()=>{
+  const f=quoteHandoffFixture();const get=quoteId=>f.route('GET','/api/sales/quotes/:quoteId/history',{...owner,params:{quoteId}});
+  assert.equal((await get('invalid')).statusCode,400);assert.equal((await get(id(900))).statusCode,404);
+  f.db.tables.quotes[0].business_id='B';assert.equal((await get(f.quoteId)).statusCode,404);f.db.tables.quotes[0].business_id='A';
+  f.db.tables.quote_versions=[];assert.deepEqual((await get(f.quoteId)).body,{versions:[]});
+  for(const table of ['quotes','quote_versions']){
+    f.db.fail=t=>t===table;const res=await get(f.quoteId);assert.equal(res.statusCode,503);
+    assert.doesNotMatch(res.body.error,/secret database detail/);
+  }
+});
+
+test('legacy approved handoff requires explicit review, captures server snapshot once and performs durable delivery',async()=>{
+  const f=quoteHandoffFixture();f.db.tables.jobs[0].status='scheduled';f.db.tables.quotes[0].status='accepted';f.db.tables.quote_versions=[];
+  let res=await f.route('POST','/api/sales/servicem8/handoff',handoffRequest(f.jobId));
+  assert.equal(res.statusCode,409);assert.equal(res.body.code,"LEGACY_REVIEW_REQUIRED");assert.match(res.body.error,/reviewLegacy: true/);
+  assert.equal(f.db.tables.integration_tasks,undefined);
+  const before=JSON.stringify([f.db.tables.quotes,f.db.tables.jobs,f.db.tables.quote_versions]);
+  res=await f.route('POST','/api/sales/servicem8/handoff',handoffRequest(f.jobId,{reviewLegacy:true,snapshot:{amount:1}}));
+  assert.equal(res.statusCode,202);const task=structuredClone(f.db.tables.integration_tasks[0]);
+  assert.equal(task.payload.snapshot.amount,115);assert.equal(task.payload.snapshot.provenance,'legacy-reviewed');
+  assert.equal(task.payload.snapshot.reviewedBy,owner.userId);assert.ok(task.payload.snapshot.reviewedAt);
+  assert.equal(task.payload.snapshot.accepted,undefined);assert.ok(task.payload.snapshotHash);
+  await f.route('POST','/api/sales/servicem8/handoff',handoffRequest(f.jobId,{reviewLegacy:true}));
+  assert.equal(f.db.tables.integration_tasks.length,1);assert.deepEqual(f.db.tables.integration_tasks[0],task);
+  Object.assign(f.db.tables.integration_tasks[0],{id:id(900),state:'running',lease_token:id(901),attempts:1});
+  let claimed=false;f.db.rpc=async()=>({data:claimed?[]:(claimed=true,[f.db.tables.integration_tasks[0]])});
+  await f.worker.tick();assert.equal(f.db.tables.integration_tasks[0].state,'succeeded');
+  assert.equal([...f.objects.entries()].find(([p])=>p.startsWith('/job/'))[1].status,'Work Order');
+  assert.equal(JSON.stringify([f.db.tables.quotes,f.db.tables.jobs,f.db.tables.quote_versions]),before);
+});
+
+test('legacy reviews fail closed for changed amount, quote link, customer, services, provenance, hash and approval',async()=>{
+  for(const mutate of [
+    f=>{f.db.tables.quotes[0].amount=230;}, f=>{f.db.tables.jobs[0].quote_id=id(999);},
+    f=>{f.db.tables.jobs[0].customer_id=id(999);}, f=>{f.db.tables.jobs[0].details.services=[];},
+    (f,t)=>{t.payload.snapshot.provenance='accepted';},(f,t)=>{t.payload.snapshotHash='bad';},
+    f=>{f.db.tables.quotes[0].status='sent';},(f,t)=>{t.payload.reviewLegacy=false;}
+  ]){
+    const f=quoteHandoffFixture();f.db.tables.jobs[0].status='scheduled';f.db.tables.quotes[0].status='accepted';f.db.tables.quote_versions=[];
+    await f.route('POST','/api/sales/servicem8/handoff',handoffRequest(f.jobId,{reviewLegacy:true}));
+    const task=structuredClone(f.db.tables.integration_tasks[0]);mutate(f,task);
+    await assert.rejects(f.worker.transfer(task));assert.equal(f.calls.length,0);
+  }
+});
+
+test('legacy missing GST requires explicit boolean review, never current business settings',async()=>{
+  const f=quoteHandoffFixture();f.db.tables.jobs[0].status='scheduled';f.db.tables.quotes[0].status='accepted';f.db.tables.quote_versions=[];
+  delete f.db.tables.jobs[0].details.gstRegistered;f.db.tables.businesses[0].gst_registered=true;
+  const post=extra=>f.route('POST','/api/sales/servicem8/handoff',handoffRequest(f.jobId,extra));
+  for(const extra of [{},{reviewLegacy:true},{reviewLegacy:true,gstRegistered:'true'}]){
+    const res=await post(extra);assert.equal(res.statusCode,409);assert.equal(res.body.code,'LEGACY_REVIEW_REQUIRED');
+    assert.deepEqual(res.body.missingFields,['gstRegistered']);assert.equal(f.db.tables.integration_tasks,undefined);
+  }
+  const res=await post({reviewLegacy:true,gstRegistered:true});assert.equal(res.statusCode,202);
+  const task=structuredClone(f.db.tables.integration_tasks[0]);assert.equal(task.payload.snapshot.gstProvenance,'explicit-review');
+  await f.worker.transfer(task);assert.equal(f.db.tables.jobs[0].details.gstRegistered,undefined);
+});
+
+test('handoff enqueue database failure is safe and quote auth middleware runs before reads',async()=>{
+  const f=quoteHandoffFixture();f.db.fail=(t,op)=>t==='integration_tasks'&&op==='insert';
+  const res=await f.route('POST','/api/sales/servicem8/handoff',handoffRequest(f.jobId,{mode:'quote'}));
+  assert.equal(res.statusCode,503);assert.equal(f.calls.length,0);assert.doesNotMatch(res.body.error,/secret/);
+  let reads=0;const db={from(){reads++;throw Error('must authenticate first');}};
+  const {route}=setup(db,undefined,{requireBusiness:(req,res)=>res.status(401).json({error:'Authentication required'})});
+  assert.equal((await route('GET','/api/sales/quotes/:quoteId/history',{params:{quoteId:id(1)}})).statusCode,401);
+  assert.equal((await route('POST','/api/sales/servicem8/handoff',{body:{jobId:id(1),mode:'quote'}})).statusCode,401);
+  assert.equal(reads,0);
+});
+
+test('quote mode accepts draft quote and quoting opportunity without inventing sent timestamps',async()=>{
+  const f=quoteHandoffFixture();f.db.tables.quotes[0].status='draft';f.db.tables.jobs[0].status='quoting';
+  const res=await f.route('POST','/api/sales/servicem8/handoff',handoffRequest(f.jobId,{mode:'quote'}));
+  assert.equal(res.statusCode,202);await f.worker.transfer(structuredClone(f.db.tables.integration_tasks[0]));
+  assert.equal(f.db.tables.quotes[0].status,'draft');assert.equal(f.db.tables.jobs[0].status,'quoting');
+  assert.equal(f.db.tables.jobs[0].details.quoteSentAt,undefined);
+  const remote=[...f.objects.entries()].find(([p])=>p.startsWith('/job/'))[1];
+  assert.equal(remote.status,'Quote');assert.equal(remote.quote_sent,undefined);
+});
+
+test('changed draft-to-approved prices are blocked before promotion or line writes, including automatic trigger payloads',async()=>{
+  for(const retainReadbackFingerprint of [true,false]){
+    const f=quoteHandoffFixture();
+    await f.route('POST','/api/sales/servicem8/handoff',handoffRequest(f.jobId,{mode:'quote'}));
+    await f.worker.transfer(structuredClone(f.db.tables.integration_tasks[0]));
+    const jobMap=f.db.tables.external_object_mappings.find(m=>m.object_type==='job');
+    if(!retainReadbackFingerprint)jobMap.snapshot={status:'Quote'};
+    const accepted=structuredClone(f.snapshot);accepted.accepted=true;accepted.amount=230;
+    accepted.details.services[0].priceSnapshot=230;
+    f.db.tables.jobs[0].status='scheduled';f.db.tables.quotes[0].status='accepted';f.db.tables.quotes[0].amount=230;
+    f.db.tables.quote_versions.push({...f.version,id:id(980),fingerprint:'changed-accepted',created_at:'2026-10-19T00:00:00Z',snapshot:accepted});
+    const before=f.calls.length,remoteBefore=JSON.stringify([...f.objects]);
+    // This matches the DB trigger's legacy payload: no generation or fingerprint.
+    await assert.rejects(f.worker.transfer({business_id:'A',payload:{jobId:f.jobId}}),/Reconcile/);
+    assert.equal(f.calls.length,before,'revision lock must run before ANY provider call');
+    assert.equal(JSON.stringify([...f.objects]),remoteBefore,'existing draft prices and Quote status must remain untouched');
+  }
+});
+
+test('draft-to-approved metadata changes preserve commercial fingerprint and promote the same job',async()=>{
+  const f=quoteHandoffFixture();
+  f.snapshot.details.areaPolys=[{id:'draft-area',service:'driveway',points:[{x:0,y:0},{x:10,y:0},{x:10,y:10}]}];
+  f.db.tables.jobs[0].details=structuredClone(f.snapshot.details);
+  await f.route('POST','/api/sales/servicem8/handoff',handoffRequest(f.jobId,{mode:'quote'}));
+  await f.worker.transfer(structuredClone(f.db.tables.integration_tasks[0]));
+  const accepted=structuredClone(f.snapshot);
+  Object.assign(accepted,{accepted:true,approvedAt:456});
+  Object.assign(accepted.details,{salesHistory:[{stage:'won'}],wonAt:456,quoteSentAt:123,
+    nextFollowUpAt:789,followup:'Later',salespersonId:'new-owner',estimatedCost:99,estimatedMarginPct:10,
+    transientCache:{preview:'different'}});
+  accepted.details.services[0].cachedEstimate=999;
+  Object.assign(accepted.details.areaPolys[0],{id:'regenerated-id',notes:'internal area note',photoPaths:['internal']});
+  accepted.details.areaPolys[0].points[0].cache='internal';
+  Object.assign(accepted.business,{pricing_config:{rates:{driveway:999},costs:{wages:888}},updated_at:'later',home_address:'private depot'});
+  Object.assign(accepted.customer,{updated_at:'later',notes:'private customer note'});
+  f.db.tables.jobs[0].status='scheduled';f.db.tables.jobs[0].details=structuredClone(accepted.details);
+  f.db.tables.quotes[0].status='accepted';
+  f.db.tables.quote_versions.push({...f.version,id:id(981),fingerprint:'metadata-accepted',created_at:'2026-10-19T00:00:00Z',snapshot:accepted});
+  // Queue validates the entire accepted version, while the reservation compares only public content.
+  assert.equal((await f.route('POST','/api/sales/servicem8/handoff',handoffRequest(f.jobId))).statusCode,202);
+  const approvedTask=structuredClone(f.db.tables.integration_tasks[1]);
+  const tampered=structuredClone(approvedTask);tampered.payload.snapshot.details.followup='Tampered payload';
+  const before=f.calls.length;
+  await assert.rejects(f.worker.transfer(tampered),/does not match/);
+  assert.equal(f.calls.length,before,'full queued snapshot validation must still reject metadata tampering');
+  await f.worker.transfer(approvedTask);
+  assert.equal(f.calls.filter(c=>c.path==='/job.json'&&c.method==='POST').length,1);
+  assert.equal(f.calls.filter(c=>c.path==='/jobmaterial.json'&&c.method==='POST').length,1);
+  assert.equal([...f.objects.entries()].find(([p])=>p.startsWith('/job/'))[1].status,'Work Order');
+});
+
+test('draft-to-approved commercial, terms, geometry and public identity changes remain fenced before provider calls',async()=>{
+  const changes={
+    service:s=>{s.details.services[0].svc='roof';},
+    price:s=>{s.details.services[0].priceSnapshot=230;},
+    amount:s=>{s.amount=230;},
+    gst:s=>{s.details.gstRegistered=false;},
+    terms:s=>{s.details.publicTerms='Changed scope and terms';},
+    geometry:s=>{s.details.areaPolys[0].points[0].x=5;},
+    geoGeometry:s=>{s.details.areaPolys[0].geoPts[0].lat=-37.0001;},
+    contact:s=>{s.customer.email='changed@example.test';},
+    address:s=>{s.customer.address='Different property';},
+    branding:s=>{s.business.name='Changed business';},
+    notes:s=>{s.details.salesNotes='Different delivered notes';},
+  };
+  for(const [name,change] of Object.entries(changes)){
+    const f=quoteHandoffFixture();
+    f.snapshot.details.areaPolys=[{service:'driveway',points:[{x:0,y:0},{x:10,y:0},{x:10,y:10}],
+      geoPts:[{lat:-37,lng:174},{lat:-37,lng:174.001},{lat:-37.001,lng:174.001}]}];
+    f.db.tables.jobs[0].details=structuredClone(f.snapshot.details);
+    await f.route('POST','/api/sales/servicem8/handoff',handoffRequest(f.jobId,{mode:'quote'}));
+    await f.worker.transfer(structuredClone(f.db.tables.integration_tasks[0]));
+    const accepted=structuredClone(f.snapshot);accepted.accepted=true;change(accepted);
+    f.db.tables.jobs[0].status='scheduled';f.db.tables.quotes[0].status='accepted';f.db.tables.quotes[0].amount=accepted.amount;
+    f.db.tables.quote_versions.push({...f.version,id:id(982),fingerprint:'commercial-accepted',created_at:'2026-10-19T00:00:00Z',snapshot:accepted});
+    const before=f.calls.length,remoteBefore=JSON.stringify([...f.objects]);
+    await assert.rejects(f.worker.transfer({business_id:'A',payload:{jobId:f.jobId}}),/Reconcile/,name);
+    assert.equal(f.calls.length,before,name);assert.equal(JSON.stringify([...f.objects]),remoteBefore,name);
+  }
 });

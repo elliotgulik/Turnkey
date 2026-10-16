@@ -1,7 +1,13 @@
 import crypto from "node:crypto";
+import { readFileSync } from "node:fs";
+import vm from "node:vm";
+// Read only the public service catalog; never load internal cost configuration.
+const catalogContext = { window: {} };
+vm.runInNewContext(readFileSync(new URL("../../pricing-engine.js", import.meta.url), "utf8"), catalogContext);
+const PUBLIC_SERVICES = catalogContext.window.TK_PRICING.SERVICES;
 export const API = "https://api.servicem8.com/api_1.0";
 export const SCOPES =
-  "vendor read_customers manage_customers read_customer_contacts manage_customer_contacts read_jobs create_jobs read_job_materials manage_job_materials read_attachments manage_attachments read_job_payments read_tax_rates";
+  "vendor read_customers manage_customers read_customer_contacts manage_customer_contacts read_jobs create_jobs manage_jobs read_job_materials manage_job_materials read_attachments manage_attachments read_job_payments read_tax_rates";
 export const hash = (value) =>
   crypto.createHash("sha256").update(String(value)).digest("hex");
 export const uuid = (value) =>
@@ -84,7 +90,7 @@ export async function request(
     nextCursor: res.headers.get("x-next-cursor"),
   };
 }
-export function approvedLines(snapshot) {
+export function approvedLines(snapshot, { mode = "approved" } = {}) {
   const d = snapshot.details || {},
     lines = d.services || [],
     amount = Number(snapshot.amount);
@@ -105,7 +111,7 @@ export function approvedLines(snapshot) {
   if (!sum)
     return [
       {
-        name: "Approved TurnKey quote (see attached PDF)",
+        name: (mode === "quote" ? "Draft" : "Approved") + " TurnKey quote (see attached PDF)",
         quantity: "1",
         price: (amount / (d.gstRegistered ? 1.15 : 1)).toFixed(6),
         displayed_amount: amount.toFixed(2),
@@ -139,19 +145,73 @@ export function approvedLines(snapshot) {
     };
   });
 }
+// Geometry uses one coordinate system per drawing; malformed vertices never get joined.
+function outlinePages(input) {
+  if (!Array.isArray(input) || !input.length || input.length > 64) return [];
+  const num = v => (typeof v === "number" || typeof v === "string" && v.trim()) && Number.isFinite(Number(v)) ? Number(v) : null;
+  const parse = (points, geo, minimum) => {
+    if (!Array.isArray(points) || points.length < minimum || points.length > 2000) return null;
+    const out = points.map(p => {
+      const x = num(geo ? p?.lng : p?.x), y = num(geo ? p?.lat : p?.y);
+      return x !== null && y !== null && (geo ? Math.abs(x) <= 180 && Math.abs(y) <= 85 : Math.abs(x) <= 1e7 && Math.abs(y) <= 1e7) ? { x, y } : null;
+    });
+    return out.every(Boolean) && new Set(out.map(p => JSON.stringify(p))).size >= minimum ? out : null;
+  };
+  const areas = input.map(a => {
+    const service = PUBLIC_SERVICES[a?.service || a?.svc];
+    if (!service || !["open", "closed"].includes(service.shape)) return null;
+    const min = service.shape === "closed" ? 3 : 2;
+    return { service, geo: parse(a.geoPts, true, min), pixels: parse(a.points, false, min) };
+  });
+  // Do not omit areas or overlay unrelated screen and geographic coordinates.
+  if (areas.some(a => !a)) return [];
+  const geo = areas.every(a => a.geo);
+  if (!geo && !areas.every(a => a.pixels)) return [];
+  const anchor = geo ? areas[0].geo[0].x : 0;
+  const shapes = areas.map((a, i) => ({ service: a.service, tag: i + 1, points: (geo ? a.geo : a.pixels).map(p => {
+    if (!geo) return p;
+    const lng = anchor + ((p.x - anchor + 540) % 360 - 180);
+    const sin = Math.sin(p.y * Math.PI / 180);
+    return { x: (lng + 180) / 360, y: .5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI) };
+  }) }));
+  let minX=Infinity, minY=Infinity, maxX=-Infinity, maxY=-Infinity;
+  for (const a of shapes) for (const p of a.points) {
+    minX=Math.min(minX,p.x);maxX=Math.max(maxX,p.x);minY=Math.min(minY,p.y);maxY=Math.max(maxY,p.y);
+  }
+  const scale = Math.min(500 / Math.max(maxX-minX,1e-10), 350 / Math.max(maxY-minY,1e-10));
+  const pages = [];
+  for (let offset=0; offset<shapes.length; offset+=16) {
+    const group=shapes.slice(offset,offset+16), commands=["q 2 w"];
+    for (const [i,a] of group.entries()) {
+      const color = /^#[a-f0-9]{6}$/i.test(a.service.color) ? a.service.color : "#138a72";
+      const rgb = [1,3,5].map(n => (parseInt(color.slice(n,n+2),16)/255).toFixed(4)).join(" ");
+      const pts=a.points.map(p=>({x:297.5+(p.x-(minX+maxX)/2)*scale,y:545-(p.y-(minY+maxY)/2)*scale}));
+      commands.push(rgb+" RG",pts.map((p,j)=>`${p.x.toFixed(2)} ${p.y.toFixed(2)} ${j ? "l" : "m"}`).join(" ")+(a.service.shape === "closed" ? " h S" : " S"));
+      const center=pts.reduce((c,p)=>({x:c.x+p.x/pts.length,y:c.y+p.y/pts.length}),{x:0,y:0});
+      commands.push(`BT /F1 10 Tf ${center.x.toFixed(2)} ${center.y.toFixed(2)} Td (${a.tag}) Tj ET`);
+      const label=String(a.service.label).replace(/[^\x20-\x7e]/g,"?").replace(/[\\()]/g,"\\$&");
+      commands.push(`${rgb} rg BT /F1 10 Tf 45 ${320-i*15} Td (${a.tag}. ${label}) Tj ET 0 g`);
+    }
+    commands.push("Q");
+    pages.push({ text: ["Measured service outlines", "Saved outline diagram - not aerial imagery.",
+      geo ? "Geographic coordinates" : "Sketch coordinates - not geographically positioned"], drawing: commands.join("\n") });
+  }
+  return pages;
+}
 // Deterministic, dependency-free PDF of the approved public terms and line totals.
-export function quotePdf({ reference, business, customer, snapshot }) {
+export function quotePdf({ reference, business, customer, snapshot, mode = "approved" }) {
+  if (!["quote", "approved"].includes(mode)) throw Error("Invalid quote PDF mode");
   const lines = [
     business?.name || "Service provider",
-    "APPROVED QUOTE " + reference,
+    (mode === "quote" ? "DRAFT QUOTE " : "APPROVED QUOTE ") + reference,
     "Customer: " + (customer.name || ""),
     "Property: " + (customer.address || ""),
     "",
-    ...approvedLines(snapshot).map(
+    ...approvedLines(snapshot, { mode }).map(
       (x) => `${x.name}    $${x.displayed_amount}`,
     ),
     "",
-    "Approved customer total: $" + Number(snapshot.amount).toFixed(2),
+    (mode === "quote" ? "Quoted customer total: $" : "Approved customer total: $") + Number(snapshot.amount).toFixed(2),
     snapshot.details?.gstRegistered ? "Includes GST (15%)." : "No GST charged.",
     "",
     ...String(snapshot.details?.publicTerms || "").split("\n"),
@@ -159,7 +219,8 @@ export function quotePdf({ reference, business, customer, snapshot }) {
   const wrapped = lines.flatMap((s) => String(s).match(/.{1,90}/g) || [""]),
     pages = [];
   for (let i = 0; i < wrapped.length; i += 45)
-    pages.push(wrapped.slice(i, i + 45));
+    pages.push({ text: wrapped.slice(i, i + 45) });
+  pages.push(...outlinePages(snapshot.details?.areaPolys));
   const objects = [
     "<< /Type /Catalog /Pages 2 0 R >>",
     "",
@@ -174,10 +235,10 @@ export function quotePdf({ reference, business, customer, snapshot }) {
       s.replace(/[^\x20-\x7e]/g, "?").replace(/[\\()]/g, "\\$&");
     const stream =
       "BT /F1 11 Tf 45 790 Td 16 TL " +
-      page
+      page.text
         .map((l, i) => (i ? "T* " : "") + "(" + clean(l) + ") Tj")
         .join("\n") +
-      " ET";
+      " ET\n" + (page.drawing || "");
     objects.push(
       `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R >> >> /Contents ${streamId} 0 R >>`,
       `<< /Length ${Buffer.byteLength(stream)} >>\nstream\n${stream}\nendstream`,

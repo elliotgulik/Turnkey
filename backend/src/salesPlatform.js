@@ -20,6 +20,41 @@ const safeError = (e) =>
       "The sales database or integration request failed. Check that the sales migration is applied, then retry.";
 const fail = (message, status = 400) =>
   Object.assign(new Error(message), { publicMessage: message, status });
+// Canonical hashing survives JSONB key ordering. Approval metadata is not quote content.
+const canonical = (v) => JSON.stringify(v, (_, value) => value && typeof value === "object" && !Array.isArray(value)
+  ? Object.fromEntries(Object.keys(value).sort().map(k => [k, value[k]])) : value);
+const pick = (value, keys) => Object.fromEntries(keys.map(key => [key, value?.[key]]));
+// The reservation compares delivered/public content, not the entire CRM record.
+// Full canonical version/payload validation below remains deliberately separate.
+const contentFingerprint = (s) => {
+  const d = s.details || {};
+  return SM.hash(canonical({
+    amount: s.amount,
+    details: {
+      ...pick(d, ["gstRegistered", "publicTerms", "jobNotes", "salesNotes"]),
+      services: (d.services || []).map(line => pick(line, ["svc", "label", "qty", "priceSnapshot",
+        "roofType", "storeys", "sides", "customRate", "fixedPrice"])),
+      areaPolys: (d.areaPolys || []).map(area => ({
+        ...pick(area, ["service", "svc"]),
+        geoPts: area?.geoPts?.map(point => pick(point, ["lat", "lng"])),
+        points: area?.points?.map(point => pick(point, ["x", "y"])),
+      })),
+    },
+    customer: pick(s.customer, ["id", "business_id", "name", "email", "phone", "address"]),
+    business: pick(s.business, ["id", "name", "phone", "email", "logo_url", "accent_color",
+      "primary_color", "font_style", "header_style", "gst_number", "tax_number", "nzbn"]),
+  }));
+};
+const publicVersion = (v) => {
+  const s = v.snapshot || {}, d = s.details || {};
+  return { id: v.id, fingerprint: v.fingerprint, createdAt: v.created_at,
+    snapshot: { accepted: s.accepted === true, approvedAt: s.approvedAt || null, amount: s.amount,
+      customer: { name: s.customer?.name, address: s.customer?.address },
+      business: { name: s.business?.name },
+      details: { gstRegistered: d.gstRegistered, publicTerms: d.publicTerms, jobNotes: d.jobNotes,
+        services: (Array.isArray(d.services) ? d.services : []).map(l => ({ svc: l.svc, label: l.label,
+          qty: l.qty, priceSnapshot: l.priceSnapshot })) } } };
+};
 export async function allRows(db, table, businessId, columns = "*") {
   let rows = [];
   for (let offset = 0; ; offset += 1000) {
@@ -71,6 +106,8 @@ export function installSalesPlatform(
     } catch (e) {
       console.error("[Sales platform]", e.code || e.status || e.name);
       res.status(e.status || 503).json({ error: safeError(e),
+        ...(e.publicCode === "LEGACY_REVIEW_REQUIRED" ? { code: e.publicCode,
+          ...(e.missingFields ? { missingFields: e.missingFields } : {}) } : {}),
         ...(e instanceof SM.ServiceM8Error ? { code: e.code, providerStatus: e.status,
           ...(e.stage ? { stage: e.stage } : {}) } : {}) });
     }
@@ -276,6 +313,9 @@ export function installSalesPlatform(
   }
   async function subscribe(businessId) {
     const c = await conn(businessId);
+    if (!c) throw fail("Connect ServiceM8 before connecting status updates.", 409);
+    if (!c.webhook_enc) throw fail("The stored ServiceM8 webhook callback is missing. Reconnect the account.", 409);
+    const generation = c.generation, tokenHash = c.webhook_token_hash;
     if (!backend.startsWith("https://"))
       throw fail("PUBLIC_BACKEND_URL must be the backend HTTPS origin.");
     const token = decryptToken(c.webhook_enc),
@@ -283,6 +323,7 @@ export function installSalesPlatform(
     for (const object of ["job", "jobpayment"]) {
       await call(businessId, "/webhook_subscriptions/object", {
         base: "https://api.servicem8.com",
+        generation,
         method: "POST",
         body: new URLSearchParams({
           object,
@@ -295,9 +336,11 @@ export function installSalesPlatform(
         }),
       });
     }
-    await unwrap(db.from("servicem8_connections")
+    const saved = await unwrap(db.from("servicem8_connections")
       .update({ webhook_subscribed_at: new Date().toISOString() })
-      .eq("business_id", businessId).eq("generation", c.generation));
+      .eq("business_id", businessId).eq("generation", generation)
+      .eq("webhook_token_hash", tokenHash).select("business_id"));
+    if (!saved.length) throw fail("ServiceM8 connection changed during webhook registration. Try again.", 409);
   }
   async function enqueue(businessId, kind, key, payload) {
     const { error } = await db
@@ -567,6 +610,44 @@ export function installSalesPlatform(
     }),
   );
   app.post(
+    "/api/sales/servicem8/webhooks",
+    requireBusiness,
+    admin,
+    wrap(async (req, res) => {
+      const c = await conn(req.businessId);
+      if (!c) throw fail("Connect ServiceM8 before connecting status updates.", 409);
+      const health = connectionHealth(c);
+      if (!health.serverConfigured)
+        throw fail("Configure " + health.configurationMissing.join(", ") + " on the backend before connecting status updates.", 503);
+      if (!health.credentialsReady)
+        throw fail("ServiceM8 credentials cannot be read. Check EMAIL_TOKEN_KEY and reconnect the account.", 409);
+      // Registration uses the stored callback token and stable per-object unique IDs.
+      // Repeated clicks are a no-op once both subscriptions have been recorded.
+      if (!c.webhook_subscribed_at) {
+        try { await subscribe(req.businessId); }
+        catch (e) {
+          await unwrap(db.from("servicem8_connections")
+            .update({ last_error: "ServiceM8 webhook registration failed. " + safeError(e) })
+            .eq("business_id", req.businessId).eq("generation", c.generation)
+            .eq("webhook_token_hash", c.webhook_token_hash));
+          throw e;
+        }
+        // Clear only webhook warnings, retaining unrelated transfer diagnostics.
+        if (/webhook registration failed/i.test(c.last_error || "")) await unwrap(db.from("servicem8_connections").update({ last_error: null })
+          .eq("business_id", req.businessId).eq("generation", c.generation)
+          .eq("webhook_token_hash", c.webhook_token_hash)
+          .eq("last_error", c.last_error));
+      }
+      const updated = await conn(req.businessId);
+      if (!updated || updated.generation !== c.generation || updated.webhook_token_hash !== c.webhook_token_hash)
+        throw fail("ServiceM8 connection changed during webhook registration. Try again.", 409);
+      res.json({ ok: true, connected: true, ...connectionHealth(updated),
+        webhookSubscribed: !!updated.webhook_subscribed_at,
+        webhookSubscribedAt: updated.webhook_subscribed_at || null,
+        lastError: updated.last_error || null });
+    }),
+  );
+  app.post(
     "/api/sales/servicem8/handoff",
     requireBusiness,
     admin,
@@ -576,18 +657,86 @@ export function installSalesPlatform(
       const job = await unwrap(
         db
           .from("jobs")
-          .select("id,status,quote_id")
+          .select("*")
           .eq("business_id", req.businessId)
           .eq("id", req.body.jobId)
           .maybeSingle(),
       );
       if (!job) throw fail("Opportunity not found.", 404);
-      if (!["won", "scheduled", "completed", "paid"].includes(job.status))
+      const mode = req.body.mode ?? "approved";
+      if (!["quote", "approved"].includes(mode)) throw fail("Invalid handoff mode.");
+      if (mode === "approved" && !["won", "scheduled", "completed", "paid"].includes(job.status))
         throw fail("Only won sales can be transferred.");
-      if (!(await conn(req.businessId)))
-        throw fail("Connect ServiceM8 first.", 409);
-      await enqueue(req.businessId, "handoff", job.id, { jobId: job.id });
+      if (mode === "quote" && ["cancelled", "completed", "paid"].includes(job.status))
+        throw fail("This opportunity cannot be sent as a draft quote.");
+      const c = await conn(req.businessId);
+      if (!c) throw fail("Connect ServiceM8 first.", 409);
+      const health = connectionHealth(c);
+      if (!health.serverConfigured || !health.credentialsReady || health.reconnectRequired)
+        throw fail("Check ServiceM8 configuration and reconnect before transferring.", 409);
+      if (!job.quote_id) throw fail("Save a quote before transferring.", 409);
+      const q = await unwrap(db.from("quotes").select("id,status,amount")
+        .eq("business_id", req.businessId).eq("id", job.quote_id).maybeSingle());
+      if (!q) throw fail("Quote not found.", 404);
+      if (mode === "quote" && q.status === "accepted") throw fail("Use approved mode for an accepted quote.", 409);
+      if (mode === "approved" && q.status !== "accepted") throw fail("The quote is not approved.", 409);
+      let query = db.from("quote_versions").select("*")
+        .eq("business_id", req.businessId).eq("quote_id", q.id);
+      if (mode === "approved") query = query.eq("snapshot->>accepted", "true");
+      const versions = await unwrap(query.order("created_at", { ascending: false }).order("id", { ascending: false }).limit(1));
+      let version = versions[0], legacy = false;
+      if (!version && mode === "approved" && req.body.reviewLegacy === true) {
+        const customer = await unwrap(db.from("customers").select("*").eq("business_id", req.businessId)
+          .eq("id", job.customer_id).maybeSingle());
+        const business = await unwrap(db.from("businesses").select("*").eq("id", req.businessId).maybeSingle());
+        if (!customer?.name || !business?.name) throw fail("Review requires a saved customer and business.", 409);
+        const savedGst = typeof job.details?.gstRegistered === "boolean";
+        const snapshot = { provenance: "legacy-reviewed", quoteId: q.id, reviewedBy: req.userId,
+          reviewedAt: new Date().toISOString(), gstProvenance: savedGst ? "saved-quote" : "explicit-review",
+          amount: q.amount, details: { ...job.details,
+            gstRegistered: savedGst ? job.details.gstRegistered : req.body.gstRegistered }, customer, business };
+        if (typeof snapshot.details?.gstRegistered !== "boolean")
+          throw Object.assign(fail("Legacy quote GST treatment is missing. Explicitly review GST and resend reviewLegacy: true with boolean gstRegistered; current business settings cannot substitute for it.", 409),
+            { publicCode: "LEGACY_REVIEW_REQUIRED", missingFields: ["gstRegistered"] });
+        version = { snapshot, fingerprint: contentFingerprint(snapshot) };
+        legacy = true;
+      }
+      if (!version && mode === "approved") throw Object.assign(fail(
+        "No immutable approved quote snapshot exists. Review the current quote amount and services, then retry with reviewLegacy: true.", 409),
+        { publicCode: "LEGACY_REVIEW_REQUIRED",
+          ...(typeof job.details?.gstRegistered !== "boolean" ? { missingFields: ["gstRegistered"] } : {}) });
+      if (!version) throw fail("Save the quote to create a version before transferring.", 409);
+      if (mode === "quote" && (Number(version.snapshot.amount) !== Number(q.amount) ||
+          canonical(version.snapshot.details) !== canonical(job.details)))
+        throw fail("Saved quote version is out of date. Save the quote again.", 409);
+      SM.approvedLines(version.snapshot, { mode });
+      await enqueue(req.businessId, "handoff", [job.id, c.generation, mode, version.fingerprint].join(":"),
+        { jobId: job.id, mode, generation: c.generation, quoteId: q.id, versionId: version.id,
+          fingerprint: version.fingerprint, snapshot: version.snapshot,
+          ...(legacy ? { reviewLegacy: true, snapshotHash: SM.hash(canonical(version.snapshot)) } : {}) });
       res.status(202).json({ queued: true });
+    }),
+  );
+  app.get(
+    "/api/sales/quotes/:quoteId/history",
+    requireBusiness,
+    wrap(async (req, res) => {
+      if (!SM.uuid(req.params.quoteId)) throw fail("Invalid quote reference.");
+      const quote = await unwrap(db.from("quotes").select("id").eq("business_id", req.businessId)
+        .eq("id", req.params.quoteId).maybeSingle());
+      if (!quote) throw fail("Quote not found.", 404);
+      const versions = [];
+      for (let offset = 0; ; offset += 1000) {
+        const page = await unwrap(db.from("quote_versions").select("id,fingerprint,created_at,snapshot")
+          .eq("business_id", req.businessId).eq("quote_id", quote.id)
+          .order("created_at", { ascending: false }).order("id", { ascending: false }).range(offset, offset + 999));
+        versions.push(...page);
+        if (page.length < 1000) break;
+      }
+      res.set("Cache-Control", "no-store");
+      res.json({ versions: versions
+        .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)) || String(b.id).localeCompare(String(a.id)))
+        .map(publicVersion) });
     }),
   );
   app.post(
@@ -767,10 +916,11 @@ export function installSalesPlatform(
         .eq("id", task.payload.jobId)
         .single(),
     );
-    if (
-      !["won", "scheduled", "completed", "paid"].includes(job.status) ||
-      !job.quote_id
-    )
+    const mode = task.payload.mode || "approved";
+    if (!["quote", "approved"].includes(mode)) throw fail("Invalid handoff mode.");
+    if (task.payload.generation && task.payload.generation !== c.generation)
+      throw fail("ServiceM8 connection changed. Queue a new handoff.", 409);
+    if (!job || !job.quote_id || (mode === "approved" && !["won", "scheduled", "completed", "paid"].includes(job.status)))
       throw fail("Only an approved, quoted sale can be transferred.");
     const q = await unwrap(
       db
@@ -780,22 +930,44 @@ export function installSalesPlatform(
         .eq("id", job.quote_id)
         .single(),
     );
-    if (q.status !== "accepted") throw fail("The quote is not approved.");
-    const versions = await unwrap(
-      db
-        .from("quote_versions")
-        .select("snapshot")
-        .eq("business_id", task.business_id)
-        .eq("quote_id", q.id)
-        .eq("snapshot->>accepted", "true")
-        .order("created_at", { ascending: false })
-        .limit(1),
-    );
-    if (!versions.length)
-      throw fail(
-        "No immutable approved quote snapshot exists. Review this legacy quote before transferring.",
-      );
-    const snapshot = versions[0].snapshot,
+    if (!q) throw fail("Quote not found.", 404);
+    if (mode === "approved" && q.status !== "accepted") throw fail("The quote is not approved.");
+    if (mode === "quote" && (q.status === "accepted" || ["cancelled", "completed", "paid"].includes(job.status)))
+      throw fail("Draft handoff is obsolete. Use approved mode or review the opportunity.", 409);
+    if (task.payload.quoteId && task.payload.quoteId !== q.id) throw fail("The linked quote changed.", 409);
+    let versionQuery = db.from("quote_versions").select("*")
+      .eq("business_id", task.business_id).eq("quote_id", q.id);
+    if (mode === "approved") versionQuery = versionQuery.eq("snapshot->>accepted", "true");
+    if (task.payload.versionId) versionQuery = versionQuery.eq("id", task.payload.versionId);
+    const versions = await unwrap(versionQuery.order("created_at", { ascending: false })
+      .order("id", { ascending: false }).limit(1));
+    let version = versions[0];
+    if (!version && mode === "approved" && task.payload.reviewLegacy === true) {
+      const s = task.payload.snapshot;
+      if (!s || s.provenance !== "legacy-reviewed" || s.quoteId !== q.id ||
+          task.payload.quoteId !== q.id || task.payload.generation !== c.generation ||
+          typeof s.reviewedBy !== "string" || !s.reviewedBy || !Number.isFinite(Date.parse(s.reviewedAt)) ||
+          s.accepted !== undefined || Number(s.amount) !== Number(q.amount) ||
+          s.customer?.id !== job.customer_id || s.customer?.business_id !== task.business_id ||
+          s.business?.id !== task.business_id || !s.customer?.name || !s.business?.name ||
+          (typeof job.details?.gstRegistered === "boolean"
+            ? s.gstProvenance !== "saved-quote" || canonical(s.details) !== canonical(job.details)
+            : s.gstProvenance !== "explicit-review" || typeof s.details?.gstRegistered !== "boolean" ||
+              canonical(s.details) !== canonical({ ...job.details, gstRegistered: s.details.gstRegistered })) ||
+          contentFingerprint(s) !== task.payload.fingerprint ||
+          SM.hash(canonical(s)) !== task.payload.snapshotHash)
+        throw fail("Legacy review no longer matches the accepted quote. Review its current amount and services again.", 409);
+      version = { snapshot: s, fingerprint: task.payload.fingerprint };
+    }
+    if (!version) throw fail("No immutable approved quote snapshot exists. Review this legacy quote before transferring.");
+    if (mode === "quote" && (!task.payload.versionId || !task.payload.fingerprint || !task.payload.snapshot))
+      throw fail("Draft handoff requires a queued immutable quote version.", 409);
+    if (task.payload.snapshot && (version.fingerprint !== task.payload.fingerprint ||
+        canonical(version.snapshot) !== canonical(task.payload.snapshot)))
+      throw fail("Queued quote snapshot does not match its saved version.", 409);
+    if (mode === "quote" && (!version.snapshot.customer?.id || !version.snapshot.customer?.name || !version.snapshot.business?.name))
+      throw fail("Saved draft is missing customer or business information. Save the quote again.", 409);
+    const snapshot = version.snapshot,
       customer = snapshot.customer || await unwrap(
         db
           .from("customers")
@@ -804,8 +976,29 @@ export function installSalesPlatform(
           .eq("id", job.customer_id)
           .single(),
       );
-    const lines = SM.approvedLines(snapshot),
-      taxes = (
+    const lines = SM.approvedLines(snapshot, { mode });
+    const fingerprint = contentFingerprint(snapshot);
+    const jobMap = await mapping(c, "job", job.id);
+    const priorFingerprint = jobMap.snapshot?.handoffFingerprint;
+    if (priorFingerprint && priorFingerprint !== fingerprint)
+      throw fail("Quote content changed after transfer began. Reconcile the existing ServiceM8 quote before retrying.", 409);
+    if (mode === "quote" && jobMap.synced_at && !priorFingerprint)
+      throw fail("Existing legacy ServiceM8 job requires review before draft handoff.", 409);
+    // An insert-only reservation fences different revisions across worker processes.
+    // Task leases are per task, so they alone cannot serialize revisions of one job.
+    await unwrap(db.from("external_object_mappings").upsert({ business_id: task.business_id,
+      connection_generation: c.generation, object_type: "handoff_content", local_id: String(job.id),
+      external_uuid: SM.stableUuid("turnkey", c.generation, "handoff_content", job.id),
+      snapshot: { fingerprint } },
+      { onConflict: "business_id,connection_generation,object_type,local_id", ignoreDuplicates: true }));
+    const reservation = await mapping(c, "handoff_content", job.id);
+    if (reservation.snapshot?.fingerprint !== fingerprint)
+      throw fail("Quote content changed after transfer began. Reconcile the existing ServiceM8 quote before retrying.", 409);
+    await unwrap(db.from("external_object_mappings").update({ snapshot: { ...jobMap.snapshot,
+      handoffFingerprint: fingerprint, handoffMode: mode } })
+      .eq("business_id", task.business_id).eq("connection_generation", c.generation)
+      .eq("object_type", "job").eq("local_id", String(job.id)));
+    const taxes = (
         await call(task.business_id, "/taxrate.json", {
           generation: c.generation,
         })
@@ -823,7 +1016,7 @@ export function installSalesPlatform(
       );
     const reference = "Q-" + q.id.slice(-6).toUpperCase();
     const description = [
-      "TurnKey approved quote " + reference,
+      "TurnKey " + (mode === "quote" ? "draft" : "approved") + " quote " + reference,
       ...(snapshot.details.services || []).map((x) => `${x.svc}: ${x.qty}`),
       snapshot.details.jobNotes || "",
       snapshot.details.salesNotes || "",
@@ -840,7 +1033,7 @@ export function installSalesPlatform(
     const jobCreator = async (args) => {
       const company = await mapping(c, "company", customer.id);
       const m = await ensure(c, "job", job.id, {
-        status: "Work Order",
+        status: mode === "quote" ? "Quote" : "Work Order",
         company_uuid: company.external_uuid,
         job_address: args.jobAddress || "",
         job_description: args.description,
@@ -909,6 +1102,12 @@ export function installSalesPlatform(
         "ServiceM8 customer/job transfer failed. Review connection permissions and retry.",
       );
     const remote = { external_uuid: core.jobUuid };
+    const remotePath = "/job/" + remote.external_uuid + ".json";
+    const remoteJob = (await call(task.business_id, remotePath, { generation: c.generation })).data;
+    if (mode === "approved" && remoteJob.status === "Quote")
+      await call(task.business_id, remotePath, { generation: c.generation, method: "POST", body: { status: "Work Order" } });
+    else if (mode === "quote" && remoteJob.status !== "Quote")
+      throw fail("ServiceM8 job has progressed beyond Quote. Review it in ServiceM8.", 409);
     const name = customer.name.split(" ");
     await ensure(c, "companycontact", customer.id, {
       company_uuid: core.companyUuid,
@@ -925,7 +1124,8 @@ export function installSalesPlatform(
         job_uuid: remote.external_uuid,
         tax_rate_uuid: tax.uuid,
       });
-    const attachment = await mapping(c, "attachment", q.id);
+    const attachmentId = mode === "quote" ? q.id + ":quote:" + fingerprint : q.id;
+    const attachment = await mapping(c, "attachment", attachmentId);
     if (!attachment.synced_at) {
       const business = snapshot.business || await unwrap(
         db
@@ -934,16 +1134,18 @@ export function installSalesPlatform(
           .eq("id", task.business_id)
           .single(),
       );
-      const pdf = SM.quotePdf({ reference, business, customer, snapshot });
+      const pdf = SM.quotePdf({ reference, business, customer, snapshot, mode });
       const form = new FormData();
       form.set("uuid", attachment.external_uuid);
       form.set("related_object", "job");
+      form.set("file_type", ".pdf");
+      form.set("attachment_source", "QUOTE");
       form.set("related_object_uuid", remote.external_uuid);
-      form.set("attachment_name", reference + "-approved.pdf");
+      form.set("attachment_name", reference + (mode === "quote" ? "-draft.pdf" : "-approved.pdf"));
       form.set(
         "file",
         new Blob([pdf], { type: "application/pdf" }),
-        reference + "-approved.pdf",
+        reference + (mode === "quote" ? "-draft.pdf" : "-approved.pdf"),
       );
       try {
         let exists = false;
@@ -990,7 +1192,7 @@ export function installSalesPlatform(
           .eq("business_id", task.business_id)
           .eq("connection_generation", c.generation)
           .eq("object_type", "attachment")
-          .eq("local_id", q.id),
+          .eq("local_id", attachmentId),
       );
     }
     await refreshRemote(task.business_id, remote.external_uuid);
@@ -1028,6 +1230,7 @@ export function installSalesPlatform(
       if (e.status !== 403) throw e;
     }
     const snapshot = {
+      ...(map.snapshot?.handoffFingerprint ? { handoffFingerprint: map.snapshot.handoffFingerprint, handoffMode: map.snapshot.handoffMode } : {}),
       status: job.status,
       completed: job.status === "Completed",
       active: job.active == null ? null : Number(job.active) === 1,

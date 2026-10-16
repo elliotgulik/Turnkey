@@ -106,7 +106,13 @@ window.TK_COST = (function(){
   // per-service "recommended price" can be shown at all. Per-line figures
   // always sum exactly to the job-level totals (last line absorbs any
   // rounding remainder) so nothing here can ever look inconsistent.
-  function costBreakdown(lines,travel){
+  // Quote-local targets can override the business default without changing it.
+  function targetMargin(value,fallback=0.55){
+    if(value===null||value===''||value===undefined)return fallback;
+    const n=Number(value);return Number.isFinite(n)&&n>=0&&n<1?n:fallback;
+  }
+  function costBreakdown(lines,travel,options){
+    const margin=targetMargin(options&&options.targetMargin,targetMargin(COST_INPUTS.targetMargin));
     const active=(lines||[]).filter(l=>SVC_COST[l.svc]&&(parseFloat(l.qty)||0)>0);
     const totalCleanMin=active.reduce((s,l)=>s+lineCleanMin(l),0);
     // travel is optional {km, mins} for the actual business->job distance
@@ -138,9 +144,11 @@ window.TK_COST = (function(){
     const totalCost=totalDirectCost+fixedExtras;
     // Target margin is hit on ex-GST revenue, then GST is added on top so
     // the recommended figure is the GST-inclusive price the customer sees.
-    const recommendedExGst=COST_INPUTS.targetMargin<1?totalCost/(1-COST_INPUTS.targetMargin):totalCost;
+    const recommendedExGst=totalCost/(1-margin);
     const rawRecommended=inclGst(recommendedExGst);
-    const recommendedTotal=Math.max(Math.round(rawRecommended/5)*5, totalCost>0?COST_INPUTS.calloutMin:0);
+    // Round UP only at the customer-price boundary: rounding to nearest can
+    // otherwise recommend less than the requested margin on actual costs.
+    const recommendedTotal=Math.max(Math.ceil(rawRecommended/5)*5, totalCost>0?COST_INPUTS.calloutMin:0);
 
     let allocated=0;
     const perLine=lineDirect.map((d,i)=>{
@@ -165,9 +173,10 @@ window.TK_COST = (function(){
       wageCost:totalWageCost, chem:totalChemCost, litres:totalLitres,
       fuelCost, equipmentCost, consumablesCost, overheadCost,
       travelKm, travelMins, travelIsEstimate:!(travel&&isFinite(travel.km)),
-      cost:Math.round(totalCost),
+      cost:Math.round(totalCost), // retained for existing display/snapshot consumers
+      costUnrounded:totalCost, // internal audit basis for target-margin guarantees
       recommended:recommendedTotal,
-      targetMargin:COST_INPUTS.targetMargin
+      targetMargin:margin
     };
   }
   // Margin % for a given GST-inclusive final price against a given cost —
@@ -184,5 +193,5 @@ window.TK_COST = (function(){
   function profit(revenueIncl,cost){
     return exGst(revenueIncl)-(cost||0);
   }
-  return {SVC_COST,CHEMICALS,COST_INPUTS,OVERHEADS,GST_RATE,lineCleanMin,lineLitres,lineChemCost,costBreakdown,marginPct,profit,exGst,inclGst,overheadsMonthly,overheadPerJob};
+  return {targetMargin,SVC_COST,CHEMICALS,COST_INPUTS,OVERHEADS,GST_RATE,lineCleanMin,lineLitres,lineChemCost,costBreakdown,marginPct,profit,exGst,inclGst,overheadsMonthly,overheadPerJob};
 })();

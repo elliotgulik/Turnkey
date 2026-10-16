@@ -133,6 +133,21 @@ const { chromium } = require("playwright"),
         (await page.locator("#view-dashboard .sale-kpi").count()) >= 11,
       );
       await page.evaluate(() => switchView("leads"));
+      // Name sort is timing-independent (unlike newest/oldest, which can tie on fixtures
+      // created within the same millisecond), so it is a stable way to check lead sorting.
+      await page
+        .locator('#view-leads [data-sale-filter="sort"]')
+        .selectOption("name");
+      assert.deepEqual(
+        await page
+          .locator("#view-leads .sale-card")
+          .evaluateAll((els) => els.map((el) => Number(el.dataset.record))),
+        [1, 4, 3],
+        "Leads sort by name must be alphabetical",
+      );
+      await page
+        .locator('#view-leads [data-sale-filter="sort"]')
+        .selectOption("newest");
       await page.locator("#sale-search").fill("does-not-exist");
       await page
         .getByText("No matching enquiries.", { exact: false })
@@ -214,6 +229,12 @@ const { chromium } = require("playwright"),
         await page.locator("#view-detail").innerText(),
         /ServiceM8 handoff/,
       );
+      // A record that never moved stages must show the history empty-state, not a blank panel.
+      await page.evaluate(() => openDetail(9));
+      assert.match(
+        await page.locator("#view-detail").innerText(),
+        /Historical stage timestamps are not available for this record\./,
+      );
       await page.evaluate(() => switchView("sales"));
       assert.match(
         await page.locator("#view-sales").innerText(),
@@ -258,6 +279,27 @@ const { chromium } = require("playwright"),
       assert.equal(await page.locator('#qw-step-0').isVisible(),true);
       await page.locator('#qw-next').click();
       assert.equal(await page.locator('#qw-step-1').isVisible(),true);
+      // User-owned measurement imports require review and never send a quote.
+      await page.evaluate(async()=>{const {measure}=await import('/chrome-extension/measurement.js');const geometry={type:'Polygon',coordinates:[[[174.75,-36.76],[174.7501,-36.76],[174.7501,-36.7601],[174.75,-36.7601],[174.75,-36.76]]]};window.postMessage({type:'TK_MEASUREMENT_IMPORT',payload:{version:1,measurements:[{service:'driveway',kind:'area',unit:'m2',value:measure(geometry).siValue,geometry}]}},location.origin);});
+      await page.getByRole('heading',{name:'Review imported measurements'}).waitFor();
+      await page.getByRole('button',{name:'Add to this quote'}).click();
+      assert.equal(await page.evaluate(()=>records.find(r=>r.id===1).areaPolys.some(a=>a.id.startsWith('import-'))),true);
+      assert.equal(await page.evaluate(()=>records.find(r=>r.id===1).quoteSentAt),null);
+      // Cancelling the review dialog must leave the quote exactly as it was — no partial add.
+      const areaPolysBeforeCancel = await page.evaluate(() => records.find(r => r.id === 1).areaPolys.length);
+      await page.evaluate(async () => {
+        const { measure } = await import('/chrome-extension/measurement.js');
+        const geometry = { type: 'LineString', coordinates: [[174.76, -36.77], [174.7601, -36.7701]] };
+        window.postMessage({ type: 'TK_MEASUREMENT_IMPORT', payload: { version: 1, measurements: [{ service: 'fence', kind: 'length', unit: 'm', value: measure(geometry).siValue, geometry }] } }, location.origin);
+      });
+      await page.getByRole('heading', { name: 'Review imported measurements' }).waitFor();
+      await page.getByRole('button', { name: 'Cancel' }).click();
+      await page.locator('.measurement-review').waitFor({ state: 'detached' });
+      assert.equal(
+        await page.evaluate(() => records.find(r => r.id === 1).areaPolys.length),
+        areaPolysBeforeCancel,
+        'Cancelling the measurement review must not add measurements',
+      );
       await page.evaluate(() => closeModal("quote-overlay"));
       // Screenshots contain synthetic test records only.
       await page.evaluate(() => switchView("dashboard"));

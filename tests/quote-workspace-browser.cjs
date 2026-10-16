@@ -6,19 +6,21 @@
 const {chromium} = require('playwright');
 const fs = require('node:fs'), path = require('node:path'), http = require('node:http'), assert = require('node:assert/strict');
 function externalFixtures() {
-  window.qwFixture = {saves:[], routes:[], imports:[], routeMode:'ok', selections:0};
+  window.qwFixture = {saves:[], routes:[], imports:[], routeMode:'ok', selections:0,transferEnabled:false,recordWrites:[]};
   window.supabase = {createClient:() => ({
-    auth:{getSession:async()=>({data:{session:null}}),onAuthStateChange:()=>({data:{subscription:{unsubscribe(){}}}})},
+    auth:{getSession:async()=>({data:{session:window.qwFixture.transferEnabled?{access_token:'fixture-session'}:null}}),onAuthStateChange:()=>({data:{subscription:{unsubscribe(){}}}})},
     from(table) {
       let payload;
       const chain = {
-        select(){return chain;},eq(){return chain;},is(){return chain;},order(){return chain;},limit(){return chain;},
+        select(){return chain;},eq(){return chain;},is(){return chain;},order(){return chain;},neq(){return chain;},limit(){return chain;},
         upsert(value){
           if(table !== 'businesses')throw Error('Unexpected database write: '+table);
           payload=value;window.qwFixture.saves.push({...value});return chain;
         },
-        insert(){throw Error('Unexpected insert: '+table);},update(){throw Error('Unexpected update: '+table);},
-        maybeSingle:async()=>({data:payload ? {...payload} : null,error:null}),
+        insert(){throw Error('Unexpected insert: '+table);},
+        update(value){if(!window.qwFixture.transferEnabled||!['customers','quotes','jobs'].includes(table))throw Error('Unexpected update: '+table);payload=value;window.qwFixture.recordWrites.push({table,payload:structuredClone(value)});return chain;},
+        single:async()=>{if(table!=='quotes'||!window.qwFixture.transferEnabled)throw Error('Unexpected read: '+table);return {data:{id:'fixture-quote',status:'sent',public_token:'fixture-public',amount:100},error:null};},
+        maybeSingle:async()=>({data:payload ? {...payload,...(table==='quotes'?{public_token:'fixture-public'}:{})} : null,error:null}),
         then(resolve,reject){return Promise.resolve({data:[],error:null}).then(resolve,reject);}
       };return chain;
     }
@@ -71,7 +73,7 @@ function mapsSDKFixture() {
     browser=await chromium.launch({headless:true,...(fs.existsSync(chromium.executablePath())?{}:{executablePath:cached})});
     for(const width of [1440,390]) {
       const context=await browser.newContext({viewport:{width,height:1000},serviceWorkers:'block'}), page=await context.newPage();
-      const errors=[],restRouting=[],loaded=new Set();
+      const errors=[],restRouting=[],loaded=new Set(),handoffs=[];let handoffMode='error';
       page.on('pageerror',error=>errors.push(error.message));
       page.on('response',response=>{if(response.url().startsWith(base)&&response.status()===200)loaded.add(new URL(response.url()).pathname);});
       await page.addInitScript(externalFixtures);
@@ -79,6 +81,11 @@ function mapsSDKFixture() {
         const url=route.request().url();
         if(/\/distancematrix\/json/.test(url)){restRouting.push(url);return route.abort();}
         if(url===base+'/config.js')return route.fulfill({contentType:'text/javascript',body:'window.TURNKEY_CONFIG={supabaseUrl:"https://fixture.invalid",supabaseAnonKey:"fixture-not-a-key",mapsKey:"fixture-not-a-key"};'});
+        if(url===base+'/api/sales/servicem8/handoff'){
+          handoffs.push({body:route.request().postDataJSON(),authorization:route.request().headers().authorization});
+          return route.fulfill({status:handoffMode==='error'?503:200,contentType:'application/json',body:handoffMode==='error'?'{"error":"ServiceM8 temporarily unavailable"}':'{"queued":true}'});
+        }
+        if(/\/api\/(conversations|email).*send/.test(url))throw Error('Email sending is forbidden in quote tests');
         if(url.startsWith(base))return route.continue(); // Includes the byte-for-byte real index.
         if(url.startsWith('https://maps.googleapis.com/maps/api/js?'))return route.fulfill({contentType:'text/javascript',body:'('+mapsSDKFixture.toString()+')();'});
         if(url.includes('/staticmap?')||url.includes('tile.openstreetmap.org'))return route.fulfill({contentType:'image/png',body:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZ1cAAAAASUVORK5CYII=','base64')});
@@ -117,10 +124,18 @@ function mapsSDKFixture() {
       assert.equal(await page.evaluate(()=>qe.areas.length),1);
       assert.equal(await page.evaluate(()=>draftLines[0].qty===qe.areas[0].size),true);
       assert.equal(await page.evaluate(()=>qe.areas[0].geoPts.every(p=>p&&Number.isFinite(p.lat)&&Number.isFinite(p.lng))),true);
+      const mapPoints=await page.evaluate(()=>structuredClone(qe.areas));
+      await page.getByRole('button',{name:'Street map',exact:true}).click();
+      await page.waitForFunction(()=>document.getElementById('qe-visual').style.backgroundImage.includes('maptype=roadmap'));
+      await page.getByRole('button',{name:'Satellite',exact:true}).click();
+      await page.waitForFunction(()=>document.getElementById('qe-visual').style.backgroundImage.includes('maptype=satellite'));
+      const switchedAreas=await page.evaluate(()=>structuredClone(qe.areas));
+      assert.deepEqual(switchedAreas[0].geoPts,mapPoints[0].geoPts);assert.equal(switchedAreas[0].size,mapPoints[0].size);
+      switchedAreas[0].points.forEach((p,i)=>{assert(Math.abs(p.x-mapPoints[0].points[i].x)<0.00001);assert(Math.abs(p.y-mapPoints[0].points[i].y)<0.00001);});
       // Real line input and pricing updates; no replacement of draft/math/render functions.
       await page.locator('#svc-builder input[type="number"]').first().fill('50');
       assert.equal(await page.locator('#quote-overlay .modal-body').evaluate(el=>el.scrollWidth<=el.clientWidth+1),true,'Map/services must fit the mobile viewport');
-      const total=await page.evaluate(()=>quoteTotal());
+      let total=await page.evaluate(()=>quoteTotal());
       await page.locator('#qw-next').click();
       assert.equal(await page.locator('#qw-step-2').isVisible(),true);
       assert.equal(await page.locator('#quote-overlay .modal').evaluate(el=>el.scrollWidth<=el.clientWidth+1),true);
@@ -128,6 +143,30 @@ function mapsSDKFixture() {
       const estimate=await page.evaluate(()=>TK_COST.costBreakdown(draftLines,quoteTravelInfo));
       assert.equal(estimate.travelKm,25);assert.equal(estimate.travelMins,30);
       assert.equal(estimate.fuelCost,await page.evaluate(()=>25*COST_INPUTS.fuelPerKm));
+      // A manual line price survives automatic quantity and travel updates.
+      await page.locator('#qw-back').click();
+      await page.locator('#svc-builder .price-input').first().fill('23');
+      await page.locator('#svc-builder input[type="number"]').first().fill('60');
+      assert.equal(await page.evaluate(()=>draftLines[0].customRate),'23');
+      assert.equal(await page.evaluate(()=>quoteTotal()),1380);
+      await page.locator('#qw-next').click();
+      const defaultMargin=await page.evaluate(()=>COST_INPUTS.targetMargin);
+      assert.equal(await page.locator('#qw-auto').isChecked(),true);
+      await page.locator('#qw-margin').fill('65');await page.locator('#qw-margin').press('Tab');
+      await page.locator('#qw-apply-pricing').click();
+      total=await page.evaluate(()=>quoteTotal());
+      assert.equal(await page.evaluate(()=>COST_INPUTS.targetMargin),defaultMargin,'Quote target must not change the business default');
+      assert.equal(await page.evaluate(()=>quoteTotal()),await page.evaluate(()=>TK_COST.costBreakdown(draftLines,quoteTravelInfo,{targetMargin:0.65}).recommended));
+      const marginFloor=await page.evaluate(()=>TK_COST.costBreakdown(draftLines,quoteTravelInfo,{targetMargin:0.65}).recommended);
+      await page.getByRole('button',{name:'Easy access',exact:true}).click();
+      assert(await page.evaluate(()=>quoteTotal())>=marginFloor,'Easy access must not undercut applied recommendations');
+      await page.locator('#assumptions-zone .toggle').click();
+      assert(await page.evaluate(()=>quoteTotal())>=marginFloor,'Premium handling must retain the target floor');
+      await page.locator('#assumptions-zone .toggle').click();
+      await page.getByRole('button',{name:'Standard',exact:true}).click();
+      await page.locator('#qw-margin').fill('100');await page.locator('#qw-margin').press('Tab');
+      assert.equal(await page.locator('#qw-margin').evaluate(el=>el.checkValidity()),false);
+      await page.locator('#qw-margin').fill('65');await page.locator('#qw-margin').press('Tab');
       // Provider denial, zero-results and malformed responses use an explicitly labelled estimate.
       for(const mode of ['denied','zero','malformed']){
         await page.evaluate(async mode=>{window.qwFixture.routeMode=mode;await loadQuoteTravelInfo(records.find(r=>r.id===701));},mode);
@@ -155,9 +194,17 @@ function mapsSDKFixture() {
       assert.doesNotMatch(await page.locator('#qw-preview').innerText(),/Wages|Chemicals|Estimated Profit/);
       await page.locator('#qw-next').click(); // Real confirmQuoteSend and sales-platform snapshots.
       assert.equal(await page.locator('#doc-preview-overlay').evaluate(el=>el.classList.contains('open')),true);
-      const snapshot=await page.evaluate(()=>{const r=records.find(r=>r.id===701);return {total:r.total,travelKm:r.travelKm,travelMins:r.travelMins,source:r.travelSource,price:r.services[0].priceSnapshot};});
-      assert.equal(snapshot.total,total);assert.equal(snapshot.travelKm,25);assert.equal(snapshot.travelMins,30);assert.equal(snapshot.source,'google');assert(snapshot.price>0);
-      await page.evaluate(()=>{closeDocPreview();openQuoteModal(702);});
+      const snapshot=await page.evaluate(()=>{const r=records.find(r=>r.id===701);return {total:r.total,travelKm:r.travelKm,travelMins:r.travelMins,source:r.travelSource,price:r.services[0].priceSnapshot,targetMargin:r.targetMargin};});
+      assert.equal(snapshot.total,total);assert.equal(snapshot.travelKm,25);assert.equal(snapshot.travelMins,30);assert.equal(snapshot.source,'google');assert(snapshot.price>0);assert.equal(snapshot.targetMargin,0.65);assert.equal(await page.evaluate(()=>COST_INPUTS.targetMargin),defaultMargin);
+      await page.evaluate(()=>{closeDocPreview();openQuoteModal(701);});
+      assert.equal(await page.locator('#qw-auto').isChecked(),false,'Reopened saved prices are not automatically replaced');
+      const savedPrice=await page.evaluate(()=>draftLines[0].fixedPrice);
+      await page.locator('#qw-next').click();
+      assert.equal(await page.evaluate(()=>draftLines[0].fixedPrice),savedPrice);
+      const protectedPrice=await page.evaluate(()=>{
+        const r=records.find(r=>r.id===701),before=draftLines[0].fixedPrice;r.stage='won';applyRecommendedPricing();const after=draftLines[0].fixedPrice;r.stage='quoting';return {before,after};
+      });assert.equal(protectedPrice.before,protectedPrice.after,'Accepted quotes cannot be repriced by the workspace action');
+      await page.evaluate(()=>{closeModal('quote-overlay');openQuoteModal(702);});
       assert.equal(await page.locator('#quote-overlay').evaluate(el=>el.classList.contains('open')),false);
       // Existing measurements cannot be moved to another Places-selected property.
       await page.evaluate(()=>{openQuoteModal(701);});
@@ -178,6 +225,30 @@ function mapsSDKFixture() {
       await page.waitForFunction(()=>window.qwFixture.saves.length===2);
       assert.equal(await page.evaluate(()=>window.qwFixture.saves.at(-1).home_lat),null);assert.equal(await page.evaluate(()=>window.qwFixture.saves.at(-1).home_lng),null);
       await page.evaluate(async()=>{currentUserRole='technician';await saveBusinessProfile();});assert.equal(await page.evaluate(()=>window.qwFixture.saves.length),2);
+      const emailSentBefore=await page.evaluate(()=>records.find(r=>r.id===701).quoteSentAt);
+      // Exercise the parent's real transfer helper through mocked DB and HTTP boundaries.
+      await page.evaluate(()=>{
+        closeModal('settings-overlay');currentUserRole='owner';
+        const r=records.find(r=>r.id===701);r.stage='new';r.customerId='fixture-customer';r.quoteId='fixture-quote';r.jobId='fixture-job';
+        recordBusinesses.set(r,currentBusinessId);TURNKEY_CONFIG.backendUrl=location.origin;window.qwFixture.transferEnabled=true;
+        openQuoteModal(701);
+      });
+      await page.locator('#qw-next').click();await page.locator('#qw-next').click();await page.locator('#qw-next').click();
+      await page.locator('#qw-transfer').click();
+      await page.getByRole('alert').filter({hasText:'ServiceM8 temporarily unavailable'}).waitFor();
+      assert.equal(await page.locator('#doc-preview-overlay').evaluate(el=>el.classList.contains('open')),true,'Failed queue keeps the document preview open');
+      assert.equal(await page.evaluate(()=>records.find(r=>r.id===701).stage),'quoting','Transfer helper must promote new drafts before persistence');
+      assert.equal(handoffs.length,1);assert.deepEqual(handoffs[0].body,{jobId:'fixture-job',mode:'quote'});assert.equal(handoffs[0].authorization,'Bearer fixture-session');
+      assert.equal(await page.evaluate(()=>records.find(r=>r.id===701).quoteSentAt),emailSentBefore,'Queuing is not customer email delivery');
+      assert(await page.evaluate(()=>qwFixture.recordWrites.some(w=>w.table==='jobs'&&w.payload.details.services[0].priceSnapshot>0)),'Draft snapshot must save before queueing');
+      assert(await page.evaluate(()=>qwFixture.recordWrites.filter(w=>w.table==='quotes').every(w=>w.payload.status==='draft')),'Unsent transfers persist as draft quotes, not sent quotes');
+      handoffMode='ok';
+      await page.evaluate(()=>{closeDocPreview();openQuoteModal(701);});
+      await page.locator('#qw-next').click();await page.locator('#qw-next').click();await page.locator('#qw-next').click();
+      await page.locator('#qw-transfer').click();
+      await page.waitForFunction(()=>document.getElementById('toast').textContent.includes('Quote queued for ServiceM8'));
+      assert.equal(await page.locator('#doc-preview-overlay').evaluate(el=>el.classList.contains('open')),false,'Successful queue closes the preview');
+      assert.equal(handoffs.length,2);assert.equal(await page.evaluate(()=>records.find(r=>r.id===701).quoteSentAt),emailSentBefore);
       assert.deepEqual(restRouting,[],'No direct browser Distance Matrix REST calls');assert.deepEqual(errors,[]);
       await context.close();console.log(`Assembled quote workspace browser checks passed (${width}px)`);
     }

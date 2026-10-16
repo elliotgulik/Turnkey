@@ -1332,7 +1332,7 @@
   .dp-name{font-size:14px;font-weight:600}
   .dp-line{font-size:12px;color:#5b6b78;margin-top:2px}
   .doc-map{padding-bottom:22px}
-  .doc-map img{width:100%;aspect-ratio:640/400;object-fit:cover;border-radius:9px;border:1px solid #e9edf1;display:block}
+  .doc-map img{width:100%;height:auto;object-fit:contain;border-radius:9px;border:1px solid #e9edf1;display:block}
   .doc-table{width:100%;border-collapse:collapse;margin:6px 0}
   .doc-table th{text-align:left;font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#9aa7b1;padding:8px 0;border-bottom:1px solid #e9edf1}
   .doc-table th.r{text-align:right}
@@ -4520,6 +4520,7 @@ function openGmailCompose({to,subject,body}){
   return win;
 }
 async function generateAndSendDoc(mode,r){
+  const docBusiness=currentBusinessId,docUser=currentUserId,docSession=businessSessionVersion;
   // The public quote-approval link (quote.html?t=...) only exists once the
   // quote row is synced to Supabase — public_token is server-generated, not
   // something we can invent client-side. Sync first (full sync for quotes,
@@ -4539,7 +4540,9 @@ async function generateAndSendDoc(mode,r){
   // for invoices (there's no earlier "invoice built" moment to preload from,
   // since an invoice is generated straight from the completed job's already-
   // final property outline — same geometry the quote was drawn with).
-  if(r._mapSnapshotDataUrl===undefined)await preloadMapSnapshot(r);
+  await preloadMapSnapshot(r);
+  if(docBusiness!==currentBusinessId||docUser!==currentUserId||docSession!==businessSessionVersion)return;
+  if(TK_MAP_SNAPSHOT.getAreas(r.areaPolys).length&&!r._mapSnapshotDataUrl){toast('Property outline could not be prepared. Please retry.');return;}
   // ALWAYS downloads the PDF, then opens GMAIL'S OWN web compose window
   // (openGmailCompose() — mail.google.com/mail/?view=cm, NOT a mailto: link)
   // in a brand new tab, subject/body pre-filled, leaving this TurnKey tab
@@ -4646,6 +4649,10 @@ async function confirmSendDocEmail(){
   const subject=document.getElementById('sd-subject').value.trim();
   const bodyText=document.getElementById('sd-body').value;
   if(!to||!subject){toast('Add a recipient and subject');return;}
+  const docBusiness=currentBusinessId,docUser=currentUserId,docSession=businessSessionVersion;
+  await preloadMapSnapshot(r);
+  if(docBusiness!==currentBusinessId||docUser!==currentUserId||docSession!==businessSessionVersion)return;
+  if(TK_MAP_SNAPSHOT.getAreas(r.areaPolys).length&&!r._mapSnapshotDataUrl){toast('Property outline could not be prepared. Please retry.');return;}
   const btn=document.getElementById('sd-send-btn');
   btn.disabled=true;btn.textContent='Sending…';
   const bodyHtml=renderEmailBodyHtml(bodyText);
@@ -4786,20 +4793,13 @@ function buildDocPDF(mode,r,outputType){
   doc.text(money(r.total),MR,y,{align:'right'});
   y+=12;
 
-  // property map snapshot — shows exactly what was measured, so the scope
-  // of work isn't just a line-item list. Same image for quote AND invoice:
-  // the invoice reuses the job's areaPolys/geoPts as they stood at
-  // completion, which — per qeReprojectAreas/reprojectAreas — is the exact
-  // same outline the quote was approved against, just re-rendered at
-  // whatever zoom/center happens to produce this snapshot; the underlying
-  // geographic anchor never moves. Best-effort only: preloadMapSnapshot()
-  // fetches this ahead of time (see confirmQuoteSend/generateAndSendDoc); if
-  // it hasn't resolved yet, or this record has no georeferenced areas at all
-  // (older records, or ones drawn on a plain non-geo grid), the PDF simply
-  // omits this section rather than blocking or erroring.
+  // PNG includes measured outlines and their quantity legend. A labelled
+  // diagram remains available without aerial imagery; use the returned
+  // dimensions so the legend is neither cropped nor stretched in the PDF.
   if(r._mapSnapshotDataUrl){
-    const imgW=TW, imgH=TW*400/640;
-    if(y+imgH>265){doc.addPage();y=20;}
+    const snapshotRatio=(r._mapSnapshotHeight>0&&r._mapSnapshotWidth>0)?r._mapSnapshotHeight/r._mapSnapshotWidth:400/640;
+    const imgW=Math.min(TW,235/snapshotRatio),imgH=imgW*snapshotRatio;
+    if(y+imgH+4>265){doc.addPage();y=20;}
     try{
       doc.setFont('helvetica','bold');doc.setFontSize(7);doc.setTextColor(120,130,140);
       doc.text('PROPERTY AREA',ML,y);y+=4;
@@ -4813,6 +4813,7 @@ function buildDocPDF(mode,r,outputType){
   var terms=mode==='quote'?t.quoteTerms:t.invoiceTerms;
   var termLines=doc.splitTextToSize(terms||'',TW-8);
   var termH=termLines.length*4+10;
+  if(y+termH+18>280){doc.addPage();y=20;}
   doc.setFillColor(247,249,250);
   doc.roundedRect(ML,y,TW,termH,2,2,'F');
   doc.setFont('helvetica','bold');doc.setFontSize(7);doc.setTextColor(120,130,140);
@@ -4862,22 +4863,20 @@ function docNumber(mode,r){
   const p=mode==='quote'?'Q':'INV';
   return p+'-'+String(1000+r.id).slice(-4);
 }
-// Shared by both quote and invoice documents — same drawn outline, same
-// stable geographic coordinates (see qeSvgToLatLng/reprojectAreas), so an
-// invoice generated long after the quote was approved still shows exactly
-// what was outlined then, regardless of how many times the map's been
-// zoomed/panned/reloaded since. TK_MAP_SNAPSHOT (map-snapshot.js) bakes the
-// polygon directly onto a Google Static Maps image via `path=` params — no
-// client-side SVG reprojection needed for a flat, non-interactive document.
+// Shared by both quote and invoice documents — the preview uses the same
+// public geometry as the PDF. Prefer a current rendered snapshot; show an
+// immediate measured diagram otherwise.
 function docMapSectionHtml(r){
+  if(!window.TK_MAP_SNAPSHOT)return '';
   const mapsKey=(window.TURNKEY_CONFIG&&window.TURNKEY_CONFIG.mapsKey)||'';
-  if(!window.TK_MAP_SNAPSHOT||!mapsKey)return '';
-  const hasOutline=r.areaPolys&&r.areaPolys.length;
-  const fallbackAddress=TK_FORMAT.address(r);
-  const url=TK_MAP_SNAPSHOT.buildUrl(r.areaPolys,mapsKey,{size:'640x400',scale:2,fallbackAddress});
+  const hasOutline=TK_MAP_SNAPSHOT.getAreas(r.areaPolys).length>0;
+  const cached=mapSnapshotLoads.get(r);
+  const image=cached&&cached.key===mapSnapshotKey(r)&&cached.result;
+  const url=(image&&image.dataUrl)||TK_MAP_SNAPSHOT.buildSvgUrl(r.areaPolys)||TK_MAP_SNAPSHOT.buildUrl(null,mapsKey,{size:'640x400',scale:2,fallbackAddress:TK_FORMAT.address(r)});
   if(!url)return '';
-  return `<div class="doc-map"><div class="dp-label">${hasOutline?'Property area':'Property'}</div><img src="${url}" alt="${hasOutline?'Property outline':'Property photo'}" loading="lazy"></div>`;
+  return `<div class="doc-map"><div class="dp-label">${hasOutline?'Property area':'Property'}</div><img src="${url}" alt="${hasOutline?'Property outline and measurements':'Property photo'}" loading="lazy"></div>`;
 }
+
 function renderDocHTML(mode,r){
   const t=docTemplate;
   const today=new Date().toLocaleDateString('en-NZ',{day:'numeric',month:'short',year:'numeric'});
@@ -9145,27 +9144,43 @@ async function preloadLogoDataUrl(){
     });
   }catch(e){console.warn('Logo preload failed',e);}
 }
-// Per-record (not global) — mirrors preloadLogoDataUrl's fetch-once-and-
-// cache-as-data-URL pattern, since jsPDF can't fetch a remote image itself.
-// Deliberately best-effort: sets r._mapSnapshotDataUrl to null (not left
-// undefined) on any failure/no-data case, so callers can tell "already
-// tried, nothing to show" apart from "never attempted yet".
+// Snapshot promises and fingerprints live outside records so persistence,
+// exports and accepted quote versions never receive async/cache state.
+const mapSnapshotLoads=new WeakMap();
+function mapSnapshotKey(r){
+  return JSON.stringify([currentBusinessId,currentUserId,businessSessionVersion,(window.TURNKEY_CONFIG&&window.TURNKEY_CONFIG.mapsKey)||'',TK_MAP_SNAPSHOT.getAreas(r.areaPolys)]);
+}
 async function preloadMapSnapshot(r){
-  r._mapSnapshotDataUrl=null;
+  const biz=currentBusinessId,user=currentUserId,version=businessSessionVersion,client=sb;
+  if(!r||!biz||!user||recordBusinesses.get(r)!==biz||!window.TK_MAP_SNAPSHOT)return null;
+  const key=mapSnapshotKey(r),previous=mapSnapshotLoads.get(r);
+  if(previous&&previous.key===key){
+    if(previous.promise)return previous.promise;
+    if(previous.reusable)return previous.result;
+  }
+  const areas=(Array.isArray(r.areaPolys)?r.areaPolys:[]).map(a=>({service:a?.service||a?.svc,geoPts:structuredClone(a?.geoPts),points:structuredClone(a?.points||a?.pts),size:a?.size}));
   const mapsKey=(window.TURNKEY_CONFIG&&window.TURNKEY_CONFIG.mapsKey)||'';
-  const url=window.TK_MAP_SNAPSHOT&&r.areaPolys&&r.areaPolys.length?TK_MAP_SNAPSHOT.buildUrl(r.areaPolys,mapsKey):null;
-  if(!url)return;
-  try{
-    const res=await fetch(url);
-    if(!res.ok)return;
-    const blob=await res.blob();
-    r._mapSnapshotDataUrl=await new Promise((resolve,reject)=>{
-      const reader=new FileReader();
-      reader.onload=()=>resolve(reader.result);
-      reader.onerror=reject;
-      reader.readAsDataURL(blob);
-    });
-  }catch(e){console.warn('Map snapshot preload failed',e);}
+  const entry={key,promise:null,result:null,reusable:false};
+  mapSnapshotLoads.set(r,entry);
+  // Discard stale images before yielding, but a null result is never a
+  // permanent failure cache: the next explicit preload retries it.
+  delete r._mapSnapshotDataUrl;delete r._mapSnapshotWidth;delete r._mapSnapshotHeight;
+  const current=()=>biz===currentBusinessId&&user===currentUserId&&version===businessSessionVersion&&client===sb&&recordBusinesses.get(r)===biz&&mapSnapshotLoads.get(r)===entry&&key===mapSnapshotKey(r);
+  entry.promise=Promise.resolve().then(async()=>{
+    try{
+      const snapshot=await TK_MAP_SNAPSHOT.buildSnapshot(areas,mapsKey);
+      if(!current())return null;
+      entry.result=snapshot;
+      entry.reusable=!!snapshot&&(snapshot.hasImagery||!mapsKey||!TK_MAP_SNAPSHOT.getAreas(areas).every(a=>a.geoPts));
+      r._mapSnapshotDataUrl=snapshot?.dataUrl||null;
+      if(snapshot){r._mapSnapshotWidth=snapshot.width;r._mapSnapshotHeight=snapshot.height;}
+      return snapshot;
+    }catch(e){
+      if(current()){r._mapSnapshotDataUrl=null;console.warn('Map snapshot unavailable; the next preload will retry');}
+      return null;
+    }finally{entry.promise=null;}
+  });
+  return entry.promise;
 }
 // One-way seed, not a sync: only fills in docTemplate fields that are still
 // blank, so it never overwrites a template a business has already customised
@@ -10278,7 +10293,7 @@ async function persistRecordToSupabase(r){
     const editable={};
     for(const key of ['salesNotes','nextFollowUpAt','assignedSalespersonId','salespersonName'])if(Object.hasOwn(r,key))editable[key]=r[key];
     // Restore the complete server snapshot, including removed commercial fields.
-    const excluded=['id','customerId','jobId','invoiceId','quoteId','assignedStaffId','stage','scheduledDate','scheduledDateISO','name','email','phone','address','suburb','notes','source','paymentStatus','paymentMethod','dueDate','_mapSnapshotDataUrl'];
+    const excluded=['id','customerId','jobId','invoiceId','quoteId','assignedStaffId','stage','scheduledDate','scheduledDateISO','name','email','phone','address','suburb','notes','source','paymentStatus','paymentMethod','dueDate','_mapSnapshotDataUrl','_mapSnapshotWidth','_mapSnapshotHeight','_mapSnapshotPromise'];
     for(const key of Object.keys(r))if(!excluded.includes(key))delete r[key];
     Object.assign(r,job.details||{},editable,{jobId:job.id,customerId:job.customer_id,quoteId:quote.id,quotePublicToken:quote.public_token,total:Number(quote.amount),stage:job.status});
     return {...job.details,...editable};
@@ -10292,7 +10307,7 @@ async function persistRecordToSupabase(r){
   }
   if(!acceptedDetails&&r.total>0&&r.stage!=='new'){
     if(isWon(r)&&(!r.quoteId||!r.jobId))throw new Error('Save a sent quote on this opportunity before marking it won.');
-    const quotePayload={business_id:biz,lead_id:r.customerId,amount:r.total,status:isWon(r)?'accepted':isLost(r)?'declined':'sent'};
+    const quotePayload={business_id:biz,lead_id:r.customerId,amount:r.total,status:isWon(r)?'accepted':isLost(r)?'declined':r.quoteSentAt?'sent':'draft'};
     if(r.quoteId){
       // The predicate closes the read/update race with public acceptance.
       const {data,error}=await sb.from('quotes').update(quotePayload).eq('id',r.quoteId).eq('business_id',biz).neq('status','accepted').select('public_token').maybeSingle();
@@ -10331,7 +10346,7 @@ async function persistRecordToSupabase(r){
   // regenerable any time from areaPolys) — persisting it would bloat every
   // job row in Supabase for no benefit, so it's excluded here same as id/
   // customerId/etc.
-  ['id','customerId','jobId','invoiceId','quoteId','assignedStaffId','stage','scheduledDate','scheduledDateISO','name','email','phone','address','suburb','notes','source','paymentStatus','paymentMethod','dueDate','_mapSnapshotDataUrl']
+  ['id','customerId','jobId','invoiceId','quoteId','assignedStaffId','stage','scheduledDate','scheduledDateISO','name','email','phone','address','suburb','notes','source','paymentStatus','paymentMethod','dueDate','_mapSnapshotDataUrl','_mapSnapshotWidth','_mapSnapshotHeight','_mapSnapshotPromise']
     .forEach(k=>delete details[k]);
   const jobPayload={
     business_id:biz,customer_id:r.customerId,quote_id:r.quoteId||null,assigned_to:r.assignedStaffId||null,
@@ -10703,7 +10718,9 @@ async function retryPendingPhotos(){
 </script>
 <script src="sales-metrics.js"></script>
 <script src="pipeline-model.js"></script>
+<script src="lead-priority.js"></script>
 <script src="sales-platform.js"></script>
+<script type="module" src="measurement-import.js"></script>
 <script src="quote-workspace.js"></script>
 <script src="conversations.js"></script>
 <script src="conversations-bridge.js"></script>

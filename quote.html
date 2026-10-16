@@ -77,6 +77,8 @@
   .qmap-wrap{position:relative;width:100%;aspect-ratio:4/3;border-radius:var(--radius-sm);overflow:hidden;background:var(--surface-2);margin-bottom:8px;touch-action:none;border:1px solid var(--line)}
   .qmap-fallback{width:100%;aspect-ratio:4/3;border-radius:var(--radius-sm);overflow:hidden;background:var(--surface-2);margin-bottom:8px;border:1px solid var(--line)}
   .qmap-fallback img{width:100%;height:100%;object-fit:cover;display:block}
+  .qmap-fallback.measured-outline{aspect-ratio:auto}
+  .qmap-fallback.measured-outline img{height:auto;object-fit:contain}
   .qmap-visual{position:absolute;inset:0;background-size:cover;background-position:center;cursor:grab}
   .qmap-visual.dragging{cursor:grabbing}
   .qmap-svg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
@@ -198,13 +200,12 @@ function renderState(icon,title,body,cls){
 /* ===== read-only property map — same projection/measurement formulas as
    the staff quote editor (index.html's qe.*) so a measurement can never
    read differently here than it does internally, but pan/zoom only: no
-   drawing, no vertex dragging, nothing editable. Gracefully renders
-   nothing at all if a quote has no georeferenced areas (older quotes, or
-   ones drawn on a plain non-geo grid) rather than showing a broken map. ===== */
+   drawing, no vertex dragging, nothing editable. Unanchored sketches are
+   shown as separate measured diagrams, never guessed onto aerial imagery. ===== */
 const PUB_ZOOM_MIN=15, PUB_ZOOM_MAX=22, PUB_OSM_TILES=3;
 const PMAP={lat:null,lng:null,zoom:19,scale:1,mapsKey:'',areas:[],loadToken:0,origLat:null,origLng:null};
 function pubAreasWithGeo(areaPolys){
-  return (areaPolys||[]).filter(a=>a.geoPts&&a.points&&a.geoPts.length===a.points.length&&a.geoPts.length>=2&&a.geoPts.every(Boolean));
+  return window.TK_MAP_SNAPSHOT?TK_MAP_SNAPSHOT.getAreas(areaPolys).filter(a=>a.geoPts):[];
 }
 function pubLatLngToSvg(ll){
   const dLat=ll.lat-PMAP.lat, dLng=ll.lng-PMAP.lng;
@@ -273,7 +274,7 @@ function pubShapeSvg(area){
   const d=pts.map((p,i)=>(i===0?'M':'L')+p.x+','+p.y).join(' ')+(svc&&svc.shape==='closed'?' Z':'');
   const fill=svc&&svc.shape==='closed'?color+'2e':'none';
   const cx=pts.reduce((s,p)=>s+p.x,0)/pts.length, cy=pts.reduce((s,p)=>s+p.y,0)/pts.length;
-  const label=(svc&&svc.label)||area.service;
+  const label=[(svc&&svc.label)||area.service,area.measurement].filter(Boolean).join(' · ').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   return `<path d="${d}" fill="${fill}" stroke="${color}" stroke-width="2.5" stroke-linejoin="round"/>`+
     `<text x="${cx}" y="${cy}" text-anchor="middle" font-size="11" font-weight="700" fill="#fff" stroke="${color}" stroke-width="3" paint-order="stroke" style="font-family:-apple-system,sans-serif">${label}</text>`;
 }
@@ -342,9 +343,11 @@ function pubMapLegend(areas){
 // #qmap-zone empty, so the customer saw no property image at all. Falls
 // back to a flat, close-up, pinned satellite photo centered on the address
 // itself (Google geocodes the string server-side — no separate lookup).
-function pubMountFallbackImage(cust){
+function pubMountFallbackImage(cust,areaPolys){
   const zone=document.getElementById('qmap-zone'); if(!zone)return;
   const mapsKey=(window.TURNKEY_CONFIG&&window.TURNKEY_CONFIG.mapsKey)||'';
+  const outline=window.TK_MAP_SNAPSHOT&&TK_MAP_SNAPSHOT.buildSvgUrl(areaPolys);
+  if(outline){zone.innerHTML=`<div class="qmap-fallback measured-outline"><img src="${outline}" alt="Measured property outline; no aerial imagery"></div>`;return;}
   const addr=TK_FORMAT.address(cust);
   const url=(window.TK_MAP_SNAPSHOT&&mapsKey&&addr)?TK_MAP_SNAPSHOT.buildUrl(null,mapsKey,{size:'640x400',scale:2,fallbackAddress:addr}):null;
   zone.innerHTML=url?`<div class="qmap-fallback"><img src="${url}" alt="Property photo" loading="lazy"></div>`:'';
@@ -352,9 +355,9 @@ function pubMountFallbackImage(cust){
 function pubMountMap(areaPolys){
   const withGeo=pubAreasWithGeo(areaPolys);
   const zone=document.getElementById('qmap-zone'); if(!zone)return;
-  if(!withGeo.length){zone.innerHTML='';return;}
+  if(!withGeo.length){pubMountFallbackImage(null,areaPolys);return;}
   PMAP.mapsKey=(window.TURNKEY_CONFIG&&window.TURNKEY_CONFIG.mapsKey)||'';
-  PMAP.areas=withGeo.map(a=>({service:a.service,geoPts:a.geoPts}));
+  PMAP.areas=withGeo.map(a=>({service:a.service,geoPts:a.geoPts,measurement:a.measurement}));
   zone.innerHTML=`
     <div class="qmap-wrap" id="qmap-wrap">
       <div class="qmap-visual" id="qmap-visual"><div id="qmap-tiles" style="position:absolute;inset:0"></div></div>
@@ -363,6 +366,10 @@ function pubMountMap(areaPolys){
       <div class="qmap-zoom"><button type="button" onclick="pubZoom(1)" aria-label="Zoom in">+</button><button type="button" onclick="pubZoom(-1)" aria-label="Zoom out">−</button></div>
     </div>
     <div class="qmap-legend">${pubMapLegend(withGeo)}</div>`;
+  // Unanchored sketches cannot be placed on the satellite layer. Keep
+  // them visible separately rather than dropping them beside mapped areas.
+  const sketch=TK_MAP_SNAPSHOT.buildSvgUrl((areaPolys||[]).filter(a=>!pubAreasWithGeo([a]).length));
+  if(sketch)zone.insertAdjacentHTML('beforeend',`<div class="qmap-fallback measured-outline"><img src="${sketch}" alt="Additional measured outline; no aerial imagery"></div>`);
   const fit=pubComputeFit(withGeo);
   if(fit){PMAP.origLat=fit.lat;PMAP.origLng=fit.lng;pubInitPan();pubReloadAt(fit.lat,fit.lng,fit.zoom);}
 }
@@ -489,7 +496,7 @@ function renderQuote(q){
     </div>`;
   document.getElementById('foot').style.display='';
   if(withGeo.length)pubMountMap(q.areaPolys);
-  else pubMountFallbackImage(cust);
+  else pubMountFallbackImage(cust,q.areaPolys);
 }
 function toggleQuestion(){
   document.getElementById('question-box').classList.toggle('open');

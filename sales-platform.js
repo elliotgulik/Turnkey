@@ -29,6 +29,7 @@
     search = "",
     sourceFilter = "",
     stageFilter = "",
+    leadSort = "newest",
     migrationError = "",
     busy = false,
     serial = 0,
@@ -127,7 +128,7 @@
       },
     });
     const data = await response.json();
-    if (!response.ok) throw Error(data.error || "Request failed");
+    if (!response.ok) throw Object.assign(Error(data.error || "Request failed"), {code:data.code,status:response.status,missingFields:data.missingFields});
     return data;
   }
   async function refreshMetrics() {
@@ -308,7 +309,7 @@
   function card(r) {
     const due = r.nextFollowUpAt && Date.parse(r.nextFollowUpAt) < Date.now();
     const age = M.leadTime(r);
-    return `<article class="sale-card" draggable="true" data-record="${esc(r.id)}" tabindex="0" role="button" aria-label="Open ${esc(r.name)}"><div class="sale-card-top"><b>${esc(r.name || "Unnamed enquiry")}</b><span>${esc(money(r.total || r.opportunityValue || 0))}</span></div><p>${esc((r.requestedServices || []).map((x) => x.name || x).join(", ") || (r.services || []).map((x) => SERVICES[x.svc]?.label || x.svc).join(", ") || "Services to confirm")}</p><div class="sale-tags"><span>${esc(r.source || "Manual")}</span><span>${age ? Math.max(0, Math.floor((Date.now() - age) / 86400000)) + "d old" : "Age unknown"}</span></div><small>${esc(r.salespersonName || "Unassigned")}${r.nextFollowUpAt ? " · Follow-up " + esc(new Date(r.nextFollowUpAt).toLocaleDateString()) : ""}</small>${due ? '<strong class="sale-overdue">Follow-up overdue</strong>' : ""}<select data-sale-stage="${esc(r.id)}" aria-label="Sales stage">${options(
+    return `<article class="sale-card" draggable="true" data-record="${esc(r.id)}" tabindex="0" role="button" aria-label="Open ${esc(r.name)}"><div class="sale-card-top"><b>${esc(r.name || "Unnamed enquiry")}</b><span>${esc(money(r.total || r.opportunityValue || 0))}</span></div><p>${esc((r.requestedServices || []).map((x) => x.name || x).join(", ") || (r.services || []).map((x) => SERVICES[x.svc]?.label || x.svc).join(", ") || "Services to confirm")}</p><div class="sale-tags"><span>${esc(r.source || "Manual")}</span><span title="${esc(window.TK_LEADS.grade(r).description)}">${esc(window.TK_LEADS.grade(r).label)}</span><span>${age ? Math.max(0, Math.floor((Date.now() - age) / 86400000)) + "d old" : "Age unknown"}</span></div><small>${esc(r.salespersonName || "Unassigned")}${r.nextFollowUpAt ? " · Follow-up " + esc(new Date(r.nextFollowUpAt).toLocaleDateString()) : ""}</small>${due ? '<strong class="sale-overdue">Follow-up overdue</strong>' : ""}<select data-sale-stage="${esc(r.id)}" aria-label="Sales stage">${options(
       stages.map((x) => [x.key, x.label]),
       P.key(r),
     )}</select><button class="btn ghost sm sale-next" data-sale-action="${P.next(r)}" data-id="${esc(r.id)}">${esc(defaults.find(s=>s.key===P.key(r))?.action||'View record')}</button></article>`;
@@ -340,6 +341,7 @@
     if (sourceFilter)
       rs = rs.filter((r) => (r.source || "Manual") === sourceFilter);
     if (stageFilter) rs = rs.filter((r) => P.key(r) === stageFilter);
+    rs = window.TK_LEADS.sort(rs, leadSort);
     const sources = [
       ...new Set(records.map((r) => r.source || "Manual")),
     ].sort();
@@ -349,7 +351,7 @@
         "All open enquiries and qualified sales opportunities.",
         button("+ New lead", "new") + button("Import", "import"),
       ) +
-      `<div class="sale-filters">${field("Search", `<input id="sale-search" type="search" value="${esc(search)}" placeholder="Name, email, phone or address">`)}${field("Source", `<select data-sale-filter="source">${options([["", "All sources"], ...sources.map((s) => [s, s])], sourceFilter)}</select>`)}${field("Stage", `<select data-sale-filter="stage">${options([["", "All open stages"], ...stages.filter((x) => !["won", "lost"].includes(x.key)).map((x) => [x.key, x.label])], stageFilter)}</select>`)}</div><div class="sale-lead-grid">${rs.map(card).join("") || empty("No matching enquiries. Add a lead, import contacts or connect a lead source.")}</div>`;
+      `<div class="sale-filters">${field("Search", `<input id="sale-search" type="search" value="${esc(search)}" placeholder="Name, email, phone or address">`)}${field("Source", `<select data-sale-filter="source">${options([["", "All sources"], ...sources.map((s) => [s, s])], sourceFilter)}</select>`)}${field("Sort by", `<select data-sale-filter="sort">${options([["newest","Newest first"],["oldest","Oldest first"],["value-high","Highest estimated value"],["value-low","Lowest estimated value"],["followup","Follow-up due first"],["name","Customer name"]],leadSort)}</select>`)}${field("Stage", `<select data-sale-filter="stage">${options([["", "All open stages"], ...stages.filter((x) => !["won", "lost"].includes(x.key)).map((x) => [x.key, x.label])], stageFilter)}</select>`)}</div><div class="sale-lead-grid">${rs.map(card).join("") || empty("No matching enquiries. Add a lead, import contacts or connect a lead source.")}</div>`;
   }
   async function move(r, key) {
     if (!r) return;
@@ -456,7 +458,7 @@
           ["Quote sent", dates(r.quoteSentAt)],
           ["Sale won", dates(M.winTime(r))],
         ],
-      )}<p>${esc((r.services || []).map((x) => SERVICES[x.svc]?.label || x.svc).join(", "))}</p>${r.quotePublicToken ? `<a class="btn ghost" target="_blank" rel="noopener" href="quote.html?t=${encodeURIComponent(r.quotePublicToken)}">Open customer quote</a>` : ""}${!M.won(r)&&r.quoteId&&r.total>0?button('Confirm quote accepted','confirm-sale',r.id):''}${button("Quote history", "versions", r.id)}<h3>ServiceM8 handoff</h3><p>TurnKey owns the sale. ServiceM8 owns scheduling, delivery, invoices and payments.</p>${map ? `<a class="btn accent" target="_blank" rel="noopener" href="https://go.servicem8.com/OpenJob/${encodeURIComponent(map.external_uuid)}">Open in ServiceM8</a><p class="sale-muted">ServiceM8: ${esc(map.snapshot?.status||'Transferred')} · Last checked ${esc(dates(map.synced_at))}</p>` : button("Transfer approved sale", "handoff", r.id, M.won(r) ? "" : "disabled")}<div id="sale-versions"></div></section></div><section class="sale-panel"><h3>Sales history</h3>${
+      )}<p>${esc((r.services || []).map((x) => SERVICES[x.svc]?.label || x.svc).join(", "))}</p>${r.quotePublicToken ? `<a class="btn ghost" target="_blank" rel="noopener" href="quote.html?t=${encodeURIComponent(r.quotePublicToken)}">Open customer quote</a>` : ""}${!M.won(r)&&r.quoteId&&r.total>0?button('Confirm quote accepted','confirm-sale',r.id):''}${button("Quote history", "versions", r.id)}${!M.won(r)&&r.total>0?button("Send quote to ServiceM8","handoff-quote",r.id):""}<h3>ServiceM8 handoff</h3><p>TurnKey owns the sale. ServiceM8 owns scheduling, delivery, invoices and payments.</p>${map ? `<a class="btn accent" target="_blank" rel="noopener" href="https://go.servicem8.com/OpenJob/${encodeURIComponent(map.external_uuid)}">Open in ServiceM8</a><p class="sale-muted">ServiceM8: ${esc(map.snapshot?.status||'Transferred')} · Last checked ${esc(dates(map.synced_at))}</p>` : button("Transfer approved sale", "handoff", r.id, M.won(r) ? "" : "disabled")}<div id="sale-versions"></div></section></div><section class="sale-panel"><h3>Sales history</h3>${
         (r.salesHistory || []).length
           ? (r.salesHistory || [])
               .slice()
@@ -668,7 +670,7 @@
         el = document.getElementById("sale-sm8");
       if (!el) return;
       mappings = s.mappings || [];
-      el.innerHTML = `<h3>ServiceM8 · operations handoff</h3><p>${s.connected ? "Connected to " + esc(s.accountName || s.accountUuid) : "Connect ServiceM8 to transfer approved work."}</p>${s.connected ? `<p>Pending: ${s.pending || 0} · Failed: ${s.failed || 0} · Last sync: ${esc(dates(s.lastSyncAt))} · Status updates: ${s.webhookSubscribed ? "connected" : "not subscribed"}</p>${s.lastError ? `<p role="alert">${esc(s.lastError)}</p>` : ""}<label><input type="checkbox" data-sale-auto ${s.autoHandoff ? "checked" : ""}> Automatically transfer approved sales</label><div class="sale-actions">${button("Retry failed transfers", "retry", "", s.retryAvailable ? "" : "disabled")}${button("Refresh linked jobs", "refresh-jobs")}${button("Disconnect", "disconnect-sm8")}</div>` : `<div class="sale-actions">${button("Connect ServiceM8", "oauth-sm8", "", s.oauthConfigured ? "" : "disabled")}${s.privateEnabled ? button("Private API key (testing)", "private-sm8") : ""}</div><p>${s.oauthConfigured ? "Authorize access to your ServiceM8 account." : "ServiceM8 OAuth needs to be configured on the backend."}</p>`}`;
+      el.innerHTML = `<h3>ServiceM8 · operations handoff</h3><p>${s.connected ? "Connected to " + esc(s.accountName || s.accountUuid) : "Connect ServiceM8 to transfer approved work."}</p>${s.connected ? `<p>Pending: ${s.pending || 0} · Failed: ${s.failed || 0} · Last sync: ${esc(dates(s.lastSyncAt))} · Status updates: ${s.webhookSubscribed ? "connected" : "not subscribed"}</p>${s.lastError ? `<p role="alert">${esc(s.lastError)}</p>` : ""}<label><input type="checkbox" data-sale-auto ${s.autoHandoff ? "checked" : ""}> Automatically transfer approved sales</label><div class="sale-actions">${button("Retry failed transfers", "retry", "", s.retryAvailable ? "" : "disabled")}${button("Refresh linked jobs", "refresh-jobs")}${!s.webhookSubscribed?button("Connect status updates", "subscribe-sm8"):""}${button("Disconnect", "disconnect-sm8")}</div>` : `<div class="sale-actions">${button("Connect ServiceM8", "oauth-sm8", "", s.oauthConfigured ? "" : "disabled")}${s.privateEnabled ? button("Private API key (testing)", "private-sm8") : ""}</div><p>${s.oauthConfigured ? "Authorize access to your ServiceM8 account." : "ServiceM8 OAuth needs to be configured on the backend."}</p>`}`;
     } catch (e) {
       const el = document.getElementById("sale-sm8");
       if (el) el.textContent = "ServiceM8: " + e.message;
@@ -934,6 +936,7 @@
     }
     const key = e.target.dataset.saleFilter;
     if (!key) return;
+    if (key === "sort") { leadSort=e.target.value; renderLeads(); return; }
     if (key === "source") {
       sourceFilter = e.target.value;
       renderLeads();
@@ -1030,22 +1033,17 @@
         toast("Sales details saved");
       }
       if (a === "versions") {
-        const { data, error: err } = await sb
-          .from("quote_versions")
-          .select("id,created_at,snapshot")
-          .eq("business_id", currentBusinessId)
-          .eq("quote_id", r.quoteId)
-          .order("created_at", { ascending: false });
-        if (err) throw err;
-        document.getElementById("sale-versions").innerHTML =
-          "<h3>Saved quote versions</h3>" +
-          table(
-            ["Saved", "Quote amount"],
-            (data || []).map((x) => [
-              dates(x.created_at),
-              money(x.snapshot.amount),
-            ]),
-          );
+        const host=document.getElementById("sale-versions");
+        if(!r?.quoteId){host.innerHTML=empty("No saved quote yet. Build and save a quote to start its history.");return;}
+        host.innerHTML='<p role="status">Loading saved quotes…</p>';
+        b.disabled=true;
+        try {
+          const result=await api("/api/sales/quotes/"+encodeURIComponent(r.quoteId)+"/history");
+          if(activeId!==r.id||!host.isConnected)return;
+          const versions=result.versions||[];
+          host.innerHTML='<h3>Saved quote versions</h3>'+ (versions.length ? table(["Saved","Quote amount","Status"],versions.map(x=>[dates(x.createdAt||x.created_at),money(x.snapshot?.amount||0),x.snapshot?.accepted?'Accepted · locked':'Saved quote'])) : empty("No saved versions exist for this legacy quote."));
+        } catch(e) {if(host.isConnected)host.innerHTML='<p role="alert">'+esc(e.message)+'</p>';}
+        finally {b.disabled=false;}
       }
       if (a === "export") {
         const rep = currentReport(),
@@ -1161,6 +1159,7 @@
           throw Error("Allow the connection popup to authorize ServiceM8.");
         }
       }
+      if(a === "subscribe-sm8") {await api('/api/sales/servicem8/webhooks',{method:'POST'});await loadConnection();toast('ServiceM8 status updates connected');}
       if (a === "private-sm8")
         modal(
           "Private ServiceM8 test connection",
@@ -1185,14 +1184,37 @@
         await api("/api/sales/servicem8/refresh", { method: "POST" });
         toast("Linked jobs queued for refresh");
       }
-      if (a === "handoff") {
-        if (!r.jobId) await syncRecordToSupabase(r);
-        await api("/api/sales/servicem8/handoff", {
-          method: "POST",
-          body: JSON.stringify({ jobId: r.jobId }),
-        });
-        toast("Transfer queued. Check Connections for progress.");
+      if (a === "handoff" || a === "handoff-quote") {
+        b.disabled=true;
+        try {
+          if(a==='handoff-quote'&&r.stage==='new')r.stage='quoting';
+          await syncRecordToSupabase(r);
+          if(!r.jobId||!r.quoteId)throw Error("Save a complete quote before transferring it.");
+          let reviewedGst;
+          const transfer=reviewLegacy=>api("/api/sales/servicem8/handoff", {
+            method: "POST",
+            body: JSON.stringify({ jobId: r.jobId, ...(a==='handoff-quote'?{mode:'quote'}:{}), ...(reviewLegacy?{reviewLegacy:true}:{}), ...(typeof reviewedGst==='boolean'?{gstRegistered:reviewedGst}:{}) }),
+          });
+          try {await transfer(false);}
+          catch(e){
+            if(e.code!=='LEGACY_REVIEW_REQUIRED')throw e;
+            if(e.missingFields?.includes('gstRegistered')){
+              const tax=prompt('This historical quote has no saved GST treatment. Check the original quote. Type GST if the accepted total includes 15% GST, or NO GST if no GST was charged. Cancel stops the transfer.');
+              if(tax===null)return;
+              const answer=tax.trim().toUpperCase();
+              if(!['GST','NO GST'].includes(answer))throw Error('Transfer cancelled. Enter GST or NO GST to review the historical tax treatment.');
+              reviewedGst=answer==='GST';
+            }
+            const services=(r.services||[]).map(l=>(SERVICES[l.svc]?.label||l.svc)+': '+l.qty).join('\n');
+            if(!confirm('This accepted quote predates saved approval versions. Review its current details before transferring.\n\n'+r.name+'\n'+(r.address||'')+'\n'+services+'\nAccepted total: '+money(r.total)+'\nTax: '+((reviewedGst??r.gstRegistered)?'Includes 15% GST':'No GST charged')+'\n\nTransfer these details to ServiceM8? This records your review; it does not recreate the original approval history.'))return;
+            await transfer(true);
+          }
+          toast(a==='handoff-quote'?"Quote queued for ServiceM8. Send and schedule it there.":"Approved sale queued for ServiceM8.");
+          await loadSales();
+          if(activeId===r.id)openDetail(r.id);
+        } finally {b.disabled=false;}
       }
+
     } catch (err) {
       error(err);
     }
@@ -1298,11 +1320,20 @@
       loadConnection();
   });
   window.TK_SALES_PLATFORM = {
+    transferQuote: async (id) => {
+      const r=record(id);
+      if(!r||M.won(r))throw Error('Select an editable quote to transfer.');
+      if(r.stage==='new')r.stage='quoting';
+      await syncRecordToSupabase(r);
+      if(!r.jobId||!r.quoteId||!r.services?.length||!(r.total>0))throw Error('Save a complete quote before transferring.');
+      await api('/api/sales/servicem8/handoff',{method:'POST',body:JSON.stringify({jobId:r.jobId,mode:'quote'})});
+      toast('Quote queued for ServiceM8. Send and schedule it there.');
+    },
     refresh: loadSales,
     report: currentReport,
     reset: () => {
       pipelineScope="open"; pipelineSearch=""; pipelineDueOnly=false;
-      search=""; sourceFilter=""; stageFilter=""; activeId=null;
+      search=""; sourceFilter=""; stageFilter=""; leadSort="newest"; activeId=null;
       cloudGoals = [];
       spend = [];
       settings = {};

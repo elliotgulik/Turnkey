@@ -24,6 +24,8 @@ const assets = [
   "sales-metrics.js",
   "pipeline-model.js",
   "sales-platform.js",
+  "lead-priority.js",
+  "measurement-import.js",
   "quote-workspace.js",
   "quote-workspace.css",
   "conversations.js",
@@ -47,6 +49,8 @@ const assets = [
 ];
 for (const name of assets)
   fs.copyFileSync(path.join(root, name), path.join(target, name));
+fs.mkdirSync(path.join(target, 'chrome-extension'), {recursive:true});
+fs.copyFileSync(path.join(root, 'chrome-extension/measurement.js'), path.join(target, 'chrome-extension/measurement.js'));
 if (fs.existsSync(path.join(root, "assets")))
   fs.cpSync(path.join(root, "assets"), path.join(target, "assets"), {
     recursive: true,

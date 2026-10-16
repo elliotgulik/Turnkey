@@ -41,7 +41,7 @@
     // buildDocPDF is the existing customer-facing renderer. Give it only its
     // public inputs, never internal costs, margins, notes or attachments.
     const out = {};
-    for (const k of ['id', 'name', 'email', 'phone', 'address', 'suburb', 'total', 'quotePublicToken', '_mapSnapshotDataUrl', 'areaPolys']) {
+    for (const k of ['id', 'name', 'email', 'phone', 'address', 'suburb', 'total', 'quotePublicToken', '_mapSnapshotDataUrl', '_mapSnapshotWidth', '_mapSnapshotHeight', 'areaPolys']) {
       if (r[k] !== undefined) out[k] = structuredClone(r[k]);
     }
     out.services = (r.services || []).map(line => {
@@ -60,10 +60,14 @@
     else await ensureRecordSynced(r);
     assertScope(start);
     if (recordFor(r.id) !== r) throw Error('The opportunity changed. Select it again.');
-    const safe = publicRecord(r);
-    if (safe._mapSnapshotDataUrl === undefined && typeof preloadMapSnapshot === 'function') {
-      await preloadMapSnapshot(safe); assertScope(start);
+    // Preload the owned record, not a detached copy, so preview/send share
+    // in-flight work and the loader can enforce the business/session guard.
+    if (typeof preloadMapSnapshot === 'function') {
+      await preloadMapSnapshot(r); assertScope(start);
     }
+    if (recordFor(r.id) !== r) throw Error('The opportunity changed. Select it again.');
+    if (global.TK_MAP_SNAPSHOT?.getAreas(r.areaPolys).length && !r._mapSnapshotDataUrl) throw Error('The property outline could not be prepared. Please retry. Nothing was sent.');
+    const safe = publicRecord(r);
     // Actual helper contract: buildDocPDF(mode, record, 'base64') returns raw
     // base64; its default returns a Blob and is intentionally not used here.
     const contentBase64 = buildDocPDF(mode, safe, 'base64');

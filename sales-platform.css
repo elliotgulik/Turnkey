@@ -472,3 +472,36 @@ main {
 .sale-column>header p {font-size:12px;line-height:1.5;color:var(--sale-muted);font-weight:400;min-height:36px;margin:10px 0 0;}
 .sale-next {width:100%;margin-top:9px;}
 @media(max-width:760px){.sale-pipeline-toolbar{align-items:stretch;}.sale-pipeline-toolbar>.sale-field{width:100%;}.sale-scope-tabs .btn{padding:9px 12px;}.sale-kanban{grid-template-columns:repeat(var(--pipeline-columns,4),minmax(275px,85vw));}.sale-stage-jump{position:sticky;top:0;z-index:2;background:var(--sale-bg,#f8fafc);padding-top:8px;}}
+
+/* Shared finishing pass: quieter surfaces, legible controls and clear focus. */
+.sale-head h2{font-weight:750;line-height:1.15;letter-spacing:-.035em;}
+.sale-panel,.sale-kpi,.sale-filters{box-shadow:0 2px 8px #18283a04;}
+.sale-card{box-shadow:0 2px 5px #18283a05;transition:border-color .15s,box-shadow .15s;}
+.sale-card:hover{border-color:#a8c8c3;box-shadow:0 5px 16px #18283a0b;}
+.sale-card-top b{font-size:15px;line-height:1.4;}
+.sale-card-top>span{font-variant-numeric:tabular-nums;white-space:nowrap;font-weight:700;color:#155e56;}
+.sale-column{background:#f1f5f7;border-radius:16px;}
+.sale-filters .sale-field{flex:1;min-width:155px;}
+.sale-panel :is(button,a,input,select,textarea):focus-visible,.sale-card:focus-visible,.sale-filters :focus-visible{outline:3px solid #2e8e8380;outline-offset:3px;}
+.sale-tags span{line-height:1.5;}
+#sale-versions{margin-top:20px;border-top:1px solid var(--sale-line);padding-top:16px;}
+#sale-versions:empty{display:none;}
+.measurement-review{width:min(540px,calc(100vw - 40px));box-sizing:border-box;border:1px solid var(--sale-line);border-radius:18px;padding:28px;color:var(--sale-ink);box-shadow:0 20px 70px #152b3b30;}
+.measurement-review::backdrop{background:#10233380;}
+.measurement-review p,.measurement-review li{font-size:14px;line-height:1.7;}
+.measurement-review ul{max-height:35vh;overflow:auto;padding-left:20px;}
+@media(max-width:760px){.sale-head{align-items:flex-start;}.sale-head h2{font-size:26px;}.sale-panel{padding:18px;border-radius:16px;}.sale-filters{gap:12px;padding:14px;}.sale-filters .sale-field{min-width:calc(50% - 12px);}.sale-filters .sale-field:first-child{flex-basis:100%;}}
+
+/* Lead sort, grade badge, history empty-state and measurement-review polish. */
+.sale-tags span:nth-of-type(2){font-weight:700;border:1px solid #c7d6cf;background:#eef6f3;color:#105f55;}
+.sale-tags span:nth-of-type(2)[title^="Enter an opportunity value"]{border-style:dashed;background:#f3f4f6;color:var(--sale-muted);}
+.sale-empty{border:1px dashed var(--sale-line);border-radius:12px;background:#fafcfd;}
+.sale-row:last-child{border-bottom:none;}
+.measurement-review h2{font-size:18px;margin:0 0 6px;}
+.measurement-review :is(button,a):focus-visible{outline:3px solid #2e8e8380;outline-offset:3px;}
+@media(max-width:480px){
+  .measurement-review{padding:20px;border-radius:14px;}
+  .measurement-review .sale-actions{flex-direction:column-reverse;align-items:stretch;}
+  .measurement-review .sale-actions .btn{width:100%;min-height:44px;}
+  .sale-tags span{font-size:11px;}
+}

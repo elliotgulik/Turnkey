@@ -11,6 +11,7 @@
   const valid = p => p && p.lat != null && p.lng != null && Number.isFinite(Number(p.lat)) && Number.isFinite(Number(p.lng)) && Math.abs(p.lat) <= 90 && Math.abs(p.lng) <= 180;
   const locked = r => !r || isWon(r) || r.quoteStatus === 'accepted';
   let step = 0, panels, nav, next, back, leadId, saving = false;
+  let quoteMargin = TK_COST.targetMargin(COST_INPUTS.targetMargin), automatic = false, pricingBusy = false, transferring = false, autoPrices = new WeakMap();
   let baseSelection = null, baseInput = null, mapsPromise, propertySelection = null, propertyBinding;
   function message(text) { $('qw-message').textContent = text; }
   function build() {
@@ -27,14 +28,28 @@
     panels[0].innerHTML = '<h3>Start with the property</h3><p id="qw-client"></p><div class="field"><label for="qw-address">Property address</label><input id="qw-address" autocomplete="street-address"></div><div class="field"><label for="qw-suburb">Suburb</label><input id="qw-suburb" autocomplete="address-level2"></div><p class="qw-help">Confirm the address before measuring. Changes apply to this opportunity when you continue.</p>';
     ['quote-map-zone', 'req-services-zone', 'svc-builder'].forEach(id => panels[1].append($(id)));
     panels[1].append(body.querySelector('.add-svc'));
+    const mapIntro = document.createElement('div'); mapIntro.className = 'qw-section-head';
+    mapIntro.innerHTML = '<h3>Measure &amp; choose services</h3><p>Choose a service above the map, then tap its outline. You can also enter quantities below.</p>';
+    panels[1].prepend(mapIntro);
     ['assumptions-zone', 'estimate-zone'].forEach(id => panels[2].append($(id)));
     // Move, rather than rebuild, the proven pricing and attachment controls.
     [...body.children].filter(el => !el.classList.contains('qw-panel')).forEach(el => panels[2].append(el));
-    panels[3].innerHTML = '<h3>Check the customer quote</h3><div id="qw-preview"></div><p class="qw-help">Next opens the document preview. Sending remains a separate action in that preview.</p>';
+    const pricing = document.createElement('section'); pricing.className = 'qw-pricing-controls';
+    pricing.innerHTML = '<div><h3>Set a profitable price</h3><p>Recommendations include fuel, delivery costs and your target margin. Recommendations protect the target for easy access; difficult access and premium handling add to the price.</p></div><div class="qw-margin-row"><label for="qw-margin">Target profit margin (%)<input id="qw-margin" type="number" min="0" max="95" step="1" inputmode="decimal" aria-describedby="qw-margin-help"></label><button type="button" class="btn primary" id="qw-apply-pricing">Apply recommended prices</button></div><p id="qw-margin-help" class="qw-help">For this quote only. Margin uses ex-GST revenue when GST registered. Applying replaces draft prices and clears any total override.</p><label class="qw-auto"><input id="qw-auto" type="checkbox"> Keep unedited prices updated as measurements and travel change</label><p id="qw-pricing-status" class="qw-help" role="status"></p>';
+    panels[2].prepend(pricing);
+    $('qw-margin').addEventListener('change', () => {
+      const value = Number($('qw-margin').value);
+      if ($('qw-margin').value === '' || !Number.isFinite(value) || value < 0 || value > 95) { $('qw-margin').setCustomValidity('Enter a margin from 0 to 95%.'); $('qw-margin').reportValidity(); return; }
+      $('qw-margin').setCustomValidity(''); quoteMargin = value / 100; updateQuoteTotal();
+    });
+    $('qw-auto').onchange = () => { automatic = $('qw-auto').checked; updateQuoteTotal(); };
+    $('qw-apply-pricing').onclick = () => applyRecommendedPricing();
+    panels[3].innerHTML = '<h3>Check the customer quote</h3><div id="qw-preview"></div><p class="qw-help">Preview in TurnKey, or save this quote and queue it in ServiceM8. Customer email is a separate action.</p>';
     const status = document.createElement('p'); status.id = 'qw-message'; status.className = 'qw-message'; status.setAttribute('role', 'status'); body.append(status);
     const footer = overlay.querySelector('.modal-foot');
-    footer.innerHTML = '<button type="button" class="btn ghost" id="qw-back">Back</button><span id="qw-progress"></span><button type="button" class="btn primary" id="qw-next">Continue</button>';
+    footer.innerHTML = '<button type="button" class="btn ghost" id="qw-back">Back</button><span id="qw-progress"></span><button type="button" class="btn ghost qw-transfer" id="qw-transfer" hidden>Save &amp; send to ServiceM8</button><button type="button" class="btn primary" id="qw-next">Continue</button>';
     next = $('qw-next'); back = $('qw-back');
+    $('qw-transfer').onclick = transferQuote;
     back.onclick = () => go(step - 1);
     next.onclick = () => step === 3 ? preview() : go(step + 1);
     nav.addEventListener('click', e => { const b = e.target.closest('[data-step]'); if (b) go(Number(b.dataset.step)); });
@@ -53,7 +68,7 @@
     return true;
   }
   function go(target) {
-    if (target < 0 || target > 3) return;
+    if (transferring || target < 0 || target > 3) return;
     const r = records.find(r => r.id === leadId);
     if (locked(r)) { toast('Approved quote is locked.'); return; }
     if (target > 0 && step === 0) {
@@ -63,10 +78,13 @@
       if (!applyAddress()) return;
     }
     if (target > 1 && !draftLines.some(l => parseFloat(l.qty) > 0)) { message('Add a service and quantity before reviewing pricing.'); return; }
+    if (target > 2 && !$('qw-margin').reportValidity()) return;
     step = target;
     panels.forEach((p, i) => { p.hidden = i !== step; });
     [...nav.children].forEach((b, i) => { b.setAttribute('aria-current', i === step ? 'step' : 'false'); });
-    back.disabled = step === 0; next.textContent = step === 3 ? 'Open document preview →' : 'Continue →';
+    back.disabled = step === 0; back.textContent = step ? '← ' + labels[step - 1] : 'Back';
+    next.textContent = ['Measure property →','Review pricing →','Review quote →','Open document preview →'][step];
+    $('qw-transfer').hidden = step !== 3;
     $('qw-progress').textContent = `${step + 1} of 4`; message('');
     if (step === 2) renderEstimate();
     if (step === 3) {
@@ -78,24 +96,125 @@
   function preview() {
     const r = records.find(r => r.id === leadId);
     if (locked(r)) { toast('Approved quote is locked.'); return; }
+    if (!$('qw-margin').reportValidity()) return;
     if (!draftLines.some(l => parseFloat(l.qty) > 0) || !(quoteTotal() > 0)) { message('Add a service and a positive quote total.'); return; }
     closeModal('quote-overlay');
     confirmQuoteSend(); // Captures travel/cost snapshots and preserves the sales-platform approval guard.
+    return docPreview?.mode === 'quote' && docPreview.recordId === r.id && $('doc-preview-overlay').classList.contains('open');
+  }
+  async function transferQuote() {
+    if (transferring) return;
+    const id = leadId, businessId = currentBusinessId;
+    const button = $('qw-transfer');
+    if (typeof window.TK_SALES_PLATFORM?.transferQuote !== 'function') { message('ServiceM8 transfer is unavailable. Reload the app and try again.'); return; }
+    transferring = true; button.disabled = true; next.disabled = true;
+    const disabled = [];
+    try {
+      if (!preview()) return;
+      const note = document.createElement('p'); note.id = 'qw-transfer-status'; note.className = 'qw-transfer-status'; note.setAttribute('role','status'); note.textContent = 'Saving quote and queuing it in ServiceM8… No customer email is being sent.';
+      $('doc-preview-body').prepend(note);
+      // Prevent another action on this document while the transfer is in flight.
+      $('doc-preview-foot').querySelectorAll('button').forEach(b => { disabled.push([b,b.disabled]); b.disabled = true; });
+      await window.TK_SALES_PLATFORM.transferQuote(id);
+      if (businessId === currentBusinessId && docPreview?.mode === 'quote' && docPreview.recordId === id) closeDocPreview();
+      toast('Quote queued for ServiceM8. Send it to the customer from there.');
+    } catch (error) {
+      const text = 'Could not queue quote in ServiceM8: ' + (error?.message || 'Please try again.');
+      if (businessId === currentBusinessId && docPreview?.recordId === id) {
+        const note = $('qw-transfer-status'); if (note) { note.setAttribute('role','alert'); note.textContent = text + ' Your document preview remains open.'; }
+      }
+      toast(text);
+    } finally {
+      disabled.forEach(([b,value]) => { if (b.isConnected) b.disabled = value; });
+      transferring = false; button.disabled = false; next.disabled = false;
+    }
   }
   const originalOpen = openQuoteModal;
   openQuoteModal = function (id) {
     const r = records.find(r => r.id === id);
     if (locked(r)) { toast('Approved pricing is locked. Create a new opportunity for additional work.'); return; }
     build(); leadId = id;
+    quoteMargin = TK_COST.targetMargin(r.targetMargin,TK_COST.targetMargin(COST_INPUTS.targetMargin));
+    automatic = !r.quoteSentAt && !r.quoteId && !(r.total > 0) && !r.selfPriced && !r.services?.length;
+    autoPrices = new WeakMap();
+    $('qw-margin').value = Math.round(quoteMargin * 100); $('qw-margin').setCustomValidity(''); $('qw-auto').checked = automatic;
     originalOpen(id);
     $('qw-client').textContent = [r.name, r.phone, r.email].filter(Boolean).join(' · ');
     $('qw-address').value = r.address || ''; $('qw-suburb').value = r.suburb || '';
     step = 0; go(0); enhanceProperty(r);
   };
+  // Legacy views read COST_INPUTS synchronously. Scope that read while rendering
+  // or capturing the quote snapshot, then restore the business default in finally.
+  // The engine's options argument is used directly for all draft recommendations.
+  function withMargin(fn) {
+    const before = COST_INPUTS.targetMargin;
+    try { COST_INPUTS.targetMargin = quoteMargin; return fn(); }
+    finally { COST_INPUTS.targetMargin = before; }
+  }
+  // Shared pricing applies assumptions AFTER line totals. Compensate only
+  // discounts when recommending so easy access cannot undo the target floor.
+  // Manual rates and public pricing/measurement formulas remain unchanged.
+  function recommendedRate(price,qty) {
+    const discount = Math.min(1,TK_PRICING.accessPremiumMult(quoteAssumptions));
+    return price / (Number(qty) * discount);
+  }
+  function recommend(force) {
+    const r = records.find(r => r.id === leadId);
+    if (locked(r) || (!force && (!automatic || quoteTotalOverride !== null))) return false;
+    const breakdown = TK_COST.costBreakdown(draftLines, quoteTravelInfo, {targetMargin:quoteMargin});
+    let changed = false;
+    breakdown.lines.forEach(({line,recommendedPrice}) => {
+      const previous = autoPrices.get(line);
+      const untouched = previous ? line.fixedPrice == null && line.customRate === previous.rate : line.fixedPrice == null && line.customRate == null;
+      if (!force && !untouched) return;
+      const rate = recommendedRate(recommendedPrice,line.qty);
+      if (line.customRate !== rate || line.fixedPrice != null) changed = true;
+      // Use a rate so the existing map aggregation can keep updating quantities.
+      line.fixedPrice = null; line.customRate = rate; autoPrices.set(line,{rate});
+    });
+    if (force) quoteTotalOverride = null;
+    return changed;
+  }
+  function pricingStatus() {
+    if (!$('qw-pricing-status')) return;
+    $('qw-auto').checked = automatic;
+    $('qw-pricing-status').textContent = quoteTotalOverride !== null ? 'Manual total retained. Apply recommended prices to replace it.'
+      : automatic ? 'Automatic recommendations are on. Existing or manually edited prices are kept; use Apply to replace them.'
+      : 'Automatic updates are off. Current prices are kept. Apply recommendations when you are ready.';
+    document.querySelectorAll('#svc-builder .svc-line').forEach((row,i) => {
+      const line = draftLines[i], price = row.querySelector('.price-input');
+      if (line && autoPrices.has(line) && price && document.activeElement !== price && line.fixedPrice == null) price.value = Number(line.customRate).toFixed(2);
+    });
+  }
+  const originalUpdate = updateQuoteTotal, originalLines = renderSvcLines;
+  updateQuoteTotal = function () { if (!pricingBusy) recommend(false); return withMargin(() => originalUpdate()); };
+  renderSvcLines = function () { if (!pricingBusy) recommend(false); const result = withMargin(() => originalLines()); pricingStatus(); return result; };
+  applyRecommendedPricing = function () {
+    if (!$('qw-margin').reportValidity()) return;
+    if (locked(records.find(r => r.id === leadId))) { toast('Approved quote is locked.'); return; }
+    if (!draftLines.some(l => Number(l.qty) > 0)) { toast('Add a service with a quantity first.'); return; }
+    recommend(true); renderSvcLines(); toast('Recommended draft prices applied at ' + Math.round(quoteMargin * 100) + '% target margin');
+  };
+  // Per-line recommendation buttons must use the same travel and target as the job.
+  resetLineToRecommended = function (i) {
+    if (locked(records.find(r => r.id === leadId))) return;
+    const entry = TK_COST.costBreakdown(draftLines,quoteTravelInfo,{targetMargin:quoteMargin}).lines.find(e => e.line === draftLines[i]);
+    if (!entry) return;
+    entry.line.fixedPrice = null; entry.line.customRate = recommendedRate(entry.recommendedPrice,entry.line.qty);
+    autoPrices.set(entry.line,{rate:entry.line.customRate}); renderSvcLines();
+  };
+  const originalConfirm = confirmQuoteSend;
+  confirmQuoteSend = function () { return withMargin(() => originalConfirm()); };
   let travelRequest = 0, travelPending = false;
   const originalEstimate = renderEstimate;
   renderEstimate = function () {
-    originalEstimate();
+    if (!pricingBusy && recommend(false)) {
+      pricingBusy = true;
+      try { withMargin(() => originalUpdate()); } finally { pricingBusy = false; }
+    }
+    withMargin(() => originalEstimate()); pricingStatus();
+    // The workspace exposes one consistent recommendation action above the estimate.
+    $('estimate-zone')?.querySelector('[onclick="applyRecommendedPricing()"]')?.remove();
     const zone = $('estimate-zone');
     if (!zone || !draftLines.some(l => parseFloat(l.qty) > 0)) return;
     const note = document.createElement('p'); note.className = 'qw-help'; note.id = 'qw-travel-status'; note.setAttribute('role', 'status');
@@ -177,6 +296,22 @@
       qe.provider = qe.mapsKey ? 'google' : 'osm';
       qeReloadAt(Number(center.lat), Number(center.lng), center.zoom || QE_ZOOM_DEFAULT);
     } else originalMapLoad();
+  };
+  const originalToolbar = qeRenderToolbar;
+  qeRenderToolbar = function () {
+    originalToolbar();
+    const toolbar = $('qe-toolbar'); if (!toolbar || !qe) return;
+    toolbar.querySelector('[onclick="qeToggleSatellite()"]')?.remove();
+    const modes = document.createElement('div'); modes.className = 'qw-map-modes'; modes.setAttribute('role','group'); modes.setAttribute('aria-label','Map imagery');
+    modes.innerHTML = ['satellite','roadmap'].map(mode => `<button type="button" class="btn ghost sm" data-qw-map="${mode}" aria-pressed="${qe.provider === 'google' && qe.mapType === mode}" ${qe.provider === 'google' ? '' : 'disabled'}>${mode === 'satellite' ? 'Satellite' : 'Street map'}</button>`).join('');
+    modes.onclick = event => { const mode = event.target.closest('[data-qw-map]')?.dataset.qwMap; if (!mode || qe.provider !== 'google') return; qe.mapType = mode; qeReloadAt(qe.lat,qe.lng,qe.zoom); qeRenderToolbar(); };
+    toolbar.prepend(modes);
+    let status = $('qw-map-status');
+    if (!status) { status = document.createElement('p'); status.id = 'qw-map-status'; status.className = 'qw-map-status'; status.setAttribute('role','status'); toolbar.after(status); }
+    status.textContent = qe.provider === 'google' ? (qe.mapType === 'satellite' ? 'Satellite imagery' : 'Street map') + ' · zoom ' + qe.zoom + ' · outlines stay anchored when you change view.'
+      : qe.provider === 'osm' ? 'Street map fallback. Satellite imagery is unavailable; existing measurements are retained.'
+      : qe.provider === 'grid' ? 'Drawing grid only — not a satellite image or a scaled property measurement.' : 'Locating property and loading imagery…';
+    toolbar.querySelectorAll('button').forEach(button => { if (!button.getAttribute('aria-label')) button.setAttribute('aria-label',button.title || button.textContent.trim()); });
   };
   async function enhanceBase() {
     const input = $('biz-home-address-input'); if (!input || input.dataset.qw) return;
