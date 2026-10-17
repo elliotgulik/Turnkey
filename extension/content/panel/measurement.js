@@ -28,6 +28,12 @@ const TILE_SIZE = 256;
 const OSM_TILES_ACROSS = 3; // 3x3 mosaic, same as booking.html's OSM_TILES
 const CANVAS_W = 520;
 const CANVAS_H = 380;
+// OpenStreetMap's standard tile server only serves zoom 0-19 — requesting
+// z=20+ returns 400 for every tile at that level, not a CSP block (verified
+// against the real tile.openstreetmap.org live in testing). booking.html's
+// already-proven OSM mosaic (OSM_ZOOM_DEFAULT/MIN/MAX, ~line 838) already
+// knows this; this module ported the mosaic technique but not these bounds.
+const OSM_ZOOM_DEFAULT = 18, OSM_ZOOM_MIN = 15, OSM_ZOOM_MAX = 19;
 
 /** Meters per on-screen pixel at this lat/zoom, scaled for our CANVAS_W (see booking.html's identical formula). */
 function metersPerPixel(lat, zoom) {
@@ -85,7 +91,7 @@ function tileXY(lat, lng, zoom) {
  * `shape` is 'area' (closed polygon, min 3 points) or 'line' (open path, min 2 points).
  * Returns a controller: {setZoom, undo, clear, finish, destroy, onChange}.
  */
-export function createTracer(container, { lat, lng, zoom = 20, shape = 'area', onChange }) {
+export function createTracer(container, { lat, lng, zoom = OSM_ZOOM_DEFAULT, shape = 'area', onChange }) {
   let center = { lat, lng };
   let currentZoom = zoom;
   let scale = metersPerPixel(center.lat, currentZoom);
@@ -177,7 +183,7 @@ export function createTracer(container, { lat, lng, zoom = 20, shape = 'area', o
   container.querySelector('.tk-tracer-zoom').addEventListener('click', (e) => {
     const dir = e.target.getAttribute('data-zoom');
     if (!dir) return;
-    currentZoom = Math.max(17, Math.min(22, currentZoom + (dir === 'in' ? 1 : -1)));
+    currentZoom = Math.max(OSM_ZOOM_MIN, Math.min(OSM_ZOOM_MAX, currentZoom + (dir === 'in' ? 1 : -1)));
     renderTiles();
     reproject();
     render();
