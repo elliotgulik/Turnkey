@@ -322,11 +322,19 @@ els.undo.addEventListener('click', () => { points.pop(); render(); });
 els.clear.addEventListener('click', () => { points = []; render(); });
 
 let finishing = false;
+let finishTimer;
 els.finish.addEventListener('click', () => {
   if (finishing || points.length < minPoints()) return;
   finishing = true;
   els.finish.disabled = true;
   els.finish.textContent = 'Sending…';
+  clearTimeout(finishTimer);
+  finishTimer=setTimeout(()=>{
+    finishing=false;
+    els.finish.textContent='Finish';
+    render();
+    els.readout.textContent='No extension confirmation received. Keep the original Earth tab open and check that TurnKey v0.2.0 is loaded in Chrome Extensions before retrying.';
+  },15000);
   // Posted to this same window/origin — the extension's dynamically
   // injected bridge content script (extension/content/bridge/measure-bridge.js)
   // listens for this and re-runs the SAME geometry.js calculation
@@ -352,17 +360,24 @@ window.addEventListener('message', (e) => {
   if (!msg || msg.source !== 'turnkey-measure-bridge') return;
   if (msg.requestId !== requestId) return;
   if (msg.type === 'TURNKEY_MEASURE_ACK') {
+    clearTimeout(finishTimer);
     els.finish.textContent = 'Sent to Google Earth ✓';
     setState('<p>Measurement sent back to Google Earth — you can close this tab, or keep tracing another shape there.</p>');
   } else if (msg.type === 'TURNKEY_MEASURE_ERROR') {
+    clearTimeout(finishTimer);
     finishing = false;
     els.finish.disabled = points.length < minPoints();
     els.finish.textContent = 'Finish';
-    setErrorState(msg.message || 'Could not send this measurement back to Google Earth.');
+    setErrorState(msg.message || 'Could not send this measurement back to Google Earth.',{retry:()=>{clearState();render();}});
   }
 });
 
 // ── Boot ──────────────────────────────────────────────────────────────
+let mapsAuthFailed=false;
+window.gm_authFailure=()=>{
+  mapsAuthFailed=true;
+  setErrorState('Google Maps rejected this site’s API key or billing configuration. Correct TURNKEY_MAPS_KEY in Netlify, redeploy, then reload this workspace. No measurement has been sent.');
+};
 function loadMapsSdk() {
   return new Promise((resolve, reject) => {
     const cbName = '__tkMeasureMapsReady';
@@ -381,6 +396,7 @@ function loadMapsSdk() {
   try {
     await loadMapsSdk();
     initMap2d();
+    if(mapsAuthFailed)return;
     clearState();
     render();
     await tryInit3d();
