@@ -132,7 +132,16 @@
 .tk-tracer-host { padding:0 20px; }
 .tk-tracer { position:relative; width:100%; aspect-ratio:520/380; border-radius:var(--radius-sm); overflow:hidden; border:1px solid var(--line); background:#e4e8eb; }
 .tk-tracer-tiles { position:absolute; inset:0; overflow:hidden; }
-.tk-tracer-tilefail {
+/* :not([hidden]) matters here, not just style: an unscoped display:flex has
+   EQUAL CSS specificity to the UA stylesheet's [hidden]{display:none}
+   default, and author rules win specificity ties regardless of source
+   order vs UA styles — so this banner was permanently visible (covering
+   the tiles beneath it, z-index:1) no matter what measurement.js set
+   element.hidden to. Reproduced live against Google Earth + real OSM
+   tiles: every tile loaded successfully (load/error events on each <img>
+   confirmed, zero errors) and the banner still showed, because .hidden was
+   never actually being respected at all. */
+.tk-tracer-tilefail:not([hidden]) {
   position:absolute; inset:0; z-index:1; display:flex; align-items:center; justify-content:center;
   text-align:center; padding:24px; font-size:12.5px; color:var(--ink-soft); background:var(--surface-2);
 }
