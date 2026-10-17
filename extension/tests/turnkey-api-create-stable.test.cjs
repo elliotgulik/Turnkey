@@ -36,7 +36,7 @@ test('createQuote retried after a lost response adopts the row the first write a
     return {
       ok: true,
       status: 200,
-      json: async () => ([{ id: stableId, business_id: 'biz1', lead_id: 'cust1', amount: 450, status: 'draft' }])
+      text: async () => JSON.stringify([{ id: stableId, business_id: 'biz1', lead_id: 'cust1', amount: 450, status: 'draft' }])
     };
   });
 
@@ -57,7 +57,7 @@ test('createQuote does NOT adopt a different row that happens to exist at the sa
     return {
       ok: true,
       status: 200,
-      json: async () => ([{ id: stableId, business_id: 'biz1', lead_id: 'cust1', amount: 999, status: 'draft' }])
+      text: async () => JSON.stringify([{ id: stableId, business_id: 'biz1', lead_id: 'cust1', amount: 999, status: 'draft' }])
     };
   });
 
@@ -80,7 +80,7 @@ test('createCustomer recovery is scoped to the correct business — never adopts
   const client = makeClient(TurnKeyClient, async (url, opts = {}) => {
     requestedUrls.push(url);
     if ((opts.method || 'GET') === 'POST') throw new Error('network interrupted');
-    return { ok: true, status: 200, json: async () => ([]) }; // no row found scoped to the right business
+    return { ok: true, status: 200, text: async () => '[]' }; // no row found scoped to the right business
   });
   await assert.rejects(() => client.createCustomer('biz1', { id: stableId, name: 'Jane' }), /network interrupted/);
   const recoveryGet = requestedUrls.find((u) => u.includes('customers?'));

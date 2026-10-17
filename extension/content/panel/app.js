@@ -3,6 +3,7 @@ import { TurnKeyApi } from '../../api/client-bridge.js';
 import { mountToolbar } from './toolbar.js';
 import { renderQuotePanel, renderQuoteCreated } from './quote.js';
 import { createQuoteDraft } from './quote-create.js';
+import { configureCosts } from './quote-pricing.js';
 import { captureVisibleTab, renderScreenshotPreview } from './screenshot.js';
 
 // `kind` matches extension/geometry.js's own vocabulary exactly
@@ -96,6 +97,8 @@ export async function init(shadowRoot) {
   // afterward rather than using named exports.
   await import(chrome.runtime.getURL('vendor/pricing-engine.js'));
   const TK_PRICING = window.TK_PRICING;
+  await import(chrome.runtime.getURL('vendor/cost-engine.js'));
+  const TK_COST=window.TK_COST;
   if (!TK_PRICING) {
     toast(root, 'TurnKey pricing engine failed to load — try reloading the page.', 'error');
     return;
@@ -283,13 +286,19 @@ export async function init(shadowRoot) {
       toast(root, 'Measure at least one area or distance first.', 'error');
       return;
     }
+    try {
+      const business=await TurnKeyApi.getBusiness(state.profile.business_id);
+      if(!business)throw new Error('Reconnect the extension to load your business pricing.');
+      state.business=business;
+    }catch(error){toast(root,error.message,'error');return;}
+    configureCosts(TK_COST,state.business.pricing_config||{});
     if (state.business && state.business.pricing_config && state.business.pricing_config.rates) {
       applyRateOverrides(state.business.pricing_config.rates);
     }
     state.quoteCreateProgress = null; // fresh quote-panel session — any earlier partial create attempt is unrelated
     renderQuotePanel(
       modalLayer,
-      { measurements: state.measurements, address: state.address, TK_PRICING, business: state.business },
+      { measurements: state.measurements, address: state.address, TK_PRICING, TK_COST, business: state.business },
       {
         onCancel: closeModal,
         onSearchCustomer: async (query) => {
@@ -306,7 +315,7 @@ export async function init(shadowRoot) {
           try {
             await createQuoteFlow(payload);
           } catch (err) {
-            toast(root, 'Could not reach TurnKey — check your connection and try again.', 'error');
+            toast(root, err.message || 'Could not save this draft. Please retry.', 'error');
             throw err;
           }
         }
@@ -324,7 +333,7 @@ export async function init(shadowRoot) {
   async function createQuoteFlow(payload) {
     const businessId = state.profile.business_id;
     const progress = state.quoteCreateProgress || (state.quoteCreateProgress = {});
-    const { quote, job } = await createQuoteDraft(TurnKeyApi, progress, { businessId, payload, screenshotDataUrl: state.screenshotDataUrl });
+    const { quote, job, warning } = await createQuoteDraft(TurnKeyApi, progress, { businessId, payload, screenshotDataUrl: state.screenshotDataUrl });
     state.quoteCreateProgress = null; // this intent fully succeeded — a future quote starts a clean one
 
     const publicUrl = state.config.siteUrl + '/quote.html?t=' + quote.public_token;
@@ -334,7 +343,7 @@ export async function init(shadowRoot) {
     const openUrl = state.config.siteUrl + '/index.html?open=pipeline&job=' + encodeURIComponent(job.id);
     renderQuoteCreated(
       modalLayer,
-      { address: payload.address, total: payload.total, lines: payload.lines, SERVICES, openUrl, publicUrl },
+      { address: payload.address, total: payload.total, lines: payload.lines, SERVICES, openUrl, publicUrl, warning },
       {
         onDone: () => {
           state.measurements = [];

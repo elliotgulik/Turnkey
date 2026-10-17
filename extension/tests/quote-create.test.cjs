@@ -54,6 +54,16 @@ const samplePayload = {
   areaPolys: [{ id: 'a1' }]
 };
 
+test('a failed activity note cannot turn a saved quote into a failed quote',async()=>{
+ const {createQuoteDraft}=await loadModule();
+ const api=makeApi({logActivity:async()=>{throw new Error('activity unavailable');}});
+ const result=await createQuoteDraft(api,{}, {businessId:'B',payload:samplePayload});
+ assert.ok(result.quote.id);assert.ok(result.job.id);
+ assert.match(result.warning,/quote is saved/i);
+ assert.equal(api.calls.createQuote.length,1);
+ assert.equal(api.calls.createJob.length,1);
+});
+
 test('creates exactly one customer, quote, and job for a single successful run', async () => {
   const { createQuoteDraft } = await loadModule();
   const api = makeApi();

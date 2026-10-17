@@ -1,3 +1,4 @@
+import { instantPricing } from './quote-pricing.js';
 // Instant Quote panel (build brief §9-§12) — turns the measurements list
 // into priced service lines using TurnKey's own shared pricing engine
 // (vendor/pricing-engine.js, the exact same window.TK_PRICING loaded by
@@ -35,6 +36,9 @@ export function renderQuotePanel(container, ctx, actions) {
     unit: m.unit,
     categoryLabel: m.categoryLabel
   }));
+  let customPrice=null, localMargin=ctx.TK_COST.targetMargin(ctx.TK_COST.COST_INPUTS.targetMargin), travelKm=ctx.TK_COST.COST_INPUTS.avgKm;
+  const estimatedAt=new Date().toISOString();
+  const priceModel=()=>instantPricing(ctx.TK_PRICING,ctx.TK_COST,computeLines(),{targetMargin:localMargin,price:customPrice,travelKm,estimatedAt});
   const extraLines = []; // ad-hoc services not tied to a drawn measurement
   let selectedCustomer = null; // {id,name} | null = "new customer"
   let newCustomer = { name: '', phone: '', email: '' };
@@ -65,8 +69,9 @@ export function renderQuotePanel(container, ctx, actions) {
 
   function paint() {
     const lines = computeLines();
-    const total = ctx.TK_PRICING.quoteTotal(lines, {});
-    const { exGst, gst } = ctx.TK_PRICING.gstFromInclusive(total);
+    let model, pricingError='';
+    try{model=priceModel();}catch(error){pricingError=error.message;model={total:0,exGst:0,gst:0,breakdown:null};}
+    const {total,exGst=0,gst=0,breakdown:bd}=model;
 
     container.innerHTML = `
       <div class="tk-modal-backdrop">
@@ -122,18 +127,35 @@ export function renderQuotePanel(container, ctx, actions) {
             </div>
 
             <div class="tk-price-block">
-              <div class="tk-price-line"><span>Subtotal (ex GST)</span><span>${money(exGst)}</span></div>
-              <div class="tk-price-line"><span>GST</span><span>${money(gst)}</span></div>
-              <div class="tk-price-total"><span>Estimated Price</span><span>${money(total)}</span></div>
+              <div class="tk-section-label">Internal delivery estimate</div>
+              <p class="tk-modal-sub">Based on your business’s saved cost settings. Travel is an estimate, not a live route calculation.</p>
+              ${bd ? [ ['Labour + setup ('+bd.labourHrs.toFixed(1)+' hours × '+ctx.TK_COST.COST_INPUTS.crew+' crew)',bd.wageCost],['Materials / chemicals',bd.chem],['Travel / fuel',bd.fuelCost],['Equipment',bd.equipmentCost],['Consumables',bd.consumablesCost],['Allocated overheads',bd.overheadCost],['Total estimated costs (ex GST)',bd.costUnrounded] ].map(([label,value])=>`<div class="tk-price-line"><span>${label}</span><strong>${money(value)}</strong></div>`).join('') : ''}
+              <label class="tk-price-line">Round-trip travel estimate (km) <input class="tk-qty-input" aria-label="Round-trip travel estimate in km" data-travel type="number" min="0" step="0.1" value="${travelKm}"></label>
+              <label class="tk-price-line">Target gross margin (%) <input class="tk-qty-input" aria-label="Target gross margin" data-margin type="number" min="0" max="99" step="1" value="${Math.round(localMargin*100)}"></label>
+              <div class="tk-price-line"><span>Recommended customer price${ctx.TK_COST.COST_INPUTS.gstRegistered?' (incl GST)':''}</span><strong data-recommended>${money(bd?.recommended||0)}</strong></div>
+              <label class="tk-price-line">Final customer price${ctx.TK_COST.COST_INPUTS.gstRegistered?' (incl GST)':''} <input class="tk-qty-input" style="width:120px" aria-label="Final customer price" data-price type="number" min="1" step="1" value="${total}"></label>
+              <button type="button" class="tk-link-btn" data-use-recommended>Use recommended price</button>
+              <div class="tk-price-line"><span>Expected gross profit</span><strong data-profit>${money(model.profit||0)}</strong></div>
+              <div class="tk-price-line"><span>Expected gross margin</span><strong data-margin-result>${(model.marginPct||0).toFixed(1)}%</strong></div>
+              ${bd&&model.marginPct+0.01<localMargin*100?'<p role="status" class="tk-error">This price is below your target gross margin.</p>':''}
+              <div class="tk-price-line"><span>Subtotal${ctx.TK_COST.COST_INPUTS.gstRegistered?' (ex GST)':''}</span><span>${money(exGst)}</span></div>
+              <div class="tk-price-line"><span>${ctx.TK_COST.COST_INPUTS.gstRegistered?'GST':'GST (not registered)'}</span><span>${money(gst)}</span></div>
+              <div class="tk-price-total"><span>Final customer total</span><span>${money(total)}</span></div>
+              ${pricingError?`<p class="tk-error" role="alert">${escapeHtml(pricingError)}</p>`:''}
+              <p class="tk-modal-sub">Margin uses revenue excluding GST. These are estimated costs, not actual job expenses. Your internal costs stay off the customer quote.</p>
             </div>
           </div>
           <div class="tk-modal-foot">
             <button type="button" class="tk-btn" data-close>Cancel</button>
-            <button type="button" class="tk-btn tk-btn-accent" data-create ${lines.length ? '' : 'disabled'}>Create Quote</button>
+            <button type="button" class="tk-btn tk-btn-accent" data-create ${lines.length&&!pricingError ? '' : 'disabled'}>Create Quote</button>
           </div>
         </div>
       </div>`;
 
+    container.querySelector('[data-price]').addEventListener('change',e=>{customPrice=e.target.value===''?NaN:Number(e.target.value);paint();});
+    container.querySelector('[data-margin]').addEventListener('change',e=>{const value=Number(e.target.value)/100;if(Number.isFinite(value)&&value>=0&&value<1)localMargin=value;paint();});
+    container.querySelector('[data-travel]').addEventListener('change',e=>{const value=Number(e.target.value);if(Number.isFinite(value)&&value>=0)travelKm=value;paint();});
+    container.querySelector('[data-use-recommended]').addEventListener('click',()=>{customPrice=null;paint();});
     container.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', () => actions.onCancel()));
     container.querySelectorAll('[data-line]').forEach((cb) =>
       cb.addEventListener('change', () => {
@@ -210,8 +232,8 @@ export function renderQuotePanel(container, ctx, actions) {
       const createBtn = container.querySelector('[data-create]');
       createBtn.disabled = true;
       createBtn.textContent = 'Creating…';
-      const finalLines = computeLines();
-      const finalTotal = ctx.TK_PRICING.quoteTotal(finalLines, {});
+      const finalModel=priceModel();
+      const finalLines=finalModel.lines, finalTotal=finalModel.total;
       try {
         await actions.onCreateQuote({
           customer: selectedCustomer || newCustomer,
@@ -219,7 +241,12 @@ export function renderQuotePanel(container, ctx, actions) {
           address: ctx.address,
           lines: finalLines,
           total: finalTotal,
-          areaPolys: ctx.measurements
+          areaPolys: ctx.measurements.filter(m=>lineState.some(l=>l.include&&l.measurementId===m.id)).map(m=>({...m,service:lineState.find(l=>l.measurementId===m.id).svc})),
+          costSnapshot:finalModel.snapshot,
+          estimatedCost:finalModel.breakdown.costUnrounded,
+          estimatedMarginPct:finalModel.marginPct,
+          gstRegistered:ctx.TK_COST.COST_INPUTS.gstRegistered,
+          targetMargin:localMargin
         });
       } catch (err) {
         createBtn.disabled = false;
@@ -237,12 +264,13 @@ export function renderQuotePanel(container, ctx, actions) {
 }
 
 /** The post-creation "QUOTE CREATED" screen (build brief §12). */
-export function renderQuoteCreated(container, { address, total, lines, SERVICES, openUrl, publicUrl }, actions) {
+export function renderQuoteCreated(container, { address, total, lines, SERVICES, openUrl, publicUrl, warning }, actions) {
   container.innerHTML = `
     <div class="tk-modal-backdrop">
       <div class="tk-modal tk-quote-created">
         <div class="tk-created-badge">✓</div>
         <h3>Quote Created</h3>
+        ${warning ? `<p role="status" class="tk-modal-sub">${escapeHtml(warning)}</p>` : ''}
         <p class="tk-modal-sub">${escapeHtml(address)}</p>
         <div class="tk-created-total">${money(total)}</div>
         <div class="tk-created-lines">

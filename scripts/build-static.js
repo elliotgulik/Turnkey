@@ -18,6 +18,7 @@ const assets = [
   "measure.html",
   "measure.js",
   "measure.css",
+  "measurement-editor.js",
   "extension-quote-link.js",
   "privacy.html",
   "404.html",

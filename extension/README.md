@@ -1,5 +1,16 @@
 # TurnKey — Google Earth Instant Quote (Chrome extension)
 
+## Version 0.2.1: edit the outline and the quote price
+
+- **2D:** drag a numbered corner. Click or drag a **+** handle to insert a corner between existing points.
+- **Either view:** choose **Insert point** and an edge, then click its new position; or choose a corner and **Move corner**, then click the correct position. **Delete corner** and **Undo** also work.
+- **3D:** move/insert points by clicking the loaded surface, so each edited point gets a real map coordinate and elevation. Roof surfaces use outline-only rendering; no filled sheet or extruded walls span the property.
+- **Instant Quote:** the initial price uses the recommended target-margin price. Edit **Final customer price** or the quote's **Target gross margin**, or click **Use recommended price** again. Labour, chemicals, estimated travel/fuel, equipment, consumables and overheads appear separately with expected profit/margin. Internal costs do not appear on the customer quote.
+- Travel uses an editable **round-trip kilometre estimate**, not a live route calculation. Costs are estimates from your business pricing settings, not actual job expenses.
+- A successful empty database response no longer produces a false failed-save error. A failed activity note is reported separately from an already saved quote.
+
+Install the updated extension folder and refresh Google Earth. Refresh any already-open measurement workspace to load the new editing controls.
+
 A Manifest V3 Chrome extension that overlays a TurnKey quoting toolbar on
 [Google Earth](https://earth.google.com), lets an operator measure a
 property's roof/driveway/house/fence on an accurate satellite map, prices it

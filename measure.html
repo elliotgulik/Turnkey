@@ -28,6 +28,15 @@
       <button type="button" data-range="0.7" aria-label="Zoom in">＋</button><button type="button" data-range="1.4" aria-label="Zoom out">−</button>
       <span>Shift + drag to rotate freely. Trace one roof face at a time.</span>
     </div>
+    <div class="tkm-edit-controls" aria-label="Edit outline">
+      <button type="button" data-edit="add" aria-pressed="true">Draw</button>
+      <button type="button" data-edit="insert" aria-pressed="false">Insert point</button>
+      <button type="button" data-edit="move" aria-pressed="false">Move corner</button>
+      <label>Corner <select id="tkm-corner" aria-label="Selected corner"></select></label>
+      <label>Edge <select id="tkm-edge" aria-label="Selected edge"></select></label>
+      <button type="button" id="tkm-delete">Delete corner</button>
+      <span id="tkm-edit-help" role="status"></span>
+    </div>
     <div class="tkm-map-wrap">
       <div id="tkm-map-2d" class="tkm-map"></div>
       <div id="tkm-map-3d" class="tkm-map" hidden></div>
@@ -45,7 +54,7 @@
     <div class="tkm-footer">
       <div class="tkm-readout" id="tkm-readout">Click points on the map to trace the outline.</div>
       <div class="tkm-actions">
-        <button type="button" class="tkm-btn" id="tkm-undo">Undo point</button>
+        <button type="button" class="tkm-btn" id="tkm-undo">Undo</button>
         <button type="button" class="tkm-btn" id="tkm-clear">Clear</button>
         <button type="button" class="tkm-btn tkm-btn-accent" id="tkm-finish" disabled>Finish</button>
       </div>

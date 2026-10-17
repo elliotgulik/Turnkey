@@ -13,7 +13,8 @@
 // root by scripts/build-static.js (copied from extension/geometry.js) —
 // loading it here is just this website importing its own same-origin JS,
 // not the extension loading remote code.
-import { measureGeometry, validatePoints, distanceMeters } from './geometry.js';
+import { measureGeometry, distanceMeters } from './geometry.js';
+import { editOutline, createOutlineHistory, displayAltitude } from './measurement-editor.js';
 
 const params = new URLSearchParams(location.search);
 const requestId = params.get('requestId') || '';
@@ -73,7 +74,8 @@ if (!cfg.mapsKey) {
 // Canonical list of real points ({lat, lng, altitude?}) — both the 2D and
 // 3D views render from this one array and push into it, so switching views
 // never loses or re-derives a point from screen pixels.
-let points = [];
+const history = createOutlineHistory();
+let points = [], editAction='add', selectedCorner=0, selectedEdge=0, maps3dLib=null;
 let activeView = '2d';
 // Explicit, operator-chosen — NEVER auto-inferred from whether points
 // happen to carry an altitude. Always starts (and falls back to) 'ground'.
@@ -115,10 +117,11 @@ function boundingDiagonalMeters() {
 
 function render() {
   const preview = livePreview();
-  const canFinish = points.length >= minPoints() && !preview.blocked;
+  const canFinish = points.length >= minPoints() && !preview.blocked && !finishing;
   els.finish.disabled = !canFinish;
-  els.undo.disabled = points.length === 0;
-  els.clear.disabled = points.length === 0;
+  els.undo.disabled = !history.canUndo || finishing;
+  els.clear.disabled = points.length === 0 || finishing;
+  renderEditorControls();
 
   let readout;
   if (preview.result) {
@@ -149,6 +152,7 @@ function updateModeToggle() {
   els.modeToggle.querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.getAttribute('data-mode') === mode));
 }
 function setMode(next) {
+  if(finishing)return;
   if (next === 'surface' && activeView !== '3d') return; // never reachable without being in 3D view in the first place
   mode = next;
   updateModeToggle();
@@ -175,29 +179,36 @@ function initMap2d() {
   });
 }
 function renderOverlay2d() {
-  if (activeView !== '2d') return;
-  markers2d.forEach((m) => m.setMap(null));
-  markers2d = points.map((p, i) => new google.maps.Marker({
-    position: { lat: p.lat, lng: p.lng },
-    map: map2d,
-    label: { text: String(i + 1), color: '#fff', fontSize: '11px' },
-    icon: { path: google.maps.SymbolPath.CIRCLE, scale: 9, fillColor: '#0f7d6b', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2 }
-  }));
-  if (overlay2d) overlay2d.setMap(null);
-  const path = points.map((p) => ({ lat: p.lat, lng: p.lng }));
-  if (points.length > 1) {
-    overlay2d = interaction === 'closed'
-      ? new google.maps.Polygon({ paths: path, map: map2d, fillColor: '#0f7d6b', fillOpacity: 0.18, strokeColor: '#0f7d6b', strokeWeight: 3 })
-      : new google.maps.Polyline({ path, map: map2d, strokeColor: '#0f7d6b', strokeWeight: 3 });
-  } else {
-    overlay2d = null;
+  if (activeView !== '2d' || !map2d) return;
+  markers2d.forEach(m=>m.setMap(null));markers2d=[];
+  const markerAt=(position,label,scale,drag,click)=>{
+    const marker=new google.maps.Marker({position,map:map2d,draggable:!finishing,label:{text:label,color:'#fff',fontSize:'11px'},icon:{path:google.maps.SymbolPath.CIRCLE,scale,fillColor:'#0f7d6b',fillOpacity:1,strokeColor:'#fff',strokeWeight:2}});
+    marker.addListener('dragend',e=>{if(!finishing)drag({lat:e.latLng.lat(),lng:e.latLng.lng()});});
+    marker.addListener('click',()=>{if(!finishing)click();});
+    markers2d.push(marker);
+  };
+  points.forEach((p,i)=>markerAt({lat:p.lat,lng:p.lng},String(i+1),9,
+    p=>commitEdit({action:'move',index:i,point:p,view:'2d'}),
+    ()=>{selectedCorner=i;editAction='move';render();}));
+  const edges=interaction==='closed'&&points.length>2?points.length:Math.max(0,points.length-1);
+  for(let i=0;i<edges;i++){
+    const a=points[i],b=points[(i+1)%points.length];
+    const p={lat:(a.lat+b.lat)/2,lng:((a.lng+((b.lng-a.lng+540)%360-180)/2+540)%360)-180};
+    markerAt(p,'+',7,next=>commitEdit({action:'insert',index:i,point:next,view:'2d'}),()=>commitEdit({action:'insert',index:i,point:p,view:'2d'}));
   }
+  if(overlay2d)overlay2d.setMap(null);
+  const path=points.map(p=>({lat:p.lat,lng:p.lng}));
+  overlay2d=points.length>1?(interaction==='closed'&&points.length>=3
+    ?new google.maps.Polygon({paths:path,map:map2d,fillColor:'#0f7d6b',fillOpacity:0.1,strokeColor:'#0f7d6b',strokeWeight:3})
+    :new google.maps.Polyline({path,map:map2d,strokeColor:'#0f7d6b',strokeWeight:3})):null;
+  overlay2d?.addListener('click',e=>{e.stop?.();if(e.latLng)addPoint({lat:e.latLng.lat(),lng:e.latLng.lng()});});
 }
 
 // ── 3D "Inspect" view (optional — multi-angle, altitude-aware) ──────────
 async function tryInit3d() {
   try {
     const maps3d = await google.maps.importLibrary('maps3d');
+    maps3dLib=maps3d;
     if (!maps3d || !maps3d.Map3DElement) throw new Error('maps3d library unavailable');
     map3d = new maps3d.Map3DElement({
       center: { lat: startLat, lng: startLng, altitude: 0 },
@@ -242,44 +253,32 @@ async function tryInit3d() {
   }
 }
 function renderOverlay3d() {
-  if (!map3d || activeView !== '3d') return;
-  markers3d.forEach((m) => m.remove());
-  markers3d = [];
-  const MarkerEl = window.customElements && window.customElements.get('gmp-marker-3d');
-  points.forEach((p) => {
-    if (!MarkerEl) return;
-    const marker = document.createElement('gmp-marker-3d');
-    // ABSOLUTE when this point actually has a real elevation; CLAMP_TO_GROUND
-    // otherwise — the SDK's own default altitude mode can otherwise bury a
-    // roof-height marker visually at ground level, which looks like the
-    // click failed even though the coordinate itself was captured fine.
-    marker.altitudeMode = p.altitude != null ? 'ABSOLUTE' : 'CLAMP_TO_GROUND';
-    marker.position = { lat: p.lat, lng: p.lng, altitude: p.altitude || 0 };
-    map3d.appendChild(marker);
-    markers3d.push(marker);
+  if(!map3d||activeView!=='3d'||!maps3dLib)return;
+  markers3d.forEach(m=>m.remove());markers3d=[];
+  if(overlay3d){overlay3d.remove();overlay3d=null;}
+  const display=displayAltitude(points,mode,maps3dLib.AltitudeMode);
+  const Marker=maps3dLib.MarkerInteractiveElement||maps3dLib.Marker3DInteractiveElement;
+  if(Marker)display.coordinates.forEach((position,i)=>{
+    const marker=new Marker({position,altitudeMode:display.altitudeMode,title:'Corner '+(i+1)});
+    if(maps3dLib.MarkerInteractiveElement){
+      const dot=document.createElement('span');dot.textContent=String(i+1);
+      dot.style.cssText='display:block;width:22px;height:22px;border:2px solid white;border-radius:50%;background:#138a72;color:white;text-align:center;font:bold 12px/18px sans-serif;box-shadow:0 1px 4px #0005';
+      marker.anchorLeft='-50%';marker.anchorTop='-50%';marker.appendChild(dot);
+    }else{marker.label=String(i+1);marker.extruded=false;marker.drawsWhenOccluded=false;}
+    marker.addEventListener('gmp-click',e=>{e.stopPropagation();if(!finishing){selectedCorner=i;editAction='move';render();}});
+    map3d.appendChild(marker);markers3d.push(marker);
   });
-
-  if (overlay3d) { overlay3d.remove(); overlay3d = null; }
-  if (points.length > 1) {
-    const tagName = interaction === 'closed' ? 'gmp-polygon-3d' : 'gmp-polyline-3d';
-    const OverlayEl = window.customElements && window.customElements.get(tagName);
-    if (OverlayEl) {
-      const el = document.createElement(tagName);
-      const allAltitude = points.every((p) => p.altitude != null);
-      el.altitudeMode = allAltitude ? 'ABSOLUTE' : 'CLAMP_TO_GROUND';
-      const coords = points.map((p) => ({ lat: p.lat, lng: p.lng, altitude: p.altitude || 0 }));
-      if (interaction === 'closed') el.outerCoordinates = coords;
-      else el.coordinates = coords;
-      el.strokeColor = '#0f7d6b';
-      el.strokeWidth = 3;
-      if (interaction === 'closed') { el.fillColor = '#0f7d6b'; el.fillOpacity = 0.18; }
-      map3d.appendChild(el);
-      overlay3d = el;
-    }
+  if(points.length>1){
+    const path=[...display.coordinates];if(interaction==='closed'&&points.length>=3)path.push({...path[0]});
+    // Outline only: no filled sheet spanning roofs, no extruded walls,
+    // and no drawing through buildings. Always use the SDK's actual enums.
+    overlay3d=new maps3dLib.Polyline3DElement({path,altitudeMode:display.altitudeMode,strokeColor:'#138a72',strokeWidth:3,drawsOccludedSegments:false,extruded:false});
+    map3d.appendChild(overlay3d);
   }
 }
 
 function switchView(view) {
+  if(finishing)return;
   if (view === activeView) return;
   if (view === '3d' && !maps3dAvailable) return;
   activeView = view;
@@ -308,24 +307,58 @@ document.getElementById('tkm-camera-controls').addEventListener('click',e=>{
 });
 document.getElementById('tkm-camera-tilt').addEventListener('change',e=>{if(map3d)map3d.tilt=Number(e.target.value);});
 
-function addPoint(p) {
-  if (interaction === 'closed' && points.length >= 3) {
-    const first = points[0];
-    const d = distanceMeters({ lat: p.lat, lng: p.lng }, { lat: first.lat, lng: first.lng });
-    if (d < 2) return; // closing the loop near the start point — don't add a duplicate
-  }
-  points.push(p);
-  render();
+function commitEdit(operation){
+  if(finishing)return;
+  try{
+    const next=editOutline(points,operation);
+    if(!history.commit(next))return;
+    points=history.points;
+    if(operation.action==='insert'){selectedCorner=operation.index+1;editAction='move';}
+    render();
+  }catch(error){document.getElementById('tkm-edit-help').textContent=error.message;}
 }
-
-els.undo.addEventListener('click', () => { points.pop(); render(); });
-els.clear.addEventListener('click', () => { points = []; render(); });
+function addPoint(p){
+  commitEdit({action:editAction,index:editAction==='insert'?selectedEdge:selectedCorner,point:p,view:activeView});
+}
+function renderEditorControls(){
+  selectedCorner=Math.min(selectedCorner,Math.max(0,points.length-1));
+  const edgeCount=interaction==='closed'&&points.length>2?points.length:Math.max(0,points.length-1);
+  selectedEdge=Math.min(selectedEdge,Math.max(0,edgeCount-1));
+  if((editAction==='move'&&!points.length)||(editAction==='insert'&&!edgeCount))editAction='add';
+  const corner=document.getElementById('tkm-corner'),edge=document.getElementById('tkm-edge');
+  if(corner.options.length!==points.length)corner.innerHTML=points.map((_,i)=>`<option value="${i}">${i+1}</option>`).join('');
+  const edgeOptions=Array.from({length:edgeCount},(_,i)=>`<option value="${i}">${i+1} → ${(i+1)%points.length+1}</option>`).join('');
+  if(edge.dataset.options!==edgeOptions){edge.innerHTML=edgeOptions;edge.dataset.options=edgeOptions;}
+  corner.value=String(selectedCorner);edge.value=String(selectedEdge);
+  corner.disabled=finishing||!points.length;edge.disabled=finishing||!edgeCount;
+  document.querySelectorAll('[data-edit]').forEach(button=>{
+    button.setAttribute('aria-pressed',String(button.dataset.edit===editAction));
+    button.disabled=finishing||(button.dataset.edit==='move'&&!points.length)||(button.dataset.edit==='insert'&&!edgeCount);
+  });
+  document.getElementById('tkm-delete').disabled=finishing||!points.length;
+  document.getElementById('tkm-edit-help').textContent=editAction==='insert'
+    ?'Click the new position to insert a corner on the selected edge.'
+    :editAction==='move'?`Click a new ${activeView==='3d'?'surface ':''}position for corner ${selectedCorner+1}.`
+    :activeView==='2d'?'Draw around the property. Drag numbered corners or the + edge handles to refine it.'
+    :'Draw on the loaded surface. Select an edge to insert a point, or select a corner to move it.';
+}
+ document.querySelector('.tkm-edit-controls').addEventListener('click',e=>{
+   const button=e.target.closest('[data-edit]');if(button&&!finishing){editAction=button.dataset.edit;render();}
+ });
+ document.getElementById('tkm-corner').addEventListener('input',e=>{selectedCorner=Number(e.target.value);editAction='move';});
+ document.getElementById('tkm-edge').addEventListener('input',e=>{selectedEdge=Number(e.target.value);editAction='insert';});
+ document.getElementById('tkm-corner').addEventListener('change',e=>{selectedCorner=Number(e.target.value);editAction='move';render();});
+ document.getElementById('tkm-edge').addEventListener('change',e=>{selectedEdge=Number(e.target.value);editAction='insert';render();});
+ document.getElementById('tkm-delete').addEventListener('click',()=>commitEdit({action:'delete',index:selectedCorner}));
+ els.undo.addEventListener('click',()=>{if(!finishing){points=history.undo();render();}});
+ els.clear.addEventListener('click',()=>{if(!finishing){history.commit([]);points=history.points;editAction='add';render();}});
 
 let finishing = false;
 let finishTimer;
 els.finish.addEventListener('click', () => {
   if (finishing || points.length < minPoints()) return;
   finishing = true;
+  render();
   els.finish.disabled = true;
   els.finish.textContent = 'Sending…';
   clearTimeout(finishTimer);

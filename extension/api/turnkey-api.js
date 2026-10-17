@@ -138,12 +138,21 @@ export class TurnKeyClient {
         ...(opts.headers || {})
       }
     });
+    if (res.status === 204 && res.ok) return null;
+    const text=await res.text();
+    let body=null;
+    if(text.trim()){
+      try{body=JSON.parse(text);}
+      catch{throw new Error('TurnKey returned an unreadable response (HTTP '+res.status+'). Please retry; an existing draft will be reused.');}
+    }
     if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
+      body ||= {};
       throw new Error(body.message || body.error_description || ('Request failed (HTTP ' + res.status + ')'));
     }
-    if (res.status === 204) return null;
-    return res.json();
+    // PostgREST return=minimal commonly uses 201 with NO body, not 204.
+    // A successful note write must not make an already saved quote fail.
+    if(body===null && (opts.method||'GET')==='GET')throw new Error('TurnKey returned no data for this read. Please retry.');
+    return body;
   }
 
   /** business_id + role for the signed-in user — same lookup as index.html's resolveProfile(). */

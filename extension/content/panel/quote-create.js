@@ -59,6 +59,7 @@ export async function createQuoteDraft(api, progress, { businessId, payload, scr
         services: payload.lines,
         total: payload.total,
         areaPolys: payload.areaPolys,
+        ...(payload.costSnapshot ? {costSnapshot:payload.costSnapshot,estimatedCost:payload.estimatedCost,estimatedMarginPct:payload.estimatedMarginPct,gstRegistered:payload.gstRegistered,targetMargin:payload.targetMargin} : {}),
         source: 'Google Earth Extension'
         // No `quoteSentAt` — this creates a DRAFT (see turnkey-api.js's
         // createQuote status: 'draft'); nothing has actually been sent to
@@ -79,14 +80,19 @@ export async function createQuoteDraft(api, progress, { businessId, payload, scr
   }
 
   if (!progress.activityLogged) {
-    await api.logActivity(businessId, {
+    try {
+      await api.logActivity(businessId, {
       customerId,
       jobId: job.id,
       type: 'note',
       summary: 'Quote drafted from Google Earth — ' + payload.lines.length + ' service' + (payload.lines.length === 1 ? '' : 's') + ', ' + payload.total
-    });
-    progress.activityLogged = true;
+      });
+      progress.activityLogged = true;
+      delete progress.activityWarning;
+    } catch {
+      progress.activityWarning='Your quote is saved. Its activity note could not be recorded.';
+    }
   }
 
-  return { customerId, quote, job };
+  return { customerId, quote, job, warning:progress.activityWarning || '' };
 }
