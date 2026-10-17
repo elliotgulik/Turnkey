@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TurnKey — Measure</title>
+<script src="config.js"></script>
+<link rel="stylesheet" href="measure.css">
+</head>
+<body>
+  <div id="app" class="tkm-app">
+    <div class="tkm-topbar">
+      <div class="tkm-brand">TURNKEY <span class="tkm-brand-sub">Measure</span></div>
+      <div class="tkm-category" id="tkm-category"></div>
+      <div class="tkm-mode-toggle" id="tkm-mode-toggle">
+        <button type="button" data-mode="ground" class="active">Ground</button>
+        <button type="button" data-mode="surface" disabled title="Switch to 3D inspect and trace with every point on a real surface to enable this">3D surface</button>
+      </div>
+      <div class="tkm-view-toggle" id="tkm-view-toggle" hidden>
+        <button type="button" data-view="2d" class="active">2D top-down</button>
+        <button type="button" data-view="3d">3D inspect</button>
+      </div>
+    </div>
+    <div id="tkm-camera-controls" class="tkm-camera-controls" hidden aria-label="3D camera controls">
+      <span>View from</span>
+      <button type="button" data-heading="0">North</button><button type="button" data-heading="90">East</button><button type="button" data-heading="180">South</button><button type="button" data-heading="270">West</button>
+      <label>Angle <select id="tkm-camera-tilt"><option value="0">Overhead</option><option value="45">45°</option><option value="60" selected>60°</option><option value="75">75°</option></select></label>
+      <button type="button" data-range="0.7" aria-label="Zoom in">＋</button><button type="button" data-range="1.4" aria-label="Zoom out">−</button>
+      <span>Shift + drag to rotate freely. Trace one roof face at a time.</span>
+    </div>
+    <div class="tkm-map-wrap">
+      <div id="tkm-map-2d" class="tkm-map"></div>
+      <div id="tkm-map-3d" class="tkm-map" hidden></div>
+      <div id="tkm-3d-unavailable" class="tkm-banner" hidden>
+        3D inspect isn't available for this property/browser (no WebGL, no 3D imagery here, or the Maps API key isn't enabled for it) — the 2D satellite view above still works normally for measuring.
+      </div>
+      <div id="tkm-steady-hint" class="tkm-banner tkm-banner-soft" hidden>Camera is still moving — points are only added once it settles.</div>
+      <div id="tkm-state" class="tkm-state-overlay">
+        <div class="tkm-state-box">
+          <div class="tkm-spinner"></div>
+          <p>Loading satellite map…</p>
+        </div>
+      </div>
+    </div>
+    <div class="tkm-footer">
+      <div class="tkm-readout" id="tkm-readout">Click points on the map to trace the outline.</div>
+      <div class="tkm-actions">
+        <button type="button" class="tkm-btn" id="tkm-undo">Undo point</button>
+        <button type="button" class="tkm-btn" id="tkm-clear">Clear</button>
+        <button type="button" class="tkm-btn tkm-btn-accent" id="tkm-finish" disabled>Finish</button>
+      </div>
+    </div>
+  </div>
+  <script type="module" src="measure.js"></script>
+</body>
+</html>

@@ -1,154 +1,247 @@
 # TurnKey — Google Earth Instant Quote (Chrome extension)
 
 A Manifest V3 Chrome extension that overlays a TurnKey quoting toolbar on
-[Google Earth](https://earth.google.com), lets an operator trace a property's
-driveway/roof/house/fence on a real geo-anchored map, prices it with the
-business's own TurnKey rates, and creates the quote directly in TurnKey —
-without leaving the browser tab.
+[Google Earth](https://earth.google.com), lets an operator measure a
+property's roof/driveway/house/fence on an accurate satellite map, prices it
+with the business's own TurnKey rates, and creates a draft quote directly in
+TurnKey — without leaving the browser.
 
-It's a working prototype, not a mockup: every screen writes to and reads from
-the real TurnKey Supabase project (`customers`, `quotes`, `jobs`,
-`activity_log`, `attachments`), reuses TurnKey's actual pricing engine
-byte-for-byte, and authenticates with the operator's real TurnKey login.
+Every screen writes to and reads from the real TurnKey Supabase project
+(`customers`, `quotes`, `jobs`, `activity_log`, `attachments`), reuses
+TurnKey's actual pricing engine byte-for-byte, and authenticates with the
+operator's real TurnKey login.
 
-## Install (unpacked, for development)
+## Install / update (unpacked)
 
 1. `chrome://extensions` → enable **Developer mode** (top right).
-2. **Load unpacked** → select this `extension/` folder.
+2. **Load unpacked** → select this `extension/` folder (if you already had
+   an older version loaded, click the reload icon on this extension's card
+   instead — v0.2.0 changed its permissions, which Chrome will ask you to
+   re-approve once).
 3. Click the TurnKey icon in the toolbar → enter your TurnKey site's URL
-   (the same address you use to log into the CRM, e.g.
-   `https://yourbusiness.netlify.app`) → **Continue** → sign in with your
-   normal TurnKey email/password.
+   (the same address you use to log into the CRM) → **Continue** → sign in
+   with your normal TurnKey email/password.
 4. Open [earth.google.com](https://earth.google.com), search for a property,
    and the TurnKey toolbar appears in the top-right.
 
 The extension reads its Supabase connection details from your TurnKey site's
-own public `config.js` at connect time (the same file `index.html`/
-`booking.html`/`quote.html` already load) rather than shipping any
-business's credentials inside the extension — see `api/turnkey-api.js`'s
+own public `config.js` at connect time, parsed with a small set of
+allowlisted regexes rather than executing it — see `api/turnkey-api.js`'s
 `fetchSiteConfig()`. Nothing beyond the anon key and site URL (both already
-public, by the app's own design — see the header comment in `config.js`) is
-ever stored.
+public, by the app's own design) is ever stored.
+
+## How measuring actually works (read this before the "known limitations")
+
+Google Earth Web renders through a proprietary WebGL globe with no public JS
+API for reading camera state, terrain elevation, or converting a screen
+click into a real coordinate — there's nothing a content script can hook
+into for that, and the previous version of this extension's workaround (an
+in-page OpenStreetMap tile tracer stretched onto a fixed-size canvas) had
+real bugs: it requested a zoom level OSM doesn't serve, could render a blank
+map if Earth's page CSP blocked the tile images, and applied one fixed
+pixel-to-metre scale to a canvas whose on-screen size didn't match that
+scale — producing a wrong number instead of an obviously-broken one.
+
+**"Outline"/"Distance" now opens a dedicated TurnKey-hosted workspace tab**
+(`measure.html`, served from your own TurnKey site, e.g.
+`https://turnkeycrm.net/measure.html`) instead of tracing inside the Earth
+page. That page:
+
+- Loads the real Google Maps JavaScript SDK directly (your TurnKey site's
+  own `config.js` → `mapsKey`), giving you an actual 2D satellite top-down
+  view with native click → lat/lng, polygon/polyline drawing, pan/zoom, and
+  Undo/Clear/Finish — not a stretched image mosaic.
+- Offers **"3D inspect"** where available (`google.maps.maps3d.Map3DElement`
+  — current Google Maps JS API; the old `tilt: 45` imagery API is
+  decommissioned and isn't used here) with heading/tilt/range camera
+  controls, so you can walk around a roof from multiple angles. Points
+  collected in 3D carry a real altitude; points collected in 2D don't, and
+  are never guessed.
+- Lets you explicitly choose **Ground** (always available) vs **3D
+  surface/3D distance** (only selectable while in 3D inspect) — this is
+  never auto-detected from whether a point happens to have an altitude.
+  Switching back to 2D forces the mode back to Ground, since 2D clicks
+  can't supply a real elevation.
+- Shows a live preview using **the exact same math** as the final,
+  authoritative calculation (`extension/geometry.js`, copied to this site's
+  own `/geometry.js` at build time by `scripts/build-static.js`) — not a
+  second, merely-similar implementation.
+
+No extension code or remotely-hosted script runs inside Google Earth's page
+to do this — see "The secure bridge" below for how the result actually gets
+back to Earth.
+
+### House vs Roof/Driveway/Deck: area vs perimeter
+
+"House" traces the same closed-outline interaction as Roof/Driveway/Deck,
+but is priced by **perimeter** (metres of wall, matching the `housewash`
+service's `shape:'closed', unit:'m', basis:'perimeter'`), not area. The
+service picker filters candidate services by BOTH click-shape and unit so a
+perimeter measurement can never be assigned to an m²-priced service by
+mistake (see `quote.js`'s `renderServiceOptions()`).
+
+### The secure bridge (how a measurement gets back to Google Earth)
+
+1. The Earth content script asks the **background service worker** to open
+   the workspace (`TK_OPEN_WORKSPACE`). The worker checks the connected
+   site's origin against a small allowlist it can actually inject into
+   (`https://turnkeycrm.net` + local dev origins — see
+   `BRIDGE_ALLOWED_ORIGINS` in `background/service-worker.js`, kept in sync
+   with `manifest.json`'s `web_accessible_resources` for `geometry.js`); a
+   self-hosted site outside that list gets a clear error up front instead of
+   a tab that can never finish.
+2. The worker creates a random `requestId`, opens `measure.html?requestId=…`
+   in a new tab, and records `{earthTabId, workspaceTabId, category, kind,
+   createdAt}` in `chrome.storage.session` — **not just an in-memory Map**.
+   MV3 service workers are killed after ~30s idle and can restart between
+   any two messages; a multi-minute 3D trace will outlive several such
+   restarts, so the pending-request registry is rehydrated from
+   `chrome.storage.session` on each access rather than assumed to still be
+   in memory.
+3. Once that tab loads, the worker injects
+   `content/bridge/measure-bridge.js` into it via `chrome.scripting.executeScript`
+   (no static content-script match for arbitrary sites — this requires the
+   host permission the operator already granted when connecting).
+4. When you click **Finish**, `measure.js` `postMessage`s the raw points +
+   your explicit `kind`/`mode` choice to itself; the injected bridge script
+   validates the message (exact origin/source, payload size/shape, no
+   duplicate Finish for the same `requestId`), runs the **authoritative**
+   `geometry.js` calculation, and sends the result to the background worker.
+5. The worker checks the result came from the exact workspace tab it opened
+   for that `requestId`, hasn't already been completed, then forwards it to
+   the original Earth tab and tells the bridge to show "Sent ✓".
+
+A spoofed origin, a stale/replayed `requestId`, a message from the wrong
+tab, or a duplicate Finish are all rejected — see
+`extension/tests/background-bridge.test.cjs` and
+`extension/tests/measure-bridge.test.cjs`.
 
 ## How it reuses TurnKey rather than duplicating it
 
 | Concern | Extension behaviour |
 |---|---|
-| Auth | Signs in via Supabase's password grant — the same call `index.html`'s `sb.auth.signInWithPassword()` makes. RLS (`current_business_id()`) scopes every read/write to the operator's own business automatically; no new auth system. |
-| Pricing | `vendor/pricing-engine.js` is a byte-for-byte copy of the repo root's `pricing-engine.js` — the exact `TK_PRICING.SERVICES`/`quoteTotal()`/`gstFromInclusive()` every other TurnKey page uses. A quote priced here matches a quote priced in the CRM. |
-| Customers/leads | Writes to `public.customers` with `source: 'Google Earth Extension'` — same table, same shape `index.html` writes. |
-| Quotes | Writes `public.quotes` + `public.jobs` (with `details.areaPolys`/`details.services`) using the exact two-step pattern `index.html`'s `syncRecordToSupabase()` uses — no new tables, no new RPC. |
-| Measurements | Stored as `job.details.areaPolys` — the same array shape (`{id, service, size, unit, points, geoPts}`) `booking.html`'s map-drawing tool already produces and `map-snapshot.js` already knows how to render. A quote built here shows up correctly in the CRM's existing property-map UI with zero CRM changes. |
-| Screenshots | Uploaded to the same private `turnkey-uploads` bucket, same `{business_id}/quote_attachment/...` path convention, same `attachments` table `uploadAttachment()` uses in `index.html`. |
-| Design | `content/panel/panel.css` copies `index.html`'s `:root` CSS variables verbatim (there's no shared theme file in this no-build-step codebase to import instead). |
+| Auth | Signs in via Supabase's password grant, proxied through the background worker (`api/client-bridge.js` → `TK_API` messages) rather than fetched directly from inside Google Earth's page — see "API calls" below. RLS scopes every read/write to the operator's own business automatically. |
+| Pricing | `vendor/pricing-engine.js` is a byte-for-byte copy of the repo root's `pricing-engine.js`. |
+| Measurement math | `extension/geometry.js` (geodesic ground area/length, ECEF-triangulated 3D surface area, closed-form validation) is the one implementation used by both the hosted workspace's live preview and the bridge's authoritative calculation. |
+| Customers/leads | Writes to `public.customers` with `source: 'Google Earth Extension'`. |
+| Quotes | Creates a **DRAFT** `quotes` row (`status: 'draft'`) + a `jobs` row — it never marks a quote `sent` or stamps a fake `quoteSentAt`, since nothing has actually been emailed to the customer at this point. |
+| Measurements | Stored as `job.details.areaPolys`, same shape `booking.html`'s tool produces (`{id, service, size, unit, points, geoPts}`). `geoPts` (real lat/lng, with altitude for 3D-surface traces) is the source of truth; `points` is a same-length local-projection placeholder index.html's own Quote Editor immediately recomputes from `geoPts` — never used for measurement math itself. |
+| Screenshots | Uploaded to the same private `turnkey-uploads` bucket/`attachments` table convention `index.html` uses. |
 
 No new database tables or columns were added for this feature.
 
-## Known limitations (read before assuming full parity with the brief)
+## API calls: why they go through the background worker
 
-**Google Earth's 3D view can't be measured directly, and this is investigated,
-not assumed.** Earth Web renders through a proprietary WebGL globe with no
-public JS API for reading camera state, terrain elevation, or converting a
-screen click into a real coordinate — there is nothing a content script can
-hook into for that. The one thing Earth's page does expose is its own URL,
-which encodes the camera's look-at point as the operator flies/searches
-(`@lat,lng,...`); the extension reads that to know roughly where the
-property is.
+`turnkey-api.js`'s `TurnKeyClient`/`fetchSiteConfig()` only ever run in the
+**background service worker** now (`background/service-worker.js`), not in
+the Earth content script. Two independent reasons converged on the same
+fix:
 
-Rather than fake per-pixel accuracy on a tilted 3D view, **"Measure" opens a
-small top-down tile view inside the TurnKey panel**, anchored at that
-location, using the exact same technique `booking.html`'s own property-outline
-tool already uses and TurnKey already trusts for real quotes: a Web Mercator
-tile mosaic at a known zoom level (where meters-per-pixel is exact, unlike a
-perspective 3D view) plus a local flat-earth projection for each traced
-point (`content/panel/measurement.js` — see its header comment for the full
-reasoning). Google Earth itself is never touched — panning/zooming/rotating/
-searching all keep working exactly as normal, since the tracer is a separate
-surface, not an overlay drawn onto Earth's own canvas.
+- **CSP/CORS**: `fetch()`ing Supabase directly from a script execution
+  context tied to `earth.google.com` is subject to that page's CSP and
+  cross-origin posture, neither of which this extension controls or can
+  rely on. A background service worker has its own `extension_pages` CSP
+  instead.
+- **Blast radius**: the content script (and popup) now only ever reach a
+  small, explicit allowlist of named operations (`TK_API` messages — see
+  `API_ACTIONS` in `background/service-worker.js`), not an arbitrary
+  "fetch this Supabase path" proxy. A compromised/malicious page script
+  running anywhere a content script of this extension runs can't use this
+  channel to read/write tables beyond what the extension's own UI already
+  does.
 
-Trade-off this creates: the trace happens on a flat top-down map, not on
-Earth's cinematic 3D view, so there are two "map" experiences in the flow —
-Earth for finding/orienting the property, the TurnKey tile view for actually
-tracing it. That's a deliberate, disclosed choice, not an oversight; building
-a second, less-accurate "click on the tilted 3D globe" measurement engine
-would have been strictly worse and would have duplicated logic that already
-exists correctly elsewhere in this codebase.
+`api/client-bridge.js` is the thin messaging client both the content panel
+and the popup use instead of talking to Supabase directly.
 
-**Tile images use the free OpenStreetMap tile server, not Google's satellite
-imagery**, so the extension needs no separate Maps API key of its own (avoids
-having to manage a key/referrer-restriction inside an unpacked extension
-bundle). If a business's TurnKey deployment has a Google Maps key configured,
-a future pass could offer Static Maps satellite imagery here as well — not
-done in this prototype.
+## Idempotent quote creation
 
-**Page CSP risk, flagged rather than silently ignored:** the tracer's tile
-images are inserted into Google Earth's own page DOM from a content script.
-Modern Chrome generally exempts content-script-initiated resource loads from
-the host page's Content-Security-Policy, but this hasn't been verified
-against Earth's live, current CSP in an actual browser session (not
-available in the environment this was built in). `measurement.js` detects
-the failure case (every tile image erroring out) and shows a clear in-panel
-message rather than a silently blank map — see `tk-tracer-tilefail` — but if
-you hit this in testing, the fix is to move the tracer into a dedicated
-extension popup window (`chrome.windows.create`) instead of the in-page
-shadow DOM, since extension pages aren't subject to the host page's CSP at
-all. The tracer/quote functions are already written as plain `(container,
-ctx, actions)` renderers with no dependency on being inside a content
-script, so that move is a plumbing change, not a rewrite.
+`content/panel/quote-create.js`'s `createQuoteDraft()` persists
+which steps (customer/quote/job/screenshot/activity-log) already
+succeeded in a `progress` object scoped to the current quote-panel session,
+business-bound: if the connected business changes between attempts (e.g.
+disconnect → reconnect a different TurnKey account while the panel is still
+open), or a step's returned row doesn't actually belong to the current
+business, its id is **not** adopted — see
+`extension/tests/quote-create.test.cjs`. Retrying after a partial failure
+reuses already-created ids instead of creating a second customer/quote/job
+for the same intent.
 
-**Screenshots capture the whole visible tab, not a pixel-composited
-image.** `chrome.tabs.captureVisibleTab` is used (Chrome's own sanctioned
-screenshot API) rather than drawing the OSM tile pixels onto an offscreen
-`<canvas>` — `toDataURL()`/`toBlob()` on cross-origin tile images would taint
-the canvas unless OpenStreetMap's tile server reliably sends
-cross-origin-readable CORS headers for programmatic reproduction, which its
-usage policy doesn't commit to. `captureVisibleTab` still captures the
-TurnKey measurement overlay when the tracer is open, since that's real
-on-screen DOM — see `content/panel/screenshot.js`'s header comment.
+## Known limitations
 
-**Address detection is a best-effort guess, always editable.** Earth's URL
-sometimes contains a `/search/<slug>/` segment reflecting the last search
-query — that's decoded into the Property field as a starting point, but it's
-just as often a place name, not a postal address, so it's never treated as
-authoritative and the field is a plain editable text input (per the brief's
-own §8 instruction not to build fragile scraping logic).
+**Self-hosted TurnKey sites outside the bridge allowlist can't use the
+measurement workspace yet.** `web_accessible_resources` (needed for the
+bridge to `import()` `geometry.js` on the workspace tab's own origin) is a
+static manifest list — unlike `host_permissions`, it can't be extended at
+runtime when an operator types in a custom site URL. Opening the workspace
+on an unlisted origin fails with a clear message rather than opening a tab
+that can never complete. Production (`https://turnkeycrm.net`) and common
+local-dev origins are covered; extending this to arbitrary self-hosted
+sites would need either a build step that regenerates the manifest per
+deployment, or `externally_connectable`-style trust of arbitrary sites,
+which this extension deliberately avoids.
+
+**3D inspect can be unavailable** (no WebGL, no 3D imagery for this
+location, or the Maps API key doesn't have 3D enabled) — the workspace
+shows a visible banner explaining this and the 2D satellite view keeps
+working normally; it never pretends 3D succeeded.
+
+**3D surface area is an aerial estimate, not a survey measurement** — it
+triangulates the exact points you clicked in 3D space and says so in the
+UI ("3D surface estimate — trace each flat face separately for best
+accuracy"). It cannot see hidden features (chimneys, valleys, overhangs)
+you didn't click.
 
 **Default measurement unit (m² vs ft², in the popup's Settings) is stored
 but not yet wired into the pricing/measurement math** — TurnKey's rates are
-all defined per-m² (`pricing-engine.js`), so converting the whole quoting
-flow to imperial would mean reworking that shared rate model, not just a
-display format. The toggle is present per the brief's settings list, but is
-a placeholder for a real unit-conversion pass rather than functional today —
-flagged here rather than left to be discovered by using it.
+all defined per-m², so converting the whole quoting flow to imperial would
+mean reworking that shared rate model, not just a display format.
 
-**"Create Quote" does not send an email.** It creates a real `quotes` row
-(with a working `public_token` share link — the same link `quote.html`
-resolves) and a real `jobs` row, exactly as if the operator had built and
-"sent" the quote in the CRM's own Quote Builder — but it deliberately does
-not call the CRM's `generateAndSendDoc()`/email-template/Gmail-connection
-path, since that's a heavier operation this extension has no reason to
-duplicate. "Copy Quote Link" / "Open in TurnKey" (shown on the confirmation
-screen) are how the operator actually gets it to the customer.
+**"Create Quote" does not send an email.** It creates a real DRAFT `quotes`
+row (with a working `public_token` share link) and a real `jobs` row, but
+deliberately does not call the CRM's `generateAndSendDoc()`/email-template
+path. "Copy Quote Link" / "Open in TurnKey" (which now deep-links to the
+exact job it just created) are how the operator gets it to the customer or
+reviews/sends it for real.
 
 ## Structure
 
 ```
 extension/
 ├── manifest.json
-├── background/service-worker.js   # only job: chrome.tabs.captureVisibleTab (content scripts can't call it)
+├── geometry.js                      # measurement math source of truth — also copied to the site root (scripts/build-static.js) for measure.html's live preview
+├── background/service-worker.js     # screenshot capture, workspace bridge (open tab, durable pending registry, routing), scoped TK_API proxy
 ├── content/
-│   ├── content.js                 # detects earth.google.com, mounts a Shadow DOM root, dynamic-imports the panel
+│   ├── content.js                   # detects earth.google.com, mounts a Shadow DOM root, dynamic-imports the panel
+│   ├── bridge/measure-bridge.js     # injected into the measure.html workspace tab — validates + computes + relays the finished measurement
 │   └── panel/
-│       ├── app.js                 # orchestrator: state, Earth URL polling, wiring
-│       ├── toolbar.js             # the floating draggable/minimizable toolbar
-│       ├── measurement.js         # geo-accurate tracer (area/distance) — see its header comment
-│       ├── quote.js               # Instant Quote panel + "Quote Created" screen
-│       └── screenshot.js          # capture + preview
+│       ├── app.js                   # orchestrator: state, Earth URL polling, wiring, measurement-complete handling
+│       ├── toolbar.js               # the floating draggable/minimizable toolbar
+│       ├── quote.js                 # Instant Quote panel + "Quote Created" screen
+│       ├── quote-create.js          # idempotent, business-bound quote/job creation (unit-testable without chrome/DOM)
+│       └── screenshot.js            # capture + preview
 ├── api/
-│   ├── turnkey-api.js             # hand-rolled Supabase REST client (same pattern quote.html already uses)
-│   └── storage.js                 # chrome.storage.local wrapper shared by the popup and the panel
-├── vendor/
-│   └── pricing-engine.js          # byte-for-byte copy of /pricing-engine.js — see its header for why
-├── popup/                         # toolbar-icon popup: connect flow + settings (brief §19-20)
-└── icons/                         # resized from the repo's existing icon-512.png — no new brand assets
+│   ├── turnkey-api.js               # hand-rolled Supabase REST client — background-worker-only now
+│   ├── client-bridge.js             # thin TK_API messaging client used by the popup + content panel
+│   └── storage.js                   # chrome.storage.local wrapper shared by the popup and the panel
+├── vendor/pricing-engine.js         # byte-for-byte copy of /pricing-engine.js
+├── popup/                           # toolbar-icon popup: connect flow + settings
+├── icons/
+└── tests/                           # node --test unit tests — no real browser/network/DB required; see each file's header
+
+measure.html / measure.js / measure.css   # the hosted workspace itself (repo root — served by this site, not the extension)
 ```
+
+## Running the extension's tests
+
+```
+node --test extension/tests/*.test.cjs extension/tests/*.test.mjs
+```
+
+All of them are unit tests against plain Node — no Chrome, no network, no
+database. They cover: the config.js parser (no `eval`/`new Function`, even
+against a deliberately malicious payload), the measurement bridge's
+origin/payload/dedupe validation and its use of the real `geometry.js`, the
+background worker's request-bridging security checks (wrong tab, spoofed
+origin, expiry, duplicate Finish, allowlist rejection, and surviving a
+simulated service-worker restart via `chrome.storage.session`), and
+idempotent/business-bound quote-draft creation.

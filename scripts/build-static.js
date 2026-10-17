@@ -15,6 +15,10 @@ const assets = [
   "index.html",
   "booking.html",
   "quote.html",
+  "measure.html",
+  "measure.js",
+  "measure.css",
+  "extension-quote-link.js",
   "privacy.html",
   "404.html",
   "config.js",
@@ -51,6 +55,14 @@ for (const name of assets)
   fs.copyFileSync(path.join(root, name), path.join(target, name));
 fs.mkdirSync(path.join(target, 'chrome-extension'), {recursive:true});
 fs.copyFileSync(path.join(root, 'chrome-extension/measurement.js'), path.join(target, 'chrome-extension/measurement.js'));
+// geometry.js is the single source of truth for area/length/perimeter math,
+// shared between the extension's content bridge (extension/geometry.js,
+// imported there via chrome.runtime.getURL) and this site's own
+// measure.html workspace (imported here as a normal same-origin module —
+// no remote-hosted-code concern, this is just a website loading its own
+// JS). Copied rather than duplicated so both ever have exactly one
+// implementation to keep correct.
+fs.copyFileSync(path.join(root, 'extension/geometry.js'), path.join(target, 'geometry.js'));
 if (fs.existsSync(path.join(root, "assets")))
   fs.cpSync(path.join(root, "assets"), path.join(target, "assets"), {
     recursive: true,

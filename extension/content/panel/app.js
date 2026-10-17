@@ -1,22 +1,58 @@
 import { Storage } from '../../api/storage.js';
-import { TurnKeyClient } from '../../api/turnkey-api.js';
+import { TurnKeyApi } from '../../api/client-bridge.js';
 import { mountToolbar } from './toolbar.js';
-import { createTracer } from './measurement.js';
 import { renderQuotePanel, renderQuoteCreated } from './quote.js';
-import { captureVisibleTab, dataUrlToBlob, renderScreenshotPreview } from './screenshot.js';
+import { createQuoteDraft } from './quote-create.js';
+import { captureVisibleTab, renderScreenshotPreview } from './screenshot.js';
 
+// `kind` matches extension/geometry.js's own vocabulary exactly
+// (measureGeometry's {kind:'area'|'line'|'perimeter'}) — no translation
+// layer between what a category means and what the geometry engine
+// computes. `interaction` (derived below, not stored) is just the click
+// behaviour: a closed loop (area AND perimeter both trace an outline the
+// same way — House measures the drawn outline's PERIMETER in metres, for
+// per-linear-metre house-wash pricing, not its area) or an open path.
 const CATEGORIES = [
-  { key: 'roof', label: 'Roof', shape: 'area' },
-  { key: 'driveway', label: 'Driveway', shape: 'area' },
-  { key: 'house', label: 'House', shape: 'area' },
-  { key: 'deck', label: 'Deck', shape: 'area' },
-  { key: 'concrete', label: 'Concrete', shape: 'area' },
-  { key: 'custom', label: 'Custom area', shape: 'area' },
-  { key: 'fence', label: 'Fence', shape: 'line' },
-  { key: 'custom-line', label: 'Custom distance', shape: 'line' }
+  { key: 'roof', label: 'Roof', kind: 'area' },
+  { key: 'driveway', label: 'Driveway', kind: 'area' },
+  { key: 'house', label: 'House', kind: 'perimeter' },
+  { key: 'deck', label: 'Deck', kind: 'area' },
+  { key: 'concrete', label: 'Concrete', kind: 'area' },
+  { key: 'custom', label: 'Custom area', kind: 'area' },
+  { key: 'fence', label: 'Fence', kind: 'line' },
+  { key: 'custom-line', label: 'Custom distance', kind: 'line' }
 ];
+function interactionForKind(kind) {
+  return kind === 'line' ? 'open' : 'closed';
+}
 
-/** Google Earth encodes its current camera look-at point in the URL as it flies (`@lat,lng,...`) — the only property-location signal a content script can legitimately read (see measurement.js's header comment for why nothing more precise is attempted). */
+/**
+ * Same-length placeholder "pixel" points for job.details.areaPolys.points
+ * — compatibility only, NEVER used for measurement math (geoPts/real
+ * lat-lng is the source of truth end to end; see geometry.js). index.html's
+ * own Quote Editor immediately recomputes real screen coordinates from
+ * geoPts whenever `points.length === geoPts.length` (qeLatLngToSvg), and
+ * several other spots (map-snapshot.js, the Quote Editor's own centroid/
+ * edge math) assume `points` exists with that same length even when
+ * geoPts is also present — an empty/mismatched array there, not wrong
+ * values, is what breaks those. A simple local tangent-plane projection
+ * (not tied to any fixed canvas size or zoom level — that fixed-scale
+ * assumption was the old in-panel tracer's root bug) is enough to satisfy
+ * that contract.
+ */
+function toDisplayPoints(geoPts) {
+  if (!geoPts.length) return [];
+  const originLat = geoPts[0].lat;
+  const originLng = geoPts[0].lng;
+  const metersPerDegLat = 111320;
+  const metersPerDegLng = 111320 * Math.cos((originLat * Math.PI) / 180);
+  return geoPts.map((p) => ({
+    x: (p.lng - originLng) * metersPerDegLng,
+    y: -(p.lat - originLat) * metersPerDegLat
+  }));
+}
+
+/** Google Earth encodes its current camera look-at point in the URL as it flies (`@lat,lng,...`) — the only property-location signal a content script can legitimately read. It seeds where the measurement workspace opens; the operator can pan/zoom freely once there. */
 function readEarthCamera() {
   const m = location.href.match(/@(-?\d+\.\d{3,}),(-?\d+\.\d{3,})/);
   if (!m) return null;
@@ -76,19 +112,13 @@ export async function init(shadowRoot) {
     lat: null,
     lng: null,
     measurements: [],
-    screenshotDataUrl: null
+    screenshotDataUrl: null,
+    pendingMeasureRequests: {} // requestId -> {category, categoryLabel, kind, serviceId}
   };
-  let client = null;
 
   async function hydrate() {
     const stored = await Storage.loadAll();
     state = { ...state, ...stored };
-    if (state.config) {
-      client = new TurnKeyClient(state.config, state.session, (session) => {
-        state.session = session;
-        Storage.setSession(session);
-      });
-    }
   }
   await hydrate();
 
@@ -151,13 +181,13 @@ export async function init(shadowRoot) {
     return true;
   }
 
-  function openCategoryPicker(shape) {
-    const options = CATEGORIES.filter((c) => c.shape === shape);
+  function openCategoryPicker(interaction) {
+    const options = CATEGORIES.filter((c) => interactionForKind(c.kind) === interaction);
     modalLayer.innerHTML = `
       <div class="tk-modal-backdrop">
         <div class="tk-modal tk-category-modal">
           <div class="tk-modal-head">
-            <h3>${shape === 'area' ? 'What are you measuring?' : 'What is this distance?'}</h3>
+            <h3>${interaction === 'closed' ? 'What are you measuring?' : 'What is this distance?'}</h3>
             <button type="button" class="tk-icon-btn" data-close aria-label="Close">×</button>
           </div>
           <div class="tk-category-grid">
@@ -167,67 +197,83 @@ export async function init(shadowRoot) {
       </div>`;
     modalLayer.querySelector('[data-close]').addEventListener('click', closeModal);
     modalLayer.querySelectorAll('[data-cat]').forEach((b) =>
-      b.addEventListener('click', () => openTracer(shape, b.getAttribute('data-cat')))
+      b.addEventListener('click', () => {
+        closeModal();
+        openWorkspaceMeasure(b.getAttribute('data-cat'));
+      })
     );
   }
 
-  function openTracer(shape, categoryKey) {
+  /**
+   * "Measure" opens a dedicated TurnKey-hosted workspace tab (measure.html,
+   * on the business's own TurnKey site) rather than tracing in-page —
+   * see the extension README for why: Google Earth's own view can't be
+   * turned into accurate ground coordinates, and the previous in-panel
+   * OSM tile tracer broke under Earth's page CSP and used a stretched
+   * fixed-canvas pixel scale that didn't match the real tile zoom. The
+   * background service worker owns opening the tab and routing the result
+   * back here (background/service-worker.js) — this content script never
+   * talks to that tab directly.
+   */
+  async function openWorkspaceMeasure(categoryKey) {
     const category = CATEGORIES.find((c) => c.key === categoryKey);
-    modalLayer.innerHTML = `
-      <div class="tk-modal-backdrop">
-        <div class="tk-modal tk-tracer-modal">
-          <div class="tk-modal-head">
-            <h3>${category.label}</h3>
-            <button type="button" class="tk-icon-btn" data-close aria-label="Close">×</button>
-          </div>
-          <div class="tk-tracer-host" data-role="tracer"></div>
-          <div class="tk-tracer-readout" data-role="readout">Click points on the map to trace ${shape === 'area' ? 'the outline' : 'the line'}.</div>
-          <div class="tk-modal-foot">
-            <button type="button" class="tk-btn" data-undo>Undo point</button>
-            <button type="button" class="tk-btn" data-clear>Clear</button>
-            <button type="button" class="tk-btn tk-btn-accent" data-finish disabled>Finish</button>
-          </div>
-        </div>
-      </div>`;
-    modalLayer.querySelector('[data-close]').addEventListener('click', () => { tracer.destroy(); closeModal(); });
-
-    const tracer = createTracer(modalLayer.querySelector('[data-role="tracer"]'), {
-      lat: state.lat,
-      lng: state.lng,
-      shape,
-      onChange: ({ points, canFinish, value }) => {
-        const readout = modalLayer.querySelector('[data-role="readout"]');
-        const finishBtn = modalLayer.querySelector('[data-finish]');
-        finishBtn.disabled = !canFinish;
-        if (!points) {
-          readout.textContent = `Click points on the map to trace ${shape === 'area' ? 'the outline' : 'the line'}.`;
-        } else if (shape === 'area') {
-          readout.innerHTML = `<strong>${Math.round(value.m2 * 10) / 10} m²</strong> · perimeter ${Math.round(value.m)} m`;
-        } else {
-          readout.innerHTML = `<strong>${Math.round(value.m * 10) / 10} m</strong>`;
+    const svc = guessServiceForCategory(category.key, category.kind);
+    toast(root, `Opening the TurnKey measurement workspace for ${category.label}…`);
+    chrome.runtime.sendMessage(
+      {
+        type: 'TK_OPEN_WORKSPACE',
+        payload: { category: category.key, categoryLabel: category.label, kind: category.kind, lat: state.lat, lng: state.lng }
+      },
+      (res) => {
+        if (chrome.runtime.lastError || !res || !res.ok) {
+          toast(root, 'Could not open the measurement workspace — ' + ((res && res.error) || (chrome.runtime.lastError && chrome.runtime.lastError.message) || 'unknown error'), 'error');
+          return;
         }
+        state.pendingMeasureRequests[res.requestId] = { category: category.key, categoryLabel: category.label, kind: category.kind, serviceId: svc };
       }
-    });
-    modalLayer.querySelector('[data-undo]').addEventListener('click', () => tracer.undo());
-    modalLayer.querySelector('[data-clear]').addEventListener('click', () => tracer.clear());
-    modalLayer.querySelector('[data-finish]').addEventListener('click', () => {
-      const svc = guessServiceForCategory(category.key, shape);
-      const measurement = tracer.finish(category.key, svc);
-      if (!measurement) return;
-      measurement.categoryLabel = category.label;
-      state.measurements.push(measurement);
-      toolbar.update(state);
-      tracer.destroy();
-      closeModal();
-      toast(root, `${category.label} saved — ${measurement.size}${measurement.unit === 'm²' ? ' m²' : ' m'}`);
-    });
+    );
   }
 
-  function guessServiceForCategory(categoryKey, shape) {
+  /** Dispatched by background/service-worker.js once the workspace tab finishes a trace (see the chrome.runtime.onMessage listener at the bottom of init()). */
+  function handleMeasureComplete({ requestId, result }) {
+    if (state.measurements.some(m => m.id === requestId)) return true;
+    const pending = state.pendingMeasureRequests[requestId];
+    if (!pending) return false;
+    if (!result || typeof result.value !== 'number') {
+      toast(root, 'That measurement could not be completed — ' + ((result && result.error) || 'try again from Google Earth.'), 'error');
+      return false;
+    }
+    // geometry.js's measureGeometry() already returns `value` in the right
+    // unit for this exact `kind` (area → m², perimeter/line → m) — no
+    // per-kind field-picking needed here, unlike the old shape-only model.
+    const geoPts = (result.points || []).map((p) => ({ lat: p.lat, lng: p.lng, ...(p.altitude != null ? { altitude: p.altitude } : {}) }));
+    const measurement = {
+      id: requestId,
+      type: pending.kind,
+      category: pending.category,
+      categoryLabel: pending.categoryLabel,
+      service: pending.serviceId,
+      unit: result.unit || (pending.kind === 'area' ? 'm²' : 'm'),
+      size: Math.round(result.value * 10) / 10,
+      points: toDisplayPoints(geoPts),
+      geoPts,
+      method: result.method || (pending.kind === 'area' ? 'ground' : 'haversine'),
+      notes: '',
+      photoPaths: []
+    };
+    state.measurements.push(measurement);
+    delete state.pendingMeasureRequests[requestId];
+    toolbar.update(state);
+    toast(root, `${pending.categoryLabel} saved — ${measurement.size}${measurement.unit === 'm²' ? ' m²' : ' m'}`);
+    return true;
+  }
+
+  function guessServiceForCategory(categoryKey, kind) {
     const hintMap = { roof: 'roof', driveway: 'driveway', concrete: 'driveway', house: 'housewash', fence: 'fence', deck: 'deck' };
     if (hintMap[categoryKey] && SERVICES[hintMap[categoryKey]]) return hintMap[categoryKey];
-    const wantShape = shape === 'area' ? 'closed' : 'open';
-    const match = Object.keys(SERVICES).find((k) => SERVICES[k].shape === wantShape);
+    const wantShape = interactionForKind(kind);
+    const wantUnit = kind === 'area' ? 'm²' : 'm';
+    const match = Object.keys(SERVICES).find((k) => SERVICES[k].shape === wantShape && SERVICES[k].unit === wantUnit);
     return match || Object.keys(SERVICES)[0];
   }
 
@@ -240,6 +286,7 @@ export async function init(shadowRoot) {
     if (state.business && state.business.pricing_config && state.business.pricing_config.rates) {
       applyRateOverrides(state.business.pricing_config.rates);
     }
+    state.quoteCreateProgress = null; // fresh quote-panel session — any earlier partial create attempt is unrelated
     renderQuotePanel(
       modalLayer,
       { measurements: state.measurements, address: state.address, TK_PRICING, business: state.business },
@@ -248,7 +295,7 @@ export async function init(shadowRoot) {
         onSearchCustomer: async (query) => {
           if (!query || query.length < 2) return [];
           try {
-            const all = await client.listCustomers(state.profile.business_id);
+            const all = await TurnKeyApi.listCustomers(state.profile.business_id);
             const q = query.toLowerCase();
             return all.filter((c) => (c.name || '').toLowerCase().includes(q)).slice(0, 8);
           } catch (e) {
@@ -267,47 +314,24 @@ export async function init(shadowRoot) {
     );
   }
 
+  /**
+   * Creates the DRAFT quote + job via createQuoteDraft() (quote-create.js)
+   * — `state.quoteCreateProgress` carries whatever already succeeded
+   * across retries of the SAME quote-panel session (reset fresh each time
+   * openQuotePanel() opens, or after a successful create here), so a retry
+   * after a partial failure reuses ids instead of duplicating them.
+   */
   async function createQuoteFlow(payload) {
     const businessId = state.profile.business_id;
-    let customerId = payload.isNewCustomer ? null : payload.customer.id;
-    if (payload.isNewCustomer) {
-      const created = await client.createCustomer(businessId, {
-        name: payload.customer.name,
-        phone: payload.customer.phone || '',
-        email: payload.customer.email || '',
-        address: payload.address || '',
-        source: 'Google Earth Extension'
-      });
-      customerId = created.id;
-    }
-    const quote = await client.createQuote(businessId, { customerId, amount: payload.total });
-    const job = await client.createJob(businessId, {
-      customerId,
-      quoteId: quote.id,
-      details: {
-        services: payload.lines,
-        total: payload.total,
-        areaPolys: payload.areaPolys,
-        source: 'Google Earth Extension',
-        quoteSentAt: Date.now()
-      }
-    });
-    if (state.screenshotDataUrl) {
-      try {
-        await client.uploadScreenshot(businessId, customerId, job.id, dataUrlToBlob(state.screenshotDataUrl));
-      } catch (e) {
-        // Non-fatal — the quote itself already succeeded.
-      }
-    }
-    await client.logActivity(businessId, {
-      customerId,
-      jobId: job.id,
-      type: 'quote_sent',
-      summary: 'Quote created from Google Earth — ' + payload.lines.length + ' service' + (payload.lines.length === 1 ? '' : 's') + ', ' + payload.total
-    });
+    const progress = state.quoteCreateProgress || (state.quoteCreateProgress = {});
+    const { quote, job } = await createQuoteDraft(TurnKeyApi, progress, { businessId, payload, screenshotDataUrl: state.screenshotDataUrl });
+    state.quoteCreateProgress = null; // this intent fully succeeded — a future quote starts a clean one
 
     const publicUrl = state.config.siteUrl + '/quote.html?t=' + quote.public_token;
-    const openUrl = state.config.siteUrl + '/index.html';
+    // `open=pipeline&job=<id>` lets index.html's own quote-link helper jump
+    // straight to the record this just created, instead of landing on the
+    // generic dashboard — see extension-quote-link.js (owned separately).
+    const openUrl = state.config.siteUrl + '/index.html?open=pipeline&job=' + encodeURIComponent(job.id);
     renderQuoteCreated(
       modalLayer,
       { address: payload.address, total: payload.total, lines: payload.lines, SERVICES, openUrl, publicUrl },
@@ -340,10 +364,10 @@ export async function init(shadowRoot) {
     if (!requireConnected()) return;
     if (action === 'measure-area') {
       if (!requireLocation()) return;
-      openCategoryPicker('area');
+      openCategoryPicker('closed');
     } else if (action === 'measure-distance') {
       if (!requireLocation()) return;
-      openCategoryPicker('line');
+      openCategoryPicker('open');
     } else if (action === 'screenshot') {
       handleScreenshot();
     } else if (action === 'instant-quote') {
@@ -356,5 +380,12 @@ export async function init(shadowRoot) {
     if (area !== 'local') return;
     await hydrate();
     toolbar.update(state);
+  });
+
+  // The background worker forwards the finished measurement here once the
+  // workspace tab/bridge complete it — see background/service-worker.js's
+  // TK_MEASURE_RESULT handler and openWorkspaceMeasure() above.
+  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (msg && msg.type === 'TK_MEASURE_COMPLETE') sendResponse({ok: handleMeasureComplete(msg)});
   });
 }

@@ -1,5 +1,5 @@
 import { Storage } from '../api/storage.js';
-import { fetchSiteConfig, TurnKeyClient } from '../api/turnkey-api.js';
+import { TurnKeyApi } from '../api/client-bridge.js';
 
 const app = document.getElementById('app');
 let view = 'loading';
@@ -83,7 +83,7 @@ function renderSiteUrl() {
     error = '';
     render();
     try {
-      const cfg = await fetchSiteConfig(url);
+      const cfg = await TurnKeyApi.fetchSiteConfig(url);
       if (!cfg.supabaseUrl.includes('supabase.co')) {
         await requestOrigins([cfg.supabaseUrl]);
       }
@@ -123,11 +123,9 @@ function renderSignIn() {
     error = '';
     render();
     try {
-      const client = new TurnKeyClient(data.config, null, (s) => Storage.setSession(s));
-      const session = await client.signIn(email, password);
-      const profile = await client.getProfile();
-      const business = await client.getBusiness(profile.business_id);
-      await Storage.setSession(session);
+      const session = await TurnKeyApi.signIn(email, password);
+      const profile = await TurnKeyApi.getProfile();
+      const business = await TurnKeyApi.getBusiness(profile.business_id);
       await Storage.setProfile(profile);
       await Storage.setBusiness(business);
       data = { ...data, session, profile, business };

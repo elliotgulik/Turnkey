@@ -28,28 +28,39 @@
  * — is how the extension supports whatever TurnKey site the operator points
  * it at, and stays correct if that business ever rotates its anon key.
  */
+// Pulls one `key: 'value'`/`key: "value"` pair out of the config object
+// literal's source text. Deliberately not a dynamic-code-execution parse
+// (the kind MV3's default extension-pages CSP forbids outright) — and
+// executing a string fetched over the network (even from a
+// site the operator trusts) is a bigger blast radius than this needs: every
+// field config.js actually exposes is a plain string literal, so a single
+// allowlisted regex per known key is both sufficient and exactly as safe as
+// generate-config.js's own symmetric read of this same file (see its
+// mapsKey/onesignalAppId carry-forward regexes).
+function extractConfigString(source, key) {
+  const match = source.match(new RegExp(key + "\\s*:\\s*(['\"])((?:(?!\\1).)*)\\1"));
+  return match ? match[2] : '';
+}
+
 export async function fetchSiteConfig(siteUrl) {
   const base = siteUrl.replace(/\/+$/, '');
   const res = await fetch(base + '/config.js', { cache: 'no-store' });
   if (!res.ok) throw new Error('Could not reach ' + base + ' (HTTP ' + res.status + ')');
   const text = await res.text();
-  const match = text.match(/window\.TURNKEY_CONFIG\s*=\s*window\.TURNKEY_CONFIG\s*\|\|\s*(\{[\s\S]*?\});/);
-  if (!match) throw new Error('That site does not look like a TurnKey deployment (no config.js found)');
-  // config.js is a plain-JS object literal, not JSON (unquoted keys, single
-  // quotes) — safe to evaluate here because it's the business's OWN
-  // deployed static asset (same trust boundary as loading their site at
-  // all), not third-party or user-authored content.
-  // eslint-disable-next-line no-new-func
-  const cfg = new Function('return ' + match[1])();
-  if (!cfg.supabaseUrl || !cfg.supabaseAnonKey) {
+  if (!/window\.TURNKEY_CONFIG\s*=/.test(text)) {
+    throw new Error('That site does not look like a TurnKey deployment (no config.js found)');
+  }
+  const supabaseUrl = extractConfigString(text, 'supabaseUrl');
+  const supabaseAnonKey = extractConfigString(text, 'supabaseAnonKey');
+  if (!supabaseUrl || !supabaseAnonKey) {
     throw new Error('That site\'s config.js is missing supabaseUrl/supabaseAnonKey');
   }
   return {
     siteUrl: base,
-    backendUrl: cfg.backendUrl || '',
-    supabaseUrl: cfg.supabaseUrl,
-    supabaseAnonKey: cfg.supabaseAnonKey,
-    mapsKey: cfg.mapsKey || ''
+    backendUrl: extractConfigString(text, 'backendUrl'),
+    supabaseUrl,
+    supabaseAnonKey,
+    mapsKey: extractConfigString(text, 'mapsKey')
   };
 }
 
@@ -154,36 +165,51 @@ export class TurnKeyClient {
   }
 
   async createCustomer(businessId, payload) {
-    const rows = await this._rest('customers', {
-      method: 'POST',
-      headers: { Prefer: 'return=representation' },
-      body: JSON.stringify({ business_id: businessId, ...payload })
-    });
-    return rows[0];
+    return this._createStable('customers', { ...payload, business_id: businessId });
   }
 
-  async createQuote(businessId, { customerId, amount }) {
-    const rows = await this._rest('quotes', {
-      method: 'POST',
-      headers: { Prefer: 'return=representation' },
-      body: JSON.stringify({ business_id: businessId, lead_id: customerId, amount, status: 'sent' })
-    });
-    return rows[0];
+  // A lost HTTP response must not turn Retry into a second database row.
+  // Stable UUIDs use the database primary key for concurrency protection.
+  // Recovery reads are scoped to the business and checked against the
+  // intended contents; an existing different row is never overwritten.
+  async _createStable(table, payload) {
+    try {
+      const rows = await this._rest(table, {method:'POST',headers:{Prefer:'return=representation'},body:JSON.stringify(payload)});
+      if (!rows?.[0]) throw new Error('The database did not confirm the saved record.');
+      return rows[0];
+    } catch (error) {
+      if (!payload.id) throw error;
+      const rows=await this._rest(table+'?id=eq.'+encodeURIComponent(payload.id)+'&business_id=eq.'+encodeURIComponent(payload.business_id)+'&select=*');
+      const row=rows?.[0];
+      const sort=value=>Array.isArray(value)?value.map(sort):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(k=>[k,sort(value[k])])):value;
+      const canonical=value=>JSON.stringify(sort(value));
+      if (!row || !Object.entries(payload).every(([key,value])=>canonical(row[key])===canonical(value))) throw error;
+      return row;
+    }
   }
 
-  async createJob(businessId, { customerId, quoteId, details }) {
-    const rows = await this._rest('jobs', {
-      method: 'POST',
-      headers: { Prefer: 'return=representation' },
-      body: JSON.stringify({
+  /**
+   * Creates a DRAFT quote — matches index.html's own convention
+   * (`status: r.quoteSentAt ? 'sent' : 'draft'`, index.html's
+   * syncRecordToSupabase()). The extension has no "send to customer" step
+   * of its own (no email/SMS is triggered here), so marking it 'sent'
+   * would claim an action that never happened; the operator sends it for
+   * real from TurnKey itself (see quote.js's "Open in TurnKey" / "Copy
+   * Quote Link").
+   */
+  async createQuote(businessId, { id, customerId, amount }) {
+    return this._createStable('quotes', { ...(id ? {id} : {}), business_id: businessId, lead_id: customerId, amount, status:'draft' });
+  }
+
+  async createJob(businessId, { id, customerId, quoteId, details }) {
+    return this._createStable('jobs', {
+        ...(id ? {id} : {}),
         business_id: businessId,
         customer_id: customerId,
         quote_id: quoteId,
         status: 'quoted',
         details
-      })
     });
-    return rows[0];
   }
 
   async logActivity(businessId, { customerId, jobId, type, summary, detail }) {

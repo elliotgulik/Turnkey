@@ -8968,6 +8968,8 @@ async function handleAuthedSession(session){
   initOneSignal();
   loadNotificationCentre();
   startLastSeenHeartbeat();
+  window.TK_READY_BUSINESS={id:currentBusinessId,version};
+  window.dispatchEvent(new Event('turnkey:business-ready'));
 }
 // Real "last active in the app" tracking for the Team page's Active now/
 // Recently active/Offline status — auth.users.last_sign_in_at exists but
@@ -10727,5 +10729,6 @@ async function retryPendingPhotos(){
 <script src="servicem8-import.js"></script>
 <script src="marketing-analytics.js"></script>
 <footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a></footer>
+<script src="extension-quote-link.js?v=0.2.0"></script>
 </body>
 </html>

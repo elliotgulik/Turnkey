@@ -15,7 +15,7 @@ export function mountToolbar(root, actions) {
       <div class="tk-status" data-role="status"></div>
       <div class="tk-actions">
         <button type="button" class="tk-btn" data-action="measure-area">
-          <span class="tk-btn-ico">▣</span> Area
+          <span class="tk-btn-ico">▣</span> Outline
         </button>
         <button type="button" class="tk-btn" data-action="measure-distance">
           <span class="tk-btn-ico">📏</span> Distance

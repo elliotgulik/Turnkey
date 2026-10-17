@@ -8,6 +8,15 @@ function money(n) {
   return '$' + (Math.round(n * 100) / 100).toLocaleString('en-NZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+// Every value interpolated into innerHTML/attribute strings below can come
+// from the operator's own typed input or a customer's stored name/address
+// — both are untrusted as far as HTML is concerned. Escaped at the point
+// of interpolation rather than trusted upstream, since the CRM's own
+// customer records can contain anything a past form submission put there.
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
 /**
  * Renders the quote builder into `container`. `ctx` = {measurements, address, TK_PRICING, business, customers}.
  * `actions` = {onCreateQuote(payload), onSearchCustomer(query), onCancel}.
@@ -36,10 +45,20 @@ export function renderQuotePanel(container, ctx, actions) {
     return included.concat(extras);
   }
 
-  function renderServiceOptions(selected, shapeType) {
-    const wantShape = shapeType === 'area' ? 'closed' : shapeType === 'line' ? 'open' : null;
+  /**
+   * `measurementType` is the measurement's `kind` ('area'|'perimeter'|
+   * 'line') — filtered by BOTH the service's click-interaction shape
+   * ('closed' for area/perimeter, 'open' for line) AND its unit. Shape
+   * alone isn't enough: House ('perimeter', unit 'm') and Roof ('area',
+   * unit 'm²') both trace a closed outline, but a perimeter measurement's
+   * quantity is metres — assigning it to an m²-priced service would price
+   * the wrong quantity, not just mislabel it.
+   */
+  function renderServiceOptions(selected, measurementType) {
+    const wantShape = measurementType === 'line' ? 'open' : measurementType ? 'closed' : null;
+    const wantUnit = measurementType === 'area' ? 'm²' : measurementType ? 'm' : null;
     return Object.entries(SERVICES)
-      .filter(([, s]) => !wantShape || s.shape === wantShape || s.shape === 'none')
+      .filter(([, s]) => !wantShape || (s.shape === wantShape && s.unit === wantUnit))
       .map(([key, s]) => `<option value="${key}" ${key === selected ? 'selected' : ''}>${s.label}</option>`)
       .join('');
   }
@@ -55,7 +74,7 @@ export function renderQuotePanel(container, ctx, actions) {
           <div class="tk-modal-head">
             <div>
               <h3>Create Instant Quote</h3>
-              <p class="tk-modal-sub">${ctx.address || 'No address set'}</p>
+              <p class="tk-modal-sub">${escapeHtml(ctx.address) || 'No address set'}</p>
             </div>
             <button type="button" class="tk-icon-btn" data-close aria-label="Close">×</button>
           </div>
@@ -90,14 +109,14 @@ export function renderQuotePanel(container, ctx, actions) {
             <div class="tk-customer-picker">
               ${
                 selectedCustomer
-                  ? `<div class="tk-customer-chip">${selectedCustomer.name} <button type="button" data-clear-customer>Change</button></div>`
+                  ? `<div class="tk-customer-chip">${escapeHtml(selectedCustomer.name)} <button type="button" data-clear-customer>Change</button></div>`
                   : `
                 <input type="text" class="tk-input" placeholder="Search TurnKey customers…" data-role="customer-search"/>
                 <div class="tk-customer-results" data-role="customer-results"></div>
                 <div class="tk-new-customer">
-                  <input type="text" class="tk-input" placeholder="Name" data-new="name" value="${newCustomer.name}"/>
-                  <input type="text" class="tk-input" placeholder="Phone" data-new="phone" value="${newCustomer.phone}"/>
-                  <input type="text" class="tk-input" placeholder="Email" data-new="email" value="${newCustomer.email}"/>
+                  <input type="text" class="tk-input" placeholder="Name" data-new="name" value="${escapeHtml(newCustomer.name)}"/>
+                  <input type="text" class="tk-input" placeholder="Phone" data-new="phone" value="${escapeHtml(newCustomer.phone)}"/>
+                  <input type="text" class="tk-input" placeholder="Email" data-new="email" value="${escapeHtml(newCustomer.email)}"/>
                 </div>`
               }
             </div>
@@ -163,7 +182,7 @@ export function renderQuotePanel(container, ctx, actions) {
           const resultsEl = container.querySelector('[data-role="customer-results"]');
           if (!resultsEl) return;
           resultsEl.innerHTML = results
-            .map((c) => `<button type="button" class="tk-customer-result" data-pick="${c.id}">${c.name}${c.address ? ' — ' + c.address : ''}</button>`)
+            .map((c) => `<button type="button" class="tk-customer-result" data-pick="${escapeHtml(c.id)}">${escapeHtml(c.name)}${c.address ? ' — ' + escapeHtml(c.address) : ''}</button>`)
             .join('');
           resultsEl.querySelectorAll('[data-pick]').forEach((b) =>
             b.addEventListener('click', () => {
@@ -224,7 +243,7 @@ export function renderQuoteCreated(container, { address, total, lines, SERVICES,
       <div class="tk-modal tk-quote-created">
         <div class="tk-created-badge">✓</div>
         <h3>Quote Created</h3>
-        <p class="tk-modal-sub">${address || ''}</p>
+        <p class="tk-modal-sub">${escapeHtml(address)}</p>
         <div class="tk-created-total">${money(total)}</div>
         <div class="tk-created-lines">
           ${lines.map((l) => `<div class="tk-kv"><span>${SERVICES[l.svc] ? SERVICES[l.svc].label : l.svc}</span><span>${l.qty}${SERVICES[l.svc] && SERVICES[l.svc].unit === 'm²' ? ' m²' : ''}</span></div>`).join('')}
