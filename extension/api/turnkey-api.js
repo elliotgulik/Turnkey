@@ -33,24 +33,34 @@ export async function fetchSiteConfig(siteUrl) {
   const res = await fetch(base + '/config.js', { cache: 'no-store' });
   if (!res.ok) throw new Error('Could not reach ' + base + ' (HTTP ' + res.status + ')');
   const text = await res.text();
-  const match = text.match(/window\.TURNKEY_CONFIG\s*=\s*window\.TURNKEY_CONFIG\s*\|\|\s*(\{[\s\S]*?\});/);
-  if (!match) throw new Error('That site does not look like a TurnKey deployment (no config.js found)');
-  // config.js is a plain-JS object literal, not JSON (unquoted keys, single
-  // quotes) — safe to evaluate here because it's the business's OWN
-  // deployed static asset (same trust boundary as loading their site at
-  // all), not third-party or user-authored content.
-  // eslint-disable-next-line no-new-func
-  const cfg = new Function('return ' + match[1])();
+  if (!/window\.TURNKEY_CONFIG\s*=/.test(text)) {
+    throw new Error('That site does not look like a TurnKey deployment (no config.js found)');
+  }
+  // config.js is a plain-JS object literal, not JSON (unquoted keys, mixed
+  // quote styles) — extracted field-by-field with a targeted regex rather
+  // than evaluated as code. Manifest V3's CSP for extension pages
+  // (script-src 'self' — no unsafe-eval, see manifest.json) hard-blocks
+  // eval()/new Function() for every extension page regardless of how
+  // trusted the source is; that isn't a judgment call to opt out of, it's a
+  // platform restriction, and attempting it here failed outright with
+  // "Evaluating a string as JavaScript violates the following Content
+  // Security Policy directive" the first time this ran in real Chrome. This
+  // approach also doesn't care about comments, trailing commas or exact
+  // object-literal syntax the way a Function-based parse still would.
+  const field = (name) => {
+    const m = text.match(new RegExp(name + '\\s*:\\s*["\']([^"\']*)["\']'));
+    return m ? m[1] : '';
+  };
+  const cfg = {
+    backendUrl: field('backendUrl'),
+    supabaseUrl: field('supabaseUrl'),
+    supabaseAnonKey: field('supabaseAnonKey'),
+    mapsKey: field('mapsKey')
+  };
   if (!cfg.supabaseUrl || !cfg.supabaseAnonKey) {
     throw new Error('That site\'s config.js is missing supabaseUrl/supabaseAnonKey');
   }
-  return {
-    siteUrl: base,
-    backendUrl: cfg.backendUrl || '',
-    supabaseUrl: cfg.supabaseUrl,
-    supabaseAnonKey: cfg.supabaseAnonKey,
-    mapsKey: cfg.mapsKey || ''
-  };
+  return { siteUrl: base, ...cfg };
 }
 
 export class TurnKeyClient {
