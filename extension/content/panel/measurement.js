@@ -34,10 +34,42 @@ const CANVAS_H = 380;
 // already-proven OSM mosaic (OSM_ZOOM_DEFAULT/MIN/MAX, ~line 838) already
 // knows this; this module ported the mosaic technique but not these bounds.
 const OSM_ZOOM_DEFAULT = 18, OSM_ZOOM_MIN = 15, OSM_ZOOM_MAX = 19;
+// Real aerial/satellite imagery via Google Static Maps — same provider,
+// same endpoint shape, same default zoom as booking.html's proven
+// reloadMapAt()/SAT_ZOOM_DEFAULT (~line 837-893), ported rather than
+// reinvented. Requested at exactly CANVAS_W x CANVAS_H (scale=2 for a sharp
+// retina image — scale only increases pixel density, not ground coverage,
+// so it doesn't change the meters-per-pixel math below), so — unlike the
+// OSM path — there's no tile-mosaic size-mismatch factor to correct for.
+const SAT_ZOOM_DEFAULT = 19, SAT_ZOOM_MIN = 15, SAT_ZOOM_MAX = 21;
 
-/** Meters per on-screen pixel at this lat/zoom, scaled for our CANVAS_W (see booking.html's identical formula). */
-function metersPerPixel(lat, zoom) {
-  return (156543.03392 * Math.cos((lat * Math.PI) / 180)) / Math.pow(2, zoom) * ((OSM_TILES_ACROSS * TILE_SIZE) / CANVAS_W);
+/** Meters per on-screen pixel at this lat/zoom. The OSM mosaic requests
+ * TILE_SIZE*OSM_TILES_ACROSS raw pixels stretched/cropped into CANVAS_W
+ * CSS pixels, so it needs that scale-correction factor; a Static Maps
+ * satellite image is requested at exactly CANVAS_W x CANVAS_H, so it doesn't. */
+function metersPerPixel(lat, zoom, satellite) {
+  const base = (156543.03392 * Math.cos((lat * Math.PI) / 180)) / Math.pow(2, zoom);
+  return satellite ? base : base * ((OSM_TILES_ACROSS * TILE_SIZE) / CANVAS_W);
+}
+
+// Best-effort match between Google Earth's reported camera distance (how
+// far the camera is from the look-at point, metres — see app.js's
+// readEarthCamera()) and a Static Maps zoom level whose ground coverage is
+// in the same ballpark, so the tracer opens roughly as zoomed-in as the
+// property view the operator actually had — rather than always the same
+// fixed default regardless of whether they were looking at one roof or a
+// whole block. Earth's URL doesn't expose field-of-view in a way this
+// content script reads reliably, so this uses a fixed, empirically
+// reasonable FOV assumption rather than an exact figure — approximate by
+// design, not a precise camera-to-zoom inverse.
+function zoomForDistance(lat, distanceM) {
+  if (!distanceM || !Number.isFinite(distanceM) || distanceM <= 0) return SAT_ZOOM_DEFAULT;
+  const assumedGroundWidthM = distanceM * 0.7; // ~35-40° effective FOV, Earth's typical default
+  for (let z = SAT_ZOOM_MAX; z >= SAT_ZOOM_MIN; z--) {
+    const coverageM = CANVAS_W * metersPerPixel(lat, z, true);
+    if (coverageM >= assumedGroundWidthM) return z;
+  }
+  return SAT_ZOOM_MIN;
 }
 
 /** Local flat-earth (equirectangular) projection around the view center — accurate at residential-property scale. */
@@ -91,10 +123,11 @@ function tileXY(lat, lng, zoom) {
  * `shape` is 'area' (closed polygon, min 3 points) or 'line' (open path, min 2 points).
  * Returns a controller: {setZoom, undo, clear, finish, destroy, onChange}.
  */
-export function createTracer(container, { lat, lng, zoom = OSM_ZOOM_DEFAULT, shape = 'area', onChange }) {
+export function createTracer(container, { lat, lng, zoom, mapsKey, distance, shape = 'area', onChange }) {
+  const satellite = !!mapsKey; // same choice booking.html's reloadMapAt() makes: Google satellite when a key is configured, free OSM otherwise
   let center = { lat, lng };
-  let currentZoom = zoom;
-  let scale = metersPerPixel(center.lat, currentZoom);
+  let currentZoom = zoom != null ? zoom : (satellite ? zoomForDistance(lat, distance) : OSM_ZOOM_DEFAULT);
+  let scale = metersPerPixel(center.lat, currentZoom, satellite);
   let points = []; // {x,y} canvas space
   let geoPts = []; // parallel real {lat,lng}
 
@@ -114,8 +147,27 @@ export function createTracer(container, { lat, lng, zoom = OSM_ZOOM_DEFAULT, sha
   const svgEl = container.querySelector('.tk-tracer-svg');
   const tileFailEl = container.querySelector('[data-role="tilefail"]');
 
-  function renderTiles() {
-    tileFailEl.hidden = true;
+  function attachFailDetection(imgs) {
+    let failed = 0;
+    imgs.forEach((img) =>
+      img.addEventListener('error', () => {
+        failed++;
+        if (failed >= imgs.length) tileFailEl.hidden = false;
+      })
+    );
+  }
+
+  function renderSatellite() {
+    // Same endpoint/params booking.html's reloadMapAt() already uses in
+    // production (~line 887) — single image, no mosaic math needed since
+    // it's requested at exactly CANVAS_W x CANVAS_H.
+    const url = 'https://maps.googleapis.com/maps/api/staticmap?center=' + center.lat + ',' + center.lng +
+      '&zoom=' + currentZoom + '&size=' + CANVAS_W + 'x' + CANVAS_H + '&scale=2&maptype=satellite&key=' + encodeURIComponent(mapsKey);
+    tilesEl.innerHTML = `<img src="${url}" style="width:100%;height:100%;position:absolute;left:0;top:0">`;
+    attachFailDetection(Array.from(tilesEl.querySelectorAll('img')));
+  }
+
+  function renderOsmMosaic() {
     const n = Math.pow(2, currentZoom);
     const { xF, yF } = tileXY(center.lat, center.lng, currentZoom);
     const tx = Math.floor(xF);
@@ -134,18 +186,17 @@ export function createTracer(container, { lat, lng, zoom = OSM_ZOOM_DEFAULT, sha
       }
     }
     tilesEl.innerHTML = html;
-    const imgs = Array.from(tilesEl.querySelectorAll('img'));
-    let failed = 0;
-    imgs.forEach((img) =>
-      img.addEventListener('error', () => {
-        failed++;
-        if (failed >= imgs.length) tileFailEl.hidden = false;
-      })
-    );
+    attachFailDetection(Array.from(tilesEl.querySelectorAll('img')));
+  }
+
+  function renderTiles() {
+    tileFailEl.hidden = true;
+    if (satellite) renderSatellite();
+    else renderOsmMosaic();
   }
 
   function reproject() {
-    scale = metersPerPixel(center.lat, currentZoom);
+    scale = metersPerPixel(center.lat, currentZoom, satellite);
     points = geoPts.map((g) => latLngToSvg(g, center, scale));
   }
 
@@ -183,7 +234,8 @@ export function createTracer(container, { lat, lng, zoom = OSM_ZOOM_DEFAULT, sha
   container.querySelector('.tk-tracer-zoom').addEventListener('click', (e) => {
     const dir = e.target.getAttribute('data-zoom');
     if (!dir) return;
-    currentZoom = Math.max(OSM_ZOOM_MIN, Math.min(OSM_ZOOM_MAX, currentZoom + (dir === 'in' ? 1 : -1)));
+    const [zMin, zMax] = satellite ? [SAT_ZOOM_MIN, SAT_ZOOM_MAX] : [OSM_ZOOM_MIN, OSM_ZOOM_MAX];
+    currentZoom = Math.max(zMin, Math.min(zMax, currentZoom + (dir === 'in' ? 1 : -1)));
     renderTiles();
     reproject();
     render();

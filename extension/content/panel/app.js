@@ -16,13 +16,23 @@ const CATEGORIES = [
   { key: 'custom-line', label: 'Custom distance', shape: 'line' }
 ];
 
-/** Google Earth encodes its current camera look-at point in the URL as it flies (`@lat,lng,...`) — the only property-location signal a content script can legitimately read (see measurement.js's header comment for why nothing more precise is attempted). */
+/** Google Earth encodes its current camera state in the URL as it flies —
+ * `@lat,lng,altitude(a),distance(d),fov(y),heading(h),tilt(t),roll(r)` — the
+ * only property-location/zoom/angle signal a content script can legitimately
+ * read (see measurement.js's header comment for why nothing more precise is
+ * attempted). distance and tilt are optional captures: older/shorter Earth
+ * URLs sometimes omit the trailing camera params entirely, so lat/lng alone
+ * still resolves (same as before this read grew the extra fields). */
 function readEarthCamera() {
-  const m = location.href.match(/@(-?\d+\.\d{3,}),(-?\d+\.\d{3,})/);
+  const m = location.href.match(/@(-?\d+\.\d{3,}),(-?\d+\.\d{3,})(?:,[\d.]+a)?(?:,([\d.]+)d)?(?:,[\d.]+y)?(?:,[\d.]+h)?(?:,([\d.]+)t)?/);
   if (!m) return null;
   const searchMatch = location.href.match(/\/search\/([^/@]+)/);
   const addressGuess = searchMatch ? decodeURIComponent(searchMatch[1]).replace(/\+/g, ' ') : '';
-  return { lat: parseFloat(m[1]), lng: parseFloat(m[2]), addressGuess };
+  return {
+    lat: parseFloat(m[1]), lng: parseFloat(m[2]), addressGuess,
+    distance: m[3] ? parseFloat(m[3]) : null, // camera-to-ground-point distance, metres — used to pick a matching satellite zoom
+    tilt: m[4] ? parseFloat(m[4]) : null       // degrees; 0 = straight down. Non-zero can't carry over to the flat tracer — surfaced as a notice instead of silently ignored.
+  };
 }
 
 function toast(root, message, tone = 'info') {
@@ -75,6 +85,8 @@ export async function init(shadowRoot) {
     address: '',
     lat: null,
     lng: null,
+    distance: null,
+    tilt: null,
     measurements: [],
     screenshotDataUrl: null
   };
@@ -108,6 +120,8 @@ export async function init(shadowRoot) {
   if (camera) {
     state.lat = camera.lat;
     state.lng = camera.lng;
+    state.distance = camera.distance;
+    state.tilt = camera.tilt;
     if (!state.address && camera.addressGuess) state.address = camera.addressGuess;
   }
   toolbar.update(state);
@@ -125,6 +139,8 @@ export async function init(shadowRoot) {
     if (!cam) return;
     state.lat = cam.lat;
     state.lng = cam.lng;
+    state.distance = cam.distance;
+    state.tilt = cam.tilt;
     if (cam.addressGuess && cam.addressGuess !== state.address) {
       state.address = cam.addressGuess;
       toolbar.update(state);
@@ -181,6 +197,7 @@ export async function init(shadowRoot) {
             <button type="button" class="tk-icon-btn" data-close aria-label="Close">×</button>
           </div>
           <div class="tk-tracer-host" data-role="tracer"></div>
+          ${state.tilt != null && state.tilt > 10 ? `<p class="tk-tracer-tilt-note">Your Google Earth view is tilted — tracing always uses a straight-down satellite image for accurate measurements, matched to your current position and zoom. Tilt/rotation itself can't carry over.</p>` : ''}
           <div class="tk-tracer-readout" data-role="readout">Click points on the map to trace ${shape === 'area' ? 'the outline' : 'the line'}.</div>
           <div class="tk-modal-foot">
             <button type="button" class="tk-btn" data-undo>Undo point</button>
@@ -194,6 +211,8 @@ export async function init(shadowRoot) {
     const tracer = createTracer(modalLayer.querySelector('[data-role="tracer"]'), {
       lat: state.lat,
       lng: state.lng,
+      distance: state.distance,
+      mapsKey: state.config && state.config.mapsKey,
       shape,
       onChange: ({ points, canFinish, value }) => {
         const readout = modalLayer.querySelector('[data-role="readout"]');

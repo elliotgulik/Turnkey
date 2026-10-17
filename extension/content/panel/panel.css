@@ -152,6 +152,7 @@
 .tk-tracer-zoom button:hover { background:var(--surface-2); }
 .tk-tracer-readout { padding:12px 20px 0; font-size:13px; color:var(--ink-soft); }
 .tk-tracer-readout strong { color:var(--teal); font-size:15px; }
+.tk-tracer-tilt-note { margin:10px 20px 0; padding:8px 12px; border-radius:var(--radius-sm); background:#fff6e5; color:#8a5a00; font-size:12px; line-height:1.4; }
 
 /* Quote panel */
 .tk-quote-modal { width:520px; }
