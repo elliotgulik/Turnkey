@@ -14,7 +14,7 @@
 // loading it here is just this website importing its own same-origin JS,
 // not the extension loading remote code.
 import { measureGeometry, distanceMeters } from './geometry.js';
-import { editOutline, createOutlineHistory, displayAltitude, createCameraPickGuard } from './measurement-editor.js';
+import { editOutline, createOutlineHistory, displayAltitude, createCameraPickGuard } from './measurement-editor.js?v=20261018c';
 
 const params = new URLSearchParams(location.search);
 const requestId = params.get('requestId') || '';

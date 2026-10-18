@@ -17,7 +17,7 @@ test('independent calendar SQL: real schema, private RPCs, ownership, conflicts 
  const native = fs.readFileSync(path.join(__dirname,'../supabase/migrations/20260810100000_native_calendar_events_blocks_hours.sql'),'utf8').split('-- ===== Per-employee')[0];
  await db.exec(native);
  await db.exec(fs.readFileSync(path.join(__dirname,'../supabase/migrations/20261018094524_job_calendar_booking.sql'),'utf8'));
- const sql = fs.readFileSync(path.join(__dirname,'../supabase/migrations/20261018095355_job_calendar_independent_events.sql'),'utf8');
+ const sql = fs.readFileSync(path.join(__dirname,'../supabase/migrations/20261018100839_job_calendar_independent_events.sql'),'utf8');
  await db.exec(`grant usage on schema public,auth to anon,authenticated,service_role;
  grant select,insert,update,delete on all tables in schema public to authenticated,service_role;
  insert into users values ('${id(1)}','a','owner'),('${id(2)}','a','manager'),('${id(3)}','a','technician'),('${id(4)}','a','technician'),('${id(5)}','b','owner');

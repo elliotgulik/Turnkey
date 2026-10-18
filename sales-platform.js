@@ -462,7 +462,7 @@
           ["Quote sent", dates(r.quoteSentAt)],
           ["Sale won", dates(M.winTime(r))],
         ],
-      )}<p>${esc((r.services || []).map((x) => SERVICES[x.svc]?.label || x.svc).join(", "))}</p>${r.quotePublicToken ? `<a class="btn ghost" target="_blank" rel="noopener" href="quote.html?t=${encodeURIComponent(r.quotePublicToken)}">Open customer quote</a>` : ""}${!M.won(r)&&r.quoteId&&r.total>0?button('Confirm quote accepted','confirm-sale',r.id):''}${button("Quote history", "versions", r.id)}${!M.won(r)&&r.total>0?button("Send quote to ServiceM8","handoff-quote",r.id):""}<h3>ServiceM8 handoff</h3><p>TurnKey owns the sale. ServiceM8 owns scheduling, delivery, invoices and payments.</p>${map ? `<a class="btn accent" target="_blank" rel="noopener" href="https://go.servicem8.com/OpenJob/${encodeURIComponent(map.external_uuid)}">Open in ServiceM8</a><p class="sale-muted">ServiceM8: ${esc(map.snapshot?.status||'Transferred')} · Last checked ${esc(dates(map.synced_at))}</p>` : button("Transfer approved sale", "handoff", r.id, M.won(r) ? "" : "disabled")}${!map&&M.won(r)&&!r.quoteId&&r.jobId?`<p class="sale-muted">This sale predates quote tracking — no quote was ever saved for it. Transferring will ask you to review its recorded amount and services before creating one.</p>`:""}<div id="sale-versions"></div></section></div><section class="sale-panel"><h3>Sales history</h3>${
+      )}<p>${esc((r.services || []).map((x) => SERVICES[x.svc]?.label || x.svc).join(", "))}</p>${r.quotePublicToken ? `<a class="btn ghost" target="_blank" rel="noopener" href="quote.html?t=${encodeURIComponent(r.quotePublicToken)}">Open customer quote</a>` : ""}${!M.won(r)&&r.quoteId&&r.total>0?button('Confirm quote accepted','confirm-sale',r.id):''}${button("Quote history", "versions", r.id)}${!M.won(r)&&r.total>0?button("Send quote to ServiceM8","handoff-quote",r.id):""}<h3>ServiceM8 handoff</h3><p>Manage this job in TurnKey, or transfer it to your connected ServiceM8 account for delivery and billing.</p>${map ? `<a class="btn accent" target="_blank" rel="noopener" href="https://go.servicem8.com/OpenJob/${encodeURIComponent(map.external_uuid)}">Open in ServiceM8</a><p class="sale-muted">ServiceM8: ${esc(map.snapshot?.status||'Transferred')} · Last checked ${esc(dates(map.synced_at))}</p>` : button("Transfer approved sale", "handoff", r.id, M.won(r) ? "" : "disabled")}${!map&&M.won(r)&&!r.quoteId&&r.jobId?`<p class="sale-muted">This sale predates quote tracking — no quote was ever saved for it. Transferring will ask you to review its recorded amount and services before creating one.</p>`:""}<div id="sale-versions"></div></section></div><section class="sale-panel"><h3>Sales history</h3>${
         (r.salesHistory || []).length
           ? (r.salesHistory || [])
               .slice()
@@ -644,6 +644,8 @@
         ["Dashboard", "dashboard"],
         ["Leads", "leads"],
         ["Pipeline", "pipeline"],
+        ["Customers", "customers"],
+        ["Jobs & invoices", "operations"],
         ["Analytics", "sales"],
         ["Goals", "goals"],
         ["Conversations", "inbox"],
@@ -664,14 +666,6 @@
     await Promise.allSettled([loadEmailAccountStatus(),wixStatus.pendingUrl?Promise.resolve():loadWixStatus(),loadMetaStatus()]);
     if(call!==connectionOpenSerial||biz!==currentBusinessId||version!==businessSessionVersion||!document.getElementById('conn-overlay').classList.contains('open'))return;
     oldConnections();
-    document.querySelectorAll("#conn-body .conn-card").forEach((c) => {
-      if (
-        /^Calendar|^Stripe/.test(
-          c.querySelector(".conn-name")?.textContent || "",
-        )
-      )
-        c.remove();
-    });
     const el = document.createElement("div");
     el.className = "conn-card";
     el.id = "sale-sm8";
@@ -694,21 +688,7 @@
   openSettings = function () {
     oldSettings();
     const body = document.getElementById("settings-body");
-    body.querySelectorAll(".more-group-label").forEach((label) => {
-      if (
-        ["Team", "Workflows", "Calendar", "Billing"].includes(
-          label.textContent.trim(),
-        )
-      ) {
-        let next = label.nextElementSibling;
-        while (next && !next.classList.contains("more-group-label")) {
-          const n = next.nextElementSibling;
-          next.remove();
-          next = n;
-        }
-        label.remove();
-      }
-    });
+    body.insertAdjacentHTML('beforeend',settingsGroup('Pipeline',`<p>Configure stage names, order and sales probabilities for your business.</p>${button('Manage pipeline stages','stages')}`));
   };
   const oldSaveLead = saveLead;
   saveLead = function () {
@@ -1133,7 +1113,7 @@
         if (err) throw err;
         await loadSales();
       }
-      if (a === "stages") openStageSettings();
+      if (a === "stages") {closeModal('settings-overlay');openStageSettings();}
       if (a === "stage-add") {
         const label = prompt("Name this pipeline stage");
         if (!label?.trim()) return;

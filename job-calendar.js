@@ -980,6 +980,18 @@
   root.TK_JOB_CALENDAR = {
     configure(options) { config = { ...options }; state = null; destroyFc(); },
     open() { if (typeof root.switchView === 'function') root.switchView('calendar'); else tkRenderCalendar(); },
+    async book(jobId, dateISO) {
+      const scope=makeScope();
+      const bizKey=scope.biz+':'+scope.user;
+      if(!state||state.bizKey!==bizKey){state=freshState();state.bizKey=bizKey;destroyFc();}
+      if(/^\d{4}-\d{2}-\d{2}$/.test(dateISO||''))state.anchor=parseLocalDate(dateISO);
+      if(typeof root.switchView==='function')root.switchView('calendar');
+      await load();
+      if(scope.isStale())return;
+      if(!state.canManage){notify('Only an owner or manager can manage bookings.');return;}
+      if(!findJob(jobId)){notify('This job could not be loaded. Refresh the calendar and try again.');return;}
+      openBookingModal({jobId,dateISO:dateISO||localDateStr(new Date())});
+    },
     refresh() { load(); }
   };
 })(window);

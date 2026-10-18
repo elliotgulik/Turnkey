@@ -334,6 +334,14 @@ const { chromium } = require("playwright"),
         'Cancelling the measurement review must not add measurements',
       );
       await page.evaluate(() => closeModal("quote-overlay"));
+      // Exercise the mounted independent workspace, including its real create-job bridge.
+      await page.evaluate(() => { currentUserId='operations-browser-owner';currentUserRole='owner';businessStateReady=true;records.forEach(r=>recordBusinesses.set(r,currentBusinessId));switchView('operations'); TK_OPERATIONS.open('jobs'); });
+      assert.match(await page.locator('#view-operations').innerText(), /Scheduled operation/);
+      await page.locator('#view-operations [data-action="createJob"]').click();
+      assert.equal(await page.locator('#lead-overlay').evaluate(el=>el.classList.contains('open')),true);
+      await page.evaluate(() => closeModal('lead-overlay'));
+      await page.evaluate(() => TK_OPERATIONS.open('invoices'));
+      assert.match(await page.locator('#view-operations').innerText(), /Invoices/);
       // Screenshots contain synthetic test records only.
       await page.evaluate(() => switchView("dashboard"));
       fs.mkdirSync(".artifacts", { recursive: true });

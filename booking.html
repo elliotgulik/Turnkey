@@ -743,8 +743,8 @@ let standalone=!EMBED_MODE;
 let URL_MODE='';
 try{const u=new URL(location.href);const m=u.searchParams.get('mode');if(m==='map'||m==='services')URL_MODE=m;}catch(e){}
 
-/* ===== Business profile: name/logo/phone/region, loaded per ?biz= id from the
-   public.businesses table (public-read RLS — see schema-business-profile.sql).
+/* ===== Business profile: name/logo/phone/region, loaded per ?biz= id through
+   a public-safe RPC. Internal business settings remain protected by RLS.
    Plain REST fetch, not the full supabase-js SDK, since this is a customer-
    facing page and it's a single anonymous read. Falls back to generic copy
    (never another business's name) if unset or the request fails. ===== */
@@ -756,10 +756,9 @@ try{const u=new URL(location.href);const m=u.searchParams.get('mode');if(m==='ma
   // margin, fuel cost) and chemical cost-per-litre, which is internal
   // business-economics data that has no reason to ever reach a public,
   // unauthenticated page's network tab.
-  const url=window.TURNKEY_CONFIG.supabaseUrl+'/rest/v1/businesses?id=eq.'+encodeURIComponent(TURNKEY_BUSINESS_ID)+'&select=name,phone,email,region,logo_url,accent_color,primary_color,font_style,policies_config,rates:pricing_config->rates';
-  fetch(url,{headers:{apikey:window.TURNKEY_CONFIG.supabaseAnonKey}})
-    .then(r=>r.json()).then(rows=>{
-      const biz=(rows&&rows[0])||null;
+  const url=window.TURNKEY_CONFIG.supabaseUrl+'/rest/v1/rpc/get_public_business';
+  fetch(url,{method:'POST',headers:{apikey:window.TURNKEY_CONFIG.supabaseAnonKey,'Content-Type':'application/json'},body:JSON.stringify({p_business_id:TURNKEY_BUSINESS_ID})})
+    .then(r=>{if(!r.ok)throw Error('Business profile is unavailable');return r.json();}).then(biz=>{
       if(!biz)return;
       if(biz.font_style==='serif'||biz.font_style==='rounded')document.body.classList.add('font-'+biz.font_style);
       // Terms checkbox previously always said "Turnkey's Terms & Conditions"

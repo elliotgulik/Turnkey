@@ -1374,7 +1374,7 @@
   .settings-group-body{padding:0 0 14px}
 
 </style>
-<link rel="stylesheet" href="sales-platform.css?v=20261018b">
+<link rel="stylesheet" href="sales-platform.css?v=20261018c">
 <link rel="stylesheet" href="quote-workspace.css?v=20261017a">
 <link rel="stylesheet" href="conversations.css?v=20261017a">
 <link rel="stylesheet" href="marketing-analytics.css?v=20261017a">
@@ -1431,6 +1431,8 @@
         <button data-view="dashboard" class="active"><span class="nav-ico" data-icon="dashboard"></span>Dashboard</button>
         <button data-view="leads"><span class="nav-ico" data-icon="leads"></span>Leads <span class="count" id="cnt-leads">0</span></button>
         <button data-view="pipeline"><span class="nav-ico" data-icon="pipeline"></span>Pipeline</button>
+        <button data-view="customers"><span class="nav-ico" data-icon="customers"></span>Customers</button>
+        <button data-view="operations"><span class="nav-ico" data-icon="jobsflow"></span>Jobs &amp; invoices</button>
         <button data-view="sales"><span class="nav-ico" data-icon="sales"></span>Analytics</button>
         <button data-view="goals"><span class="nav-ico" data-icon="goals"></span>Goals</button>
         <button onclick="openConnections()"><span class="nav-ico" data-icon="settings"></span>Connections</button>
@@ -1459,6 +1461,7 @@
     <section class="view" id="view-leads"></section>
     <section class="view" id="view-customers"></section>
     <section class="view" id="view-calendar"></section>
+    <section class="view" id="view-operations"></section>
     <section class="view" id="view-inbox"></section>
     <section class="view" id="view-ops"></section>
     <section class="view" id="view-pricing"></section>
@@ -2881,7 +2884,7 @@ function resetAll(){
 document.getElementById('tabs').addEventListener('click',e=>{const b=e.target.closest('button[data-view]');if(b)switchView(b.dataset.view)});
 document.getElementById('bottom-nav').addEventListener('click',e=>{const b=e.target.closest('button[data-view]');if(b)switchView(b.dataset.view)});
 function switchView(v){
-  if(!['dashboard','leads','pipeline','sales','goals','inbox','pricing','detail','calendar'].includes(v)||!document.getElementById('view-'+v))v='dashboard';
+  if(!['dashboard','leads','pipeline','sales','goals','inbox','pricing','detail','calendar','operations','customers'].includes(v)||!document.getElementById('view-'+v))v='dashboard';
   document.querySelectorAll('nav.tabs button[data-view], .bottom-nav button[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===v));
   document.querySelectorAll('.view').forEach(s=>s.classList.remove('active'));
   document.getElementById('view-'+v).classList.add('active');
@@ -2895,6 +2898,7 @@ function switchView(v){
   if(v==='sales')renderSales();
   if(v==='goals')renderGoals();
   if(v==='customers')renderCustomers();
+  if(v==='operations')window.TK_OPERATIONS?.refresh();
   window.scrollTo({top:0,behavior:'smooth'});
 }
 const MODULE_ACCENT={
@@ -8250,7 +8254,7 @@ function openSettings(){
       <p>${mapsKey?'Property photos and satellite scale are turned on for your account.':'On the free basic map for now — satellite photos with accurate scale are available for your account, just ask whoever set up your TurnKey.'}</p>
     </div>`)}
     ${settingsGroup('Imports',settingsRow('Import customers','From a spreadsheet or another CRM',"closeModal('settings-overlay');openImportWizard()"))}
-    ${settingsGroup('Billing',`<div class="conn-card"><div class="conn-top"><span class="conn-name">Subscription</span><span class="conn-badge">coming soon</span></div><p>Your Turnkey subscription and billing details will show up here.</p></div>`)}
+    ${settingsGroup('Billing',settingsRow('Invoice templates &amp; payment terms','Configure the invoices you send from TurnKey',"closeModal('settings-overlay');openTemplateEditor()")+settingsRow('Online card payments',stripeStatus.configured?'Stripe is configured':'Manage payment connections',"closeModal('settings-overlay');openConnections()"))}
     ${settingsGroup('Support',`<div class="conn-card"><p style="margin:0">Need a hand? Reach out to whoever set up your Turnkey account, or check the guidance notes throughout the app — most screens explain what they do as you go.</p></div>`)}
     ${settingsGroup('Advanced',`
     <div class="conn-card">
@@ -8913,8 +8917,9 @@ let currentUserId=null;
 let currentUserRole='owner';
 async function resolveProfile(userId){
   const {data,error}=await sb.from('users').select('business_id,role').eq('id',userId).maybeSingle();
-  if(error||!data||!data.business_id)return {businessId:userId,role:'owner'}; // fallback: own user id as business id
-  return {businessId:data.business_id,role:data.role||'owner'};
+  if(error)throw new Error('Could not load your business profile. Please try signing in again.');
+  if(!data?.business_id||!['owner','manager','technician'].includes(data.role))throw new Error('Your account does not have a business profile yet. Ask your business owner to finish your invitation.');
+  return {businessId:data.business_id,role:data.role};
 }
 async function handleAuthedSession(session){
   const version=++businessSessionVersion;
@@ -8922,7 +8927,11 @@ async function handleAuthedSession(session){
   clearTimeout(supabaseSyncTimer);
   showAuth();
   currentUserId=session.user.id;
-  const profile=await resolveProfile(session.user.id);
+  let profile;
+  try{profile=await resolveProfile(session.user.id);}catch(e){
+    if(version===businessSessionVersion){records=[];currentBusinessId=null;currentUserRole='technician';window.TK_OPERATIONS?.reset();setAuthMsg(e.message);}
+    return;
+  }
   if(version!==businessSessionVersion||currentUserId!==session.user.id)return;
   if(currentBusinessId!==profile.businessId){
     records=[];goals=[];seq=1;goalSeq=1;followSeq=1;
@@ -8944,7 +8953,7 @@ async function handleAuthedSession(session){
   if(version!==businessSessionVersion)return;
   seedDocTemplateFromProfile();
   preloadLogoDataUrl();
-  switchView('dashboard');
+  switchView(currentUserRole==='technician'?'operations':'dashboard');
   // A push notification's url (e.g. /index.html?open=pipeline — see
   // sendNotification() call sites) lands here when the app was closed and
   // the OS notification click opened it fresh — takes priority over the
@@ -10744,7 +10753,7 @@ async function retryPendingPhotos(){
 <script src="sales-metrics.js?v=20261017a"></script>
 <script src="pipeline-model.js?v=20261017a"></script>
 <script src="lead-priority.js?v=20261017a"></script>
-<script src="sales-platform.js?v=20261018b"></script>
+<script src="sales-platform.js?v=20261018c"></script>
 <script type="module" src="measurement-import.js?v=20261017a"></script>
 <script src="quote-workspace.js?v=20261017a"></script>
 <script src="conversations.js?v=20261017a"></script>
@@ -10755,7 +10764,11 @@ async function retryPendingPhotos(){
 <script src="extension-quote-link.js?v=20261018b"></script>
 <link rel="stylesheet" href="job-workspace.css?v=20261018.1">
 <script src="job-workspace.js?v=20261018"></script>
-<link rel="stylesheet" href="job-calendar.css?v=20261018">
-<script src="job-calendar.js?v=20261018"></script>
+<link rel="stylesheet" href="job-calendar.css?v=20261018c">
+<script src="job-calendar.js?v=20261018c"></script>
+<link rel="stylesheet" href="operations-workspace.css?v=20261018c">
+<script src="operations-workspace.js?v=20261018c"></script>
+<script src="operations-bridge.js?v=20261018c"></script>
+<link rel="stylesheet" href="crm-theme.css?v=20261018c">
 </body>
 </html>

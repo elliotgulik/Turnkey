@@ -29,6 +29,7 @@
     }));
     const keyOf = c => JSON.stringify([c.businessId,c.userId,c.version,c.role,c.ready]);
     const manager = c => ['owner','manager'].includes(c.role);
+    const assigned = (r,c) => r.assignedStaffId === c.userId || (Array.isArray(r.assignedStaffIds) && r.assignedStaffIds.includes(c.userId));
     const source = () => get('getRecords', () => typeof records === 'undefined' ? [] : records);
     const staffList = () => get('getStaff', () => typeof staff === 'undefined' ? [] : staff);
     const action = name => Object.prototype.hasOwnProperty.call(options.actions || {}, name) ? options.actions[name] : name === 'calendar' && root.TK_JOB_CALENDAR?.open ? () => root.TK_JOB_CALENDAR.open() : root[name];
@@ -45,7 +46,7 @@
       if (!c.ready || !c.businessId || !c.userId) return [];
       return source().filter(r => {
         if (!owned(r,c) || r.id == null) return false;
-        if (!manager(c) && !(c.role === 'technician' && r.assignedStaffId === c.userId)) return false;
+        if (!manager(c) && !(c.role === 'technician' && assigned(r,c))) return false;
         const id = r.jobId || r.id;
         if (seen.has(id)) return false;
         seen.add(id); return true;
@@ -64,11 +65,11 @@
     };
     function allowed(name,r,c) {
       if (typeof action(name) !== 'function') return false;
-      if (name === 'openNewJobModal' || name === 'calendar') return manager(c);
+      if (name === 'openNewJobModal' || name === 'createJob' || name === 'calendar') return manager(c);
       if (name === 'openDetail') return true;
       if (['previewInvoice','openPaymentModal'].includes(name)) return manager(c) && !!r.invoiceId && (name !== 'openPaymentModal' || (Number.isFinite(balance(r)) && balance(r) > 0 && invoiceStatus(r) !== 'paid'));
       if (name === 'openSchedule') return manager(c) && ['won','scheduled'].includes(r.stage) && !['in_progress','paused'].includes(r.jobStatus);
-      if (!(manager(c) || (c.role === 'technician' && r.assignedStaffId === c.userId))) return false;
+      if (!(manager(c) || (c.role === 'technician' && assigned(r,c)))) return false;
       if (name === 'startJob') return r.stage === 'scheduled' && !r.startedAt && !['in_progress','paused','completed'].includes(r.jobStatus);
       if (name === 'pauseJob') return r.stage === 'scheduled' && r.jobStatus === 'in_progress';
       if (name === 'resumeJob') return r.stage === 'scheduled' && r.jobStatus === 'paused';
@@ -136,7 +137,7 @@
       };
       host.classList.add('tko-workspace');
       host.innerHTML = `<nav class="tko-nav" aria-label="Operations"><button type="button" data-view="jobs" aria-current="${view==='jobs'?'page':'false'}">Jobs</button>${manager(c)?`<button type="button" data-view="invoices" aria-current="${invoiceView?'page':'false'}">Invoices</button>`:''}</nav><section aria-label="${invoiceView?'Invoices':'Jobs'}"><header><div><h2>${invoiceView?'Invoices':'Jobs'}</h2><p>${invoiceView?'Existing invoices and payment balances.':'Won jobs, scheduling and work in progress.'}</p></div>${!invoiceView && manager(c) && typeof action('calendar') === 'function'?'<button type="button" data-action="calendar">Open calendar</button>':''}</header>
-      ${!invoiceView && manager(c) && typeof action('openNewJobModal') === 'function'?`<div class="tko-new"><label>Existing customer<select data-control="customer"><option value="">Choose customer</option>${customers.map(r=>`<option value="${escape(r.customerId)}" ${customer===r.customerId?'selected':''}>${escape(r.name || r.email || 'Unnamed customer')}</option>`).join('')}</select></label><button type="button" data-action="openNewJobModal" ${!customer||busy?'disabled':''}>New job</button></div>`:''}
+      ${!invoiceView && manager(c) && typeof action('createJob') === 'function'?'<div class="tko-new"><button type="button" data-action="createJob">＋ New job</button><p>Search for an existing customer or add their details in the job form.</p></div>':!invoiceView && manager(c) && typeof action('openNewJobModal') === 'function'?`<div class="tko-new"><label>Existing customer<select data-control="customer"><option value="">Choose customer</option>${customers.map(r=>`<option value="${escape(r.customerId)}" ${customer===r.customerId?'selected':''}>${escape(r.name || r.email || 'Unnamed customer')}</option>`).join('')}</select></label><button type="button" data-action="openNewJobModal" ${!customer||busy?'disabled':''}>New job</button></div>`:''}
       <div class="tko-tools"><label>Search<input type="search" data-control="search" value="${escape(search)}" placeholder="Customer, address, crew or reference"></label><label>Status<select data-control="filter">${filters.map(f=>`<option value="${f}" ${filter===f?'selected':''}>${escape(labels[f] || (f==='all'?'All':f==='unpaid'?'Unpaid':'Unscheduled'))}</option>`).join('')}</select></label>${!invoiceView?`<label>View<select data-control="layout"><option value="table" ${layout==='table'?'selected':''}>Table</option><option value="board" ${layout==='board'?'selected':''}>Board</option></select></label>`:''}</div><p role="status">${escape(message || `${shown.length} ${invoiceView?(shown.length===1?'invoice':'invoices'):(shown.length===1?'job':'jobs')}`)}</p>
       ${shown.length ? !invoiceView && layout === 'board' ? `<div class="tko-board">${[...new Set(shown.map(status))].map(s=>`<section class="tko-column" aria-label="${escape(labels[s]||s)}"><h3>${escape(labels[s]||s)}</h3>${shown.filter(r=>status(r)===s).map(r=>`<article data-row="${escape(r.id)}"><h4>${escape(r.name)}</h4><p>${escape(r.address || r.suburb || '')}</p><p>${escape(schedule(r))}</p><p>${escape(crew(r))}</p><p>${Number.isFinite(r.total)?escape(currency(r.total)):'Unavailable'}</p><div class="tko-actions">${actions(r,c)}</div></article>`).join('')}</section>`).join('')}</div>` : `<table><caption class="tko-sr">${invoiceView?'Invoices':'Jobs'}</caption><thead><tr>${['Customer',invoiceView?'Due':'Schedule',invoiceView?'Payment':'Crew','Status','Value','Actions'].map(h=>`<th scope="col">${h}</th>`).join('')}</tr></thead><tbody>${shown.map(r=>`<tr data-row="${escape(r.id)}">${cells(r)}</tr>`).join('')}</tbody></table>` : '<p class="tko-empty">No matching records.</p>'}
       ${invoiceView?`<details><summary>Payment terms</summary><p class="tko-terms">${escape(get('getInvoiceTerms',()=>typeof docTemplate!=='undefined'?docTemplate.invoiceTerms:'') || 'No payment terms configured. Configure them in Settings Templates.')}</p><p>Open the invoice preview for the existing PDF and email flow. Record payment opens the payment ledger and history.</p></details>`:''}</section>`;
@@ -152,6 +153,7 @@
       const name = el.dataset.action;
       const r = visible(c).find(r => String(r.id) === el.dataset.record);
       if (name === 'openNewJobModal') { if (!visible(c).some(r => r.customerId === customer) || !allowed(name,null,c)) return; }
+      else if (name === 'createJob') { if (!allowed(name,null,c)) return; }
       else if (name !== 'calendar' && (!r || !(view === 'invoices' ? r.invoiceId && manager(c) : job(r)) || !allowed(name,r,c))) return;
       else if (name === 'calendar' && !allowed(name,null,c)) return;
       busy = true; launched = true; message = ''; const token = epoch; refresh();
