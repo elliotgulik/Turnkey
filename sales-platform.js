@@ -554,6 +554,9 @@
     el.innerHTML = `<div class="sale-dialog-head"><h2>${esc(title)}</h2>${button("Close", "dialog-close")}</div>${html}<p id="sales-dialog-error" role="alert"></p>`;
     el.showModal();
   }
+  function openStageSettings() {
+    modal('Pipeline settings', `<form id="sale-stages-form"><p>Rename and reorder stages to fit your sales process. Built-in stages keep their identity for reporting. A custom stage can be deleted after all its opportunities have been moved elsewhere.</p>${stages.map((s,i) => `<div class="sale-settings-row"><b>${esc(s.key)}</b><input name="label-${esc(s.key)}" value="${esc(s.label)}" required maxlength="50"><input aria-label="${esc(s.label)} probability" name="prob-${esc(s.key)}" type="number" min="0" max="100" value="${Math.round((settings.probabilities?.[s.key] || 0) * 100)}"><button type="button" class="btn ghost sm" data-sale-action="stage-move" data-stage="${esc(s.key)}" data-delta="-1" aria-label="Move ${esc(s.label)} up" ${i===0?'disabled':''}>↑</button><button type="button" class="btn ghost sm" data-sale-action="stage-move" data-stage="${esc(s.key)}" data-delta="1" aria-label="Move ${esc(s.label)} down" ${i===stages.length-1?'disabled':''}>↓</button>${defaults.some(d=>d.key===s.key)?'':'<button type="button" class="btn ghost sm" data-sale-action="stage-remove" data-stage="'+esc(s.key)+'">Delete</button>'}</div>`).join('')}<button type="button" class="btn ghost" data-sale-action="stage-add">＋ Add custom stage</button>${field("Quote follow-up reminder after days", `<input name="days" type="number" min="1" max="365" value="${settings.followup_days || 2}">`)}<button class="btn accent">Save settings</button></form>`);
+  }
   function error(e) {
     const el = document.getElementById("sales-dialog-error");
     if (el) el.textContent = e.message;
@@ -582,14 +585,13 @@
       settings = results[0].data || {};
       cloudGoals = results[1].data || [];
       spend = results[2].data || [];
-      stages = defaults.map((d) => ({
-        key: d.key,
-        label: String(
-          (Array.isArray(settings.pipeline) ? settings.pipeline : []).find(
-            (s) => s.key === d.key,
-          )?.label || d.label,
-        ).slice(0, 50),
+      const configuredPipeline = Array.isArray(settings.pipeline) ? settings.pipeline : [];
+      const allowedStage = s => s && typeof s.key === 'string' && (defaults.some(d => d.key === s.key) || /^custom_[a-z0-9_]{3,48}$/.test(s.key));
+      stages = configuredPipeline.filter(allowedStage).map(s => ({
+        key: s.key,
+        label: String(s.label || defaults.find(d => d.key === s.key)?.label || 'Custom stage').slice(0,50),
       }));
+      for (const d of defaults) if (!stages.some(s => s.key === d.key)) stages.push({...d});
       migrationError = "";
     }
     try {
@@ -1116,11 +1118,26 @@
         if (err) throw err;
         await loadSales();
       }
-      if (a === "stages")
-        modal(
-          "Pipeline settings",
-          `<form id="sale-stages-form"><p>Stage identities stay stable so historical records remain valid. Rename stages and set their win probability. Probabilities are assumptions, not confirmed revenue.</p>${stages.map((s) => `<div class="sale-settings-row"><b>${esc(s.key)}</b><input name="label-${esc(s.key)}" value="${esc(s.label)}" required maxlength="50"><input aria-label="${esc(s.label)} probability" name="prob-${esc(s.key)}" type="number" min="0" max="100" value="${Math.round((settings.probabilities?.[s.key] || 0) * 100)}"></div>`).join("")}${field("Quote follow-up reminder after days", `<input name="days" type="number" min="1" max="365" value="${settings.followup_days || 2}">`)}<button class="btn accent">Save settings</button></form>`,
-        );
+      if (a === "stages") openStageSettings();
+      if (a === "stage-add") {
+        const label = prompt("Name this pipeline stage");
+        if (!label?.trim()) return;
+        const key = 'custom_' + Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+        stages.push({key,label:label.trim().slice(0,50)});
+        openStageSettings(); return;
+      }
+      if (a === "stage-move") {
+        const from=stages.findIndex(s=>s.key===b.dataset.stage),to=from+Number(b.dataset.delta);
+        if(from<0||to<0||to>=stages.length)return;
+        [stages[from],stages[to]]=[stages[to],stages[from]];
+        openStageSettings(); return;
+      }
+      if (a === "stage-remove") {
+        const key=b.dataset.stage;
+        if(defaults.some(s=>s.key===key)){toast('Built-in stages cannot be removed.');return;}
+        if(records.some(r=>String(r.stage)===key)){toast('Move every opportunity out of this stage before deleting it.');return;}
+        stages=stages.filter(s=>s.key!==key);openStageSettings();return;
+      }
       if (a === "spend")
         modal(
           "Record advertising spend",
