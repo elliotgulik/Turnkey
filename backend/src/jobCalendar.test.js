@@ -32,6 +32,7 @@ function makeDb(tables, { rpcImpl } = {}) {
         gte(k, v) { filters.push((r) => r[k] >= v); return q },
         lte(k, v) { filters.push((r) => r[k] <= v); return q },
         lt(k, v) { filters.push((r) => r[k] < v); return q },
+        gt(k, v) { filters.push((r) => r[k] > v); return q },
         in(k, values) { filters.push((r) => values.includes(r[k])); return q },
         maybeSingle() { one = true; return q },
         single() { one = true; return q },
@@ -202,12 +203,12 @@ test('PUT /jobs/:id: technician cannot manage bookings', async () => {
   assert.equal(res.statusCode, 403)
 })
 
-test('PUT /jobs/:id: owner/manager can book; the RPC receives the mapped params and the response is detail-whitelisted', async () => {
+test('PUT /jobs/:id: owner/manager can book without changing sales stage; the RPC receives mapped params and response is detail-whitelisted', async () => {
   let received
   const h = setup({
     rpcImpl: async (fn, params) => {
       received = { fn, params }
-      return { data: { id: job, status: 'scheduled', assigned_to: tech, scheduled_date: '2026-02-01', updated_at: '2026-02-01T00:00:00Z', details: { calendarStartAt: params.p_start_at, calendarEndAt: params.p_end_at, cost: 1234 } }, error: null }
+      return { data: { id: job, status: 'new', assigned_to: tech, scheduled_date: '2026-02-01', updated_at: '2026-02-01T00:00:00Z', details: { calendarStartAt: params.p_start_at, calendarEndAt: params.p_end_at, cost: 1234 } }, error: null }
     }
   })
   const res = await h.run('put', `/api/job-calendar/jobs/${job}`, { userId: manager, body: validPut() })
@@ -215,7 +216,7 @@ test('PUT /jobs/:id: owner/manager can book; the RPC receives the mapped params 
   assert.equal(received.fn, 'job_calendar_book')
   assert.deepEqual(received.params.p_staff_ids, [tech])
   assert.equal(received.params.p_timezone, 'Pacific/Auckland')
-  assert.equal(res.body.job.status, 'scheduled')
+  assert.equal(res.body.job.status, 'new')
   assert.deepEqual(Object.keys(res.body.job.details).sort(), ['calendarEndAt', 'calendarStartAt'])
 })
 
@@ -494,9 +495,9 @@ test('SQL schema: tenant/role-checked, serialized, overlap-safe booking + idempo
     db.query(`select * from job_calendar_book($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
       [BIZ_A, caller, jobId, startAt, endAt, 'UTC', staff, 'Team A', 'notes', true, null, null])
 
-  await t.test('owner books jobA for techA — status becomes scheduled', async () => {
+  await t.test('owner books jobA for techA — sales stage stays unchanged', async () => {
     const { rows } = await book(jobA, '2026-02-01T08:00:00Z', '2026-02-01T10:00:00Z', [uidTechA])
-    assert.equal(rows[0].status, 'scheduled')
+    assert.equal(rows[0].status, 'new')
     assert.equal(rows[0].assigned_to, uidTechA)
   })
 
@@ -510,7 +511,7 @@ test('SQL schema: tenant/role-checked, serialized, overlap-safe booking + idempo
 
   await t.test('back-to-back bookings (end exactly equals next start) do NOT conflict — half-open range', async () => {
     const { rows } = await book(jobB, '2026-02-01T10:00:00Z', '2026-02-01T11:00:00Z', [uidTechA])
-    assert.equal(rows[0].status, 'scheduled')
+    assert.equal(rows[0].status, 'new')
   })
 
   await t.test('a lost/cancelled job cannot be booked', async () => {
@@ -537,7 +538,7 @@ test('SQL schema: tenant/role-checked, serialized, overlap-safe booking + idempo
     await db.query(`update public.jobs set details = jsonb_build_object('googleEventId','ext-busy-1') where id = $1`, [jobB])
     await db.query(`update public.calendar_events set external_id = 'ext-busy-1' where business_id = $1 and user_id = $2`, [BIZ_A, uidTechA])
     const { rows } = await book(jobB, '2026-04-01T08:00:00Z', '2026-04-01T09:00:00Z', [uidTechA])
-    assert.equal(rows[0].status, 'scheduled')
+    assert.equal(rows[0].status, 'new')
   })
 
   await t.test('a block is idempotent for a reused id with matching content, and reports a conflicting-jobs count instead of silently cancelling the job', async () => {

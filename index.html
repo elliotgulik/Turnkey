@@ -1363,6 +1363,15 @@
   .conn-keyrow input{flex:1;min-width:0;padding:9px 12px;border:1px solid var(--line);border-radius:9px;font-size:13px;font-family:ui-monospace,Menlo,monospace}
   .conn-keyrow input:focus{outline:none;border-color:var(--accent)}
   .conn-note{font-size:12px;color:var(--ink-faint);text-align:center;padding:8px 4px 2px}
+  .settings-search{position:sticky;top:0;z-index:2;background:var(--surface);padding:8px 0 12px}
+  .settings-search label{display:block;font-size:12px;color:var(--ink-faint);margin-bottom:5px}
+  .settings-search input{width:100%;min-height:42px;border:1px solid var(--line);border-radius:12px;padding:9px 12px;background:var(--surface-2);color:var(--ink)}
+  .settings-group{border-bottom:1px solid var(--line)}
+  .settings-group>summary{list-style:none;cursor:pointer;padding:14px 3px;font-size:14px;font-weight:700;color:var(--ink);display:flex;justify-content:space-between;align-items:center}
+  .settings-group>summary::-webkit-details-marker{display:none}
+  .settings-group>summary::after{content:'+';font-size:18px;color:var(--ink-faint)}
+  .settings-group[open]>summary::after{content:'−'}
+  .settings-group-body{padding:0 0 14px}
 
 </style>
 <link rel="stylesheet" href="sales-platform.css?v=20261017a">
@@ -8115,11 +8124,17 @@ function openMoreSheet(){
     ${row('Log out',"handleLogout()",true)}`;
   openModal('more-overlay');
 }
-// iPhone-Settings-style grouped layout — every group the user asked for
-// (Business/Branding/Team/Templates/Pricing/Notifications/Calendar/Email/
-// Integrations/Imports/Billing/Support/Advanced), each with a small caps
-// label, so this reads like a settings app instead of a stack of cards.
-function settingsGroup(label,inner){return `<div class="more-group-label">${label}</div>${inner}`;}
+// Searchable, collapsible groups keep the complete existing settings set easy
+// to scan without forcing every section into one long modal.
+function settingsGroup(label,inner){return `<details class="settings-group" ${label==='Business'?'open':''}><summary>${label}</summary><div class="settings-group-body">${inner}</div></details>`;}
+function filterSettings(query){
+  const q=String(query||'').trim().toLowerCase();
+  document.querySelectorAll('#settings-body .settings-group').forEach(group=>{
+    const match=!q||group.textContent.toLowerCase().includes(q);
+    group.hidden=!match;
+    if(q&&match)group.open=true;
+  });
+}
 function settingsRow(label,sub,onclick){
   return `<button class="more-row" onclick="${onclick}"><span class="mr-label">${label}${sub?`<br><span style="font-weight:400;font-size:12px;color:var(--ink-faint)">${sub}</span>`:''}</span><span class="mr-chev">›</span></button>`;
 }
@@ -8148,6 +8163,7 @@ function openSettings(){
   const icalConns=calendarConnections.filter(c=>c.provider==='ical');
   const calConnected=hasGoogleCal||icalConns.length>0;
   document.getElementById('settings-body').innerHTML=`
+    <div class="settings-search"><label for="settings-search-input">Find a setting</label><input id="settings-search-input" type="search" placeholder="Search pricing, team, calendar…" oninput="filterSettings(this.value)"></div>
     ${settingsGroup('Business',`
     <div class="conn-card ${biz.name?'live':''}">
       <div class="conn-top"><span class="conn-name">Business profile</span><span class="conn-badge ${biz.name?'on':'off'}">${biz.name?'● SET':'not set yet'}</span></div>

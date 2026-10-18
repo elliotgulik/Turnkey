@@ -404,13 +404,13 @@ export function installJobCalendar(app, { db, requireBusiness, getGoogleCalendar
       }
 
       if (!googleConfigured()) {
-        const row = await persist({ calendarGoogleSyncState: 'error', calendarGoogleSyncError: 'Google Calendar is not configured on this server' })
+        const row = await persist({ calendarGoogleSync: true, calendarGoogleSyncState: 'error', calendarGoogleSyncError: 'Google Calendar is not configured on this server' })
         return { state: 'error', reason: 'not_configured', error: 'Google Calendar is not configured on this server', eventId: job.details.googleEventId || null, job: row }
       }
 
       const auth = await getGoogleCalendarToken(req.businessId, req.userId)
       if (!auth) {
-        const row = await persist({ calendarGoogleSyncState: 'error', calendarGoogleSyncError: 'Google Calendar is not connected' })
+        const row = await persist({ calendarGoogleSync: true, calendarGoogleSyncState: 'error', calendarGoogleSyncError: 'Google Calendar is not connected' })
         return { state: 'error', reason: 'not_connected', error: 'Connect Google Calendar first', eventId: job.details.googleEventId || null, job: row }
       }
 
@@ -461,7 +461,7 @@ export function installJobCalendar(app, { db, requireBusiness, getGoogleCalendar
         // 'synced' claim standing. The old eventId itself is left as-is
         // (not deleted) so a later retry can still try to PATCH it first.
         console.error('[jobCalendar] Google sync failed', { businessId: req.businessId, jobId, message: e.message })
-        const row = await persist({ calendarGoogleSyncState: 'error', calendarGoogleSyncError: 'Could not sync to Google Calendar' })
+        const row = await persist({ calendarGoogleSync: true, calendarGoogleSyncState: 'error', calendarGoogleSyncError: 'Could not sync to Google Calendar' })
         return { state: 'error', reason: 'network', error: 'Could not sync to Google Calendar', eventId: job.details.googleEventId || null, job: row }
       }
 
