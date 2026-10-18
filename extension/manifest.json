@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "TurnKey — Google Earth Instant Quote",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Measure a property on Google Earth, price it with your TurnKey rates, and create the quote without leaving the map.",
   "icons": {
     "16": "icons/icon16.png",
@@ -76,7 +76,8 @@
     "http://127.0.0.1:8888/*"
   ],
   "optional_host_permissions": [
-    "*://*/*"
+    "https://rcighpmdrutnghsqhzlr.supabase.co/*",
+    "https://turnkeynova.onrender.com/*"
   ],
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'"

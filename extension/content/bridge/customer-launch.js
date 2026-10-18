@@ -16,6 +16,15 @@
 
   const PAGE_SOURCE = 'turnkey-crm-page';
   const EXT_SOURCE = 'turnkey-customer-launch';
+  const CRM_ORIGINS = new Set([
+    'https://turnkeycrm.net',
+    'http://localhost',
+    'http://localhost:5173',
+    'http://localhost:8888',
+    'http://127.0.0.1',
+    'http://127.0.0.1:5173',
+    'http://127.0.0.1:8888'
+  ]);
 
   function postToPage(type, extra) {
     global.postMessage(Object.assign({ source: EXT_SOURCE, type }, extra), global.location.origin);
@@ -36,6 +45,34 @@
   if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id && typeof global.addEventListener === 'function') {
     if (global.__turnkeyCustomerLaunchInstalled) return;
     global.__turnkeyCustomerLaunchInstalled = true;
+
+    // The popup asks the background worker for this through Chrome's
+    // extension messaging channel. Never forward the CRM token through
+    // window.postMessage, which is observable by page scripts.
+    chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+      if (!msg || msg.type !== 'TK_READ_CRM_AUTH_SESSION' || sender.id !== chrome.runtime.id) return false;
+      if (!CRM_ORIGINS.has(global.location.origin) || typeof msg.storageKey !== 'string' ||
+          !/^sb-[a-z0-9-]+-auth-token$/.test(msg.storageKey)) {
+        sendResponse({ ok: false, error: 'This TurnKey tab cannot be used to connect.' });
+        return false;
+      }
+      try {
+        const raw = global.localStorage.getItem(msg.storageKey);
+        const session = raw ? JSON.parse(raw) : null;
+        if (!session || typeof session.access_token !== 'string' || typeof session.refresh_token !== 'string') {
+          sendResponse({ ok: false, error: 'No active TurnKey sign-in was found in this tab. Sign in and try again.' });
+          return false;
+        }
+        sendResponse({ ok: true, session: {
+          access_token: session.access_token,
+          refresh_token: session.refresh_token,
+          expires_at: session.expires_at
+        } });
+      } catch {
+        sendResponse({ ok: false, error: 'Could not read the TurnKey sign-in from this tab.' });
+      }
+      return false;
+    });
 
     global.addEventListener('message', (event) => {
       const msg = readPageMessage(event);

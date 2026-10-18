@@ -18,7 +18,7 @@
 // but NOT on worker suspension/restart, unlike chrome.storage.local which
 // would needlessly survive a full browser restart for what's meant to be a
 // short-lived handshake) — see loadPending()/savePending() below.
-import { fetchSiteConfig, TurnKeyClient } from '../api/turnkey-api.js';
+import { fetchSiteConfig, TurnKeyClient, TURNKEY_CRM_ORIGINS, TURNKEY_SUPABASE_ORIGIN } from '../api/turnkey-api.js';
 import { Storage } from '../api/storage.js';
 import { dataUrlToBlob } from '../content/panel/screenshot.js';
 import { registerCustomerHandoff } from './customer-handoff.js';
@@ -243,7 +243,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 // Only these named operations are reachable from content scripts/popup —
 // deliberately not a generic "fetch this URL"/"run this REST path" proxy.
 const API_ACTIONS = new Set([
-  'fetchSiteConfig', 'signIn', 'refresh', 'getProfile', 'getBusiness',
+  'refresh', 'getProfile', 'getBusiness',
   'listCustomers', 'getCustomer', 'createCustomer', 'createQuote', 'createJob',
   'logActivity', 'uploadScreenshotDataUrl', 'sendQuoteToServiceM8', 'serviceM8TransferStatus'
 ]);
@@ -262,20 +262,74 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 
 async function handleApiAction(action, args) {
-  if (action === 'fetchSiteConfig') return fetchSiteConfig(args[0]);
   const c = await ensureClient();
   if (!c) throw new Error('Not connected to a TurnKey site yet.');
-  if (action === 'signIn') {
-    const session = await c.signIn(args[0], args[1]);
-    await Storage.setSession(session);
-    return session;
-  }
   if (action === 'uploadScreenshotDataUrl') {
     const [businessId, customerId, jobId, dataUrl] = args;
     return c.uploadScreenshot(businessId, customerId, jobId, dataUrlToBlob(dataUrl));
   }
   return c[action](...args);
 }
+
+async function connectFromActiveCRM(sender) {
+  if (!sender || sender.id !== chrome.runtime.id ||
+      !String(sender.url || '').startsWith('chrome-extension://' + chrome.runtime.id + '/popup/')) {
+    throw new Error('Open the TurnKey extension popup to connect your account.');
+  }
+  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  let siteOrigin;
+  try { siteOrigin = new URL(tab && tab.url).origin; } catch { siteOrigin = ''; }
+  if (!tab || !Number.isInteger(tab.id) || !TURNKEY_CRM_ORIGINS.has(siteOrigin)) {
+    throw new Error('Open a TurnKey tab, sign in, then choose Connect to TurnKey from the extension.');
+  }
+
+  const config = await fetchSiteConfig(siteOrigin);
+  let supabaseOrigin;
+  try { supabaseOrigin = new URL(config.supabaseUrl).origin; } catch { supabaseOrigin = ''; }
+  if (supabaseOrigin !== TURNKEY_SUPABASE_ORIGIN) {
+    throw new Error('This TurnKey deployment uses an unapproved Supabase project. Contact support to connect it safely.');
+  }
+  const hasPermission = await chrome.permissions.contains({ origins: [supabaseOrigin + '/*'] });
+  if (!hasPermission) throw new Error('Allow the TurnKey database permission in the popup, then retry.');
+
+  const projectRef = new URL(config.supabaseUrl).hostname.split('.')[0];
+  try {
+    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content/bridge/customer-launch.js'] });
+  } catch {
+    throw new Error('Could not connect to this TurnKey tab. Refresh it and try again.');
+  }
+  let result;
+  try {
+    result = await chrome.tabs.sendMessage(tab.id, {
+      type: 'TK_READ_CRM_AUTH_SESSION',
+      storageKey: 'sb-' + projectRef + '-auth-token'
+    });
+  } catch {
+    throw new Error('Could not read the TurnKey sign-in from this tab. Refresh it and try again.');
+  }
+  if (!result || !result.ok || !result.session) {
+    throw new Error(result && result.error || 'Sign in to TurnKey in the active tab, then try again.');
+  }
+
+  const verified = new TurnKeyClient(config, null);
+  await verified.adoptSession(result.session);
+  const profile = await verified.getRequiredProfile();
+  const business = await verified.getBusiness(profile.business_id);
+  if (!business || String(business.id) !== profile.business_id) {
+    throw new Error('Your TurnKey business profile could not be loaded. Refresh TurnKey and retry.');
+  }
+  await Storage.connect({ config, session: verified.session, profile, business });
+  client = new TurnKeyClient(config, verified.session, (session) => Storage.setSession(session));
+  return { profile: { business_id: profile.business_id, role: profile.role, name: profile.name, email: profile.email }, business: { id: business.id, name: business.name } };
+}
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (!msg || msg.type !== 'TK_CONNECT_FROM_ACTIVE_CRM') return false;
+  connectFromActiveCRM(sender)
+    .then((data) => sendResponse({ ok: true, data }))
+    .catch((err) => sendResponse({ ok: false, error: err.message }));
+  return true;
+});
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg || msg.type !== 'TK_API') return false;

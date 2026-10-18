@@ -1,5 +1,6 @@
 import { Storage } from '../api/storage.js';
 import { TurnKeyApi } from '../api/client-bridge.js';
+import { TURNKEY_SUPABASE_ORIGIN } from '../api/turnkey-api.js';
 
 const app = document.getElementById('app');
 let view = 'loading';
@@ -7,24 +8,20 @@ let error = '';
 let busy = false;
 let data = { config: null, session: null, profile: null, business: null, settings: null };
 
+function escapeHtml(value) {
+  return String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  })[c]);
+}
+
 async function boot() {
   data = await Storage.loadAll();
-  view = !data.config ? 'site-url' : !data.session ? 'sign-in' : 'connected';
+  view = data.session && data.config ? 'connected' : 'connect';
   render();
 }
 
-function originOf(url) {
-  try {
-    return new URL(url).origin + '/*';
-  } catch {
-    return null;
-  }
-}
-
-async function requestOrigins(urls) {
-  const origins = urls.map(originOf).filter(Boolean);
-  const granted = await chrome.permissions.request({ origins });
-  return granted;
+function originPattern(url) {
+  try { return new URL(url).origin + '/*'; } catch { return null; }
 }
 
 function render() {
@@ -32,119 +29,41 @@ function render() {
     app.innerHTML = `<div class="tk-popup-logo">TURNKEY</div>`;
     return;
   }
-  if (view === 'site-url') return renderSiteUrl();
-  if (view === 'sign-in') return renderSignIn();
+  if (view === 'connect') return renderConnect();
   if (view === 'connected') return renderConnected();
 }
 
-function renderSiteUrl() {
+function renderConnect() {
   app.innerHTML = `
     <div class="tk-popup-logo">TURNKEY</div>
-    <p class="tk-hint">Connect this extension to your TurnKey CRM. Enter the web address of your TurnKey site (the same one you log into every day).</p>
-    <div class="tk-field">
-      <label>TurnKey site URL</label>
-      <input type="text" id="site-url" placeholder="https://yourbusiness.netlify.app" />
-    </div>
-    ${error ? `<div class="tk-error">${error}</div>` : ''}
-    <button class="tk-btn tk-btn-accent" id="continue" ${busy ? 'disabled' : ''}>${busy ? 'Checking…' : 'Continue'}</button>
+    <p class="tk-hint">Open TurnKey in this window and sign in. The extension will securely connect to that account; no URL or password is needed.</p>
+    ${error ? `<div class="tk-error" role="alert">${escapeHtml(error)}</div>` : ''}
+    <button class="tk-btn tk-btn-accent" id="connect" ${busy ? 'disabled' : ''}>${busy ? 'Connecting…' : 'Connect to signed-in TurnKey'}</button>
   `;
-  document.getElementById('continue').addEventListener('click', async () => {
-    const url = document.getElementById('site-url').value.trim();
-    if (!url) return;
-    const siteOrigin = originOf(url);
-    if (!siteOrigin) {
-      error = 'That doesn\'t look like a valid URL.';
-      render();
-      return;
-    }
-    // Requested as the very first thing in this click handler, before any
-    // network calls — Chrome only honors chrome.permissions.request while
-    // the click's "transient user activation" is still live, which a slow
-    // fetch could otherwise burn through. Supabase's own domain is
-    // requested up front too (rather than after learning the project's
-    // exact URL from config.js, a second gesture-gated request later)
-    // since virtually every TurnKey deployment's database lives on
-    // *.supabase.co; a self-hosted Supabase instance outside that pattern
-    // is the one case this won't cover.
-    let granted;
-    try {
-      granted = await chrome.permissions.request({ origins: [siteOrigin, 'https://*.supabase.co/*'] });
-    } catch (e) {
-      error = e.message;
-      render();
-      return;
-    }
-    if (!granted) {
-      error = 'TurnKey needs permission to talk to your site and its Supabase project to connect.';
-      render();
-      return;
-    }
+  document.getElementById('connect').addEventListener('click', async () => {
+    if (busy) return;
     busy = true;
     error = '';
+    // Request the one production database origin directly in the click
+    // gesture. Access to other sites and database projects is not requested.
+    const permissionPromise = chrome.permissions.request({ origins: [TURNKEY_SUPABASE_ORIGIN + '/*'] });
     render();
     try {
-      const cfg = await TurnKeyApi.fetchSiteConfig(url);
-      if (!cfg.supabaseUrl.includes('supabase.co')) {
-        await requestOrigins([cfg.supabaseUrl]);
-      }
-      await Storage.setConfig(cfg);
-      data.config = cfg;
-      view = 'sign-in';
-    } catch (e) {
-      error = e.message;
-    }
-    busy = false;
-    render();
-  });
-}
-
-function renderSignIn() {
-  app.innerHTML = `
-    <div class="tk-popup-logo">TURNKEY</div>
-    <button class="tk-back-link" id="back">← Change site</button>
-    <p class="tk-hint">Sign in with the same email and password you use for the TurnKey CRM.</p>
-    <div class="tk-field"><label>Email</label><input type="email" id="email" /></div>
-    <div class="tk-field"><label>Password</label><input type="password" id="password" /></div>
-    ${error ? `<div class="tk-error">${error}</div>` : ''}
-    <button class="tk-btn tk-btn-accent" id="signin" ${busy ? 'disabled' : ''}>${busy ? 'Signing in…' : 'Sign in with TurnKey'}</button>
-  `;
-  document.getElementById('back').addEventListener('click', async () => {
-    await Storage.setConfig(null).catch(() => {});
-    data.config = null;
-    view = 'site-url';
-    error = '';
-    render();
-  });
-  const submit = async () => {
-    const email = document.getElementById('email').value.trim();
-    const password = document.getElementById('password').value;
-    if (!email || !password) return;
-    busy = true;
-    error = '';
-    render();
-    try {
-      if(data.config.backendUrl&&!await requestOrigins([data.config.backendUrl]))throw new Error('Allow the TurnKey backend connection to enable ServiceM8 transfers.');
-      const session = await TurnKeyApi.signIn(email, password);
-      const profile = await TurnKeyApi.getProfile();
-      const business = await TurnKeyApi.getBusiness(profile.business_id);
-      await Storage.setProfile(profile);
-      await Storage.setBusiness(business);
-      data = { ...data, session, profile, business };
+      if (!await permissionPromise) throw new Error('Allow the TurnKey database connection in Chrome, then try again.');
+      await TurnKeyApi.connectFromActiveCRM();
+      data = await Storage.loadAll();
       view = 'connected';
     } catch (e) {
-      error = e.message;
+      error = e && e.message ? e.message : 'Could not connect to TurnKey. Refresh the signed-in tab and retry.';
     }
     busy = false;
     render();
-  };
-  document.getElementById('signin').addEventListener('click', submit);
-  document.getElementById('password').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') submit();
   });
 }
 
 function renderConnected() {
-  const bizName = (data.business && data.business.name) || 'Your business';
+  const bizName = escapeHtml((data.business && data.business.name) || 'Your business');
+  const backendPermission = data.config && data.config.backendUrl ? originPattern(data.config.backendUrl) : null;
   app.innerHTML = `
     <div class="tk-popup-logo">TURNKEY</div>
     <div class="tk-connected-card">
@@ -162,7 +81,9 @@ function renderConnected() {
     </div>
     <div class="tk-divider"></div>
     <button class="tk-btn tk-btn-accent" id="open">Open TurnKey</button>
-    ${data.config.backendUrl ? '<button class="tk-btn" id="enable-transfers">Enable ServiceM8 transfers</button><p class="tk-hint" id="transfer-permission-status" role="status"></p>' : ''}
+    ${backendPermission ? '<button class="tk-btn" id="enable-transfers">Enable ServiceM8 transfers</button><p class="tk-hint" id="transfer-permission-status" role="status"></p>' : ''}
+    <button class="tk-btn" id="refresh-account" ${busy ? 'disabled' : ''}>${busy ? 'Refreshing…' : 'Refresh from open TurnKey tab'}</button>
+    ${error ? `<div class="tk-error" role="alert">${escapeHtml(error)}</div>` : ''}
     <button class="tk-btn tk-btn-danger" id="disconnect">Disconnect</button>
   `;
   document.getElementById('unit').addEventListener('change', async (e) => {
@@ -172,16 +93,35 @@ function renderConnected() {
   document.getElementById('open').addEventListener('click', () => {
     chrome.tabs.create({ url: data.config.siteUrl + '/index.html' });
   });
-  document.getElementById('enable-transfers')?.addEventListener('click',async()=>{
-    const status=document.getElementById('transfer-permission-status');
-    try{const granted=await requestOrigins([data.config.backendUrl]);status.textContent=granted?'Backend connection enabled. Use Send to ServiceM8 after creating a quote.':'Permission was not granted; your TurnKey quotes remain saved.';}catch(e){status.textContent='Could not enable the backend connection. Try again.';}
+  document.getElementById('enable-transfers')?.addEventListener('click', async () => {
+    const status = document.getElementById('transfer-permission-status');
+    try {
+      const pattern = originPattern(data.config.backendUrl);
+      if (!pattern) throw new Error('The TurnKey backend address is invalid.');
+      const granted = await chrome.permissions.request({ origins: [pattern] });
+      status.textContent = granted ? 'Backend connection enabled. Use Send to ServiceM8 after creating a quote.' : 'Permission was not granted; your TurnKey quotes remain saved.';
+    } catch {
+      status.textContent = 'Could not enable the backend connection. Try again.';
+    }
+  });
+  document.getElementById('refresh-account').addEventListener('click', async () => {
+    busy = true;
+    error = '';
+    render();
+    try {
+      await TurnKeyApi.connectFromActiveCRM();
+      data = await Storage.loadAll();
+    } catch (e) {
+      error = e && e.message ? e.message : 'Could not refresh the TurnKey account.';
+    }
+    busy = false;
+    render();
   });
   document.getElementById('disconnect').addEventListener('click', async () => {
     await Storage.disconnect();
-    data.session = null;
-    data.profile = null;
-    data.business = null;
-    view = 'sign-in';
+    data = await Storage.loadAll();
+    view = 'connect';
+    error = '';
     render();
   });
 }

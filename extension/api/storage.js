@@ -33,7 +33,16 @@ export const Storage = {
   setBusiness: (v) => set(KEYS.business, v),
   getSettings: async () => (await get(KEYS.settings)) || { defaultUnit: 'm2' },
   setSettings: (v) => set(KEYS.settings, v),
-  disconnect: () => remove([KEYS.session, KEYS.profile, KEYS.business]),
+  disconnect: () => remove([KEYS.config, KEYS.session, KEYS.profile, KEYS.business]),
+  /** Persist a connection only after the background worker has validated it. */
+  connect: async ({ config, session, profile, business }) => {
+    await chrome.storage.local.set({
+      [KEYS.config]: config,
+      [KEYS.session]: session,
+      [KEYS.profile]: profile,
+      [KEYS.business]: business
+    });
+  },
   /** Loads everything the panel/popup need in one call. */
   async loadAll() {
     const [config, session, profile, business, settings] = await Promise.all([

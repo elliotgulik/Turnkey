@@ -8,11 +8,10 @@
 // shipping/maintaining a local bundle for a handful of endpoints this file
 // already covers directly.
 //
-// Auth model: sign in with the operator's own TurnKey email/password via
-// Supabase's password grant (the exact credential index.html's
-// sb.auth.signInWithPassword() uses under the hood) and keep the resulting
-// access/refresh token pair in chrome.storage.local. Every table call below
-// sends that access token as the Authorization bearer — RLS's
+// Auth model: adopt the active TurnKey CRM tab's session through the private
+// extension messaging channel, validate it with Supabase Auth, then keep the
+// resulting access/refresh token pair in chrome.storage.local. Every table
+// call below sends that access token as the Authorization bearer — RLS's
 // current_business_id()/current_business_role() (see
 // backend/supabase/fix-rls-recursion.sql) then scopes every read/write to the
 // signed-in operator's own business exactly the way it scopes index.html,
@@ -64,6 +63,18 @@ export async function fetchSiteConfig(siteUrl) {
   };
 }
 
+export const TURNKEY_CRM_ORIGINS = new Set([
+  'https://turnkeycrm.net',
+  'http://localhost',
+  'http://localhost:5173',
+  'http://localhost:8888',
+  'http://127.0.0.1',
+  'http://127.0.0.1:5173',
+  'http://127.0.0.1:8888'
+]);
+
+export const TURNKEY_SUPABASE_ORIGIN = 'https://rcighpmdrutnghsqhzlr.supabase.co';
+
 export class TurnKeyClient {
   /**
    * @param {{supabaseUrl:string, supabaseAnonKey:string, backendUrl?:string}} cfg
@@ -85,20 +96,45 @@ export class TurnKeyClient {
     this.onSessionChange = onSessionChange || (() => {});
   }
 
-  async signIn(email, password) {
-    const res = await fetch(this.cfg.supabaseUrl + '/auth/v1/token?grant_type=password', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', apikey: this.cfg.supabaseAnonKey },
-      body: JSON.stringify({ email, password })
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error_description || data.msg || 'Sign-in failed');
+  /**
+ * Adopt an existing CRM session only after Supabase validates its bearer
+ * token. If the access token expired, rotate it with the supplied refresh
+ * token. The user id comes from /auth/v1/user, never from page storage.
+   */
+  async adoptSession(stored) {
+    const accessToken = stored && (stored.access_token || stored.accessToken);
+    const refreshToken = stored && (stored.refresh_token || stored.refreshToken);
+    if (typeof accessToken !== 'string' || !accessToken || typeof refreshToken !== 'string' || !refreshToken) {
+      throw new Error('No active TurnKey sign-in was found in this tab. Sign in to TurnKey, then retry.');
+    }
+    const rawExpiry = Number(stored.expires_at || stored.expiresAt);
     this.session = {
-      accessToken: data.access_token,
-      refreshToken: data.refresh_token,
-      userId: data.user.id,
-      expiresAt: Date.now() + (data.expires_in || 3600) * 1000
+      accessToken,
+      refreshToken,
+      userId: null,
+      expiresAt: Number.isFinite(rawExpiry) && rawExpiry > 0
+        ? (rawExpiry < 1e12 ? rawExpiry * 1000 : rawExpiry)
+        : Date.now()
     };
+    const loadUser = async () => {
+      const res = await fetch(this.cfg.supabaseUrl + '/auth/v1/user', {
+        headers: { apikey: this.cfg.supabaseAnonKey, Authorization: 'Bearer ' + this.session.accessToken }
+      });
+      const text = await res.text();
+      let user = null;
+      try { user = text ? JSON.parse(text) : null; } catch { /* handled below */ }
+      return { res, user };
+    };
+    let { res, user } = await loadUser();
+    if (!res.ok && res.status === 401) {
+      try { await this.refresh(); } catch { /* report one safe session error below */ }
+      ({ res, user } = await loadUser());
+    }
+    if (!res.ok || !user || typeof user.id !== 'string') {
+      throw new Error('The TurnKey session could not be verified. Refresh TurnKey and try connecting again.');
+    }
+    this.session.userId = user.id;
+    if (this.session.expiresAt - Date.now() < 60000) await this.refresh();
     this.onSessionChange(this.session);
     return this.session;
   }
@@ -191,6 +227,16 @@ export class TurnKeyClient {
     const rows = await this._rest('users?id=eq.' + this.session.userId + '&select=business_id,role,name,email');
     const row = rows && rows[0];
     return row && row.business_id ? row : { business_id: this.session.userId, role: 'owner' };
+  }
+
+  /** Must return a real tenant mapping for automatic account connection. */
+  async getRequiredProfile() {
+    const rows = await this._rest('users?id=eq.' + encodeURIComponent(this.session.userId) + '&select=business_id,role,name,email');
+    const row = rows && rows[0];
+    if (!row || typeof row.business_id !== 'string' || !row.business_id) {
+      throw new Error('Your TurnKey login has no business profile. Ask a business owner to finish account setup.');
+    }
+    return row;
   }
 
   async getBusiness(businessId) {

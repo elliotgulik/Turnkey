@@ -1,6 +1,6 @@
 # TurnKey — Google Earth Instant Quote (Chrome extension)
 
-## Version 0.2.3: customer-linked Google Earth quoting
+## Version 0.2.4: automatic signed-in account connection
 
 Use **Build quote** in TurnKey to open the saved customer address in Google Earth. Sign the extension into the same business first. The quote panel stays linked to that customer, and saving creates a new draft under their existing file. Existing accepted quotes are preserved. If the extension is missing, TurnKey shows an address link and installation instructions; opening Earth without the extension does not bind a quote automatically.
 
@@ -37,16 +37,26 @@ operator's real TurnKey login.
    an older version loaded, click the reload icon on this extension's card
    instead — v0.2.0 changed its permissions, which Chrome will ask you to
    re-approve once).
-3. Click the TurnKey icon in the toolbar → enter your TurnKey site's URL
-   (the same address you use to log into the CRM) → **Continue** → sign in
-   with your normal TurnKey email/password.
+3. Open TurnKey and sign in as usual. Click the extension icon and choose
+   **Connect to signed-in TurnKey**. Chrome asks for access to TurnKey's
+   production Supabase project; allow it to finish the connection. The
+   extension validates the existing session with Supabase and reads the
+   business from the authenticated user's `users` profile. It does not ask
+   for a site URL or password.
 4. Open [earth.google.com](https://earth.google.com), search for a property,
    and the TurnKey toolbar appears in the top-right.
 
-The extension reads its Supabase connection details from your TurnKey site's
-own public `config.js` at connect time, parsed with a small set of
-allowlisted regexes rather than executing it — see `api/turnkey-api.js`'s
-`fetchSiteConfig()`. Connection settings and the signed-in Supabase session are stored in this extension's local browser storage. Never paste service-role credentials into it. Tokens and customer identifiers are not placed in Google Earth URLs.
+The extension reads the public config from the active, allowlisted TurnKey
+site and the existing session from that site's Supabase local-storage entry.
+The session is passed only through Chrome's extension messaging channel (not
+through page `postMessage` or a URL), then validated by Supabase's Auth API
+before the extension stores it. The Supabase user id and business id are
+derived from validated Auth and the user's RLS-protected profile; neither is
+trusted from page-provided values. Only the production TurnKey CRM origin and
+the repository's production Supabase project are accepted for automatic
+connection. ServiceM8 backend access remains a separate optional permission.
+Never paste service-role credentials into the extension. Tokens and customer
+identifiers are not placed in Google Earth URLs.
 
 ## How measuring actually works (read this before the "known limitations")
 
@@ -138,7 +148,7 @@ tab, or a duplicate Finish are all rejected — see
 
 | Concern | Extension behaviour |
 |---|---|
-| Auth | Signs in via Supabase's password grant, proxied through the background worker (`api/client-bridge.js` → `TK_API` messages) rather than fetched directly from inside Google Earth's page — see "API calls" below. RLS scopes every read/write to the operator's own business automatically. |
+| Auth | Reuses the active TurnKey tab's Supabase session through a private extension message, validates it with Supabase Auth, then derives the tenant from the authenticated user's RLS-protected profile. No password is collected by the extension. |
 | Pricing | `vendor/pricing-engine.js` is a byte-for-byte copy of the repo root's `pricing-engine.js`. |
 | Measurement math | `extension/geometry.js` (geodesic ground area/length, ECEF-triangulated 3D surface area, closed-form validation) is the one implementation used by both the hosted workspace's live preview and the bridge's authoritative calculation. |
 | Customers/leads | Writes to `public.customers` with `source: 'Google Earth Extension'`. |

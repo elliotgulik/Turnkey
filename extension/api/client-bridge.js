@@ -20,8 +20,14 @@ function call(action, ...args) {
 export const TurnKeyApi = {
   sendQuoteToServiceM8: (businessId,jobId) => call('sendQuoteToServiceM8',businessId,jobId),
   serviceM8TransferStatus: (businessId,jobId) => call('serviceM8TransferStatus',businessId,jobId),
-  fetchSiteConfig: (siteUrl) => call('fetchSiteConfig', siteUrl),
-  signIn: (email, password) => call('signIn', email, password),
+  connectFromActiveCRM: () => new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage({ type: 'TK_CONNECT_FROM_ACTIVE_CRM' }, (res) => {
+      if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
+      if (!res) return reject(new Error('No response from the TurnKey extension background worker.'));
+      if (res.ok) resolve(res.data);
+      else reject(new Error(res.error || 'Could not connect to TurnKey.'));
+    });
+  }),
   getProfile: () => call('getProfile'),
   getBusiness: (businessId) => call('getBusiness', businessId),
   listCustomers: (businessId) => call('listCustomers', businessId),

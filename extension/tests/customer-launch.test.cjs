@@ -10,14 +10,18 @@ const path = require('node:path');
 function loadBridge({ onSendMessage } = {}) {
   const posted = [];
   const listeners = [];
+  const runtimeListeners = [];
   const fakeWindow = {
     location: { origin: 'https://turnkeycrm.net' },
+    localStorage: { getItem: (key) => fakeWindow.storageData && fakeWindow.storageData[key] || null },
+    storageData: {},
     postMessage: (msg, origin) => posted.push({ msg, origin }),
     addEventListener: (name, fn) => { if (name === 'message') listeners.push(fn); }
   };
   global.chrome = {
     runtime: {
       id: 'test-extension-id',
+      onMessage: { addListener: (fn) => runtimeListeners.push(fn) },
       getManifest: () => ({ version: '0.2.2' }),
       sendMessage: (msg, cb) => (onSendMessage || (() => cb({ ok: true })))(msg, cb)
     }
@@ -27,7 +31,7 @@ function loadBridge({ onSendMessage } = {}) {
   global.window = fakeWindow;
   require('../content/bridge/customer-launch.js');
   global.window = origWindow;
-  return { posted, emit: (data, overrides = {}) => listeners.forEach((fn) => fn(Object.assign({ source: fakeWindow, origin: 'https://turnkeycrm.net', data }, overrides))) };
+  return { posted, runtimeListeners, fakeWindow, emit: (data, overrides = {}) => listeners.forEach((fn) => fn(Object.assign({ source: fakeWindow, origin: 'https://turnkeycrm.net', data }, overrides))) };
 }
 
 test('broadcasts TK_READY on load, with the extension version and no nonce', () => {
@@ -85,4 +89,36 @@ test('TK_LAUNCH without a nonce is ignored outright', () => {
   posted.length = 0;
   emit({ source: 'turnkey-crm-page', type: 'TK_LAUNCH', recordId: 1, customerId: 'cust1', businessId: 'biz1' });
   assert.equal(posted.length, 0);
+});
+
+test('only the extension channel can read the matching TurnKey Supabase session, and the token is never posted to page scripts', () => {
+  const { posted, runtimeListeners, fakeWindow } = loadBridge();
+  fakeWindow.storageData['sb-rcighpmdrutnghsqhzlr-auth-token'] = JSON.stringify({
+    access_token: 'access-secret', refresh_token: 'refresh-secret', expires_at: 1800000000,
+    user: { id: 'untrusted-user-id' }
+  });
+  const listener = runtimeListeners[0];
+  let response;
+  listener({ type: 'TK_READ_CRM_AUTH_SESSION', storageKey: 'sb-rcighpmdrutnghsqhzlr-auth-token' }, { id: 'test-extension-id' }, (value) => { response = value; });
+  assert.equal(response.ok, true);
+  assert.deepEqual(response.session, { access_token: 'access-secret', refresh_token: 'refresh-secret', expires_at: 1800000000 });
+  assert.equal(JSON.stringify(posted).includes('access-secret'), false);
+  assert.equal(JSON.stringify(posted).includes('refresh-secret'), false);
+
+  response = null;
+  listener({ type: 'TK_READ_CRM_AUTH_SESSION', storageKey: 'sb-rcighpmdrutnghsqhzlr-auth-token' }, { id: 'other-extension' }, (value) => { response = value; });
+  assert.equal(response, null, 'messages from other extensions must not retrieve a session');
+});
+
+test('session bridge rejects an invalid storage-key shape and reports a signed-out CRM tab', () => {
+  const { runtimeListeners } = loadBridge();
+  const listener = runtimeListeners[0];
+  let response;
+  listener({ type: 'TK_READ_CRM_AUTH_SESSION', storageKey: '../../secret' }, { id: 'test-extension-id' }, (value) => { response = value; });
+  assert.equal(response.ok, false);
+
+  response = null;
+  listener({ type: 'TK_READ_CRM_AUTH_SESSION', storageKey: 'sb-rcighpmdrutnghsqhzlr-auth-token' }, { id: 'test-extension-id' }, (value) => { response = value; });
+  assert.equal(response.ok, false);
+  assert.match(response.error, /No active TurnKey sign-in/);
 });
