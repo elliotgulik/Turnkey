@@ -37,41 +37,85 @@
   function mount({ root, request, onConnect = () => {}, onCount = () => {}, listQuotes = () => [], buildQuoteAttachment, onSent = () => {} }) {
     if (!root || typeof request !== 'function') throw Error('Conversations requires a root and authenticated request function');
     let messages = [], stars = [], drafts = [], account = null, folder = 'inbox', selected = null;
-    let quoteFiles = null, quoteChoices = [];
+    let quoteFiles = null, quoteChoices = [], query = '', loaded = false;
+    const folders = [['inbox', 'Inbox', 'Customer emails and replies, together in one place.'], ['sent', 'Sent', 'Conversations containing emails you have sent.'], ['starred', 'Starred', 'Keep important conversations close at hand.'], ['drafts', 'Drafts', 'Continue a saved email when you are ready.'], ['all', 'All mail', 'Every conversation synced to TurnKey.']];
+    const searchText = new WeakMap();
+    const searchable = m => {
+      if (!searchText.has(m)) searchText.set(m, [m.from_address, m.to_addresses, m.subject, m.snippet, messageText(m)].join(' ').toLowerCase());
+      return searchText.get(m);
+    };
+    const dateLabel = value => Number.isNaN(new Date(value).getTime()) ? 'Date unavailable' : new Date(value).toLocaleString();
     let composer = null, notice = '', pending = false, destroyed = false, timer, hasMore = false, loading = false;
     let saveQueue = Promise.resolve();
     const api = (path, method = 'GET', body) => request('/api/conversations' + path, { method, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
     const button = (label, action, extra = '') => `<button type="button" data-cv-action="${action}" ${extra}>${label}</button>`;
     const activeDrafts = () => drafts.filter(d => d.status !== 'sent');
+    function focusSnapshot() {
+      const active = global.document.activeElement;
+      if (!root.contains(active)) return null;
+      return { name: active.name, action: active.dataset.cvAction, key: active.dataset.key, id: active.dataset.id, folder: active.dataset.folder, index: active.dataset.index,
+        start: active.selectionStart, end: active.selectionEnd, scroll: active.scrollTop };
+    }
+    function restoreFocus(focus) {
+      if (!focus) return;
+      const next = [...root.querySelectorAll('input,textarea,[data-cv-action]')].find(el => focus.name ? el.name === focus.name : focus.action && el.dataset.cvAction === focus.action && el.dataset.key === focus.key && el.dataset.id === focus.id && el.dataset.folder === focus.folder && el.dataset.index === focus.index);
+      if (!next || next.disabled) return;
+      next.focus({ preventScroll: true });
+      if (typeof focus.start === 'number' && ['text', 'search', 'textarea'].includes(next.type)) next.setSelectionRange(focus.start, focus.end);
+      next.scrollTop = focus.scroll;
+    }
+    function emptyHtml() {
+      if (loading) return '<div class="cv-empty"><h4>Loading your conversations…</h4><p>Your synced messages and saved drafts will appear here.</p></div>';
+      if (query.trim()) return `<div class="cv-empty"><h4>No matching ${folder === 'drafts' ? 'drafts' : 'conversations'}</h4><p>Try another name, email address or word from the message. Search covers this folder’s synced mail.</p>${button('Clear search', 'clear-search')}</div>`;
+      if (loaded && !account) return `<div class="cv-empty"><h4>Bring your customer emails into TurnKey</h4><p>Connect Gmail in Connections, then sync your mailbox. You can prepare and save a draft now.</p>${button('Connect Gmail', 'connect')}${button('Compose', 'compose')}</div>`;
+      const copy = {
+        inbox: ['Your inbox is clear', 'Sync to check for customer emails. Conversations with received mail appear here.', 'Sync mailbox', 'sync'],
+        sent: ['No sent conversations yet', 'Emails appear here after Gmail confirms they were sent.', 'Compose', 'compose'],
+        starred: ['Keep important emails handy', 'Use the star beside a conversation to find it here later.', 'Browse inbox', 'inbox'],
+        drafts: ['No drafts to finish', 'Start an email and your changes will be saved automatically as a draft.', 'Compose', 'compose'],
+        all: ['No synced conversations yet', 'Sync your connected mailbox to bring in customer emails.', 'Sync mailbox', 'sync'],
+      }[folder];
+      return `<div class="cv-empty"><h4>${copy[0]}</h4><p>${copy[1]}</p>${button(copy[2], copy[3], pending ? 'disabled' : '')}</div>`;
+    }
+    function mailboxHtml(groups) {
+      const q = query.trim().toLowerCase(), filtered = category(groups, folder).filter(g => !q || g.messages.some(m => searchable(m).includes(q)));
+      const saved = activeDrafts().filter(d => !q || [d.payload.to, d.payload.subject, d.payload.bodyText, ...(d.payload.attachments || []).map(f => f.filename)].join(' ').toLowerCase().includes(q));
+      const thread = filtered.find(g => g.key === selected), count = folder === 'drafts' ? saved.length : filtered.length;
+      const info = folders.find(([id]) => id === folder);
+      root.dataset.cvReading = thread ? 'true' : 'false';
+      const heading = `<header class="cv-folder-heading"><div><h3>${info[1]} <span>${count}</span></h3><p>${q ? 'Matching ' + (folder === 'drafts' ? 'drafts' : 'synced conversations') + ' in this folder' : info[2]}</p></div></header>`;
+      if (folder === 'drafts') return heading + `<div class="cv-drafts">${saved.map(d => button(`<div><b>${esc(d.payload.subject || '(no subject)')}</b><span>${esc(d.payload.to || 'Add a recipient')} · ${esc(d.payload.bodyText?.slice(0, 120) || 'Continue writing your email')}</span></div><small>${esc(d.status === 'draft' ? 'Draft' : 'Delivery ' + d.status + ' — check Sent')}</small>`, 'draft', `data-id="${esc(d.id)}"`)).join('') || emptyHtml()}</div>`;
+      return heading + `<div class="cv-layout"><aside class="cv-list" aria-label="Conversations">${filtered.map(g => `<div class="cv-row ${g.key === selected ? 'selected' : ''}">${button(g.starred ? '★' : '☆', 'star', `data-id="${esc(g.last.id)}" aria-label="${g.starred ? 'Unstar' : 'Star'} conversation" aria-pressed="${g.starred}"`)}${button(`<b>${esc(g.last.direction === 'sent' ? g.last.to_addresses : g.last.from_address)}</b><strong>${esc(g.last.subject || '(no subject)')}</strong><span>${esc(g.last.snippet || messageText(g.last).slice(0, 140))}</span><small>${esc(dateLabel(g.last.sent_at))}${g.messages.length > 1 ? ' · ' + g.messages.length + ' messages' : ''}</small>`, 'thread', `data-key="${esc(g.key)}" aria-current="${g.key === selected ? 'true' : 'false'}"`)}</div>`).join('') || emptyHtml()}${hasMore ? button(loading ? 'Loading older messages…' : 'Load older messages', 'more', loading || pending ? 'disabled' : '') : ''}<p class="cv-sync-hint">Search and folders cover synced messages.${hasMore ? ' Load older messages to search further back.' : ''}</p></aside><section class="cv-thread" aria-label="Selected conversation">${thread ? `${button('Back to ' + info[1].toLowerCase(), 'back', 'class="cv-back"')}<header class="cv-thread-heading"><h3 tabindex="-1">${esc(thread.last.subject || '(no subject)')}</h3><p>${thread.messages.length} message${thread.messages.length === 1 ? '' : 's'} in this conversation</p></header>${thread.messages.map(m => `<article class="cv-message ${m.direction === 'sent' ? 'sent' : 'received'}"><header><b>${esc(m.from_address)}</b><time>${esc(dateLabel(m.sent_at))}</time></header><p>To: ${esc(m.to_addresses)} <span class="cv-direction">${m.direction === 'sent' ? 'Sent' : 'Received'}</span></p><div class="cv-body">${esc(messageText(m))}</div></article>`).join('')}${button('Reply', 'reply', pending ? 'disabled' : 'class="cv-primary"')}` : '<div class="cv-empty cv-reading-empty"><h4>Your customer conversations</h4><p>Select an email to read the full conversation and reply. Start a new email with Compose.</p></div>'}</section></div>`;
+    }
     function draw() {
       if (destroyed) return;
-      const groups = groupMessages(messages, stars), filtered = category(groups, folder);
-      const thread = groups.find(g => g.key === selected);
+      const focus = focusSnapshot(), groups = groupMessages(messages, stars);
       root.classList.add('tk-conversations');
-      root.innerHTML = `<header class="cv-head"><div><h2>Conversations</h2><p>${account ? 'Connected as ' + esc(account.email_address) : 'Connect Gmail to send and sync emails.'}</p></div><div>${button('Connections', 'connect')}${button('Sync', 'sync', pending ? 'disabled' : '')}${button('Compose', 'compose', pending ? 'disabled' : '')}</div></header>
+      root.innerHTML = `<header class="cv-head"><div><h2>Conversations</h2><p>${account ? '<span class="cv-connected">Gmail connected</span> ' + esc(account.email_address) : 'Customer emails, replies and saved drafts.'}</p></div><div>${button('Connections', 'connect')}${button(pending ? 'Working…' : 'Sync', 'sync', pending || !account ? 'disabled' : '')}${button('Compose', 'compose', pending ? 'disabled class="cv-primary"' : 'class="cv-primary"')}</div></header>
         <p class="cv-notice" role="status" aria-live="polite">${esc(notice)}</p>
-        <nav class="cv-folders" aria-label="Mail folders">${[['inbox', 'Inbox'], ['sent', 'Sent'], ['starred', 'Starred'], ['drafts', 'Drafts'], ['all', 'All']].map(([id, label]) => button(`${label} <span>${id === 'drafts' ? activeDrafts().length : category(groups, id).length}</span>`, 'folder', `data-folder="${id}" aria-current="${folder === id ? 'page' : 'false'}"`)).join('')}</nav>
-        ${folder === 'drafts' ? `<div class="cv-drafts">${activeDrafts().map(d => button(`<b>${esc(d.payload.subject || '(no subject)')}</b><span>${esc(d.payload.to || 'No recipient')} · ${esc(d.status === 'draft' ? 'Draft' : 'Delivery confirmation ' + d.status)}</span>`, 'draft', `data-id="${esc(d.id)}"`)).join('') || '<p>No saved drafts.</p>'}</div>` : `<div class="cv-layout"><aside class="cv-list" aria-label="Conversations">${filtered.map(g => `<div class="cv-row ${g.key === selected ? 'selected' : ''}">${button(g.starred ? '★' : '☆', 'star', `data-id="${esc(g.last.id)}" aria-label="${g.starred ? 'Unstar' : 'Star'} conversation" aria-pressed="${g.starred}"`)}${button(`<b>${esc(g.last.direction === 'sent' ? g.last.to_addresses : g.last.from_address)}</b><strong>${esc(g.last.subject || '(no subject)')}</strong><span>${esc(g.last.snippet || '')}</span><small>${esc(new Date(g.last.sent_at).toLocaleString())}</small>`, 'thread', `data-key="${esc(g.key)}"`)}</div>`).join('') || `<p>${loading ? 'Loading…' : 'No conversations in this folder.'}</p>`}${hasMore ? button('Load older messages', 'more', loading ? 'disabled' : '') : ''}<small>Folders show synced messages; Inbox includes conversations with received mail.</small></aside><section class="cv-thread" aria-label="Selected conversation">${thread ? `<h3>${esc(thread.last.subject || '(no subject)')}</h3>${thread.messages.map(m => `<article class="cv-message ${m.direction}"><header><b>${esc(m.from_address)}</b><time>${esc(new Date(m.sent_at).toLocaleString())}</time></header><p>To: ${esc(m.to_addresses)}</p><div class="cv-body">${esc(messageText(m))}</div></article>`).join('')}${button('Reply', 'reply', pending ? 'disabled' : '')}` : '<p>Select a conversation to read it.</p>'}</section></div>`}
-        ${composer ? composeHtml() : ''}`;
+        <nav class="cv-folders" aria-label="Mail folders">${folders.map(([id, label]) => button(`${label} <span>${id === 'drafts' ? activeDrafts().length : category(groups, id).length}</span>`, 'folder', `data-folder="${id}" aria-current="${folder === id ? 'page' : 'false'}"`)).join('')}</nav>
+        <div class="cv-search-bar"><label>Search messages<input type="search" name="cvQuery" placeholder="Search names, subjects or message text…" value="${esc(query)}" autocomplete="off"></label>${button('Clear search', 'clear-search', query ? '' : 'hidden')}</div>
+        <div class="cv-results">${mailboxHtml(groups)}</div>${composer ? composeHtml() : ''}`;
+      restoreFocus(focus);
       onCount(category(groups, 'inbox').length);
     }
     function composeHtml() {
       const locked = pending || composer.status !== 'draft';
-      const fileNames = composer.payload.attachments.map((f, i) => `<li>${esc(f.filename)} ${button('Remove', 'remove-file', `data-index="${i}" ${locked ? 'disabled' : ''}`)}</li>`).join('');
-      return `<section class="cv-composer" aria-label="Email composer"><header><h3>${composer.payload.replyToId ? 'Reply' : 'New email'}</h3>${button('Save & close', 'close', locked ? 'disabled' : '')}</header><form data-cv-form>
-        <label>To<input name="to" type="email" autocomplete="email" required maxlength="2000" value="${esc(composer.payload.to)}" ${locked ? 'disabled' : ''}></label>
-        <label>Subject<input name="subject" required maxlength="998" value="${esc(composer.payload.subject)}" ${locked ? 'disabled' : ''}></label>
-        <label>Message<textarea name="bodyText" rows="9" required maxlength="100000" ${locked ? 'disabled' : ''}>${esc(composer.payload.bodyText)}</textarea></label>
-        <ul class="cv-files">${fileNames}</ul><label class="cv-file-input">Attach images or files<input type="file" name="files" multiple ${locked ? 'disabled' : ''}></label>
-        <div class="cv-compose-actions">${button('Saved quote PDF', 'quotes', locked ? 'disabled' : '')}${button('Save draft', 'save', locked ? 'disabled' : '')}${button('Discard', 'discard', pending || composer.status === 'sending' ? 'disabled' : '')}<button type="submit" ${locked ? 'disabled' : ''}>${pending ? 'Working…' : 'Send email'}</button></div>
-        <p class="cv-save-state" aria-live="polite">${esc(composer.status !== 'draft' ? 'Delivery is ' + composer.status + '. Check Sent or sync before creating another email.' : composer.dirty ? 'Unsaved changes' : 'Draft saved')}</p></form><div class="cv-quote-picker">${quoteFiles ? '<h4>Opportunity quotes</h4>' + (quoteChoices.map(q => button(esc(q.label), 'opportunity-quote', `data-id="${esc(q.id)}"`)).join('') || '<p>No opportunity quotes available.</p>') + '<h4>Uploaded quote PDFs</h4>' + (quoteFiles.map(f => button(esc(f.filename), 'quote', `data-id="${esc(f.id)}" data-filename="${esc(f.filename)}"`)).join('') || '<p>No uploaded quote PDFs.</p>') : ''}</div></section>`;
+      const fileNames = composer.payload.attachments.map((f, i) => `<li><span><b>${esc(f.filename)}</b><small>${f.savedAttachmentId ? 'Saved quote PDF' : f.mimeType === 'application/pdf' ? 'PDF document' : 'File attachment'}</small></span>${button('Remove', 'remove-file', `data-index="${i}" aria-label="Remove ${esc(f.filename)}" ${locked ? 'disabled' : ''}`)}</li>`).join('');
+      return `<section class="cv-composer" aria-label="Email composer"><header><div><h3>${composer.payload.replyToId ? 'Reply' : 'New email'}</h3><p>Your draft saves as you type. Send when you are ready.</p></div>${button(composer.status === 'draft' ? 'Save & close' : 'Close', 'close', pending ? 'disabled' : '')}</header><form data-cv-form>
+        <label>To<input name="to" type="email" autocomplete="email" placeholder="customer@example.com" required maxlength="2000" value="${esc(composer.payload.to)}" ${locked ? 'disabled' : ''}></label>
+        <label>Subject<input name="subject" placeholder="What is this email about?" required maxlength="998" value="${esc(composer.payload.subject)}" ${locked ? 'disabled' : ''}></label>
+        <label>Message<textarea name="bodyText" rows="9" placeholder="Write your message…" required maxlength="100000" ${locked ? 'disabled' : ''}>${esc(composer.payload.bodyText)}</textarea></label>
+        <div class="cv-attachments"><h4>Attachments <span>${composer.payload.attachments.length}/10</span></h4><p>Up to 10 files, 12 MB total. Review attached files before sending.</p><ul class="cv-files">${fileNames}</ul><label class="cv-file-input">Attach images or files<input type="file" name="files" multiple ${locked ? 'disabled' : ''}></label>${button('Saved quote PDF', 'quotes', `aria-expanded="${!!quoteFiles}" ${locked ? 'disabled' : ''}`)}</div>
+        <div class="cv-quote-picker" ${quoteFiles ? '' : 'hidden'}>${quoteFiles ? '<header><h4>Choose a quote to attach</h4>' + button('Close quote picker', 'quotes') + '</header><h4>Opportunity quotes</h4>' + (quoteChoices.map(q => button(esc(q.label), 'opportunity-quote', `data-id="${esc(q.id)}" ${locked ? 'disabled' : ''}`)).join('') || '<p>No opportunity quotes available.</p>') + '<h4>Uploaded quote PDFs</h4>' + (quoteFiles.map(f => button(esc(f.filename), 'quote', `data-id="${esc(f.id)}" data-filename="${esc(f.filename)}" ${locked ? 'disabled' : ''}`)).join('') || '<p>No uploaded quote PDFs. You can attach a file above.</p>') : ''}</div>
+        <footer class="cv-compose-footer"><p class="cv-save-state" role="status" aria-live="polite">${esc(composer.status !== 'draft' ? 'Delivery is ' + composer.status + '. Check Sent or sync before creating another email.' : composer.dirty ? 'Unsaved changes' : 'Draft saved')}</p>${!account ? '<p>Connect Gmail in Connections to send this draft.</p>' : ''}<div class="cv-compose-actions">${button('Save draft', 'save', locked ? 'disabled' : '')}${button('Discard', 'discard', pending || composer.status === 'sending' ? 'disabled' : '')}<button type="submit" class="cv-primary" ${locked || !account ? 'disabled' : ''}>${pending ? 'Working…' : 'Send email'}</button></div></footer></form></section>`;
     }
     async function refresh() {
-      loading = true;
+      loading = true; draw();
       try {
         const [mail, saved] = await Promise.all([api('/messages'), api('/drafts')]);
         if (destroyed) return;
-        account = mail.account; messages = mail.messages; stars = mail.stars; hasMore = mail.hasMore; drafts = saved.drafts;
+        loaded = true; account = mail.account; messages = mail.messages; stars = mail.stars; hasMore = mail.hasMore; drafts = saved.drafts;
       } finally { loading = false; draw(); }
     }
     function persist() {
@@ -96,7 +140,7 @@
       await persist(); draw(); root.querySelector('[name="to"]')?.focus();
     }
     async function send() {
-      if (pending || !composer || composer.status !== 'draft') return;
+      if (pending || !account || !composer || composer.status !== 'draft') return;
       clearTimeout(timer); pending = true; notice = ''; draw();
       try {
         await persist();
@@ -117,13 +161,15 @@
       } finally { pending = false; draw(); }
     }
     async function action(e) {
-      const b = e.target.closest('[data-cv-action]'); if (!b || !root.contains(b)) return;
+      const b = e.target.closest('[data-cv-action]'); if (!b || !root.contains(b) || b.disabled) return;
       const name = b.dataset.cvAction;
       if (pending && name !== 'connect') return;
       try {
         if (name === 'connect') return onConnect();
         if (name === 'compose') return await startCompose();
-        if (name === 'folder') { folder = b.dataset.folder; await persist(); draw(); }
+        if (name === 'clear-search') { query = ''; const search = root.querySelector('[name=cvQuery]'); search.value = ''; search.focus(); }
+        if (name === 'back') selected = null;
+        if (name === 'inbox' || name === 'folder') { folder = name === 'inbox' ? 'inbox' : b.dataset.folder; selected = null; await persist(); draw(); }
         if (name === 'thread') { selected = b.dataset.key; await persist(); draw(); }
         if (name === 'reply') {
           const group = groupMessages(messages, stars).find(g => g.key === selected); if (!group) return;
@@ -135,11 +181,13 @@
           b.disabled = true; await api('/stars/' + m.id, 'PUT', { starred: value });
           stars = value ? [...stars, key] : stars.filter(k => k !== key); draw();
         }
-        if (name === 'save' || name === 'close') { clearTimeout(timer); await persist(); notice = 'Draft saved.'; if (name === 'close') composer = null; draw(); }
+        if (name === 'save' || name === 'close') { clearTimeout(timer); await persist(); notice = composer.status === 'draft' ? 'Draft saved.' : 'Draft kept. Check Sent or sync to verify delivery.'; if (name === 'close') composer = null; draw(); }
         if (name === 'discard') { clearTimeout(timer); await saveQueue.catch(() => {}); await api('/drafts/' + composer.id, 'DELETE'); drafts = drafts.filter(d => d.id !== composer.id); composer = null; draw(); }
-        if (name === 'draft') { await persist(); const d = drafts.find(d => d.id === b.dataset.id); composer = { ...d, payload: JSON.parse(JSON.stringify(d.payload)), dirty: false }; draw(); }
+        if (name === 'draft') { await persist(); const d = drafts.find(d => d.id === b.dataset.id); quoteFiles = null; quoteChoices = []; composer = { ...d, payload: JSON.parse(JSON.stringify(d.payload)), dirty: false }; draw(); root.querySelector('[name=to]')?.focus(); }
         if (name === 'remove-file') { composer.payload.attachments.splice(Number(b.dataset.index), 1); composer.dirty = true; await persist(); draw(); }
         if (name === 'quotes') {
+          if (quoteFiles) { quoteFiles = null; return; }
+          pending = true; draw();
           quoteChoices = await listQuotes();
           try { quoteFiles = (await api('/quote-attachments')).attachments; }
           catch { quoteFiles = []; notice = 'Uploaded PDFs could not load. You can still choose an opportunity quote.'; }
@@ -152,18 +200,25 @@
           if (destroyed || composer !== target) return;
           const bytes = target.payload.attachments.reduce((n, f) => n + (f.contentBase64?.length || 0) * .75, 0) + (file.contentBase64?.length || 0) * .75;
           if (bytes > 12 * 1024 * 1024) throw Error('Attachments must total at most 12 MB');
-          target.payload.attachments.push(file); target.dirty = true; await persist();
+          target.payload.attachments.push(file); target.dirty = true; quoteFiles = null; await persist();
         }
         if (name === 'quote') {
           if (composer.payload.attachments.length >= 10) throw Error('Use at most 10 attachments');
-          composer.payload.attachments.push({ savedAttachmentId: b.dataset.id, filename: b.dataset.filename }); composer.dirty = true; await persist(); draw();
+          composer.payload.attachments.push({ savedAttachmentId: b.dataset.id, filename: b.dataset.filename }); composer.dirty = true; quoteFiles = null; await persist(); draw();
         }
         if (name === 'sync') { pending = true; draw(); await request('/api/email/sync', { method: 'POST', body: '{}' }); notice = 'Mailbox synced.'; await refresh(); }
         if (name === 'more') {
+          pending = true; loading = true; draw();
           await persist(); const data = await api('/messages?offset=' + messages.length);
           const ids = new Set(messages.map(m => m.id)); messages.push(...data.messages.filter(m => !ids.has(m.id))); stars = data.stars; hasMore = data.hasMore; draw();
         }
-      } catch (err) { notice = err.message; } finally { pending = false; draw(); }
+      } catch (err) { notice = err.message; } finally {
+        pending = false; loading = false; draw();
+        if (name === 'thread') root.querySelector('.cv-thread-heading h3')?.focus({ preventScroll: true });
+        if (name === 'back') root.querySelector('[data-cv-action=thread]')?.focus({ preventScroll: true });
+        if (name === 'close' || name === 'discard') root.querySelector('[data-cv-action=compose]')?.focus({ preventScroll: true });
+        if (name === 'quote' || name === 'opportunity-quote' || name === 'quotes') root.querySelector('.cv-attachments [data-cv-action=quotes]')?.focus({ preventScroll: true });
+      }
     }
     async function reply(bodyText = '') {
       const group = groupMessages(messages, stars).find(g => g.key === selected);
@@ -172,15 +227,23 @@
       await startCompose({ to: (raw?.match(/<([^>]+)>/)?.[1] || raw || '').trim(), subject: /^re:/i.test(m.subject || '') ? m.subject : 'Re: ' + (m.subject || ''), replyToId: m.id, bodyText });
     }
     function input(e) {
+      if (e.target.name === 'cvQuery') {
+        query = e.target.value;
+        // Replace only results: search and composer inputs keep focus, caret and DOM.
+        root.querySelector('.cv-results').innerHTML = mailboxHtml(groupMessages(messages, stars));
+        root.querySelector('[data-cv-action=clear-search]').hidden = !query;
+        return;
+      }
       if (!composer || !['to', 'subject', 'bodyText'].includes(e.target.name)) return;
       composer.payload[e.target.name] = e.target.value; composer.dirty = true; clearTimeout(timer);
       const el = root.querySelector('.cv-save-state'); if (el) el.textContent = 'Saving…';
-      timer = setTimeout(() => persist().catch(e => { notice = e.message; const el = root.querySelector('.cv-notice'); if (el) el.textContent = notice; }), 700);
+      timer = setTimeout(() => persist().catch(e => { notice = e.message; const el = root.querySelector('.cv-notice'); if (el) { el.textContent = notice; el.hidden = false; } }), 700);
     }
     async function files(e) {
-      if (e.target.name !== 'files' || !composer) return;
-      const chosen = [...e.target.files];
-      pending = true;
+      if (e.target.name !== 'files' || !composer || pending || composer.status !== 'draft') return;
+      const chosen = [...e.target.files], target = composer;
+      if (!chosen.length) return;
+      pending = true; notice = ''; draw();
       try {
         if (chosen.length + composer.payload.attachments.length > 10) throw Error('Use at most 10 attachments');
         let bytes = composer.payload.attachments.reduce((n, f) => n + (f.contentBase64?.length || 0) * .75, 0);
@@ -190,7 +253,8 @@
           const base64 = await new Promise((resolve, reject) => { const r = new FileReader(); r.onload = () => resolve(r.result.split(',')[1]); r.onerror = () => reject(Error('Could not read ' + f.name)); r.readAsDataURL(f); });
           added.push({ filename: f.name, mimeType: f.type || 'application/octet-stream', contentBase64: base64 });
         }
-        composer.payload.attachments.push(...added); composer.dirty = true; await persist();
+        if (destroyed || composer !== target) return;
+        target.payload.attachments.push(...added); target.dirty = true; await persist();
       } catch (err) { notice = err.message; } finally { pending = false; draw(); }
     }
     function submit(e) { if (e.target.matches('[data-cv-form]')) { e.preventDefault(); void send(); } }
@@ -235,7 +299,7 @@
         } });
       }
       try { await view.refresh(); } catch (e) {
-        const notice = root.querySelector('.cv-notice'); if (notice && activeKey === key) notice.textContent = e.message;
+        const notice = root.querySelector('.cv-notice'); if (notice && activeKey === key) { notice.textContent = e.message; notice.hidden = false; }
       }
     }
     render.reset = reset;
