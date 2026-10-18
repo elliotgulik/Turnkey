@@ -73,7 +73,7 @@ function makeElement({ onclick = '', text = '', cpQa = false, action = null, rec
     classList: { contains: (c) => (cpQa ? c === 'cp-qa' : false) },
     getAttribute: (name) => (name === 'onclick' ? el._onclick : name === 'data-sale-action' ? action : name === 'data-id' ? recordId : null),
     get textContent() { return el._text; },
-    closest: (sel) => ((el._onclick || action === 'quote' || id === 'quote-builder-open') ? el : null)
+    closest: (sel) => ((el._onclick || ['quote','quote-select'].includes(action) || id === 'quote-builder-open') ? el : null)
   };
   return el;
 }
@@ -269,13 +269,13 @@ test('a LAUNCH timeout keeps the modal open with a clear error instead of hangin
   assert.match(errEl.textContent, /did not respond/i);
 });
 
-test('a business session that is not ready yet falls back to the native handler (no modal, no interception) — the one case this is NOT a policy fallback', () => {
+test('a business session that is not ready blocks the old builder without handing off customer data', () => {
   const r = { id: 8, name: 'Not Ready', customerId: 'cust8', address: '8 Test St' };
   const s = setup({ records: [r], businessStateReady: false });
   s.extensionReady();
   const el = makeElement({ onclick: 'openQuoteModal(8)', text: 'Build quote' });
   const event = s.click(el);
-  assert.equal(event._prevented, undefined);
+  assert.equal(event._prevented, true);
   assert.equal(s.lastLaunch(), undefined);
   assert.equal(s.lastModal(), null);
 });
@@ -287,7 +287,7 @@ test('a record owned by a different business than the current session is never h
   s.extensionReady();
   const el = makeElement({ onclick: 'openQuoteModal(9)', text: 'Build quote' });
   const event = s.click(el);
-  assert.equal(event._prevented, undefined);
+  assert.equal(event._prevented, true);
   assert.equal(s.lastLaunch(), undefined);
   assert.equal(s.lastModal(), null);
 });
@@ -331,4 +331,22 @@ test('Sales pipeline quote action uses the Earth launcher instead of the old bui
  assert.equal(event._prevented,true);
  assert.equal(s.opened.length,0);
  assert.ok(findByAttr(s.ctx.document.body,'data-eh-earth-link'));
+});
+
+test('customer picker selection uses Earth and never opens the in-site builder', () => {
+ const r={id:43,name:'Picker Customer',customerId:'cust43',address:'43 Test Street'};
+ const s=setup({records:[r]});
+ const event=s.click(makeElement({action:'quote-select',recordId:'43',text:'Picker Customer'}));
+ assert.equal(event._prevented,true);
+ assert.equal(s.opened.length,0);
+ assert.ok(findByAttr(s.ctx.document.body,'data-eh-earth-link'));
+});
+
+test('programmatic new-customer creation has a public Earth entry point and probes for an already-loaded extension', async () => {
+ const r={id:44,name:'New Customer',customerId:'cust44',address:'44 Test Street'};
+ const s=setup({records:[r]});
+ assert.ok(s.messages.some(m=>m.type==='TK_HELLO'));
+ await s.ctx.window.TK_EARTH_QUOTES.open(44);
+ assert.equal(s.opened.length,0);
+ assert.ok(findByAttr(s.lastModal(),'data-eh-earth-link'));
 });

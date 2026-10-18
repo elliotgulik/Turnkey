@@ -59,6 +59,9 @@
       else pending.reject(new Error(msg.error||'Could not open Google Earth.'));
     }
   });
+  // Content scripts may announce readiness before this deferred page script
+  // loads. Ask again instead of depending on that one-time announcement.
+  window.postMessage({source:PAGE_SOURCE,type:'TK_HELLO'},window.location.origin);
 
   function launchViaExtension(recordId,customerId,businessId){
     return new Promise(function(resolve,reject){
@@ -79,7 +82,7 @@
   // untouched — this handoff only ever replaces a fresh "Build quote".
   function isQuoteTrigger(el){
     if(!el||typeof el.getAttribute!=='function')return false;
-    if(el.id==='quote-builder-open'||el.getAttribute('data-sale-action')==='quote')return true;
+    if(el.id==='quote-builder-open'||['quote','quote-select'].includes(el.getAttribute('data-sale-action')))return true;
     const onclick=el.getAttribute('onclick')||'';
     if(!/openQuoteModal\(\s*\d+\s*\)/.test(onclick))return false;
     const text=(el.textContent||'').trim().toLowerCase();
@@ -233,31 +236,18 @@
     };
   }
 
-  document.addEventListener('click',function(event){
-    const target=event.target&&typeof event.target.closest==='function'?event.target.closest('[onclick],[data-sale-action="quote"],#quote-builder-open'):null;
-    if(!isQuoteTrigger(target))return;
-    const match=(target.getAttribute('onclick')||'').match(/openQuoteModal\(\s*(\d+)\s*\)/);
-    const selected=document.getElementById('quote-builder-lead');
-    const recordId=Number(match?match[1]:(target.getAttribute('data-id')||(target.id==='quote-builder-open'&&selected?selected.value:NaN)));
-    if(!Number.isFinite(recordId))return;
-    if(typeof records==='undefined'||typeof currentBusinessId==='undefined'||typeof recordBusinesses==='undefined')return;
+  async function openEarthQuote(recordId){
+    if(!Number.isFinite(Number(recordId)))return false;
+    if(typeof records==='undefined'||typeof currentBusinessId==='undefined'||typeof recordBusinesses==='undefined')return false;
+    recordId=Number(recordId);
     const r=records.find(function(x){return x.id===recordId;});
-    if(!r)return;
-
-    // Tenant/session must already be valid to safely act on this record at
-    // all — when it isn't, we genuinely don't know enough to intercept
-    // safely, so the native onclick (the only thing that still runs the old
-    // builder) is left alone. This is NOT a policy fallback: once this
-    // check passes, every path below replaces the old builder — none of
-    // them ever call it again.
+    if(!r)return false;
     if(typeof businessStateReady==='undefined'||!businessStateReady||recordBusinesses.get(r)!==currentBusinessId){
-      return;
+      toast('Your business account is still loading. Please try Build quote again once it has loaded.');
+      return false;
     }
-
-    event.preventDefault();event.stopPropagation();
-    if(typeof event.stopImmediatePropagation==='function')event.stopImmediatePropagation();
-
-    (async function(){
+    const picker=document.getElementById('sales-dialog');
+    if(picker&&picker.open&&typeof picker.close==='function')picker.close();
       if(!r.customerId&&typeof syncRecordToSupabase==='function'){
         const biz=currentBusinessId,version=typeof businessSessionVersion!=='undefined'?businessSessionVersion:null;
         try{await syncRecordToSupabase(r);}catch(e){/* handled below as a validation error in the modal */}
@@ -267,7 +257,7 @@
         // a handoff for the business that's signed in now.
         if(currentBusinessId!==biz||(version!==null&&typeof businessSessionVersion!=='undefined'&&businessSessionVersion!==version)||recordBusinesses.get(r)!==biz){
           toast('Your business session changed while saving this lead — try again.');
-          return;
+          return false;
         }
       }
 
@@ -281,6 +271,18 @@
           modal.paint('manual',(err&&err.message)||'Could not open Google Earth automatically.');
         }
       }
-    })();
+      return !modal.errors.length;
+  }
+  window.TK_EARTH_QUOTES={open:openEarthQuote};
+
+  document.addEventListener('click',function(event){
+    const target=event.target&&typeof event.target.closest==='function'?event.target.closest('[onclick],[data-sale-action="quote"],[data-sale-action="quote-select"],#quote-builder-open'):null;
+    if(!isQuoteTrigger(target))return;
+    const match=(target.getAttribute('onclick')||'').match(/openQuoteModal\(\s*(\d+)\s*\)/);
+    const selected=document.getElementById('quote-builder-lead');
+    const recordId=Number(match?match[1]:(target.getAttribute('data-id')||(target.id==='quote-builder-open'&&selected?selected.value:NaN)));
+    event.preventDefault();event.stopPropagation();
+    if(typeof event.stopImmediatePropagation==='function')event.stopImmediatePropagation();
+    openEarthQuote(recordId).catch(function(err){toast((err&&err.message)||'Could not open Google Earth. Refresh this page and try again.');});
   },true);
 })();

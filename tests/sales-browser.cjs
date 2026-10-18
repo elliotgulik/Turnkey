@@ -136,6 +136,29 @@ const { chromium } = require("playwright"),
       await page.getByRole('button',{name:'Build a quote'}).first().click();
       await page.locator('#sale-quote-search').fill('lead@example.test');
       assert.equal(await page.locator('#sale-quote-results [data-sale-action="quote-select"]').count(),1);
+      await page.evaluate(() => {
+        window.__earthQuoteScope={biz:currentBusinessId,user:currentUserId,ready:businessStateReady,customer:records[0].customerId};
+        currentBusinessId='earth-browser-test';currentUserId='earth-browser-user';businessStateReady=true;
+        records.forEach(r=>recordBusinesses.set(r,currentBusinessId));
+        records[0].customerId='11111111-1111-4111-8111-111111111111';
+        window.__earthLaunch=null;
+        window.__earthAck=(e)=>{if(e.source===window&&e.data?.source==='turnkey-crm-page'&&e.data.type==='TK_LAUNCH'){
+          window.__earthLaunch=e.data;
+          window.postMessage({source:'turnkey-customer-launch',type:'TK_LAUNCH_ACK',nonce:e.data.nonce},location.origin);
+        }};
+        window.addEventListener('message',window.__earthAck);
+        window.postMessage({source:'turnkey-customer-launch',type:'TK_READY'},location.origin);
+      });
+      await page.locator('#sale-quote-results [data-sale-action="quote-select"]').click();
+      await page.waitForFunction(()=>window.__earthLaunch?.recordId===1);
+      assert.equal(await page.locator('#sales-dialog').evaluate(el=>el.open),false);
+      assert.equal(await page.locator('#quote-overlay').evaluate(el=>el.classList.contains('active')),false,'customer selection must not open the in-site quote builder');
+      await page.evaluate(()=>{
+        window.removeEventListener('message',window.__earthAck);
+        currentBusinessId=window.__earthQuoteScope.biz;currentUserId=window.__earthQuoteScope.user;businessStateReady=window.__earthQuoteScope.ready;
+        records[0].customerId=window.__earthQuoteScope.customer;records.forEach(r=>recordBusinesses.set(r,currentBusinessId));
+      });
+      await page.getByRole('button',{name:'Build a quote'}).first().click();
       await page.locator('#sale-quote-search').fill('no-such-customer');
       assert.match(await page.locator('#sale-quote-results').innerText(),/No matching opportunities/);
       await page.locator('#sale-quote-new input[name="name"]').fill('New quote customer');
@@ -201,13 +224,13 @@ const { chromium } = require("playwright"),
       assert.equal(await page.locator('#view-pipeline [data-record]').count(),1);
       await page.locator('#pipeline-due').uncheck();
       // The mounted Conversations bridge guards contact actions in this offline session.
-      // Preparation still opens the real quote workspace without sending anything.
+      // An offline/unscoped session cannot fall through to the old quote editor.
       await page.locator('#pipeline-quoted [data-sale-action="contact"][data-id="4"]').click();
       await page.waitForFunction(()=>document.getElementById('toast').textContent.includes('Sign in and wait for your business'));
       assert.equal(await page.locator('#view-inbox .cv-composer').count(),0);
       await page.locator('#pipeline-contacted [data-sale-action="quote"][data-id="3"]').click();
-      assert.equal(await page.locator('#qw-step-0').isVisible(),true);
-      await page.evaluate(()=>closeModal('quote-overlay'));
+      assert.equal(await page.locator('#qw-step-0').isVisible(),false);
+      assert.match(await page.locator('#toast').innerText(),/account is still loading/);
       assert.equal(await page.evaluate(()=>records.find(r=>r.id===3).stage),'qualified');
       if (viewport.width > 760) {
         const source=page.locator('#view-pipeline [data-record="1"]'),target=page.locator('[data-drop-stage="quoting"]');
@@ -278,9 +301,10 @@ const { chromium } = require("playwright"),
         .locator('#sales-dialog [data-sale-action="dialog-close"]')
         .click();
       await page.evaluate(() => switchView("dashboard"));
-      await page.getByRole('button',{name:'Build a quote'}).first().click();
-      await page.locator('#sale-quote-search').fill('Browser test lead');
-      await page.locator('#sale-quote-results [data-sale-action="quote-select"]').click();
+      // Existing quote review/editing remains local. A fresh Build quote uses
+      // Earth (verified above) and must not be used to test this editor.
+      await page.evaluate(()=>{const r=records.find(r=>r.id===1);r.stage='quoting';r.services=[{svc:'driveway',qty:10}];r.total=100;r.quoteSentAt=null;openDetail(r.id);});
+      await page.locator('#view-detail').getByRole('button',{name:'Edit saved quote',exact:true}).click();
       assert.match(
         await page.locator("#quote-overlay").getAttribute("class"),
         /open/,

@@ -43,7 +43,11 @@
     oldSettings = openSettings;
   const record = (id) => records.find((r) => String(r.id) === String(id));
   const button = (text, action, id = "", extra = "") =>
-    `<button class="btn ghost sm" data-sale-action="${action}" data-id="${esc(id)}" ${extra}>${esc(text)}</button>`;
+    `<button class="btn ${['quote-home','quote'].includes(action)?'accent quote-launch-btn':'ghost sm'}" data-sale-action="${action}" data-id="${esc(id)}" ${extra}>${['quote-home','quote'].includes(action)?'<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18M5 6.5h14M5 17.5h14"/></svg>':''}<span>${esc(text)}</span></button>`;
+  function buildEarthQuote(id){
+    if(!window.TK_EARTH_QUOTES?.open){toast('The Google Earth quote connection is still loading. Refresh TurnKey and try again.');return Promise.resolve(false);}
+    return window.TK_EARTH_QUOTES.open(Number(id));
+  }
   const field = (label, input) =>
     `<label class="sale-field"><span>${esc(label)}</span>${input}</label>`;
   const options = (list, value) =>
@@ -433,10 +437,10 @@
         r.address || "Property address not set",
         button("← Pipeline", "pipeline") +
           button(
-            M.won(r) ? "New quote for this customer" : "Build / edit quote",
+            M.won(r) ? "New quote for this customer" : "Build quote",
             "quote",
             r.id,
-          ),
+          ) + (!M.won(r) && (r.services||[]).length ? button('Edit saved quote','edit-quote',r.id) : ''),
       ) +
       `<div class="sale-grid"><section class="sale-panel"><h3>Enquiry &amp; contact</h3><div class="sale-actions">${r.phone ? `<a class="btn ghost" href="tel:${esc(r.phone.replace(/[^+\d]/g, ""))}">Call</a>` : ""}${r.email ? `<a class="btn ghost" href="mailto:${esc(r.email)}">Email</a>` : ""}${button("Conversations", "inbox")}</div><dl class="sale-dl"><dt>Email</dt><dd>${esc(r.email || "Not set")}</dd><dt>Phone</dt><dd>${esc(r.phone || "Not set")}</dd><dt>Received</dt><dd>${esc(dates(M.leadTime(r)))}</dd><dt>Source</dt><dd>${esc(r.source || "Manual")}</dd></dl>${field(
         "Sales stage",
@@ -561,7 +565,7 @@
     return matches.map(g=>{const r=g.jobs.find(x=>!M.won(x))||g.jobs[0];return `<button type="button" class="sale-card" style="width:100%;text-align:left" data-sale-action="quote-select" data-id="${esc(r.id)}"><b>${esc(g.name||'New customer')}</b><div class="sale-muted">${esc([g.address,g.phone,g.email].filter(Boolean).join(' · '))}</div></button>`;}).join('')||'<p class="sale-muted">No matching opportunities. Create a customer below or adjust the search.</p>';
   }
   function openQuotePicker(query='') {
-    modal('Build a quote', `<p>Search by customer, email, phone or address. Select an open opportunity to continue its quote.</p><label class="sale-field"><span>Search customers</span><input id="sale-quote-search" type="search" value="${esc(query)}" placeholder="Name, phone, email or address"></label><div id="sale-quote-results">${quotePickerRows(query)}</div><hr><form id="sale-quote-new"><h3>New customer</h3>${field('Name','<input name="name" required maxlength="160" autocomplete="name">')}${field('Phone','<input name="phone" maxlength="80" autocomplete="tel">')}${field('Email','<input name="email" type="email" maxlength="254" autocomplete="email">')}${field('Property address','<input name="address" maxlength="500" autocomplete="street-address">')}<button class="btn accent">Create customer and build quote</button></form>`);
+    modal('Build a quote in Google Earth', `<p>Choose a customer to open their property in Google Earth. Measurements, pricing and expenses return to their TurnKey file.</p><label class="sale-field"><span>Search customers</span><input id="sale-quote-search" type="search" value="${esc(query)}" placeholder="Name, phone, email or address"></label><div id="sale-quote-results">${quotePickerRows(query)}</div><hr><form id="sale-quote-new"><h3>New customer</h3>${field('Name','<input name="name" required maxlength="160" autocomplete="name">')}${field('Phone','<input name="phone" maxlength="80" autocomplete="tel">')}${field('Email','<input name="email" type="email" maxlength="254" autocomplete="email">')}${field('Property address','<input name="address" required maxlength="500" autocomplete="street-address">')}<button class="btn accent quote-launch-btn" type="submit">Create customer &amp; open Google Earth</button></form>`);
     document.getElementById('sale-quote-search')?.focus();
   }
   function openStageSettings() {
@@ -996,7 +1000,8 @@
       }
       if (a === "pipeline") switchView("pipeline");
       if (a === "quote-home") openQuotePicker();
-      if (a === "quote-select") { document.getElementById('sales-dialog')?.close(); openQuoteModal(r.id); }
+      if (a === "quote-select") { document.getElementById('sales-dialog')?.close(); await buildEarthQuote(r.id); }
+      if (a === "edit-quote") openQuoteModal(r.id);
       if (a === "inbox") switchView("inbox");
       if (a === "detail") openDetail(r.id);
       if (a === "connections") openConnections();
@@ -1019,8 +1024,8 @@
           });
           records.unshift(n);
           render();
-          openQuoteModal(n.id);
-        } else openQuoteModal(r.id);
+          await buildEarthQuote(n.id);
+        } else await buildEarthQuote(r.id);
       }
       if (a === "save-details") {
         r.opportunityValue = Math.max(
@@ -1262,8 +1267,9 @@
       const customer=newRecord({name,phone:String(f.get('phone')||'').trim(),email:String(f.get('email')||'').trim(),address:String(f.get('address')||'').trim(),source:'Manual'});
       records.unshift(customer);render();
       const submit=form.querySelector('button[type="submit"],button:last-child');if(submit)submit.disabled=true;
-      try{await syncRecordToSupabase(customer);document.getElementById('sales-dialog').close();openQuoteModal(customer.id);}
+      try{await syncRecordToSupabase(customer);document.getElementById('sales-dialog').close();}
       catch(err){records=records.filter(x=>x!==customer);render();error(err);}
+      if(records.includes(customer))try{await buildEarthQuote(customer.id);}catch(err){error(err);}
       return;
     }
     if (

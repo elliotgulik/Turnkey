@@ -505,3 +505,8 @@ main {
   .measurement-review .sale-actions .btn{width:100%;min-height:44px;}
   .sale-tags span{font-size:11px;}
 }
+/* Quote entry points open the property in Earth; keep the action recognisable. */
+.btn.quote-launch-btn{display:inline-flex;align-items:center;justify-content:center;gap:9px;min-height:42px;padding:10px 16px;border:1px solid #0b7667;background:#0b7667;color:#fff;border-radius:11px;font-size:14px;font-weight:650;line-height:1.2;white-space:nowrap;box-shadow:0 1px 2px #102b2314}
+.btn.quote-launch-btn:hover{background:#085f54;border-color:#085f54;box-shadow:0 3px 9px #0b766725}
+.btn.quote-launch-btn:focus-visible{outline:3px solid #4ba99c;outline-offset:3px}
+.quote-launch-btn svg{flex:none}
