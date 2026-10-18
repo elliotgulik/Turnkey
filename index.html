@@ -5964,6 +5964,7 @@ function renderCustomerProfile(){
       <div class="field-row"><div class="field"><label>Phone</label><input id="cp-phone" value="${(c.phone||'').replace(/"/g,'&quot;')}"></div><div class="field"><label>Email</label><input id="cp-email" value="${(c.email||'').replace(/"/g,'&quot;')}"></div></div>
       <div class="field"><label>Address</label><input id="cp-address" value="${(c.address||'').replace(/"/g,'&quot;')}"></div>
       <div class="field"><label>Suburb</label><input id="cp-suburb" value="${(c.suburb||'').replace(/"/g,'&quot;')}"></div>
+      <div class="field"><label>Lead source</label><input id="cp-source" value="${(c.source||'').replace(/"/g,'&quot;')}" placeholder="Wix, Facebook, referral…"></div>
       <button class="btn accent sm" onclick="saveCustomerContact(this)">Save</button>
     </div>
     <div class="panel"><h4>Notes</h4>
@@ -6050,7 +6051,8 @@ async function saveCustomerContact(btn){
     phone:document.getElementById('cp-phone').value.trim(),
     email:document.getElementById('cp-email').value.trim(),
     address:document.getElementById('cp-address').value.trim(),
-    suburb:document.getElementById('cp-suburb').value.trim()
+    suburb:document.getElementById('cp-suburb').value.trim(),
+    source:document.getElementById('cp-source').value.trim()
   };
   if(!payload.name){toast('Name is required');return;}
   if(btn){if(btn.disabled)return;btn.disabled=true;btn.textContent='Saving…';} // guards against a double-click firing two concurrent writes
