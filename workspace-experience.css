@@ -52,3 +52,6 @@ input::placeholder,textarea::placeholder{color:#8798a0}input[type=checkbox],inpu
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
 
 body>footer{color:#7e919b;font-size:10px!important}body>footer a{color:#728b97;text-decoration:none}body>footer a:hover{text-decoration:underline}.more-row>.nav-ico{width:20px;height:20px;display:inline-flex;align-items:center;margin-right:10px;flex:none}.more-row>.nav-ico svg{width:18px;height:18px}.more-row>.nav-ico~.mr-label{flex:1}
+
+/* These tools have labelled navigation entries; do not cover cards with old floating shortcuts. */
+#tkj-launcher{display:none!important}
