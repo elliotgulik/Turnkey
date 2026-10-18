@@ -22,6 +22,8 @@ const assets = [
   "extension-quote-link.js",
   "job-workspace.js",
   "job-workspace.css",
+  "job-calendar.js",
+  "job-calendar.css",
   "privacy.html",
   "404.html",
   "config.js",
