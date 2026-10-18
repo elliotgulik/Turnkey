@@ -110,7 +110,7 @@
   let state = null;
   function freshState() {
     return {
-      bizKey: null, loaded: false, loadSeq: 0,
+      bizKey: null, loaded: false, loading: false, loadError: '', loadSeq: 0,
       jobs: [], staff: [], events: [], blocks: [], google: { connected: false }, canManage: false, myRole: null, myUserId: null,
       view: 'month', anchor: new Date(), range: { fromISO: null, toISO: null },
       staffFilter: new Set(), search: ''
@@ -133,7 +133,16 @@
     if (state.bizKey !== bizKey) { state = freshState(); state.bizKey = bizKey; destroyFc(); }
     const seq = ++state.loadSeq;
     const { fromISO, toISO } = rangeForView(state.view, state.anchor);
+    if (state.range.fromISO !== fromISO || state.range.toISO !== toISO) {
+      // Never show the previous date range's appointments as current data.
+      state.jobs = []; state.events = []; state.blocks = []; state.loaded = false;
+    }
     state.range = { fromISO, toISO };
+    state.loading = true;
+    state.loadError = '';
+    state.canManage = false;
+    // Date/view changes are local UI actions, independent of backend latency.
+    renderBody();
     try {
       const data = await request(`/range?from=${encodeURIComponent(parseLocalDate(fromISO).toISOString())}&to=${encodeURIComponent(parseLocalDate(toISO).toISOString())}`, {}, scope);
       if (scope.isStale() || seq !== state.loadSeq) return;
@@ -147,9 +156,11 @@
       state.loaded = true;
     } catch (e) {
       if (e && e.stale) return;
-      notify(e.message || 'Could not load the calendar');
+      if (scope.isStale() || seq !== state.loadSeq) return;
+      state.loadError = e.message || 'Could not load the calendar';
     }
     if (scope.isStale() || seq !== state.loadSeq) return;
+    state.loading = false;
     renderBody();
   }
 
@@ -201,6 +212,7 @@
           <button type="button" data-tkjc-view="list">List</button>
         </div>
       </div>
+      <div id="tkjc-load-status" role="status" aria-live="polite" hidden></div>
       <div class="tkjc-legend">
         <span><i style="background:${STATUS_COLOR.scheduled}"></i>Scheduled</span>
         <span><i style="background:${STATUS_COLOR.in_progress}"></i>In progress</span>
@@ -251,7 +263,17 @@
     if (!host || host.dataset.tkjc !== '1') return;
     const { label } = rangeForView(state.view, state.anchor);
     const titleEl = document.getElementById('tkjc-title'); if (titleEl) titleEl.textContent = label;
-    document.querySelectorAll('[data-tkjc-view]').forEach((btn) => btn.classList.toggle('active', btn.dataset.tkjcView === state.view));
+    document.querySelectorAll('[data-tkjc-view]').forEach((btn) => {
+      const active = btn.dataset.tkjcView === state.view;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-pressed', String(active));
+    });
+    const statusEl = document.getElementById('tkjc-load-status');
+    if (statusEl) {
+      statusEl.hidden = !state.loading && !state.loadError;
+      statusEl.innerHTML = state.loading ? 'Loading calendar bookings…' : state.loadError ? `${esc(state.loadError)} <button type="button" class="btn ghost sm" aria-label="Retry loading calendar">Retry</button>` : '';
+      statusEl.querySelector('button')?.addEventListener('click', () => load());
+    }
     renderGooglePanel();
     renderStaffChips();
     renderSidebar();
