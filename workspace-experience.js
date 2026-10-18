@@ -3,6 +3,20 @@
   'use strict';
   const main=document.querySelector('.app main');if(!main)return;
   root.TK_SETTINGS_EXPERIENCE?.install();
+  const previousMore=root.openMoreSheet;
+  root.openMoreSheet=function(){
+    const result=previousMore.apply(this,arguments),body=document.getElementById('more-body');
+    if(body&&!body.querySelector('[data-ux-work-tools]')){
+      const tools=document.createElement('div');tools.dataset.uxWorkTools='';tools.innerHTML='<div class="more-group-label">Work tools</div>';
+      for(const [label,icon,run] of [['Work hours','calendar',()=>root.TK_JOB_WORK.openCalendar()],['Equipment & service','jobsflow',()=>root.TK_JOB_WORK.openEquipment()]]){
+        const button=document.createElement('button');button.type='button';button.className='more-row';
+        button.innerHTML='<span class="nav-ico" aria-hidden="true">'+(typeof NAV_ICONS!=='undefined'?NAV_ICONS[icon]:'')+'</span><span class="mr-label"></span><span class="mr-chev">›</span>';button.querySelector('.mr-label').textContent=label;
+        button.addEventListener('click',()=>{closeModal('more-overlay');run();});tools.append(button);
+      }
+      body.prepend(tools);
+    }
+    return result;
+  };
   const make=(tag,cls,text)=>{const el=document.createElement(tag);if(cls)el.className=cls;if(text!=null)el.textContent=text;return el;};
   const context=()=>({biz:typeof currentBusinessId!=='undefined'?currentBusinessId:null,user:typeof currentUserId!=='undefined'?currentUserId:null,version:typeof businessSessionVersion!=='undefined'?businessSessionVersion:0,ready:typeof businessStateReady!=='undefined'&&businessStateReady,role:typeof currentUserRole!=='undefined'?currentUserRole:null});
   const same=(a,b)=>a.biz===b.biz&&a.user===b.user&&a.version===b.version&&b.ready;
