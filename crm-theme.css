@@ -1,0 +1,229 @@
+/* TurnKey staff CRM theme. Load last, after all feature stylesheets.
+ * Presentation only: no visibility, z-index, map coordinates or icon replacement.
+ * Shared .panel/.contact-table styles also support future jobs/invoice screens. */
+:root {
+  --ink: #19332f; --ink-soft: #506660; --ink-faint: #61736e;
+  --paper: #f3f6f5; --surface: #fff; --surface-2: #edf3f1;
+  --line: #d9e3df; --line-soft: #eaf0ed;
+  --teal: #106b5d; --teal-bright: #0b594d; --teal-wash: #e4f2ec;
+  --accent: #106b5d; --accent-wash: #e4f2ec;
+  --sale-ink: var(--ink); --sale-muted: var(--ink-soft);
+  --sale-line: var(--line); --sale-accent: var(--teal); --sale-bg: var(--paper);
+  --text: var(--ink); --muted: var(--ink-soft); --border: var(--line); --panel: #fff;
+  --amber: #805914; --coral: #a43f30;
+  --radius: 16px; --radius-sm: 10px;
+  --shadow: 0 2px 5px #19332f04, 0 8px 24px #19332f06;
+  --shadow-lg: 0 24px 80px #19332f26;
+}
+body {font-size:15px; line-height:1.55; background:var(--paper)}
+.app {max-width:1680px}
+main {max-width:none; padding:36px clamp(24px,3vw,48px) 104px}
+nav.tabs {width:236px; background:#fbfdfc; padding:24px 14px 16px; border-right-color:var(--line)}
+.sidebar-brand {padding:0 10px 24px; margin-bottom:8px; border-bottom:1px solid var(--line)}
+.sidebar-brand h1 {font-size:20px; font-weight:750; letter-spacing:-.04em}
+.sidebar-brand .phase {font-size:12px; color:var(--ink-soft)}
+.sidebar-label {font-size:11px; letter-spacing:.09em; padding:20px 12px 8px; color:var(--ink-soft)}
+.sidebar-nav {gap:4px}
+nav.tabs button, .sidebar-settings {min-height:44px; padding:11px 12px; font-size:14px; font-weight:550; border-radius:10px}
+nav.tabs button.active {background:var(--teal-wash); color:var(--teal); box-shadow:inset 3px 0 var(--teal); font-weight:700}
+nav.tabs button.active:hover {background:#d9ece3}
+nav.tabs button .nav-ico, .sidebar-settings .nav-ico {width:20px; height:20px; opacity:1}
+nav.tabs button .nav-ico svg, .sidebar-settings .nav-ico svg {width:19px; height:19px}
+nav.tabs button .count {font-size:12px; min-width:24px; text-align:center; background:#e9efec; color:var(--ink-soft)}
+.sidebar-foot {padding-top:12px; margin-top:16px}
+/* Keep the existing collapsed sidebar's zero-sized labels and visible SVGs. */
+body.sale-sidebar-collapsed nav.tabs button .nav-ico {flex-shrink:0}
+.view-head, .sale-head, .cv-head {gap:20px; margin:0 0 28px; align-items:flex-start}
+.view-head h2, .sale-head h2, .cv-head h2 {font-size:32px; line-height:1.2; letter-spacing:-.045em; font-weight:750; color:var(--ink)}
+.view-head p, .sale-head p, .cv-head p {font-size:15px; line-height:1.6; color:var(--ink-soft); margin-top:8px; max-width:640px}
+.sale-eyebrow, .view-head .vh-eyebrow {color:var(--teal); font-size:12px; font-weight:700; letter-spacing:.06em; margin-bottom:8px}
+h3, h4 {line-height:1.4}
+.sale-actions, .add-lead-bar, .tkj-actions {gap:10px}
+.btn {min-height:44px; border-radius:10px; padding:10px 17px; font-size:14px; line-height:1.4; font-weight:650; border:1px solid transparent; text-decoration:none}
+.btn.sm {min-height:38px; padding:8px 12px; font-size:13px}
+.btn.primary, .btn.accent, .btn.ai {background:var(--teal); color:#fff; border-color:var(--teal); box-shadow:0 2px 3px #19332f0c}
+.btn.primary:hover, .btn.accent:hover, .btn.ai:hover {background:var(--teal-bright); border-color:var(--teal-bright); filter:none}
+.btn.ghost {background:#fff; border-color:#cbd8d2; color:var(--ink)}
+.btn.ghost:hover {background:var(--surface-2); border-color:#a6bdb2}
+button:disabled, .btn:disabled {cursor:not-allowed; opacity:.55; box-shadow:none}
+/* Shared parent-owned launch CTA: works as a button or link, with/without SVG. */
+.quote-launch-btn, .btn.quote-launch-btn {
+  display:inline-flex; align-items:center; justify-content:center; gap:9px;
+  min-height:44px; padding:10px 16px; border:1px solid #0b594d; border-radius:10px;
+  background:linear-gradient(180deg,#167969,#106354); color:#fff;
+  box-shadow:inset 0 1px #ffffff24,0 3px 8px #10635418;
+  font:650 14px/1.4 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  letter-spacing:-.01em; text-decoration:none; white-space:normal; text-align:center;
+}
+.quote-launch-btn svg {width:19px; height:19px; flex:0 0 19px}
+.quote-launch-btn:hover, .btn.quote-launch-btn:hover {background:#0b594d; border-color:#084a40; color:#fff; filter:none}
+:where(button,a,input,select,textarea,summary,[tabindex]):focus-visible {outline:3px solid #21856f; outline-offset:3px}
+:where(.sale-panel,.sale-filters,.qw-overlay,.tk-conversations,.tkm-panel,.measurement-review) :focus-visible {outline:3px solid #21856f; outline-offset:3px}
+:where(.field,.sale-field,.tkj-dialog,.tkj-panel-modal,.tkm-panel,.cv-composer) :is(input:not([type=checkbox]):not([type=radio]):not([type=file]),select,textarea),
+.settings-search input, .conn-keyrow input, .rate-tier input {
+  min-height:44px; border:1px solid #bfcec6; border-radius:9px; padding:10px 12px;
+  background:#fff; color:var(--ink); font-size:15px; line-height:1.4; max-width:100%; min-width:0;
+}
+input::placeholder, textarea::placeholder {color:#6b7b74; opacity:1}
+input[type=checkbox], input[type=radio] {accent-color:var(--teal)}
+.field label, .sale-field, .settings-search label, .tkj-dialog label, .tkm-panel label {font-size:13px; font-weight:650; color:var(--ink-soft)}
+.field-row {gap:16px}
+.field {margin-bottom:18px}
+/* Uniform elevation and rhythm, leaving map/editor descendants alone. */
+.stat, .sale-kpi, .panel, .sale-panel, .rate-card, .conn-card,
+.tkj-asset, .tkjc-sidebar, .tkjc-agenda-day, .tkm-attribution, .tkm-panel details {
+  background:#fff; border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow);
+}
+.panel, .sale-panel, .rate-card {padding:24px; margin-bottom:20px; min-width:0}
+.panel h4, .sale-panel h3 {font-size:17px; font-weight:700; margin-bottom:18px; color:var(--ink)}
+.stat-row, .sale-kpis {gap:16px; margin-bottom:28px; grid-template-columns:repeat(4,minmax(0,1fr))}
+.stat, .sale-kpi {padding:22px; gap:8px; min-width:0}
+.stat .label, .sale-kpi>span, .tkm-cards span {color:var(--ink-soft); font-size:13px; font-weight:550}
+.stat .value, .sale-kpi strong, .tkm-cards strong {font-size:30px; line-height:1.25; font-weight:750; letter-spacing:-.04em; font-variant-numeric:tabular-nums; overflow-wrap:anywhere}
+.stat .sub, .sale-kpi small, .sale-muted {font-size:13px; color:var(--ink-soft); line-height:1.55}
+.sale-grid, .ops-grid, .detail-grid {gap:20px}
+.sale-filters {padding:18px; gap:16px; background:#fff; border-radius:14px; box-shadow:none}
+.sale-filters .sale-field {gap:8px; min-width:150px}
+.sale-kanban {gap:14px; grid-template-columns:repeat(var(--pipeline-columns,4),minmax(245px,1fr)); min-height:52vh; padding:2px 2px 20px; overscroll-behavior-x:contain}
+.sale-column {padding:12px; background:#eaf0ed; border-color:#d8e2dc; border-radius:14px}
+.sale-column>header {padding:8px 4px 18px; border-bottom:1px solid #d3dfd7; margin-bottom:12px}
+.sale-column h3 {font-size:14px; font-weight:750}
+.sale-column small, .sale-column>header p {font-size:13px; color:var(--ink-soft)}
+.sale-card, .card {padding:17px; border-radius:12px; box-shadow:0 2px 3px #19332f05}
+.sale-card:hover, .card:hover {border-color:#8ab4a4; box-shadow:0 5px 16px #19332f0c; transform:none}
+.sale-card-top {gap:10px; flex-wrap:wrap}
+.sale-card-top b, .card .name {font-size:15px; line-height:1.45}
+.sale-card p, .sale-card small, .card .meta {font-size:13px; line-height:1.6}
+.sale-card select {min-height:40px; font-size:13px}
+.sale-tags span, .tag, .pill, .eng-badge, .conn-badge {font-size:12px; line-height:1.5; padding:4px 9px; font-weight:600}
+.sale-tags span {background:#edf3ef; color:#435d50}
+.sale-overdue {font-size:13px; color:var(--coral)}
+.sale-table-wrap, .sales-scroll, .tkm-scroll {max-width:100%; overflow-x:auto; border:1px solid var(--line); border-radius:12px; background:#fff; overscroll-behavior-x:contain}
+.sale-table, .sales-table, .contact-table, .tkm-panel table {width:100%; border-collapse:collapse; font-size:14px; color:var(--ink)}
+.sale-table th, .sales-table th, .contact-table th, .tkm-panel th {background:#f0f5f2; color:var(--ink-soft); font-size:12px; font-weight:700; letter-spacing:.025em}
+.sale-table :is(td,th), .sales-table :is(td,th), .contact-table :is(td,th), .tkm-panel :is(td,th) {padding:15px 14px; border-bottom:1px solid var(--line-soft); line-height:1.5}
+:is(.sale-table,.sales-table,.contact-table) tbody tr:hover {background:#f5faf7}
+.sale-row {font-size:14px; padding:16px 0}
+.sale-row small {font-size:13px}
+/* Conversations: folders, selected row and primary action share the CRM accent. */
+.tk-conversations {--cv-border:var(--line); font-size:15px}
+.tk-conversations button {min-height:42px; border-radius:9px; font-size:14px; font-weight:600; padding:10px 14px}
+.cv-folders {gap:8px; margin-bottom:20px}
+.cv-folders [aria-current=page], .cv-row.selected {background:var(--teal-wash); border-color:#98bdac; color:#145848}
+.cv-layout {background:#fff; border-radius:16px; min-height:480px; box-shadow:var(--shadow)}
+.cv-row {padding:8px 4px}
+.cv-row span, .cv-row small, .cv-message time {font-size:13px; opacity:1; color:var(--ink-soft)}
+.cv-row strong, .cv-row b {font-size:14px; line-height:1.6}
+.cv-thread {padding:24px}
+.cv-message {padding:20px; border-radius:12px; line-height:1.65}
+.cv-composer {padding:24px; border-radius:16px}
+.cv-compose-actions button[type=submit] {background:var(--teal); border-color:var(--teal); color:white}
+.cv-files li {flex-wrap:wrap; font-size:14px}
+/* Scheduling keeps its own event colours and all FullCalendar geometry. */
+.tkjc-toolbar {background:#fff; border:1px solid var(--line); border-radius:14px; padding:14px; gap:14px; margin:20px 0 16px}
+.tkjc-nav {flex-wrap:wrap}
+.tkjc-nav button, .tkjc-views button, .tkjc-chip, .cal-chip {min-height:40px; font-size:13px}
+.tkjc-title {font-size:16px; color:var(--ink)}
+.tkjc-layout {grid-template-columns:240px minmax(0,1fr); gap:20px}
+.tkjc-sidebar {padding:16px}
+.tkjc-sidebar-row {padding:12px; border-radius:10px; gap:4px}
+.tkjc-sidebar-name {font-size:14px}
+.tkjc-sidebar-sub, .tkjc-sidebar-time, .tkjc-legend, .tkjc-google, .tkjc-agenda-empty {font-size:13px; color:var(--ink-soft)}
+.tkjc-agenda-day {padding:18px}
+.tkjc-agenda-date {font-size:14px; margin-bottom:14px}
+.tkjc-agenda-add {width:36px; height:36px; border-radius:8px}
+.tkjc-agenda-chip {padding:10px 12px; font-size:13px; gap:3px}
+.tkjc-agenda-chip b {font-size:14px}
+.tkjc-main, .tkjc-sidebar {min-width:0}
+.tkj-launcher button {background:#245447; border-radius:10px; font-size:13px; padding:12px 16px; box-shadow:var(--shadow)}
+.tkj-launcher button:hover {background:var(--teal-bright)}
+/* Sheets/dialogs retain existing open/hidden semantics and stacking order. */
+.overlay {background:#132e2859; backdrop-filter:blur(4px)}
+.modal {border:1px solid var(--line); border-radius:20px; box-shadow:var(--shadow-lg)}
+.modal-head {padding:24px; border-bottom:1px solid var(--line-soft); gap:16px}
+.modal-head h3 {font-size:22px; font-weight:750}
+.modal-head p {font-size:14px}
+.modal-head .x {min-width:40px; min-height:40px}
+.modal-body {padding:24px}
+.modal-foot {padding:18px 24px; gap:10px; background:#fafcfb; flex-wrap:wrap}
+#sales-dialog, .measurement-review, .tkj-dialog, .tkj-panel-modal, .tkjc-dialog {border:1px solid var(--line); border-radius:18px; color:var(--ink); box-shadow:var(--shadow-lg); font-size:15px}
+#sales-dialog::backdrop, .measurement-review::backdrop {background:#132e2873}
+.qw-steps {padding:16px 24px; gap:10px; background:#f8fbf9}
+.qw-steps button {min-height:48px; font-size:14px; border-radius:10px}
+.qw-steps button[aria-current=step] {background:var(--teal-wash); border-color:#75a58d; color:#17583f}
+.qw-help, .qw-section-head p, .qw-pricing-controls p, .qw-map-status {font-size:14px; color:var(--ink-soft)}
+.qw-pricing-controls {padding:22px; background:#f2f8f4; border-color:#bfd7c7}
+.qw-preview-total {font-size:24px; font-weight:750}
+.conn-card {padding:20px; margin-bottom:14px}
+.conn-name {font-size:16px}
+.conn-card p, .conn-note {font-size:14px; line-height:1.65}
+.conn-card.live {background:#f4faf6; border-color:#accfba}
+.conn-top {flex-wrap:wrap; gap:12px; margin-bottom:12px}
+.settings-group>summary {padding:20px 4px; font-size:16px; gap:12px}
+.settings-group-body {padding:0 0 24px}
+.settings-search {padding:12px 0 18px}
+.tkm-panel {background:var(--paper); color:var(--ink)}
+.tkm-panel button {border-radius:9px; min-height:42px}
+.tkm-filters button[data-action=sync] {background:var(--teal); color:white}
+.tkm-cards {gap:16px; grid-template-columns:repeat(5,minmax(0,1fr))}
+.tkm-cards article {padding:22px; border-radius:14px; box-shadow:var(--shadow)}
+.sale-empty, .col-empty, .tkj-empty, .tkjc-empty {padding:28px 20px; border:1px dashed #becfc4; background:#f8fbf9; border-radius:12px; color:var(--ink-soft); font-size:14px; line-height:1.65; text-align:center}
+.sale-notice, .tkm-warning, .tkm-panel [role=alert] {background:#fff6e5; border:1px solid #e2c58d; color:#754b12; padding:16px; border-radius:10px; font-size:14px}
+.tkj-error, .tkjc-error, #sales-dialog-error, .qw-message, .tkj-dialog-message {color:#a23628; font-size:14px; line-height:1.6}
+.cv-notice, .tkj-message, .tkm-panel [data-message], [aria-busy=true] {font-size:14px; line-height:1.6}
+@media (max-width:1100px) {
+  main {padding-inline:24px}
+  .stat-row, .sale-kpis {grid-template-columns:repeat(2,minmax(0,1fr))}
+  .tkjc-layout {grid-template-columns:1fr}
+}
+@media (max-width:760px) {
+  .sale-head, .cv-head {flex-direction:column}
+  .sale-grid {grid-template-columns:1fr; gap:0}
+  .sale-head h2, .view-head h2, .cv-head h2 {font-size:28px}
+  .sale-filters .sale-field {min-width:calc(50% - 16px)}
+  .sale-filters .sale-field:first-child {flex-basis:100%}
+  .sale-kanban {grid-template-columns:repeat(var(--pipeline-columns,4),minmax(270px,85vw))}
+  .cv-layout {grid-template-columns:minmax(0,1fr)}
+  .cv-thread, .cv-composer {padding:18px}
+  .tkm-cards {grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (max-width:720px) {
+  main {padding:24px 16px 116px}
+  .view-head, .sale-head, .cv-head {margin-bottom:24px; gap:16px}
+  .view-head>*, .sale-head>*, .cv-head>* {min-width:0; max-width:100%}
+  .bottom-nav {padding-top:8px; background:#fcfefd; box-shadow:0 -4px 20px #19332f0a}
+  .bottom-nav button {font-size:12px; min-height:54px; color:var(--ink-soft)}
+  .bottom-nav button.active {color:var(--teal); background:var(--teal-wash)}
+  .quote-launch-btn, .btn.quote-launch-btn {width:100%; min-height:48px; font-size:15px; padding:12px 16px; flex-basis:100%}
+  .sale-actions {width:100%; flex-wrap:wrap}
+  .stat, .sale-kpi {padding:17px; border-radius:12px}
+  .stat-row, .sale-kpis {gap:12px; margin-bottom:24px}
+  .stat .value, .sale-kpi strong {font-size:26px}
+  .panel, .sale-panel, .rate-card {padding:18px; border-radius:14px}
+  .sale-filters {padding:14px; gap:12px}
+  .sale-settings-row {grid-template-columns:64px minmax(0,1fr) 64px; font-size:13px}
+  .field-row, .ops-grid, .detail-grid {grid-template-columns:minmax(0,1fr)}
+  .modal {border-radius:20px 20px 0 0; max-height:92dvh}
+  .modal-head, .modal-body {padding:20px 16px}
+  .modal-foot {padding:16px; padding-bottom:max(16px,env(safe-area-inset-bottom))}
+  .qw-steps {padding:12px; gap:8px; grid-template-columns:repeat(2,minmax(0,1fr))}
+  .qw-steps button {font-size:13px; padding:10px}
+  .qw-pricing-controls {padding:16px}
+  .conn-keyrow {flex-wrap:wrap}
+  .conn-keyrow input {flex-basis:100%}
+  .tkj-overlay, .tkjc-overlay {padding:12px}
+  .tkj-dialog, .tkj-panel-modal, .tkjc-dialog {padding:20px; max-height:92dvh}
+  .tkjc-toolbar {padding:12px; gap:12px}
+  .tkjc-views {max-width:100%; flex-wrap:wrap}
+  .tkjc-google {overflow-wrap:anywhere}
+  .tkjc-sidebar-list {max-height:280px}
+  .cv-folders button {padding:9px 11px}
+  .cv-compose-actions {gap:8px}
+  .cv-compose-actions button {flex:1}
+  /* Input text >=16px prevents iOS zoom; map tools keep their own sizing. */
+  :is(.field,.sale-field,.cv-composer,.tkj-dialog,.tkjc-dialog,.tkm-panel,.conn-keyrow,.settings-search) :is(input,select,textarea) {font-size:16px}
+}
+@media (prefers-reduced-motion:reduce) {
+  .view, .modal, .btn, .card, .sale-card {animation:none; transition:none}
+  .qw-overlay .modal-body {scroll-behavior:auto}
+}
