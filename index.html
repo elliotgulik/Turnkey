@@ -1422,7 +1422,6 @@
         <button data-view="dashboard" class="active"><span class="nav-ico" data-icon="dashboard"></span>Dashboard</button>
         <button data-view="leads"><span class="nav-ico" data-icon="leads"></span>Leads <span class="count" id="cnt-leads">0</span></button>
         <button data-view="pipeline"><span class="nav-ico" data-icon="pipeline"></span>Pipeline</button>
-        <button data-view="quote-builder"><span class="nav-ico" data-icon="pricing"></span>Quote Builder</button>
         <button data-view="sales"><span class="nav-ico" data-icon="sales"></span>Analytics</button>
         <button data-view="goals"><span class="nav-ico" data-icon="goals"></span>Goals</button>
         <button onclick="openConnections()"><span class="nav-ico" data-icon="settings"></span>Connections</button>
@@ -2873,8 +2872,7 @@ function resetAll(){
 document.getElementById('tabs').addEventListener('click',e=>{const b=e.target.closest('button[data-view]');if(b)switchView(b.dataset.view)});
 document.getElementById('bottom-nav').addEventListener('click',e=>{const b=e.target.closest('button[data-view]');if(b)switchView(b.dataset.view)});
 function switchView(v){
-  if(!['dashboard','leads','pipeline','quote-builder','sales','goals','inbox','pricing','detail','calendar'].includes(v)||!document.getElementById('view-'+v))v='dashboard';
-  if(v==="quote-builder")renderQuoteBuilderHome();
+  if(!['dashboard','leads','pipeline','sales','goals','inbox','pricing','detail','calendar'].includes(v)||!document.getElementById('view-'+v))v='dashboard';
   document.querySelectorAll('nav.tabs button[data-view], .bottom-nav button[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===v));
   document.querySelectorAll('.view').forEach(s=>s.classList.remove('active'));
   document.getElementById('view-'+v).classList.add('active');
@@ -8106,7 +8104,6 @@ function openMoreSheet(){
     <div class="more-group-label">Overview</div>
     ${!isTech?row('Dashboard',"switchView('dashboard')"):''}
     ${!isTech?row('Analytics',"switchView('sales')"):''}
-    ${row('Quote Builder',"switchView('quote-builder')")}
     ${row('Notifications',"openNotificationCentre()",false,notificationCentre.unread)}
     ${!isTech?`<div class="more-group-label">Work</div>${row('Pricing',"switchView('pricing')")}${row('Goals',"switchView('goals')")}`:''}
     <div class="more-group-label">Business</div>

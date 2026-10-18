@@ -321,7 +321,7 @@
     let list=records.filter(r=>P.visible(r,pipelineScope));
     if(pipelineSearch)list=list.filter(r=>[r.name,r.address,r.email,r.phone,r.source].join(' ').toLowerCase().includes(pipelineSearch.toLowerCase()));
     if(pipelineDueOnly)list=list.filter(r=>r.nextFollowUpAt&&Date.parse(r.nextFollowUpAt)<Date.now()&&!M.won(r)&&!M.lost(r));
-    document.getElementById('view-pipeline').innerHTML=header('Sales pipeline','A clear next action for every enquiry. Won work moves to ServiceM8.',button('+ New lead','new')+button('Pipeline settings','stages'))+
+    document.getElementById('view-pipeline').innerHTML=header('Sales pipeline','A clear next action for every enquiry. Won work moves to ServiceM8.',button('+ New lead','new')+button('Build a quote','quote-home')+button('Pipeline settings','stages'))+
     `<div class="sale-pipeline-toolbar"><div class="sale-scope-tabs" role="group" aria-label="Pipeline outcomes">${[['open','Open opportunities'],['won','Confirmed'],['lost','Not proceeding'],['all','All']].map(([key,label])=>`<button class="btn ${pipelineScope===key?'accent':'ghost'}" data-sale-action="pipeline-scope" data-id="${key}" aria-pressed="${pipelineScope===key}">${label} <span>${records.filter(r=>P.visible(r,key)).length}</span></button>`).join('')}</div><label class="sale-field"><span>Search pipeline</span><input id="pipeline-search" type="search" value="${esc(pipelineSearch)}" placeholder="Customer, address or source"></label><label><input type="checkbox" id="pipeline-due" ${pipelineDueOnly?'checked':''}> Follow-ups overdue</label></div>`+
     `<div class="sale-stage-jump" aria-label="Jump to stage">${scopeStages.map(s=>`<button class="btn ghost sm" data-sale-action="pipeline-jump" data-id="${s.key}">${esc(s.label)} · ${list.filter(r=>P.key(r)===s.key).length}</button>`).join('')}</div>`+
     `<div class="sale-kanban" style="--pipeline-columns:${scopeStages.length}">${scopeStages.map(s=>{const rs=list.filter(r=>P.key(r)===s.key);return `<section class="sale-column" id="pipeline-${s.key}" data-drop-stage="${s.key}"><header><h3>${esc(s.label)} <span>${rs.length}</span></h3><small>${esc(money(rs.reduce((n,r)=>n+Number(r.total||r.opportunityValue||0),0)))}</small><p>${esc(defaults.find(d=>d.key===s.key)?.description||'')}</p></header>${rs.map(card).join('')||empty('No opportunities in this stage')}</section>`;}).join('')}</div>`;
@@ -349,7 +349,7 @@
       header(
         "Leads",
         "All open enquiries and qualified sales opportunities.",
-        button("+ New lead", "new") + button("Import", "import"),
+        button("+ New lead", "new") + button("Build a quote", "quote-home") + button("Import", "import"),
       ) +
       `<div class="sale-filters">${field("Search", `<input id="sale-search" type="search" value="${esc(search)}" placeholder="Name, email, phone or address">`)}${field("Source", `<select data-sale-filter="source">${options([["", "All sources"], ...sources.map((s) => [s, s])], sourceFilter)}</select>`)}${field("Sort by", `<select data-sale-filter="sort">${options([["newest","Newest first"],["oldest","Oldest first"],["value-high","Highest estimated value"],["value-low","Lowest estimated value"],["followup","Follow-up due first"],["name","Customer name"]],leadSort)}</select>`)}${field("Stage", `<select data-sale-filter="stage">${options([["", "All open stages"], ...stages.filter((x) => !["won", "lost"].includes(x.key)).map((x) => [x.key, x.label])], stageFilter)}</select>`)}</div><div class="sale-lead-grid">${rs.map(card).join("") || empty("No matching enquiries. Add a lead, import contacts or connect a lead source.")}</div>`;
   }
@@ -554,6 +554,16 @@
     el.innerHTML = `<div class="sale-dialog-head"><h2>${esc(title)}</h2>${button("Close", "dialog-close")}</div>${html}<p id="sales-dialog-error" role="alert"></p>`;
     el.showModal();
   }
+  function quotePickerRows(query='') {
+    const q=query.trim().toLowerCase();
+    const groups=typeof groupRecordsByCustomer==='function' ? groupRecordsByCustomer() : records.map(r=>({customerId:r.customerId,name:r.name,email:r.email,phone:r.phone,address:r.address,suburb:r.suburb,jobs:[r]}));
+    const matches=groups.filter(g=>g.jobs.some(r=>!M.won(r)) && (!q||[g.name,g.email,g.phone,g.address,g.suburb].some(v=>String(v||'').toLowerCase().includes(q)))).slice(0,12);
+    return matches.map(g=>{const r=g.jobs.find(x=>!M.won(x))||g.jobs[0];return `<button type="button" class="sale-card" style="width:100%;text-align:left" data-sale-action="quote-select" data-id="${esc(r.id)}"><b>${esc(g.name||'New customer')}</b><div class="sale-muted">${esc([g.address,g.phone,g.email].filter(Boolean).join(' · '))}</div></button>`;}).join('')||'<p class="sale-muted">No matching opportunities. Create a customer below or adjust the search.</p>';
+  }
+  function openQuotePicker(query='') {
+    modal('Build a quote', `<p>Search by customer, email, phone or address. Select an open opportunity to continue its quote.</p><label class="sale-field"><span>Search customers</span><input id="sale-quote-search" type="search" value="${esc(query)}" placeholder="Name, phone, email or address"></label><div id="sale-quote-results">${quotePickerRows(query)}</div><hr><form id="sale-quote-new"><h3>New customer</h3>${field('Name','<input name="name" required maxlength="160" autocomplete="name">')}${field('Phone','<input name="phone" maxlength="80" autocomplete="tel">')}${field('Email','<input name="email" type="email" maxlength="254" autocomplete="email">')}${field('Property address','<input name="address" maxlength="500" autocomplete="street-address">')}<button class="btn accent">Create customer and build quote</button></form>`);
+    document.getElementById('sale-quote-search')?.focus();
+  }
   function openStageSettings() {
     modal('Pipeline settings', `<form id="sale-stages-form"><p>Rename and reorder stages to fit your sales process. Built-in stages keep their identity for reporting. A custom stage can be deleted after all its opportunities have been moved elsewhere.</p>${stages.map((s,i) => `<div class="sale-settings-row"><b>${esc(s.key)}</b><input name="label-${esc(s.key)}" value="${esc(s.label)}" required maxlength="50"><input aria-label="${esc(s.label)} probability" name="prob-${esc(s.key)}" type="number" min="0" max="100" value="${Math.round((settings.probabilities?.[s.key] || 0) * 100)}"><button type="button" class="btn ghost sm" data-sale-action="stage-move" data-stage="${esc(s.key)}" data-delta="-1" aria-label="Move ${esc(s.label)} up" ${i===0?'disabled':''}>↑</button><button type="button" class="btn ghost sm" data-sale-action="stage-move" data-stage="${esc(s.key)}" data-delta="1" aria-label="Move ${esc(s.label)} down" ${i===stages.length-1?'disabled':''}>↓</button>${defaults.some(d=>d.key===s.key)?'':'<button type="button" class="btn ghost sm" data-sale-action="stage-remove" data-stage="'+esc(s.key)+'">Delete</button>'}</div>`).join('')}<button type="button" class="btn ghost" data-sale-action="stage-add">＋ Add custom stage</button>${field("Quote follow-up reminder after days", `<input name="days" type="number" min="1" max="365" value="${settings.followup_days || 2}">`)}<button class="btn accent">Save settings</button></form>`);
   }
@@ -630,7 +640,6 @@
         ["Dashboard", "dashboard"],
         ["Leads", "leads"],
         ["Pipeline", "pipeline"],
-        ["Quote Builder", "quote-builder"],
         ["Analytics", "sales"],
         ["Goals", "goals"],
         ["Conversations", "inbox"],
@@ -986,7 +995,8 @@
         switchView(b.dataset.id);
       }
       if (a === "pipeline") switchView("pipeline");
-      if (a === "quote-home") switchView("quote-builder");
+      if (a === "quote-home") openQuotePicker();
+      if (a === "quote-select") { document.getElementById('sales-dialog')?.close(); openQuoteModal(r.id); }
       if (a === "inbox") switchView("inbox");
       if (a === "detail") openDetail(r.id);
       if (a === "connections") openConnections();
@@ -1244,6 +1254,18 @@
   });
   document.addEventListener("submit", async (e) => {
     const form = e.target;
+    if (form.id === 'sale-quote-new') {
+      e.preventDefault();
+      const f=new FormData(form),name=String(f.get('name')||'').trim();
+      if(!name)return;
+      if(!sb||!currentBusinessId){error(Error('Sign in before creating a customer quote.'));return;}
+      const customer=newRecord({name,phone:String(f.get('phone')||'').trim(),email:String(f.get('email')||'').trim(),address:String(f.get('address')||'').trim(),source:'Manual'});
+      records.unshift(customer);render();
+      const submit=form.querySelector('button[type="submit"],button:last-child');if(submit)submit.disabled=true;
+      try{await syncRecordToSupabase(customer);document.getElementById('sales-dialog').close();openQuoteModal(customer.id);}
+      catch(err){records=records.filter(x=>x!==customer);render();error(err);}
+      return;
+    }
     if (
       ![
         "sale-goal-form",
@@ -1326,6 +1348,7 @@
       if (submit) submit.disabled = false;
     }
   });
+  document.addEventListener('input',e=>{if(e.target.id==='sale-quote-search'){const host=document.getElementById('sale-quote-results');if(host)host.innerHTML=quotePickerRows(e.target.value);}});
   // Match mobile selection and initial server-side login landing.
   document
     .querySelector('#bottom-nav [data-view="pipeline"]')

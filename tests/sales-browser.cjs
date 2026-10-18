@@ -59,6 +59,7 @@ const { chromium } = require("playwright"),
         serviceWorkers: "block",
       });
       const page = await context.newPage();
+      page.setDefaultTimeout(5000);
       page.on("pageerror", (e) => errors.push(e.message));
       await page.route("**/*", (route) => {
         const url = route.request().url();
@@ -132,6 +133,13 @@ const { chromium } = require("playwright"),
       assert.ok(
         (await page.locator("#view-dashboard .sale-kpi").count()) >= 11,
       );
+      await page.getByRole('button',{name:'Build a quote'}).first().click();
+      await page.locator('#sale-quote-search').fill('lead@example.test');
+      assert.equal(await page.locator('#sale-quote-results [data-sale-action="quote-select"]').count(),1);
+      await page.locator('#sale-quote-search').fill('no-such-customer');
+      assert.match(await page.locator('#sale-quote-results').innerText(),/No matching opportunities/);
+      await page.locator('#sale-quote-new input[name="name"]').fill('New quote customer');
+      await page.getByRole('button',{name:'Close'}).click();
       await page.evaluate(() => switchView("leads"));
       // Name sort is timing-independent (unlike newest/oldest, which can tie on fixtures
       // created within the same millisecond), so it is a stable way to check lead sorting.
@@ -269,9 +277,10 @@ const { chromium } = require("playwright"),
       await page
         .locator('#sales-dialog [data-sale-action="dialog-close"]')
         .click();
-      await page.evaluate(() => switchView("quote-builder"));
-      await page.locator("#quote-builder-lead").selectOption("1");
-      await page.locator("#quote-builder-open").click();
+      await page.evaluate(() => switchView("dashboard"));
+      await page.getByRole('button',{name:'Build a quote'}).first().click();
+      await page.locator('#sale-quote-search').fill('Browser test lead');
+      await page.locator('#sale-quote-results [data-sale-action="quote-select"]').click();
       assert.match(
         await page.locator("#quote-overlay").getAttribute("class"),
         /open/,
