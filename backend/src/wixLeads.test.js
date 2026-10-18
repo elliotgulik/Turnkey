@@ -206,3 +206,13 @@ test('labelled native form values work without a contact object and reject struc
  const c=mapWixPayload({submissions:[{label:'First name',value:'Test'},{label:'Last name',value:'Customer'},{label:'Email',value:'test@example.test'}]});assert.equal(c.name,'Test Customer');assert.equal(c.email,'test@example.test');
  assert.equal(mapWixPayload({data:{contact:{name:{first:{bad:true},last:[]}}}}).name,'');
 });
+test('nested Wix submission wrapper keeps identity and form values available for redelivery dedupe', async()=>{
+ const body={data:{submission:{_id:'nested-sub-17',firstName:'Nested',lastName:'Customer',email:'nested@example.test',service:'Driveway wash'}}};
+ let saved;
+ const result=await handleWixLead({token:'t',body,lookupSource:async()=>({business_id:'business-a'}),addLead:async payload=>{saved=payload;return{id:'saved'};}});
+ assert.equal(result.status,200);assert.equal(saved.external_id,'nested-sub-17');assert.equal(saved.customer.name,'Nested Customer');assert.deepEqual(saved.requestedServices,['Driveway wash']);
+});
+test('a storage adapter that does not confirm a lead id cannot cause a false 200', async()=>{
+ const result=await handleWixLead({token:'t',body:{name:'Jane'},lookupSource:async()=>({business_id:'business-a'}),addLead:async()=>({})});
+ assert.equal(result.status,500);assert.equal(result.body.ok,undefined);
+});

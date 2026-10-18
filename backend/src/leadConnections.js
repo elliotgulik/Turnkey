@@ -22,7 +22,7 @@ export async function saveLeadConnection(db, businessId, provider, values) {
   const existing = await unwrap(
     db
       .from("lead_sources")
-      .select("id")
+      .select("id,external_id")
       .eq("business_id", businessId)
       .eq("provider", provider)
       .maybeSingle(),
@@ -36,6 +36,10 @@ export async function saveLeadConnection(db, businessId, provider, values) {
         .eq("id", existing.id)
         .eq("business_id", businessId)
         .eq("provider", provider)
+        // Prevent two simultaneous Wix token regenerations from both
+        // succeeding and returning URLs when only the last hash is live.
+        // The stale writer updates zero rows and receives a safe conflict.
+        .eq("external_id", existing.external_id)
         .select("id")
         .maybeSingle(),
     );

@@ -18,6 +18,7 @@ import { encryptToken, decryptToken } from './crypto.js'
 import { validateLeadPayload } from './leadValidation.js'
 import { handleWixLead } from './wixLeads.js'
 import { fetchMetaObject } from './metaGraph.js'
+import { ingestMetaWebhook } from './metaLeads.js'
 import { installLeadConnections, installWixBodyParser } from './leadConnections.js'
 import * as gmail from './providers/gmail.js'
 import * as googleCalendar from './providers/googleCalendar.js'
@@ -496,64 +497,42 @@ app.get('/api/leads/meta', (req, res) => {
   res.sendStatus(403)
 })
 
-async function ingestMetaLead(pageId, leadgenId) {
-  const { data: source, error: srcErr } = await authClient
-    .from('lead_sources').select('business_id, token_enc').eq('provider', 'meta').eq('external_id', pageId).maybeSingle()
-  if (srcErr) throw srcErr
-  if (!source) { console.warn('[Meta leads] no business connected for page', pageId); return }
-  const pageToken = decryptToken(source.token_enc)
-  const graphRes = await fetchMetaObject(leadgenId, { token: pageToken, fields: 'id,field_data' })
-  if (!graphRes.ok) { console.error('[Meta leads] Graph API fetch failed', leadgenId, await graphRes.text()); return }
-  const leadData = await graphRes.json()
-  const fields = {}
-  for (const f of (leadData.field_data || [])) fields[f.name] = (f.values || [])[0] || ''
-  const name = fields.full_name || [fields.first_name, fields.last_name].filter(Boolean).join(' ') || 'Meta lead'
-  const payload = {
-    business_id: source.business_id,
-    customer: {
-      name,
-      email: fields.email || undefined,
-      phone: fields.phone_number || fields.phone || undefined,
-      address: [fields.street_address, fields.city].filter(Boolean).join(', ') || undefined,
-      source: 'Meta'
-    },
-    source: 'meta', external_id: String(leadgenId), submittedAt: Date.now()
-  }
-  const lead = await storage.addLead(payload)
-  if (!lead.deduped) {
-    sendNotification(authClient, {
-      business_id: source.business_id, type: 'new_lead',
-      title: 'New Meta lead received',
-      message: name + ' submitted a lead ad on Facebook/Instagram',
-      url: '/index.html?open=pipeline'
-    }).catch((err) => console.error('new_lead (meta) notification failed', err))
-  }
-}
-
-// Meta calls this directly (no CRM session), same as Stripe's webhook —
-// deliberately not behind requireBusiness, verified by signature instead.
-// Always acks fast (before the real work) so a downstream failure doesn't
-// make Meta retry-storm an event we may have already partially processed —
-// same reasoning as the Stripe webhook handler above.
+// Meta calls this directly (no CRM session), verified by its signature.
+// Finish the Graph fetch and durable insert before acknowledging. If a batch
+// partially succeeds, the lead table's unique key makes Meta's retry safe.
 app.post('/api/leads/meta', async (req, res) => {
-  res.status(200).json({ received: true })
   try {
-    if (!isMetaConfigured()) { console.warn('[Meta leads] webhook received but META_APP_SECRET/META_VERIFY_TOKEN not configured'); return }
-    const sig = req.get('x-hub-signature-256') || ''
-    const expected = 'sha256=' + crypto.createHmac('sha256', META_APP_SECRET).update(req.rawBody).digest('hex')
-    const a = Buffer.from(sig), b = Buffer.from(expected)
-    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) { console.warn('[Meta leads] signature verification failed'); return }
-
-    for (const entry of (req.body?.entry || [])) {
-      for (const change of (entry.changes || [])) {
-        if (change.field !== 'leadgen') continue
-        const { leadgen_id: leadgenId, page_id: pageId } = change.value || {}
-        if (!leadgenId || !pageId) continue
-        await ingestMetaLead(pageId, leadgenId).catch((err) => console.error('[Meta leads] ingest failed', leadgenId, err))
-      }
-    }
+    if (!isMetaConfigured()) return res.status(503).json({ error: 'Meta lead delivery is not configured' })
+    const result = await ingestMetaWebhook({
+      body: req.body,
+      rawBody: req.rawBody,
+      signature: req.get('x-hub-signature-256'),
+      appSecret: META_APP_SECRET,
+      lookupPage: async (pageId) => {
+        const { data, error } = await authClient
+          .from('lead_sources').select('business_id, token_enc').eq('provider', 'meta').eq('external_id', pageId).maybeSingle()
+        if (error) throw error
+        if (!data) return null
+        return { business_id: data.business_id, pageToken: decryptToken(data.token_enc) }
+      },
+      fetchLead: async (leadgenId, pageToken) => {
+        const graphRes = await fetchMetaObject(leadgenId, { token: pageToken, fields: 'id,field_data' })
+        if (!graphRes.ok) throw Object.assign(new Error('Meta Graph API lead fetch failed'), { status: 503 })
+        return graphRes.json()
+      },
+      addLead: (payload) => storage.addLead(payload),
+      onNewLead: ({ businessId, name }) => sendNotification(authClient, {
+        business_id: businessId, type: 'new_lead',
+        title: 'New Meta lead received',
+        message: name + ' submitted a lead ad on Facebook/Instagram',
+        url: '/index.html?open=pipeline'
+      }).catch((err) => console.error('new_lead (meta) notification failed', err))
+    })
+    res.status(200).json(result)
   } catch (err) {
-    console.error('POST /api/leads/meta', err)
+    const status = [400, 401].includes(err.status) ? err.status : 503
+    console.error('[Meta leads] delivery failed:', err.name || 'Error', status)
+    res.status(status).json({ error: status === 401 ? 'Invalid Meta webhook signature' : status === 400 ? err.message : 'Meta lead delivery failed; retry the webhook' })
   }
 })
 

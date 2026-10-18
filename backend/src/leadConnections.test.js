@@ -217,6 +217,24 @@ test("concurrent first Wix connects cannot create two active rows for a business
     hashWixToken(successful.body.webhookUrl.split("/").at(-1)),
   );
 });
+test("concurrent Wix token regeneration returns one live URL and one conflict", async () => {
+  const db = fakeDb([wix]);
+  let calls = 0, release;
+  const barrier = new Promise(resolve => { release = resolve; });
+  db.beforeWrite = async () => {
+    if (++calls === 2) release();
+    await barrier;
+  };
+  let token = 0;
+  const route = setup(db, { generateToken: () => `rotated-${++token}` });
+  const results = await Promise.all([
+    route("POST /api/connections/wix/connect"),
+    route("POST /api/connections/wix/connect"),
+  ]);
+  assert.deepEqual(results.map(r => r.statusCode).sort(), [200, 409]);
+  const winner = results.find(r => r.statusCode === 200).body.webhookUrl.split("/").at(-1);
+  assert.equal(db.rows[0].external_id, hashWixToken(winner));
+});
 test("status and disconnect errors surface safely for both providers", async () => {
   for (const provider of ["wix", "meta"])
     for (const action of ["status", "disconnect"]) {
