@@ -1,5 +1,9 @@
 # TurnKey — Google Earth Instant Quote (Chrome extension)
 
+## Version 0.2.5: per-service chemical costs
+
+Choose chemicals and concentrate usage per service in TurnKey → Pricing. Set your actual per-litre supplier prices there. Earth uses these saved settings; missing prices are flagged as incomplete. Update your unpacked extension to this folder and refresh Earth.
+
 ## Version 0.2.4: automatic signed-in account connection
 
 Open TurnKey, sign in, then open the extension popup and choose **Connect to signed-in TurnKey** once. It adopts the verified session and business from the active TurnKey tab; it does not ask for a CRM URL, email, or password. After that, **Build quote** opens the saved customer address in Google Earth, and saving creates a new draft under that customer's file. Existing accepted quotes are preserved.
