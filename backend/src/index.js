@@ -3,6 +3,7 @@ import { installSalesPlatform } from './salesPlatform.js'
 import { installConversations } from './conversationsRoutes.js'
 import { installMarketingRoutes } from './marketingRoutes.js'
 import { installJobWork } from './jobWork.js'
+import { installExtensionTransfers } from './extensionTransfers.js'
 import dotenv from 'dotenv'
 dotenv.config()
 
@@ -1367,6 +1368,7 @@ installSalesPlatform(app,{db:authClient,requireBusiness,sendNotification})
 installConversations(app,{db:authClient,requireBusiness,getValidAccessToken})
 installMarketingRoutes(app,{db:authClient,requireBusiness})
 installJobWork(app,{db:authClient,requireBusiness})
+installExtensionTransfers(app,{db:authClient,requireBusiness})
 
 // ServiceM8 integration — all routes/logic in servicem8Routes.js,
 // servicem8Sync.js, servicem8Webhooks.js and providers/servicem8.js;

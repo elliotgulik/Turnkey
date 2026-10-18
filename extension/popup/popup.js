@@ -123,6 +123,7 @@ function renderSignIn() {
     error = '';
     render();
     try {
+      if(data.config.backendUrl&&!await requestOrigins([data.config.backendUrl]))throw new Error('Allow the TurnKey backend connection to enable ServiceM8 transfers.');
       const session = await TurnKeyApi.signIn(email, password);
       const profile = await TurnKeyApi.getProfile();
       const business = await TurnKeyApi.getBusiness(profile.business_id);
@@ -161,6 +162,7 @@ function renderConnected() {
     </div>
     <div class="tk-divider"></div>
     <button class="tk-btn tk-btn-accent" id="open">Open TurnKey</button>
+    ${data.config.backendUrl ? '<button class="tk-btn" id="enable-transfers">Enable ServiceM8 transfers</button><p class="tk-hint" id="transfer-permission-status" role="status"></p>' : ''}
     <button class="tk-btn tk-btn-danger" id="disconnect">Disconnect</button>
   `;
   document.getElementById('unit').addEventListener('change', async (e) => {
@@ -169,6 +171,10 @@ function renderConnected() {
   });
   document.getElementById('open').addEventListener('click', () => {
     chrome.tabs.create({ url: data.config.siteUrl + '/index.html' });
+  });
+  document.getElementById('enable-transfers')?.addEventListener('click',async()=>{
+    const status=document.getElementById('transfer-permission-status');
+    try{const granted=await requestOrigins([data.config.backendUrl]);status.textContent=granted?'Backend connection enabled. Use Send to ServiceM8 after creating a quote.':'Permission was not granted; your TurnKey quotes remain saved.';}catch(e){status.textContent='Could not enable the backend connection. Try again.';}
   });
   document.getElementById('disconnect').addEventListener('click', async () => {
     await Storage.disconnect();

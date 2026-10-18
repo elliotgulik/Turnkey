@@ -18,6 +18,8 @@ function call(action, ...args) {
 }
 
 export const TurnKeyApi = {
+  sendQuoteToServiceM8: (businessId,jobId) => call('sendQuoteToServiceM8',businessId,jobId),
+  serviceM8TransferStatus: (businessId,jobId) => call('serviceM8TransferStatus',businessId,jobId),
   fetchSiteConfig: (siteUrl) => call('fetchSiteConfig', siteUrl),
   signIn: (email, password) => call('signIn', email, password),
   getProfile: () => call('getProfile'),

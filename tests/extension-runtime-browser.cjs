@@ -26,11 +26,16 @@ window.__tkMeasureMapsReady();`;
   const cached=path.join(os.homedir(),'Library/Caches/ms-playwright/chromium-1228/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing');
   context=await chromium.launchPersistentContext(profile,{headless:true,channel:'chromium',...(fs.existsSync(chromium.executablePath())?{}:{executablePath:cached}),args:[`--disable-extensions-except=${extension}`,`--load-extension=${extension}`]});
   const worker=context.serviceWorkers()[0]||await context.waitForEvent('serviceworker');
-  const writes=[];
+  const writes=[],handoffs=[];
+  await context.route('https://turnkeycrm.net/api/**',r=>{
+    if(r.request().url().includes('/servicem8/handoff')){handoffs.push(r.request().postDataJSON());return r.fulfill({status:handoffs.length===1?503:202,contentType:'application/json',body:JSON.stringify(handoffs.length===1?{error:'Temporary connection issue'}:{queued:true})});}
+    return r.fulfill({contentType:'application/json',body:JSON.stringify({state:'transferred',message:'Transferred to ServiceM8',openUrl:'https://go.servicem8.com/OpenJob/22222222-2222-4222-8222-222222222222'})});
+  });
   await context.route('https://earth.google.com/**',r=>r.fulfill({contentType:'text/html',headers:{'Content-Security-Policy':"default-src 'self'; img-src 'self'; script-src 'self'"},body:'<!doctype html><title>Earth fixture</title><h1>Earth fixture</h1>'}));
   await context.route('https://maps.googleapis.com/maps/api/js**',r=>r.fulfill({contentType:'text/javascript',body:fixtureMap}));
   await context.route('https://turnkeycrm.net/**',r=>{
    const u=new URL(r.request().url());
+   if(u.pathname.startsWith('/api/'))return r.fallback();
    if(u.pathname==='/config.js')return r.fulfill({contentType:'text/javascript',body:"window.TURNKEY_CONFIG={mapsKey:'fixture'};"});
    const name=u.pathname==='/geometry.js'?'extension/geometry.js':u.pathname.slice(1);
    const file=path.resolve(root,name);
@@ -46,7 +51,7 @@ window.__tkMeasureMapsReady();`;
    }
    return r.fulfill({contentType:'application/json',body:JSON.stringify(table==='users'?[{business_id:'fixture-business'}]:table==='businesses'?[{id:'fixture-business',name:'Fixture business',pricing_config:{}}]:[])});
   });
-  await worker.evaluate(async()=>chrome.storage.local.set({tk_config:{siteUrl:'https://turnkeycrm.net',supabaseUrl:'https://fixture.supabase.co',supabaseAnonKey:'fixture'},tk_session:{accessToken:'fixture',refreshToken:'fixture',userId:'fixture-user',expiresAt:Date.now()+3600000},tk_profile:{business_id:'fixture-business'},tk_business:{name:'Fixture business',pricing_config:{}}}));
+  await worker.evaluate(async()=>chrome.storage.local.set({tk_config:{siteUrl:'https://turnkeycrm.net',backendUrl:'https://turnkeycrm.net',supabaseUrl:'https://fixture.supabase.co',supabaseAnonKey:'fixture'},tk_session:{accessToken:'fixture',refreshToken:'fixture',userId:'fixture-user',expiresAt:Date.now()+3600000},tk_profile:{business_id:'fixture-business'},tk_business:{name:'Fixture business',pricing_config:{}}}));
   const earth=await context.newPage();
   await earth.goto('https://earth.google.com/web/search/Public+fixture/@-36.800000,174.700000,50a,500d,35y');
   await earth.locator('[data-action="measure-area"]').click();
@@ -118,6 +123,16 @@ window.__tkMeasureMapsReady();`;
   assert.ok(area.size>90&&area.size<130,'Real geographic calculation, not the SDK fixture area');
   assert.equal(writes.filter(x=>x.table==='quotes').length,1);
   assert.equal(writes.find(x=>x.table==='quotes').body.status,'draft');
+  await earth.locator('[data-servicem8]').click();
+  await earth.getByText('Retry ServiceM8 transfer',{exact:true}).waitFor();
+  assert.match(await earth.locator('[data-transfer-status]').innerText(),/quote remains saved/);
+  await earth.locator('[data-servicem8]').click();
+  await earth.locator('[data-check-transfer]').waitFor();
+  assert.deepEqual(handoffs,[{jobId:job.body.id,mode:'quote'},{jobId:job.body.id,mode:'quote'}]);
+  await earth.locator('[data-check-transfer]').click();
+  await earth.locator('[data-open-servicem8]').waitFor();
+  assert.equal(await earth.locator('[data-open-servicem8]').getAttribute('href'),'https://go.servicem8.com/OpenJob/22222222-2222-4222-8222-222222222222');
+  assert.equal(writes.filter(x=>x.table==='quotes').length,1,'transfer retry must not create another quote');
   assert.deepEqual(errors,[]);
   console.log('Real MV3 runtime: restrictive Earth CSP → hosted map → extension → draft quote passed (all network writes mocked).');
  } finally {if(context)await context.close();fs.rmSync(profile,{recursive:true,force:true});}

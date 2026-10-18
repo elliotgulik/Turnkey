@@ -245,7 +245,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 const API_ACTIONS = new Set([
   'fetchSiteConfig', 'signIn', 'refresh', 'getProfile', 'getBusiness',
   'listCustomers', 'getCustomer', 'createCustomer', 'createQuote', 'createJob',
-  'logActivity', 'uploadScreenshotDataUrl'
+  'logActivity', 'uploadScreenshotDataUrl', 'sendQuoteToServiceM8', 'serviceM8TransferStatus'
 ]);
 
 let client = null;

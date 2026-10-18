@@ -1,10 +1,12 @@
 # TurnKey — Google Earth Instant Quote (Chrome extension)
 
-## Version 0.2.2: customer-linked Google Earth quoting
+## Version 0.2.3: customer-linked Google Earth quoting
 
 Use **Build quote** in TurnKey to open the saved customer address in Google Earth. Sign the extension into the same business first. The quote panel stays linked to that customer, and saving creates a new draft under their existing file. Existing accepted quotes are preserved. If the extension is missing, TurnKey shows an address link and installation instructions; opening Earth without the extension does not bind a quote automatically.
 
 Download the versioned ZIP from TurnKey, unzip it, then select the folder containing `manifest.json` with **Load unpacked**. Disable older copies and refresh both TurnKey and Earth after updating.
+
+After creating a quote, choose **Send to ServiceM8** to queue the saved draft for handoff. **Check transfer** shows its progress and opens the linked ServiceM8 job when complete. Queueing does not approve the quote or email the customer. A failed transfer leaves the TurnKey draft intact. Existing installations may need to open the extension popup and choose **Enable ServiceM8 transfers** to grant access to their configured TurnKey backend.
 
 ### Outline editing, expenses and editable pricing
 

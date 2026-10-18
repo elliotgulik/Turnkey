@@ -379,6 +379,8 @@ export async function init(shadowRoot) {
       modalLayer,
       { address: payload.address, total: payload.total, lines: payload.lines, SERVICES, openUrl, publicUrl, warning },
       {
+        onSendServiceM8: () => TurnKeyApi.sendQuoteToServiceM8(businessId,job.id),
+        onCheckServiceM8: () => TurnKeyApi.serviceM8TransferStatus(businessId,job.id),
         onDone: () => {
           state.measurements = [];
           state.screenshotDataUrl = null;

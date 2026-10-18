@@ -2,7 +2,7 @@
 
 ## Quoting
 
-Install the current extension from `/assets/turnkey-earth-extension-0.2.2.zip` on your TurnKey site: unzip it, open `chrome://extensions`, enable Developer mode, choose Load unpacked and select the folder containing `manifest.json`. Remove or disable older copies. Refresh both TurnKey and Google Earth after updating. Sign in through the extension using the same TurnKey business.
+Install the current extension from `/assets/turnkey-earth-extension-0.2.3.zip` on your TurnKey site: unzip it, open `chrome://extensions`, enable Developer mode, choose Load unpacked and select the folder containing `manifest.json`. Remove or disable older copies. Refresh both TurnKey and Google Earth after updating. Sign in through the extension using the same TurnKey business.
 
 Use **Build quote** on a saved customer with an address. The extension opens Google Earth at that address and locks the quote to that customer. Measurements and prices produce a new draft opportunity under the existing customer; previously accepted quotes remain unchanged. A plain Google Earth link without the extension opens the address but cannot automatically attach a draft to the customer.
 

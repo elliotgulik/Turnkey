@@ -286,6 +286,12 @@ export function renderQuoteCreated(container, { address, total, lines, SERVICES,
           <button type="button" class="tk-btn" data-copy>Copy Quote Link</button>
           <button type="button" class="tk-btn tk-btn-accent" data-open>Open in TurnKey</button>
         </div>
+        <div class="tk-created-transfer">
+          <button type="button" class="tk-btn tk-btn-accent" data-servicem8>Send to ServiceM8</button>
+          <button type="button" class="tk-btn" data-check-transfer hidden>Check transfer</button>
+          <p class="tk-modal-sub" role="status" aria-live="polite" data-transfer-status></p>
+          <p><a data-open-servicem8 target="_blank" rel="noopener" hidden>Open in ServiceM8</a></p>
+        </div>
         <button type="button" class="tk-link-btn" data-done>Done</button>
       </div>
     </div>`;
@@ -294,6 +300,30 @@ export function renderQuoteCreated(container, { address, total, lines, SERVICES,
     await navigator.clipboard.writeText(publicUrl);
     e.target.textContent = 'Copied!';
     setTimeout(() => (e.target.textContent = 'Copy Quote Link'), 1500);
+  });
+  const send=container.querySelector('[data-servicem8]'),check=container.querySelector('[data-check-transfer]'),status=container.querySelector('[data-transfer-status]'),link=container.querySelector('[data-open-servicem8]');
+  send.addEventListener('click',async()=>{
+    if(send.disabled)return;
+    send.disabled=true;status.textContent='Queueing your saved quote…';
+    try{
+      const result=await actions.onSendServiceM8();
+      if(!result||result.queued!==true)throw new Error('The transfer was not confirmed. Your TurnKey quote is still saved.');
+      send.textContent='Queued for ServiceM8';check.hidden=false;
+      status.textContent='Queued. You can leave this screen; TurnKey will process the transfer in the background.';
+    }catch(error){status.textContent=(error.message||'Could not transfer.')+' Your TurnKey quote remains saved.';send.textContent='Retry ServiceM8 transfer';send.disabled=false;}
+  });
+  check.addEventListener('click',async()=>{
+    if(check.disabled)return;
+    check.disabled=true;
+    try{
+      const result=await actions.onCheckServiceM8();
+      status.textContent=result.message||'Check TurnKey Connections for transfer progress.';
+      if(result.state==='transferred'&&/^https:\/\/go\.servicem8\.com\/OpenJob\/[0-9a-f-]{36}$/i.test(result.openUrl||'')){
+        link.href=result.openUrl;link.hidden=false;check.hidden=true;send.textContent='Transferred to ServiceM8';
+      }
+      if(result.state==='not_connected'||result.state==='not_queued'){send.disabled=false;send.textContent='Retry ServiceM8 transfer';}
+    }catch(error){status.textContent=error.message||'Could not check transfer. Your quote is saved.';}
+    finally{check.disabled=false;}
   });
   container.querySelector('[data-done]').addEventListener('click', () => actions.onDone());
 }

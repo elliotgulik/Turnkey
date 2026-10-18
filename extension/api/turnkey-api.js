@@ -155,6 +155,36 @@ export class TurnKeyClient {
     return body;
   }
 
+  async _salesBackend(path, businessId, options = {}) {
+    const profile=await this.getProfile();
+    if(profile.business_id!==businessId)throw new Error('The extension is signed in to a different business. Reconnect before transferring this quote.');
+    if(!this.cfg.backendUrl)throw new Error('TurnKey backend is not configured. Your quote is still saved.');
+    if(typeof chrome!=='undefined'&&chrome.permissions){
+      const granted=await chrome.permissions.contains({origins:[new URL(this.cfg.backendUrl).origin+'/*']});
+      if(!granted)throw new Error('Open the TurnKey extension icon and click Enable ServiceM8 transfers, then retry here.');
+    }
+    await this._ensureFreshSession();
+    const res=await fetch(this.cfg.backendUrl.replace(/\/$/,'')+path,{
+      ...options,headers:{Authorization:'Bearer '+this.session.accessToken,'Content-Type':'application/json'},signal:AbortSignal.timeout(30000)
+    });
+    const text=await res.text();let body={};
+    try{body=text.trim()?JSON.parse(text):{}}catch{throw new Error('Could not read the transfer response. Your quote remains saved; retry safely.');}
+    if(!res.ok)throw new Error(body.error||'Could not transfer the quote. Your TurnKey draft is still saved.');
+    return body;
+  }
+
+  async sendQuoteToServiceM8(businessId,jobId){
+    if(!/^[0-9a-f-]{36}$/i.test(jobId))throw new Error('Invalid saved job reference.');
+    const result=await this._salesBackend('/api/sales/servicem8/handoff',businessId,{method:'POST',body:JSON.stringify({jobId,mode:'quote'})});
+    if(result.queued!==true)throw new Error('ServiceM8 did not confirm the transfer was queued. Your quote is still saved.');
+    return {queued:true};
+  }
+
+  async serviceM8TransferStatus(businessId,jobId){
+    if(!/^[0-9a-f-]{36}$/i.test(jobId))throw new Error('Invalid saved job reference.');
+    return this._salesBackend('/api/extension/servicem8/jobs/'+encodeURIComponent(jobId),businessId);
+  }
+
   /** business_id + role for the signed-in user — same lookup as index.html's resolveProfile(). */
   async getProfile() {
     await this._ensureFreshSession();
