@@ -19,6 +19,7 @@ const assets = [
   "workspace-experience.css",
   "settings-experience.js",
   "settings-experience.css",
+  "sales-experience.css",
   "booking.html",
   "quote.html",
   "measure.html",
