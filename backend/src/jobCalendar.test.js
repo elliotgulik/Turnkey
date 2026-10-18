@@ -58,7 +58,17 @@ function makeDb(tables, { rpcImpl } = {}) {
       return q
     }
   }
-  db.rpc = rpcImpl || (async () => ({ data: null, error: null }))
+  db.rpc = rpcImpl || (async (name, p) => {
+    if (name === 'job_calendar_delete_item') {
+      const table = p.p_kind === 'block' ? 'availability_blocks' : 'calendar_events'
+      const row = tables[table].find(r => r.id === p.p_id && r.business_id === p.p_business_id)
+      const caller = tables.users.find(r => r.id === p.p_caller_id && r.business_id === p.p_business_id)
+      if (!row) return { error: { code: '22023', message: 'Item not found' } }
+      if (!caller || (!['owner','manager'].includes(caller.role) && row.user_id !== caller.id)) return { error: { code: '42501', message: 'You can only remove your own items' } }
+      tables[table] = tables[table].filter(r => r !== row)
+    }
+    return { data: null, error: null }
+  })
   return db
 }
 
@@ -582,4 +592,42 @@ test('SQL schema: tenant/role-checked, serialized, overlap-safe booking + idempo
   })
 
   await db.close()
+})
+
+
+test('native event routes validate input and forward trusted tenant/caller to private RPCs', async () => {
+  const calls = []
+  const h = setup({ rpcImpl: async (name, params) => { calls.push({ name, params }); return { data: { id: id(80) } } } })
+  const body = { id: id(80), staffId: tech, title: 'Site visit', startAt: '2026-10-19T01:00Z', endAt: '2026-10-19T02:00Z', busyStatus: 'busy', timeZone: 'Pacific/Auckland', businessId: OTHER_BIZ, callerId: foreignUser }
+  assert.equal((await h.run('post', '/api/job-calendar/events', { body })).statusCode, 201)
+  assert.equal(calls[0].name, 'job_calendar_upsert_event')
+  assert.equal(calls[0].params.p_business_id, BIZ)
+  assert.equal(calls[0].params.p_caller_id, owner)
+  for (const patch of [{ title: '' }, { id: 'bad' }, { staffId: 'bad' }, { endAt: body.startAt }, { busyStatus: 'other' }, { timeZone: 'invalid' }]) {
+    assert.equal((await h.run('post', '/api/job-calendar/events', { body: { ...body, ...patch } })).statusCode, 400)
+  }
+  assert.equal(calls.length, 1)
+})
+
+test('event SQL auth/conflict/not-found failures map correctly, without raw failures leaking', async () => {
+  for (const [code, message, status] of [['42501','External calendar events are read-only',403], ['23P01','Scheduling conflict',409], ['22023','Event not found',404], ['PGRST202','missing RPC',503], ['XX000','private trace',500]]) {
+    const h = setup({ rpcImpl: async () => ({ error: { code, message } }) })
+    const res = await h.run('delete', `/api/job-calendar/events/${id(80)}`)
+    assert.equal(res.statusCode, status)
+    assert.equal(JSON.stringify(res.body).includes('private trace'), false)
+  }
+})
+
+test('unschedule is owner/manager only and returns filtered details with Google warning', async () => {
+  let params
+  const h = setup({ rpcImpl: async (_name, p) => { params = p; return { data: { id: job, status: 'quoted', scheduled_date: null, details: { total: 500, calendarGoogleSync: false, googleEventId: 'keep' } } } } })
+  assert.equal((await h.run('post', `/api/job-calendar/jobs/${job}/unschedule`, { userId: tech })).statusCode, 403)
+  assert.equal(params, undefined)
+  const res = await h.run('post', `/api/job-calendar/jobs/${job}/unschedule`, { userId: manager })
+  assert.equal(res.statusCode, 200)
+  assert.equal(params.p_caller_id, manager)
+  assert.equal(res.body.job.status, 'quoted')
+  assert.equal(res.body.job.details.total, undefined)
+  assert.equal(res.body.job.details.googleEventId, 'keep')
+  assert.match(res.body.googleWarning, /remains unchanged/)
 })

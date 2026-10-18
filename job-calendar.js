@@ -1,6 +1,6 @@
 /* TurnKey Calendar page: booking/scheduling for jobs, multi-staff team
-   assignment, busy/availability blocks, and a read-only overlay of native
-   calendar events + connected Google busy times. Owns #view-calendar
+   assignment, busy/availability blocks, native appointments and a read-only overlay of
+   connected Google busy times. Owns #view-calendar
    end-to-end once mounted — overrides window.renderCalendar (the old
    FullCalendar wiring in index.html stays in the file, just unused; nothing
    is deleted) and wraps renderAll()/openMoreSheet() so this page refreshes
@@ -118,6 +118,10 @@
   }
 
   function findJob(id) { return state.jobs.find((j) => String(j.id) === String(id)) || null; }
+  const nativeEvent = (ev) => ev.source === 'turnkey' && !ev.connection_id && !ev.external_id;
+  const canEditItem = (item) => state.canManage || item.user_id === state.myUserId;
+  const findEvent = (id) => state.events.find((e) => String(e.id) === String(id));
+
   function findBlock(id) { return state.blocks.find((b) => String(b.id) === String(id)) || null; }
   function findStaff(id) { return state.staff.find((s) => String(s.id) === String(id)) || null; }
 
@@ -178,6 +182,7 @@
       <div class="view-head"><div><h2>Calendar</h2><p>Book jobs, assign crews, and block out unavailable time. Works without Google Calendar — connect one in Connections to also overlay your own busy times.</p></div>
         <div class="tkjc-head-actions">
           <button type="button" class="btn ghost sm" data-tkjc="actual-hours">Actual hours</button>
+          <button type="button" class="btn ghost sm" data-tkjc="event">+ Appointment</button>
           <button type="button" class="btn ghost sm" data-tkjc="block">+ Block time</button>
           <button type="button" class="btn accent sm" data-tkjc="book">+ Book job</button>
         </div>
@@ -218,6 +223,7 @@
   }
 
   function wireSkeleton(host) {
+    host.querySelector('[data-tkjc="event"]').addEventListener('click', () => openEventModal());
     host.querySelector('[data-tkjc="book"]').addEventListener('click', () => openBookingModal({}));
     host.querySelector('[data-tkjc="block"]').addEventListener('click', () => openBlockModal({}));
     host.querySelector('[data-tkjc="actual-hours"]').addEventListener('click', () => {
@@ -380,7 +386,7 @@
         id: 'job:' + job.id, title: jobTitle(job) + (crewLabel?' · '+crewLabel:'') + (w.confirmed ? '' : ' (unconfirmed time'),
         start: w.start.toISOString(), end: w.end.toISOString(), allDay: w.allDay,
         backgroundColor: STATUS_COLOR[job.status] || STATUS_COLOR.scheduled, borderColor: STATUS_COLOR[job.status] || STATUS_COLOR.scheduled,
-        editable: w.confirmed && state.canManage, extendedProps: { kind: 'job', jobId: job.id }
+        editable: w.confirmed && state.canManage && !['completed','paid'].includes(job.status), extendedProps: { kind: 'job', jobId: job.id }
       });
     });
     state.events.forEach((ev) => {
@@ -388,15 +394,15 @@
       const free = ev.busy_status === 'free';
       out.push({
         id: 'event:' + ev.id, title: ev.title || (free ? 'Free' : 'Busy'), start: ev.start_time, end: ev.end_time,
-        display: 'background', backgroundColor: free ? 'transparent' : '#c7cdd1', editable: false,
-        extendedProps: { kind: 'event', free }
+        display: nativeEvent(ev) ? 'auto' : 'background', backgroundColor: nativeEvent(ev) ? '#387d78' : (free ? 'transparent' : '#c7cdd1'), editable: nativeEvent(ev) && canEditItem(ev),
+        extendedProps: { kind: 'event', eventId: ev.id, free }
       });
     });
     state.blocks.forEach((b) => {
       if (b.user_id && !matchesStaffFilter([b.user_id])) return;
       out.push({
         id: 'block:' + b.id, title: (BLOCK_TYPES.find((t) => t[0] === b.block_type) || [, 'Blocked'])[1] + (b.user_id ? '' : ' (business)'),
-        start: b.start_at, end: b.end_at, allDay: !!b.all_day, display: 'auto', backgroundColor: '#f4d9a0', editable: false,
+        start: b.start_at, end: b.end_at, allDay: !!b.all_day, display: 'auto', backgroundColor: '#f4d9a0', editable: canEditItem(b),
         extendedProps: { kind: 'block', blockId: b.id }
       });
     });
@@ -429,7 +435,7 @@
     const props = info.event.extendedProps;
     if (props.kind === 'job') openBookingModal({ jobId: props.jobId });
     else if (props.kind === 'block') { const b = findBlock(props.blockId); if (b) openBlockDetail(b); }
-    // native/google events: read-only, no handler
+    else if (props.kind === 'event') { const ev = findEvent(props.eventId); if (ev) openEventModal(ev); }
   }
   function onFcDateClick(info) {
     const dateISO = localDateStr(info.date);
@@ -438,10 +444,22 @@
   }
   function onFcDropResize(info) {
     const props = info.event.extendedProps;
-    if (props.kind !== 'job') { info.revert(); return; }
-    const job = findJob(props.jobId); if (!job) { info.revert(); return; }
-    const start = info.event.start, end = info.event.end || new Date(start.getTime() + 3600000);
-    saveBooking(job.id, buildBookingPayload(job, start, end, jobStaffIds(job), (job.details || {}).calendarTeamLabel, (job.details || {}).calendarNotes, !!(job.details || {}).calendarGoogleSync), () => info.revert());
+    const start = info.event.start, end = info.event.end;
+    if (!start || !end || end <= start) { info.revert(); return; }
+    if (props.kind === 'event') {
+      const ev = findEvent(props.eventId);
+      if (!ev || !nativeEvent(ev) || !canEditItem(ev)) { info.revert(); return; }
+      saveEvent(eventPayload(ev, start, end), null, () => info.revert());
+    } else if (props.kind === 'block') {
+      const b = findBlock(props.blockId);
+      if (!b || !canEditItem(b)) { info.revert(); return; }
+      saveBlockReq({ id: b.id, staffId: b.user_id, blockType: b.block_type, reason: b.reason,
+        allDay: !!info.event.allDay, startAt: start.toISOString(), endAt: end.toISOString() }, null, () => info.revert());
+    } else if (props.kind === 'job') {
+      const job = findJob(props.jobId);
+      if (!job || !state.canManage || ['completed','paid'].includes(job.status)) { info.revert(); return; }
+      saveBooking(job.id, buildBookingPayload(job, start, end, jobStaffIds(job), job.details?.calendarTeamLabel, job.details?.calendarNotes, !!job.details?.calendarGoogleSync), () => info.revert());
+    } else info.revert();
   }
 
   /* ===================== fallback agenda (no FullCalendar loaded) ===================== */
@@ -468,8 +486,9 @@
     });
     state.events.forEach((ev) => {
       if (ev.user_id && !matchesStaffFilter([ev.user_id])) return;
-      const dISO = localDateStr(new Date(ev.start_time));
-      if (byDay[dISO]) byDay[dISO].push({ kind: 'event', event: ev });
+      days.forEach((dISO) => {
+        if (new Date(ev.start_time) < parseLocalDate(addDaysISO(dISO, 1)) && new Date(ev.end_time) > parseLocalDate(dISO)) byDay[dISO].push({ kind: 'event', event: ev });
+      });
     });
 
     zone.innerHTML = `<div class="tkjc-agenda">${days.map((dISO) => {
@@ -487,6 +506,7 @@
       const dateISO = btn.dataset.tkjcAdd;
       if (state.canManage) openBookingModal({ dateISO }); else openBlockModal({ dateISO, staffId: state.myUserId });
     }));
+    zone.querySelectorAll('[data-tkjc-agenda-event]').forEach((btn) => btn.addEventListener('click', () => openEventModal(findEvent(btn.dataset.tkjcAgendaEvent))));
     zone.querySelectorAll('[data-tkjc-agenda-job]').forEach((btn) => btn.addEventListener('click', () => openJobFromId(btn.dataset.tkjcAgendaJob)));
     zone.querySelectorAll('[data-tkjc-agenda-block]').forEach((btn) => btn.addEventListener('click', () => { const b = findBlock(btn.dataset.tkjcAgendaBlock); if (b) openBlockDetail(b); }));
   }
@@ -508,7 +528,69 @@
     }
     const ev = it.event;
     const free = ev.busy_status === 'free';
-    return `<div class="tkjc-agenda-chip tkjc-agenda-event ${free ? 'free' : 'busy'}"><b>${esc(ev.title || (free ? 'Free' : 'Busy'))}</b><span>${free ? 'Free' : 'Busy'} — external</span></div>`;
+    return `<button type="button" data-tkjc-agenda-event="${esc(ev.id)}" class="tkjc-agenda-chip tkjc-agenda-event ${nativeEvent(ev) ? 'native' : 'external'} ${free ? 'free' : 'busy'}"><b>${esc(ev.title || (free ? 'Free' : 'Busy'))}</b><span>${free ? 'Free' : 'Busy'} — ${nativeEvent(ev) ? 'Appointment' : 'external (read-only)'}</span></button>`;
+  }
+
+  const localInput = (date) => localDateStr(date) + 'T' + pad2(date.getHours()) + ':' + pad2(date.getMinutes());
+  function eventPayload(ev, start, end) {
+    return { id: ev.id, staffId: ev.user_id, title: ev.title, notes: ev.notes || null,
+      busyStatus: ev.busy_status, startAt: start.toISOString(), endAt: end.toISOString(), timeZone: timeZoneName() };
+  }
+  function openEventModal(ev) {
+    const existing = !!ev;
+    ev = ev || { id: crypto.randomUUID(), user_id: state.myUserId, title: '', busy_status: 'busy', start_time: new Date().toISOString(), end_time: new Date(Date.now() + 3600000).toISOString() };
+    const readOnly = existing && (!nativeEvent(ev) || !canEditItem(ev));
+    const overlay = document.createElement('div'); overlay.id = 'tkjc-event-overlay'; overlay.className = 'tkjc-overlay';
+    overlay.innerHTML = `<div class="tkjc-dialog" role="dialog" aria-modal="true" aria-labelledby="tkjc-event-title">
+      <h3 id="tkjc-event-title">${readOnly ? 'View event' : existing ? 'Edit appointment' : 'New appointment'}</h3>
+      ${existing && !nativeEvent(ev) ? '<p>External calendar event — read-only. Edit it in its source calendar.</p>' : ''}
+      <fieldset class="tkjc-event-fields" ${readOnly ? 'disabled' : ''}>
+        <label>Title<input data-event="title" maxlength="200" value="${esc(ev.title)}"></label>
+        <label>Staff<select data-event="staff" ${state.canManage ? '' : 'disabled'}>${state.staff.map(u => `<option value="${esc(u.id)}" ${u.id === ev.user_id ? 'selected' : ''}>${esc(u.name || u.email)}</option>`).join('')}</select></label>
+        <div class="tkjc-row"><label>Start<input type="datetime-local" data-event="start" value="${localInput(new Date(ev.start_time))}"></label>
+        <label>End<input type="datetime-local" data-event="end" value="${localInput(new Date(ev.end_time))}"></label></div>
+        <label>Availability<select data-event="busy"><option value="busy" ${ev.busy_status === 'busy' ? 'selected' : ''}>Busy</option><option value="free" ${ev.busy_status === 'free' ? 'selected' : ''}>Free</option></select></label>
+        <label>Notes<textarea data-event="notes">${esc(ev.notes || '')}</textarea></label>
+      </fieldset>
+      <div class="tkjc-dialog-message" data-event="message"></div><div class="tkjc-dialog-actions">
+        <button type="button" data-event="close">Close</button>
+        ${!readOnly && existing ? '<button type="button" class="btn danger" data-event="delete">Delete appointment</button>' : ''}
+        ${!readOnly ? '<button type="button" class="btn accent" data-event="save">Save appointment</button>' : ''}
+      </div></div>`;
+    document.body.appendChild(overlay); bindOverlay(overlay);
+    const field = (name) => overlay.querySelector('[data-event="' + name + '"]');
+    field('close').onclick = () => closeOverlay(overlay.id);
+    if (field('save')) field('save').onclick = async () => {
+      const start = new Date(field('start').value), end = new Date(field('end').value);
+      if (!field('title').value.trim() || !Number.isFinite(+start) || !Number.isFinite(+end) || end <= start) { field('message').textContent = 'Enter a title and an end after the start.'; return; }
+      field('save').disabled = true;
+      await saveEvent({ ...eventPayload(ev, start, end), title: field('title').value.trim(), notes: field('notes').value,
+        staffId: state.canManage ? field('staff').value : state.myUserId, busyStatus: field('busy').value }, overlay);
+      field('save').disabled = false;
+    };
+    if (field('delete')) field('delete').onclick = async () => {
+      if (!confirm('Delete this appointment?')) return;
+      field('delete').disabled = true;
+      try {
+        await request('/events/' + encodeURIComponent(ev.id), { method: 'DELETE' }, overlay._scope);
+        state.events = state.events.filter(e => e.id !== ev.id); closeOverlay(overlay.id); renderBody(); notify('Appointment deleted');
+      } catch (e) { if (!e.stale) field('message').textContent = e.message; }
+      finally { field('delete').disabled = false; }
+    };
+  }
+  async function saveEvent(payload, overlay, onRevert) {
+    try {
+      const body = await request('/events', { method: 'POST', body: JSON.stringify(payload) }, overlay?._scope || makeScope());
+      const idx = state.events.findIndex(e => e.id === payload.id);
+      if (idx >= 0) state.events[idx] = body.event; else state.events.push(body.event);
+      if (overlay) closeOverlay(overlay.id);
+      renderBody(); notify('Appointment saved ✓');
+    } catch (e) {
+      if (e.stale) return;
+      if (onRevert) onRevert();
+      const msg = overlay?.querySelector('[data-event="message"]');
+      if (msg) msg.textContent = e.message; else notify(e.message || 'Could not save — reverted');
+    }
   }
 
   /* ===================== booking modal ===================== */
@@ -570,12 +652,24 @@
         <div class="tkjc-dialog-message" id="tkjc-booking-msg"></div>
         <div class="tkjc-dialog-actions">
           <button type="button" data-tkjc="cancel">${readOnly ? 'Close' : 'Cancel'}</button>
+          ${!readOnly && w ? '<button type="button" class="btn danger" data-tkjc="unschedule">Unschedule booking</button>' : ''}
           ${!readOnly ? '<button type="button" class="btn accent" data-tkjc="save">Save booking</button>' : ''}
         </div>
       </div>`;
     document.body.appendChild(overlay);
     bindOverlay(overlay);
     bookingState = { jobId: job ? job.id : null };
+    const unschedule = overlay.querySelector('[data-tkjc="unschedule"]');
+    if (unschedule) unschedule.addEventListener('click', async () => {
+      if (!confirm('Unschedule this booking? Sales stage, quote, customer and staff stay unchanged. Any Google Calendar copy stays in Google; remove it there if needed.')) return;
+      unschedule.disabled = true;
+      try {
+        const body = await request('/jobs/' + encodeURIComponent(job.id) + '/unschedule', { method: 'POST' }, overlay._scope);
+        applyJobPatch(body.job); closeOverlay(overlay.id); renderBody(); refreshFromHydratedApp();
+        notify('Booking unscheduled. ' + (body.googleWarning || ''));
+      } catch (e) { if (!e.stale) overlay.querySelector('#tkjc-booking-msg').textContent = e.message; }
+      finally { unschedule.disabled = false; }
+    });
     overlay.querySelector('[data-tkjc="cancel"]').addEventListener('click', () => closeOverlay('tkjc-booking-overlay'));
     overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeOverlay('tkjc-booking-overlay'); });
     const retryBtn = overlay.querySelector('[data-tkjc="retry-google"]');
@@ -735,7 +829,7 @@
     saveBlockReq(payload, overlay).finally(() => { if (saveBtn) saveBtn.disabled = false; });
   }
 
-  async function saveBlockReq(payload, overlay) {
+  async function saveBlockReq(payload, overlay, onRevert) {
     const scope = overlay?._scope || makeScope();
     if(scope.isStale()){if(overlay)closeOverlay(overlay.id);return;}
     try {
@@ -744,13 +838,15 @@
       const idx = state.blocks.findIndex((b) => String(b.id) === String(payload.id));
       const saved = body.block || payload;
       if (idx >= 0) state.blocks[idx] = saved; else state.blocks.push(saved);
-      notify('Time blocked ✓' + (body.warnings && body.warnings.length ? ' — ' + body.warnings.join(' ') : ''));
+      notify('Time blocked ✓' + (body.conflictingJobs ? ' — ' + body.conflictingJobs + ' existing booking(s) overlap. Review them.' : ''));
       if (overlay) closeOverlay(overlay.id);
       renderBody();
     } catch (e) {
       if (e && e.stale) return;
+      if (onRevert) onRevert();
       const msg = overlay && overlay.querySelector('#tkjc-block-msg');
       if (msg) msg.textContent = e.message || 'Could not save';
+      else notify(e.message || 'Could not save — reverted');
     }
   }
 

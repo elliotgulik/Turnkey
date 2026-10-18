@@ -348,3 +348,10 @@
 }
 
 @media (max-width:900px){ .tkjc-main{grid-row:1;} .tkjc-sidebar{grid-row:2;max-height:300px;overflow:auto;} }
+
+/* Native appointments share the calendar dialog and remain distinct from imports. */
+.tkjc-event-fields{border:0;padding:0;margin:0;min-width:0}
+.tkjc-event-fields label{display:flex;flex-direction:column;gap:6px;margin-bottom:12px}
+.tkjc-agenda-event.native{border-left:4px solid #387d78;background:#e4f2ee;cursor:pointer;text-align:left}
+.tkjc-agenda-event.external{cursor:pointer;text-align:left}
+.tkjc-event-fields:disabled{opacity:.8}

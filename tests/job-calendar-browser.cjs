@@ -37,6 +37,7 @@ const { chromium } = require('playwright'),
   const base = `http://127.0.0.1:${server.address().port}`;
   try {
     const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, timezoneId: 'Pacific/Auckland' });
+    await page.clock.setFixedTime(new Date('2026-07-15T00:00:00Z'));
     const errors = [];
     page.on('pageerror', (e) => errors.push(e.message));
     await page.route('**/*', (r) => (r.request().url().startsWith(base) ? r.continue() : r.abort()));
@@ -62,6 +63,10 @@ const { chromium } = require('playwright'),
       // Mirrors index.html's own delegated nav-click wiring (#tabs/#bottom-nav -> switchView(dataset.view)).
       document.getElementById('tabs').addEventListener('click', (e) => { const b = e.target.closest('button[data-view]'); if (b) window.switchView(b.dataset.view); });
       document.getElementById('bottom-nav').addEventListener('click', (e) => { const b = e.target.closest('button[data-view]'); if (b) window.switchView(b.dataset.view); });
+    });
+    if (process.env.TURNKEY_CALENDAR_SDK) await page.evaluate(() => {
+      const Calendar = FullCalendar.Calendar;
+      FullCalendar.Calendar = class extends Calendar { constructor(...args) { super(...args); window.testFc = this; } };
     });
     await page.addScriptTag({ path: path.resolve('job-calendar.js') });
 
@@ -93,6 +98,21 @@ const { chromium } = require('playwright'),
         notify: (m) => { window.lastNotify = m; },
         request: async (p, options) => {
           fixture.calls.push({ path: p, options });
+          if (p === '/events' && options?.method === 'POST') {
+            if (fixture.eventError) throw Error(fixture.eventError);
+            const b = JSON.parse(options.body);
+            const event = { id: b.id, user_id: b.staffId, title: b.title, start_time: b.startAt, end_time: b.endAt, busy_status: b.busyStatus, notes: b.notes, source: 'turnkey', connection_id: null, external_id: null };
+            fixture.events = fixture.events.filter(e => e.id !== b.id).concat(event); return { event };
+          }
+          if (p.startsWith('/events/') && options?.method === 'DELETE') {
+            fixture.events = fixture.events.filter(e => e.id !== p.split('/')[2]); return { ok: true };
+          }
+          if (p.endsWith('/unschedule') && options?.method === 'POST') {
+            const j = fixture.jobs.find(j => j.id === p.split('/')[2]);
+            j.scheduled_date = null; delete j.details.calendarStartAt; delete j.details.calendarEndAt;
+            delete j.details.scheduledStartMin; delete j.details.scheduledDurationMin; j.details.calendarGoogleSync = false;
+            return { job: structuredClone(j), googleWarning: 'Google copy remains unchanged.' };
+          }
           if (p.startsWith('/range')) return structuredClone({ jobs: fixture.jobs, staff: fixture.staff, events: fixture.events, blocks: fixture.blocks, google: fixture.google, canManage: fixture.canManage });
           if (options && options.method === 'PUT' && p.startsWith('/jobs/')) {
             const jobId = p.split('/jobs/')[1];
@@ -116,8 +136,10 @@ const { chromium } = require('playwright'),
           }
           if (options && options.method === 'POST' && p === '/blocks') {
             const body = JSON.parse(options.body);
-            fixture.blocks.push(body);
-            return { block: body };
+            if (fixture.blockError) throw Error(fixture.blockError);
+            const block = { id: body.id, user_id: body.staffId, block_type: body.blockType, start_at: body.startAt, end_at: body.endAt, all_day: body.allDay, reason: body.reason };
+            fixture.blocks = fixture.blocks.filter(b => b.id !== body.id).concat(block);
+            return { block, conflictingJobs: 1 };
           }
           if (options && options.method === 'DELETE' && p.startsWith('/blocks/')) {
             const id = p.split('/blocks/')[1];
@@ -248,6 +270,121 @@ const { chromium } = require('playwright'),
     const endLocal = await page.evaluate((iso) => new Date(iso).toLocaleDateString('en-NZ'), blockBody.endAt);
     assert.equal(startLocal, '20/07/2026');
     assert.equal(endLocal, '21/07/2026'); // inclusive UI end date -> exclusive next local midnight
+
+
+    // Native appointment create/edit/delete through visible UI, including retry.
+    await page.click('[data-tkjc="event"]');
+    assert.equal(await page.locator('[data-event="staff"]').isDisabled(), true);
+    await page.fill('[data-event="title"]', 'Site visit <safe>');
+    await page.fill('[data-event="start"]', '2026-07-20T10:00');
+    await page.fill('[data-event="end"]', '2026-07-20T11:00');
+    await page.fill('[data-event="notes"]', 'Access gate');
+    await page.screenshot({path:process.env.TURNKEY_CALENDAR_SDK ? '/tmp/calendar-appointment-fullcalendar.png' : '/tmp/calendar-appointment-agenda.png'});
+    await page.evaluate(() => { fixture.eventError = 'Scheduling conflict'; });
+    await page.click('[data-event="save"]');
+    await page.waitForFunction(() => document.querySelector('[data-event="message"]').textContent.includes('conflict'));
+    const firstId = await page.evaluate(() => JSON.parse(fixture.calls.filter(c => c.path === '/events').at(-1).options.body).id);
+    await page.evaluate(() => { fixture.eventError = null; });
+    await page.click('[data-event="save"]');
+    await page.locator('#tkjc-event-overlay').waitFor({state:'detached'});
+    const created = await page.evaluate(() => fixture.events[0]);
+    assert.equal(created.id, firstId); assert.equal(created.user_id, 'tech-1');
+    assert.equal(created.title, 'Site visit <safe>');
+    if (!process.env.TURNKEY_CALENDAR_SDK) {
+      await page.locator('[data-tkjc-agenda-event="' + created.id + '"]').click();
+    } else {
+      await page.locator('.fc-event-title').filter({hasText:'Site visit <safe>'}).first().click();
+    }
+    await page.fill('[data-event="title"]', 'Edited visit');
+    await page.selectOption('[data-event="busy"]', 'free');
+    await page.click('[data-event="save"]');
+    await page.locator('#tkjc-event-overlay').waitFor({state:'detached'});
+    assert.equal(await page.evaluate(() => fixture.events[0].busy_status), 'free');
+
+    // Imported rows never expose a writable form, even to an owner.
+    await page.evaluate(() => {
+      fixture.canManage = true; fixture.userId = 'owner-1';
+      fixture.events.push({id:'google-readonly',user_id:'owner-1',title:'Google meeting',source:'external',connection_id:'connection',external_id:'remote',start_time:'2026-07-20T01:00Z',end_time:'2026-07-20T02:00Z',busy_status:'busy'});
+      window.TK_JOB_CALENDAR.refresh();
+    });
+    await page.waitForTimeout(150);
+    if (!process.env.TURNKEY_CALENDAR_SDK) {
+      await page.locator('[data-tkjc-agenda-event="google-readonly"]').click();
+      assert.equal(await page.locator('[data-event="save"]').count(),0);
+      assert.equal(await page.locator('[data-event="delete"]').count(),0);
+      await page.click('[data-event="close"]');
+    }
+
+    // Exercise a real pointer drag in the rendered FullCalendar month grid.
+    if (process.env.TURNKEY_CALENDAR_SDK) {
+      const source = page.locator('.fc-daygrid-event').filter({hasText:'Edited visit'}).first();
+      const box = await source.boundingBox();
+      const cell = await page.locator('.fc-daygrid-day[data-date="2026-07-20"]').boundingBox();
+      const before = await page.evaluate(() => fixture.calls.filter(c => c.path === '/events').length);
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.down();
+      await page.waitForTimeout(150);
+      await page.mouse.move(box.x + box.width / 2 + cell.width, box.y + box.height / 2, {steps:12});
+      await page.waitForTimeout(150);
+      await page.mouse.up();
+      await page.waitForFunction(n => fixture.calls.filter(c => c.path === '/events').length > n, before);
+    }
+
+    // FullCalendar callbacks receive actual EventApi objects, persist events/
+    // blocks, and invoke revert on failure. Also verify per-event editability.
+    if (process.env.TURNKEY_CALENDAR_SDK) {
+      await page.evaluate(() => {
+        const events = window.testFc.getEvents();
+        const native = events.find(e => e.id.startsWith('event:') && e.title === 'Edited visit');
+        const imported = events.find(e => e.id === 'event:google-readonly');
+        const block = events.find(e => e.id.startsWith('block:'));
+        if (!native.startEditable || imported.startEditable || !block.startEditable) throw Error('Incorrect edit permissions');
+        window.reverts = 0;
+        window.testNativeId = native.id;
+        native.setDates(new Date('2026-07-21T01:00Z'),new Date('2026-07-21T03:00Z'));
+        window.testFc.getOption('eventDrop')({event:native,revert(){window.reverts++;}});
+      });
+      await page.waitForFunction(() => fixture.events.find(e => e.title === 'Edited visit').start_time === '2026-07-21T01:00:00.000Z');
+      await page.evaluate(() => {
+        fixture.eventError = 'conflict';
+        const event = testFc.getEventById(testNativeId);
+        testFc.getOption('eventResize')({event,revert(){window.reverts++;}});
+      });
+      await page.waitForFunction(() => window.reverts === 1);
+      await page.evaluate(() => {
+        fixture.eventError = null;
+        const block = testFc.getEvents().find(e => e.id.startsWith('block:'));
+        block.setDates(new Date('2026-07-22T00:00Z'),new Date('2026-07-23T00:00Z'),{allDay:true});
+        window.expectedBlockStart = block.start.toISOString();
+        testFc.getOption('eventDrop')({event:block,revert(){window.reverts++;}});
+      });
+      await page.waitForFunction(() => fixture.calls.some(c => c.path === '/blocks' && JSON.parse(c.options.body).startAt === window.expectedBlockStart));
+      await page.waitForTimeout(100);
+      await page.evaluate(() => {
+        fixture.blockError = 'block failure';
+        const block = testFc.getEvents().find(e => e.id.startsWith('block:'));
+        testFc.getOption('eventResize')({event:block,revert(){window.reverts++;}});
+      });
+      await page.waitForFunction(() => window.reverts === 2);
+      await page.evaluate(() => { fixture.blockError = null; });
+    }
+    // Delete a native event in either renderer.
+    if (!process.env.TURNKEY_CALENDAR_SDK) await page.locator('[data-tkjc-agenda-event="' + created.id + '"]').click();
+    else await page.locator('.fc-event-title').filter({hasText:'Edited visit'}).first().click();
+    page.once('dialog', d => d.accept());
+    await page.click('[data-event="delete"]');
+    await page.locator('#tkjc-event-overlay').waitFor({state:'detached'});
+    assert.equal(await page.evaluate(() => fixture.events.some(e => e.title === 'Edited visit')),false);
+
+    // Explicit unschedule preserves stage/customer and exposes Google warning.
+    await page.locator('[data-tkjc-job="job-1"]').click();
+    page.once('dialog', d => { assert.match(d.message(),/Google/); d.accept(); });
+    await page.click('[data-tkjc="unschedule"]');
+    await page.locator('#tkjc-booking-overlay').waitFor({state:'detached'});
+    assert.match(await page.evaluate(() => window.lastNotify), /Google copy remains/);
+    const unscheduled = await page.evaluate(() => fixture.jobs.find(j => j.id === 'job-1'));
+    assert.equal(unscheduled.status,'scheduled'); assert.equal(unscheduled.customer.name,'Alice');
+    assert.equal(unscheduled.scheduled_date,null);
 
     assert.deepEqual(errors, []);
     await page.close();

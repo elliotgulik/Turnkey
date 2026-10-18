@@ -221,7 +221,7 @@ export function installJobCalendar(app, { db, requireBusiness, getGoogleCalendar
     // must still show up, or a holiday/busy span spanning the view's edge
     // would silently vanish from one of the two weeks it touches.
     const eventRows = await fetchAllPaged(() => db.from('calendar_events')
-      .select('id, user_id, title, start_time, end_time, busy_status, source').eq('business_id', req.businessId)
+      .select('id, user_id, title, start_time, end_time, busy_status, source, notes, connection_id, external_id').eq('business_id', req.businessId)
       .lt('start_time', to.toISOString()).gt('end_time', from.toISOString()))
     const blockRows = await fetchAllPaged(() => db.from('availability_blocks')
       .select('id, user_id, block_type, start_at, end_at, all_day, reason').eq('business_id', req.businessId)
@@ -357,13 +357,59 @@ export function installJobCalendar(app, { db, requireBusiness, getGoogleCalendar
 
   /* ========================= DELETE /blocks/:id ========================= */
   app.delete('/api/job-calendar/blocks/:id', requireBusiness, wrap(async (req, res) => {
-    const r = await role(req)
     if (!uuid(req.params.id)) throw fail('Invalid block id')
-    const block = await unwrap(db.from('availability_blocks').select('*').eq('id', req.params.id).eq('business_id', req.businessId).maybeSingle())
-    if (!block) throw fail('Block not found', 404)
-    if (!isPrivileged(r) && block.user_id !== req.userId) throw fail('You can only remove your own block', 403)
-    await unwrap(db.from('availability_blocks').delete().eq('id', req.params.id).eq('business_id', req.businessId))
+    try {
+      await unwrap(db.rpc('job_calendar_delete_item', {
+        p_business_id: req.businessId, p_caller_id: req.userId, p_id: req.params.id, p_kind: 'block'
+      }))
+    } catch (e) { throw mapRpcError(e) || e }
     res.json({ ok: true })
+  }))
+
+  // Stable client UUID makes a retried create update the same native event.
+  app.post('/api/job-calendar/events', requireBusiness, wrap(async (req, res) => {
+    const body = req.body || {}
+    if (!uuid(body.id) || !uuid(body.staffId)) throw fail('Valid event and staff UUIDs are required')
+    const start = new Date(body.startAt), end = new Date(body.endAt)
+    if (!body.startAt || !body.endAt || !Number.isFinite(+start) || !Number.isFinite(+end) || end <= start || end - start > 366 * 86400000) throw fail('Invalid event time window')
+    if (typeof body.title !== 'string' || !body.title.trim() || body.title.length > 200) throw fail('Event title must be 1–200 characters')
+    if (!['busy', 'free'].includes(body.busyStatus)) throw fail('Invalid busy status')
+    if (!isValidTimeZone(body.timeZone)) throw fail('Invalid time zone')
+    let result
+    try {
+      result = await unwrap(db.rpc('job_calendar_upsert_event', {
+        p_business_id: req.businessId, p_caller_id: req.userId, p_id: body.id, p_staff_id: body.staffId,
+        p_title: body.title.trim(), p_start_at: start.toISOString(), p_end_at: end.toISOString(),
+        p_busy_status: body.busyStatus, p_notes: body.notes == null ? null : String(body.notes).slice(0, 2000), p_timezone: body.timeZone
+      }))
+    } catch (e) { throw mapRpcError(e) || e }
+    res.status(201).json({ ok: true, event: Array.isArray(result) ? result[0] : result })
+  }))
+
+  app.delete('/api/job-calendar/events/:id', requireBusiness, wrap(async (req, res) => {
+    if (!uuid(req.params.id)) throw fail('Invalid event id')
+    try {
+      await unwrap(db.rpc('job_calendar_delete_item', {
+        p_business_id: req.businessId, p_caller_id: req.userId, p_id: req.params.id, p_kind: 'event'
+      }))
+    } catch (e) { throw mapRpcError(e) || e }
+    res.json({ ok: true })
+  }))
+
+  app.post('/api/job-calendar/jobs/:id/unschedule', requireBusiness, wrap(async (req, res) => {
+    if (!uuid(req.params.id)) throw fail('Invalid job id')
+    if (!isPrivileged(await role(req))) throw fail('Only an owner or manager can manage bookings', 403)
+    await withGoogleLock(`${req.businessId}:${req.params.id}`, async () => {
+      let result
+      try {
+        result = await unwrap(db.rpc('job_calendar_unschedule', {
+          p_business_id: req.businessId, p_caller_id: req.userId, p_job_id: req.params.id
+        }))
+      } catch (e) { throw mapRpcError(e) || e }
+      const row = Array.isArray(result) ? result[0] : result
+      res.json({ ok: true, job: { ...row, details: filterCalendarDetails(row.details) },
+        googleWarning: 'Any Google Calendar copy remains unchanged. Remove it in Google Calendar if no longer needed.' })
+    })
   }))
 
   // Serializes Google network calls per (business, job) within this single
