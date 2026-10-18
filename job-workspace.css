@@ -300,6 +300,7 @@
   background: #1d4e70;
 }
 @media (max-width: 700px) {
+  .tkj-launcher { bottom: calc(80px + env(safe-area-inset-bottom, 0px)); }
   .tkj-equipment-row {
     grid-template-columns: 1fr;
   }
