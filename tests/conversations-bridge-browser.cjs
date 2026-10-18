@@ -76,6 +76,7 @@ const fs = require('node:fs'), path = require('node:path'), assert = require('no
       const realBuildDocPDF=buildDocPDF;
       buildDocPDF=function(mode,record,output){bridgeFixture.pdfInputs.push({mode,record:structuredClone(record),output});if(bridgeFixture.pdfFails)throw Error('PDF generation failed');return realBuildDocPDF(mode,record,output)};
     ` });
+    await page.addScriptTag({ path: path.resolve('pipeline-model.js') });
     await page.addScriptTag({ path: path.resolve('conversations.js') });
     await page.addScriptTag({ path: path.resolve('conversations-bridge.js') });
     await page.getByRole('heading', { name: 'Conversations', exact: true }).waitFor();
@@ -144,6 +145,15 @@ const fs = require('node:fs'), path = require('node:path'), assert = require('no
     assert.equal(await page.locator('[name=subject]').inputValue(), 'Re: Question');
     state = await page.evaluate(() => [...bridgeFixture.drafts.values()].at(-1));
     assert.equal(state.payload.replyToId, '22222222-2222-4222-8222-222222222222');
+    // Real successful send callback advances contacted -> quote sent; drafts never do.
+    await page.evaluate(()=>{records[1].stage='new';return openComposeModal({to:'bob@example.com',subject:'Your enquiry',body:'Checking the scope',opportunityId:'2'});});
+    assert.equal(await page.evaluate(()=>records[1].stage),'new');
+    await page.getByRole('button',{name:'Send email',exact:true}).click();
+    await page.waitForFunction(()=>records[1].stage==='contacted');
+    await page.evaluate(()=>generateAndSendDoc('quote',records[1]));
+    assert.equal(await page.evaluate(()=>records[1].stage),'contacted');
+    await page.getByRole('button',{name:'Send email',exact:true}).click();
+    await page.waitForFunction(()=>records[1].stage==='quoted');
     // In-flight PDF work must not create a draft in the next business.
     const beforeSwitch = await page.evaluate(() => bridgeFixture.drafts.size);
     await page.evaluate(() => { bridgeFixture.pauseSync = true; bridgeFixture.preparing = generateAndSendDoc('quote', records[0]); });
@@ -153,7 +163,7 @@ const fs = require('node:fs'), path = require('node:path'), assert = require('no
     assert.equal(await page.locator('#view-inbox').textContent(), '');
     assert.equal(await page.evaluate(() => bridgeFixture.opens), 0);
     assert.equal(await page.evaluate(() => bridgeFixture.downloads), 0);
-    assert.equal(await page.evaluate(() => bridgeFixture.sends), 2);
+    assert.equal(await page.evaluate(() => bridgeFixture.sends), 4);
     assert.equal(browser.contexts()[0].pages().length, 1);
     console.log('Conversations bridge browser passed: actual PDF helper/base64 contract, public fields, opportunity picker without uploads, persisted PDF drafts, no popups/downloads, quote/invoice entry points, send rejection/success, reply, tenant-switch fencing.');
   } finally { await browser.close(); }

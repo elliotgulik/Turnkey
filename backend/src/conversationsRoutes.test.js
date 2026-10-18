@@ -145,3 +145,8 @@ test('generated quote PDF and document context survive draft persistence without
   assert.equal(h.calls[0][1].attachments[0].filename, 'Quote-Q-1007.pdf')
   assert.throws(() => validateDraft({ document: { mode: 'quote', recordId: {} } }), /document/)
 })
+
+test('opportunity correlation survives draft saves but remains non-authoritative',()=>{
+ assert.equal(validateDraft({opportunityId:'42'}).opportunityId,'42');
+ assert.throws(()=>validateDraft({opportunityId:{}}),/opportunityId/);
+});

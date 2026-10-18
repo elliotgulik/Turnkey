@@ -88,15 +88,34 @@
     return body;
   }
   async function onSent(payload) {
-    if (!payload.document) return;
-    const start = scope(), r = recordFor(payload.document.recordId), mode = payload.document.mode;
+    const start = scope();
+    let r;
+    if(payload.document)r=recordFor(payload.document.recordId);
+    else if(payload.opportunityId){
+      r=recordFor(payload.opportunityId);
+      if((r.email||'').trim().toLowerCase()!==(payload.to||'').trim().toLowerCase())return;
+    }else{
+      const matches=currentRecords().filter(x=>(x.email||'').trim().toLowerCase()===(payload.to||'').trim().toLowerCase()&&['new','contacted'].includes(global.TK_PIPELINE.key(x)));
+      if(matches.length!==1)return;
+      r=recordFor(matches[0]);
+    }
+    const mode = payload.document?.mode;
+    if(!mode){
+      if(!global.TK_PIPELINE.applyEvent(r,'contacted'))return;
+      await syncRecordToSupabase(r);assertScope(start);
+      if(typeof render==='function')render();
+      if(typeof renderAll==='function')renderAll();
+      return;
+    }
     // Only this confirmed-success callback marks a document as sent. Opening
     // a preview, saving a draft or a rejected/unknown send never does so.
     if (mode === 'quote') {
-      if (r.stage === 'new') r.stage = 'quoted';
+      if(['won','lost'].includes(global.TK_PIPELINE.key(r)))return;
+      global.TK_PIPELINE.applyEvent(r,'quote-sent');
       if ((!r.follows || !r.follows.length) && typeof defaultFollows === 'function') r.follows = defaultFollows();
       (r.follows || []).forEach(f => { if (f.dayOffset === 0) f.state = 'sent'; });
-      r.quoteSentAt = Date.now(); r.clientResponded = false; r.selfPriced = false;
+      r.clientResponded = false; r.selfPriced = false;
+      r.nextFollowUpAt=r.nextFollowUpAt||new Date(Date.now()+2*86400000).toISOString();
     } else {
       r.invoiceSent = true; r.paymentStatus = 'sent';
       if (!r.dueDate && typeof addDaysISO === 'function') r.dueDate = addDaysISO(todayISO(), 7);
@@ -197,7 +216,7 @@
   global.openComposeModal = guarded(ctx => {
     ctx ||= {};
     const last = ctx.thread?.[ctx.thread.length - 1];
-    return compose({ to: ctx.to || '', subject: ctx.forward && last ? 'Fwd: ' + (last.subject || '') : ctx.subject || '', bodyText: ctx.bodyText ?? ctx.body ?? (ctx.forward && ctx.thread ? '\n\n---------- Forwarded message ----------\n' + ctx.thread.map(m => m.body_text || m.snippet || '').join('\n\n') : ''), attachments: ctx.attachments || (ctx.attachment ? [ctx.attachment] : []), ...(ctx.replyToId ? { replyToId: ctx.replyToId } : {}) });
+    return compose({ to: ctx.to || '', subject: ctx.forward && last ? 'Fwd: ' + (last.subject || '') : ctx.subject || '', ...(ctx.opportunityId?{opportunityId:String(ctx.opportunityId)}:{}), bodyText: ctx.bodyText ?? ctx.body ?? (ctx.forward && ctx.thread ? '\n\n---------- Forwarded message ----------\n' + ctx.thread.map(m => m.body_text || m.snippet || '').join('\n\n') : ''), attachments: ctx.attachments || (ctx.attachment ? [ctx.attachment] : []), ...(ctx.replyToId ? { replyToId: ctx.replyToId } : {}) });
   });
   global.sendReply = guarded(async () => {
     const bodyText = document.getElementById('ib-reply-text')?.value || '';

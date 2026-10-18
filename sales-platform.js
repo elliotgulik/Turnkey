@@ -35,7 +35,7 @@
     serial = 0,
     activeId = null,
     mappings = [],
-    pipelineScope="open", pipelineSearch="", pipelineDueOnly=false;
+    pipelineScope="all", pipelineSearch="", pipelineDueOnly=false;
   const oldRender = render,
     oldAll = renderAll,
     oldConnections = openConnections,
@@ -325,15 +325,15 @@
     let list=records.filter(r=>P.visible(r,pipelineScope));
     if(pipelineSearch)list=list.filter(r=>[r.name,r.address,r.email,r.phone,r.source].join(' ').toLowerCase().includes(pipelineSearch.toLowerCase()));
     if(pipelineDueOnly)list=list.filter(r=>r.nextFollowUpAt&&Date.parse(r.nextFollowUpAt)<Date.now()&&!M.won(r)&&!M.lost(r));
-    document.getElementById('view-pipeline').innerHTML=header('Sales pipeline','A clear next action for every enquiry. Won work moves to ServiceM8.',button('+ New lead','new')+button('Build a quote','quote-home')+button('Pipeline settings','stages'))+
-    `<div class="sale-pipeline-toolbar"><div class="sale-scope-tabs" role="group" aria-label="Pipeline outcomes">${[['open','Open opportunities'],['won','Confirmed'],['lost','Not proceeding'],['all','All']].map(([key,label])=>`<button class="btn ${pipelineScope===key?'accent':'ghost'}" data-sale-action="pipeline-scope" data-id="${key}" aria-pressed="${pipelineScope===key}">${label} <span>${records.filter(r=>P.visible(r,key)).length}</span></button>`).join('')}</div><label class="sale-field"><span>Search pipeline</span><input id="pipeline-search" type="search" value="${esc(pipelineSearch)}" placeholder="Customer, address or source"></label><label><input type="checkbox" id="pipeline-due" ${pipelineDueOnly?'checked':''}> Follow-ups overdue</label></div>`+
+    document.getElementById('view-pipeline').innerHTML=header('Sales pipeline','New lead → Contacted → Quote sent → Quote confirmed. Cancel enquiries that are not proceeding.',button('+ New lead','new')+button('Build a quote','quote-home')+button('Pipeline settings','stages'))+
+    `<div class="sale-pipeline-toolbar"><div class="sale-scope-tabs" role="group" aria-label="Pipeline outcomes">${[['all','All'],['open','Open opportunities'],['won','Quote confirmed'],['lost','Cancelled']].map(([key,label])=>`<button class="btn ${pipelineScope===key?'accent':'ghost'}" data-sale-action="pipeline-scope" data-id="${key}" aria-pressed="${pipelineScope===key}">${label} <span>${records.filter(r=>P.visible(r,key)).length}</span></button>`).join('')}</div><label class="sale-field"><span>Search pipeline</span><input id="pipeline-search" type="search" value="${esc(pipelineSearch)}" placeholder="Customer, address or source"></label><label><input type="checkbox" id="pipeline-due" ${pipelineDueOnly?'checked':''}> Follow-ups overdue</label></div>`+
     `<div class="sale-stage-jump" aria-label="Jump to stage">${scopeStages.map(s=>`<button class="btn ghost sm" data-sale-action="pipeline-jump" data-id="${s.key}">${esc(s.label)} · ${list.filter(r=>P.key(r)===s.key).length}</button>`).join('')}</div>`+
     `<div class="sale-kanban" style="--pipeline-columns:${scopeStages.length}">${scopeStages.map(s=>{const rs=list.filter(r=>P.key(r)===s.key);return `<section class="sale-column" id="pipeline-${s.key}" data-drop-stage="${s.key}"><header><h3>${esc(s.label)} <span>${rs.length}</span></h3><small>${esc(money(rs.reduce((n,r)=>n+Number(r.total||r.opportunityValue||0),0)))}</small><p>${esc(defaults.find(d=>d.key===s.key)?.description||'')}</p></header>${rs.map(card).join('')||empty('No opportunities in this stage')}</section>`;}).join('')}</div>`;
     renderLeads();
   };
   function renderLeads() {
     let rs = records.filter(
-      (r) => !M.won(r) && !M.lost(r) && r.stage !== "cancelled",
+      (r) => P.visible(r, stageFilter ? 'all' : 'open'),
     );
     if (search)
       rs = rs.filter((r) =>
@@ -352,14 +352,14 @@
     document.getElementById("view-leads").innerHTML =
       header(
         "Leads",
-        "All open enquiries and qualified sales opportunities.",
+        "Contact and quote stages update after successful sends and customer approval.",
         button("+ New lead", "new") + button("Build a quote", "quote-home") + button("Import", "import"),
       ) +
-      `<div class="sale-filters">${field("Search", `<input id="sale-search" type="search" value="${esc(search)}" placeholder="Name, email, phone or address">`)}${field("Source", `<select data-sale-filter="source">${options([["", "All sources"], ...sources.map((s) => [s, s])], sourceFilter)}</select>`)}${field("Sort by", `<select data-sale-filter="sort">${options([["newest","Newest first"],["oldest","Oldest first"],["value-high","Highest estimated value"],["value-low","Lowest estimated value"],["followup","Follow-up due first"],["name","Customer name"]],leadSort)}</select>`)}${field("Stage", `<select data-sale-filter="stage">${options([["", "All open stages"], ...stages.filter((x) => !["won", "lost"].includes(x.key)).map((x) => [x.key, x.label])], stageFilter)}</select>`)}</div><div class="sale-lead-grid">${rs.map(card).join("") || empty("No matching enquiries. Add a lead, import contacts or connect a lead source.")}</div>`;
+      `<div class="sale-filters">${field("Search", `<input id="sale-search" type="search" value="${esc(search)}" placeholder="Name, email, phone or address">`)}${field("Source", `<select data-sale-filter="source">${options([["", "All sources"], ...sources.map((s) => [s, s])], sourceFilter)}</select>`)}${field("Sort by", `<select data-sale-filter="sort">${options([["newest","Newest first"],["oldest","Oldest first"],["value-high","Highest estimated value"],["value-low","Lowest estimated value"],["followup","Follow-up due first"],["name","Customer name"]],leadSort)}</select>`)}${field("Stage", `<select data-sale-filter="stage">${options([["", "All open stages"], ...stages.map((x) => [x.key, x.label])], stageFilter)}</select>`)}</div><div class="sale-lead-grid">${rs.map(card).join("") || empty("No matching enquiries. Add a lead, import contacts or connect a lead source.")}</div>`;
   }
   async function move(r, key) {
     if (!r) return;
-    if (M.won(r) && key !== "won") {
+    if (M.won(r) && !["won","lost"].includes(key)) {
       toast(
         "Won sales stay recorded. Create a new opportunity for further work.",
       );
@@ -393,10 +393,10 @@
     }
     const at = Date.now();
     if (key === "lost") {
-      const reason = prompt("Why was this opportunity lost?");
+      const reason = prompt("Why is this being cancelled?");
       if (!reason?.trim()) return;
-      r.lostReason = reason.trim().slice(0, 500);
-      r.lostAt = at;
+      if(M.won(r)){r.cancelReason=reason.trim().slice(0,500);r.cancelledAt=at;}
+      else{r.lostReason=reason.trim().slice(0,500);r.lostAt=at;}
       r.stage = "cancelled";
     } else {
       r.stage = key;
@@ -603,7 +603,7 @@
       const allowedStage = s => s && typeof s.key === 'string' && (defaults.some(d => d.key === s.key) || /^custom_[a-z0-9_]{3,48}$/.test(s.key));
       stages = configuredPipeline.filter(allowedStage).map(s => ({
         key: s.key,
-        label: String(s.label || defaults.find(d => d.key === s.key)?.label || 'Custom stage').slice(0,50),
+        label: defaults.find(d => d.key === s.key)?.label || String(s.label || 'Custom stage').slice(0,50),
       }));
       for (const d of defaults) if (!stages.some(s => s.key === d.key)) stages.push({...d});
       migrationError = "";
@@ -849,33 +849,7 @@
     });
     r.publicTerms = currentBusinessProfile?.policies_config?.quoteTerms || "";
   };
-  const oldSend = sendQuoteDoc;
-  sendQuoteDoc = function () {
-    const r = record(docPreview.recordId);
-    if (!r || M.won(r)) {
-      toast("Approved quote is locked.");
-      return;
-    }
-    const firstQuoteSentAt = r.quoteSentAt;
-    r.firstResponseAt = r.firstResponseAt || Date.now();
-    r.salesHistory = [
-      ...(r.salesHistory || []),
-      { at: Date.now(), label: "Quote sent", to: "quoted" },
-    ];
-    r.nextFollowUpAt =
-      r.nextFollowUpAt ||
-      new Date(
-        Date.now() + (settings.followup_days || 2) * 86400000,
-      ).toISOString();
-    oldSend();
-    r.lastQuoteSentAt = r.quoteSentAt;
-    r.quoteSentAt = firstQuoteSentAt || r.quoteSentAt;
-    if (!["quoted", "followup"].includes(r.stage)) r.stage = "quoted";
-    saveState();
-    metrics = null;
-    render();
-    renderActive();
-  };
+  // The Conversations bridge advances the stage only after Gmail confirms delivery.
   // Reminders never send customer messages automatically. Existing manual mail flow remains available.
   autoFollowUp = function () {};
   document.addEventListener("dragstart", (e) => {
@@ -962,7 +936,7 @@
     try {
       if(a==='pipeline-scope'){pipelineScope=b.dataset.id;render();return;}
       if(a==='pipeline-jump'){document.getElementById('pipeline-'+b.dataset.id)?.scrollIntoView({behavior:'smooth',block:'nearest',inline:'start'});return;}
-      if(a==='contact'){openComposeModal({to:r.email||'',subject:P.key(r)==='quoted'?'Following up on your quote':'Your enquiry',customerId:r.customerId,jobId:r.jobId});return;}
+      if(a==='contact'){openComposeModal({to:r.email||'',subject:P.key(r)==='quoted'?'Following up on your quote':'Your enquiry',customerId:r.customerId,jobId:r.jobId,opportunityId:String(r.id)});return;}
       if(a==='marketing'){window.TK_MARKETING?.open();return;}
       if(a==='confirm-sale'){if(confirm('Record this quote as accepted? If automatic handoff is enabled, the approved work will be sent to ServiceM8.')){await move(r,'won');openDetail(r.id);}return;}
       if (a === "collapse") {
@@ -1364,7 +1338,7 @@
     refresh: loadSales,
     report: currentReport,
     reset: () => {
-      pipelineScope="open"; pipelineSearch=""; pipelineDueOnly=false;
+      pipelineScope="all"; pipelineSearch=""; pipelineDueOnly=false;
       search=""; sourceFilter=""; stageFilter=""; leadSort="newest"; activeId=null;
       cloudGoals = [];
       spend = [];

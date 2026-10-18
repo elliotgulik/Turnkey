@@ -6,7 +6,7 @@ const scope = (q, req) => q.eq('business_id', req.businessId).eq('user_id', req.
 const uuid = v => typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v)
 export function validateDraft(input = {}) {
   const out = {}
-  for (const [key, max] of Object.entries({ to: 2000, subject: 998, bodyText: 100000, replyToId: 36 })) {
+  for (const [key, max] of Object.entries({ to: 2000, subject: 998, bodyText: 100000, replyToId: 36, opportunityId: 100 })) {
     const value = input[key] ?? ''
     if (typeof value !== 'string' || value.length > max || (key !== 'bodyText' && /[\r\n]/.test(value))) throw fail('Invalid ' + key)
     out[key] = value

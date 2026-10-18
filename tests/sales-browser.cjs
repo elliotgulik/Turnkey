@@ -192,11 +192,11 @@ const { chromium } = require("playwright"),
       await page.evaluate(() => {
         switchView("pipeline");
       });
-      assert.deepEqual(await page.locator('#view-pipeline [data-drop-stage]').evaluateAll(els=>els.map(el=>el.dataset.dropStage)),['new','contacted','quoting','quoted']);
+      assert.deepEqual(await page.locator('#view-pipeline [data-drop-stage]').evaluateAll(els=>els.map(el=>el.dataset.dropStage)),['new','contacted','quoted','won','lost']);
       const columnIds=async stage=>page.locator(`#pipeline-${stage} [data-record]`).evaluateAll(els=>els.map(el=>Number(el.dataset.record)).sort((a,b)=>a-b));
       assert.deepEqual(await columnIds('contacted'),[1,3]);
       assert.deepEqual(await columnIds('quoted'),[4]);
-      assert.equal(await page.locator('#view-pipeline [data-record]').count(),3);
+      assert.equal(await page.locator('#view-pipeline [data-record]').count(),10);
       assert.equal(await page.locator('#pipeline-contacted [data-sale-stage="3"]').inputValue(),'contacted');
       assert.equal(await page.locator('#pipeline-quoted [data-sale-stage="4"]').inputValue(),'quoted');
       assert.deepEqual(await page.evaluate(()=>records.filter(r=>[3,4,5,6,7,8,9,10].includes(r.id)).map(r=>r.stage)),['qualified','followup','scheduled','completed','paid','cancelled','cancelled','lost']);
@@ -207,9 +207,9 @@ const { chromium } = require("playwright"),
       await page.locator('#pipeline-won [data-sale-stage="5"]').selectOption('contacted');
       assert.equal(await page.evaluate(()=>records.find(r=>r.id===5).stage),'scheduled','Won operational records must stay locked');
       await page.locator('[data-sale-action="pipeline-scope"][data-id="lost"]').click();
-      assert.deepEqual(await columnIds('lost'),[8,10]);
+      assert.deepEqual(await columnIds('lost'),[8,9,10]);
       await page.locator('[data-sale-action="pipeline-scope"][data-id="all"]').click();
-      assert.equal(await page.locator('#view-pipeline .sale-column').count(),6);
+      assert.equal(await page.locator('#view-pipeline .sale-column').count(),5);
       const allExpected=await page.evaluate(()=>records.filter(r=>TK_PIPELINE.visible(r,'all')).map(r=>r.id).sort((a,b)=>a-b));
       const allActual=await page.locator('#view-pipeline [data-record]').evaluateAll(els=>els.map(el=>Number(el.dataset.record)).sort((a,b)=>a-b));
       if(JSON.stringify(allActual)!==JSON.stringify(allExpected))pipelineScopeErrors.push({width:viewport.width,expected:allExpected,actual:allActual,reason:'All scope must render exactly the records included by pipeline-model.visible'});
@@ -233,7 +233,7 @@ const { chromium } = require("playwright"),
       assert.match(await page.locator('#toast').innerText(),/account is still loading/);
       assert.equal(await page.evaluate(()=>records.find(r=>r.id===3).stage),'qualified');
       if (viewport.width > 760) {
-        const source=page.locator('#view-pipeline [data-record="1"]'),target=page.locator('[data-drop-stage="quoting"]');
+        const source=page.locator('#view-pipeline [data-record="1"]'),target=page.locator('[data-drop-stage="contacted"]');
         await source.scrollIntoViewIfNeeded();
         await page.locator('#view-pipeline').evaluate(el=>Promise.all(el.getAnimations().map(a=>a.finished)));
         const from=await source.boundingBox(),to=await target.boundingBox();
@@ -247,12 +247,12 @@ const { chromium } = require("playwright"),
       else
         await page
           .locator('#view-pipeline [data-sale-stage="1"]')
-          .selectOption("quoting");
-      try { await page.waitForFunction(() => records[0].stage === "quoting", null, {timeout:3000}); }
+          .selectOption("contacted");
+      try { await page.waitForFunction(() => records[0].stage === "contacted", null, {timeout:3000}); }
       catch(e) { fs.mkdirSync('.artifacts',{recursive:true}); await page.screenshot({path:'.artifacts/drag-failure.png',fullPage:true}); throw e; }
-      assert.equal(await page.evaluate(()=>records[0].salesHistory.at(-1).to),'quoting');
-      assert.deepEqual(await columnIds('quoting'),[1]);
-      await page.locator('#pipeline-quoting [data-record="1"]').click();
+      assert.equal(await page.evaluate(()=>records[0].salesHistory.at(-1).to),'contacted');
+      assert.deepEqual(await columnIds('contacted'),[1,3]);
+      await page.locator('#pipeline-contacted [data-record="1"]').click();
       await page.locator("#sale-notes").fill("Browser-only note");
       await page.locator('#view-detail [data-sale-action="save-details"]').click();
       assert.equal(await page.evaluate(()=>records[0].salesNotes),'Browser-only note');
