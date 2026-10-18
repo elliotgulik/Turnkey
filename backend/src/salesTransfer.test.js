@@ -54,3 +54,19 @@ test('shared OAuth scopes include job promotion permission exactly once',()=>{
   const scopes=SCOPES.split(' ');
   for(const scope of ['read_jobs','create_jobs','manage_jobs'])assert.equal(scopes.filter(s=>s===scope).length,1);
 });
+test('Earth fixed-price services transfer as separate named items preserving adjusted total and GST',()=>{
+  const s={amount:345,details:{gstRegistered:true,services:[{svc:'driveway',qty:40,fixedPrice:115},{svc:'deck',label:'Deck cleaning',qty:20,fixedPrice:230}]}};
+  const items=approvedLines(s,{mode:'quote'});
+  assert.equal(items.length,2);
+  assert.match(items[0].name,/Driveway/);
+  assert.match(items[1].name,/Deck cleaning/);
+  assert.equal(items.reduce((sum,i)=>sum+Number(i.displayed_amount),0),345);
+  assert.equal(Number(items[0].price),100);
+  assert.equal(Number(items[1].price),200);
+  s.amount=300;
+  assert.equal(approvedLines(s).reduce((sum,i)=>sum+Math.round(Number(i.displayed_amount)*100),0),30000);
+});
+test('invalid saved Earth service price is rejected rather than silently aggregated',()=>{
+  const s=snapshot();s.details.services=[{svc:'driveway',qty:10,fixedPrice:-1}];
+  assert.throws(()=>approvedLines(s),/invalid service price/);
+});

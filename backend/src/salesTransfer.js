@@ -100,11 +100,12 @@ export function approvedLines(snapshot, { mode = "approved" } = {}) {
     throw Error(
       "This historical quote has no GST snapshot. Review its approved tax treatment before transfer.",
     );
-  if (lines.some((line) => line.priceSnapshot != null &&
-      (!Number.isFinite(Number(line.priceSnapshot)) || Number(line.priceSnapshot) < 0)))
+  const savedPrice = line => line.priceSnapshot ?? line.fixedPrice;
+  if (lines.some((line) => savedPrice(line) != null &&
+      (!Number.isFinite(Number(savedPrice(line))) || Number(savedPrice(line)) < 0)))
     throw Error("The approved quote contains an invalid service price");
   const sum = lines.reduce(
-    (s, l) => s + Math.max(0, Number(l.priceSnapshot) || 0),
+    (s, l) => s + Math.max(0, Number(savedPrice(l)) || 0),
     0,
   );
   // Legacy line prices cannot be reconstructed safely from today's rates.
@@ -128,14 +129,14 @@ export function approvedLines(snapshot, { mode = "approved" } = {}) {
         : Math.round(
             (amount *
               100 *
-              (weight += Math.max(0, Number(l.priceSnapshot) || 0))) /
+              (weight += Math.max(0, Number(savedPrice(l)) || 0))) /
               sum,
           ) - allocated;
     remaining -= cents;
     allocated += cents;
     return {
       name:
-        String(l.label || l.svc || "Service").slice(0, 200) +
+        String(l.label || PUBLIC_SERVICES[l.svc]?.label || PUBLIC_SERVICES[l.svc]?.name || l.svc || "Service").slice(0, 200) +
         ` (${Number(l.qty) || 0} units)`,
       quantity: "1",
       price: (cents / 100 / (d.gstRegistered ? 1.15 : 1)).toFixed(6),
