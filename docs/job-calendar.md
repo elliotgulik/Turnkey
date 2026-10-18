@@ -30,4 +30,4 @@ For an existing extension installation, open the extension popup and choose **En
 
 ## Deployment
 
-Apply only `supabase/migrations/20261018035054_job_calendar_booking.sql` for this feature, preserving unrelated pending migrations. It extends the existing jobs, calendar-events and availability-block infrastructure through private write functions. Deploy the matching Express and static frontend changes. No new framework or external credentials are required; Google syncing requires an existing valid Google connection.
+Apply only `supabase/migrations/20261018094524_job_calendar_booking.sql` for this feature, preserving unrelated pending migrations. It extends the existing jobs, calendar-events and availability-block infrastructure through private write functions. Deploy the matching Express and static frontend changes. No new framework or external credentials are required; Google syncing requires an existing valid Google connection.

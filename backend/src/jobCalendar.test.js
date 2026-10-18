@@ -456,7 +456,7 @@ test('a not-migrated database error becomes a clear 503, not a crash', async () 
    that file is a tracked, committed part of this repo, not an ephemeral
    handoff artifact, so its absence is a real failure, not an expected gap.
    ========================================================================= */
-const SCHEMA_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../supabase/migrations/20261018035054_job_calendar_booking.sql')
+const SCHEMA_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../supabase/migrations/20261018094524_job_calendar_booking.sql')
 
 test('SQL schema: tenant/role-checked, serialized, overlap-safe booking + idempotent blocks', async (t) => {
   const schemaSql = fs.readFileSync(SCHEMA_PATH, 'utf8')

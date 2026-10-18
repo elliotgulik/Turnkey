@@ -10,7 +10,7 @@ import crypto from 'node:crypto'
    that touch booking/blocking go through the job_calendar_book()/
    job_calendar_upsert_block()/job_calendar_set_google_status() SQL
    functions in the canonical migration
-   (supabase/migrations/20261018035054_job_calendar_booking.sql) so the
+   (supabase/migrations/20261018094524_job_calendar_booking.sql) so the
    per-business serialization and overlap checks are enforced by Postgres,
    not by this file.
 

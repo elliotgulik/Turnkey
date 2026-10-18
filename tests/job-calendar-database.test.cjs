@@ -10,7 +10,7 @@ test.before(async()=>{
  create table calendar_events(id uuid primary key,business_id text,user_id uuid,busy_status text,start_time timestamptz,end_time timestamptz,external_id text);
  insert into users values ('${id(1)}','a','owner'),('${id(2)}','a','technician'),('${id(3)}','a','technician'),('${id(4)}','b','technician');
  insert into jobs(id,business_id,status,details) values ('${id(11)}','a','quoted','{"services":[{"svc":"deck","qty":10}],"total":500}'),('${id(12)}','a','quoted','{"googleEventId":"existing-google-event"}'),('${id(13)}','a','quoted','{}');`);
- const sql=fs.readFileSync(require('node:path').join(__dirname,'../supabase/migrations/20261018035054_job_calendar_booking.sql'),'utf8');await db.exec(sql);await db.exec(sql);
+ const sql=fs.readFileSync(require('node:path').join(__dirname,'../supabase/migrations/20261018094524_job_calendar_booking.sql'),'utf8');await db.exec(sql);await db.exec(sql);
 });
 test.after(async()=>await db?.close());
 function book(j,start,end,staff=[id(2)],actor=id(1)){return db.query('select * from job_calendar_book($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)',['a',actor,j,start,end,'Pacific/Auckland',staff,'Crew','',false,480,60])}
