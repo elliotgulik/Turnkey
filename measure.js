@@ -14,7 +14,7 @@
 // loading it here is just this website importing its own same-origin JS,
 // not the extension loading remote code.
 import { measureGeometry, distanceMeters } from './geometry.js';
-import { editOutline, createOutlineHistory, displayAltitude } from './measurement-editor.js';
+import { editOutline, createOutlineHistory, displayAltitude, createCameraPickGuard } from './measurement-editor.js';
 
 const params = new URLSearchParams(location.search);
 const requestId = params.get('requestId') || '';
@@ -87,7 +87,33 @@ let map3d = null;
 let markers3d = [];
 let overlay3d = null; // gmp-polygon-3d | gmp-polyline-3d
 let maps3dAvailable = false;
-let cameraSteady = false;
+const cameraGuard = createCameraPickGuard();
+let pickHint = '';
+const cameraHintText = {
+  moving: 'Camera is moving or settling. Release the controls, wait half a second, then click the surface again.',
+  loading: 'Camera has settled; 3D imagery is still loading. Wait for detail, then click again. If this persists, retry the view or use 2D.',
+  zoom: 'Zoom closer to the property, wait for detail, then click again.',
+  surface: 'No accurate 3D surface position was returned. Click a loaded roof or ground surface, or change the angle and retry.'
+};
+const hintMessage = document.createElement('span');
+const retryCamera = document.createElement('button');
+retryCamera.type = 'button';
+retryCamera.textContent = 'Retry view';
+retryCamera.addEventListener('click', () => {
+  map3d?.stopCameraAnimation?.();
+  cameraGuard.reset();
+  pickHint = '';
+  updateCameraHint();
+});
+els.steadyHint.replaceChildren(hintMessage, document.createTextNode(' '), retryCamera);
+els.steadyHint.setAttribute('role', 'status');
+function updateCameraHint() {
+  if (!map3d || activeView !== '3d') { els.steadyHint.hidden = true; return; }
+  const status = cameraGuard.status(map3d);
+  const reason = status === 'ready' ? pickHint : status;
+  hintMessage.textContent = cameraHintText[reason] || '';
+  els.steadyHint.hidden = !reason;
+}
 
 function minPoints() {
   return interaction === 'open' ? 2 : 3;
@@ -217,25 +243,28 @@ async function tryInit3d() {
       heading: 0,
       mode: maps3d.MapMode ? maps3d.MapMode.SATELLITE : 'SATELLITE'
     });
-    els.map3d.appendChild(map3d);
-    // Only add a point once the camera has actually settled — a click
-    // mid-flight (the operator still panning/tilting/zooming) can land on
-    // a transient, not-yet-resolved 3D position. gmp-steadychange is the
-    // Map3DElement's own signal for this.
+    // Listen before connecting: the SDK may announce initial readiness on mount.
+    // Do not use render/scene notifications as a camera-movement clock.
     map3d.addEventListener('gmp-steadychange', (e) => {
-      cameraSteady = !!e.isSteady;
-      els.steadyHint.hidden = cameraSteady;
+      cameraGuard.scene(e.isSteady);
+      updateCameraHint();
     });
+    for (const property of ['center', 'heading', 'tilt', 'range', 'roll', 'fov', 'cameraposition']) {
+      map3d.addEventListener(`gmp-${property}change`, () => {
+        updateCameraHint();
+      });
+    }
     map3d.addEventListener('gmp-click', (e) => {
-      if (!cameraSteady) return;
-      if (map3d.range > 1500) {
-        els.steadyHint.textContent = 'Zoom closer to the property before placing accurate points.';
-        els.steadyHint.hidden = false;
-        return;
-      }
-      if (!e.position) return;
-      addPoint({ lat: e.position.lat, lng: e.position.lng, altitude: e.position.altitude });
+      const pick = cameraGuard.pick(map3d, e.position);
+      pickHint = ['zoom', 'surface'].includes(pick.reason) ? pick.reason : '';
+      updateCameraHint();
+      if (pick.point) addPoint(pick.point);
+      // Never queue a rejected point: its screen position belongs to the old view.
     });
+    cameraGuard.sample(map3d);
+    els.map3d.appendChild(map3d);
+    // Page timers pause/resume with the browser's back-forward cache.
+    setInterval(updateCameraHint, 100);
     maps3dAvailable = true;
     els.viewToggle.hidden = false;
     els.viewToggle.querySelector('[data-view="3d"]').disabled = false;
@@ -282,6 +311,8 @@ function switchView(view) {
   if (view === activeView) return;
   if (view === '3d' && !maps3dAvailable) return;
   activeView = view;
+  if (view === '3d') { cameraGuard.reset(); pickHint = ''; }
+  updateCameraHint();
   document.getElementById('tkm-camera-controls').hidden = view !== '3d';
   els.map2d.hidden = view !== '2d';
   els.map3d.hidden = view !== '3d';
