@@ -30,6 +30,8 @@
     sourceFilter = "",
     stageFilter = "",
     leadSort = "newest",
+    leadLayout = "cards",
+    leadsDueOnly = false,
     migrationError = "",
     busy = false,
     serial = 0,
@@ -40,10 +42,11 @@
     oldAll = renderAll,
     oldConnections = openConnections,
     oldAuth = handleAuthedSession,
-    oldSettings = openSettings;
+    oldSettings = openSettings,
+    originalCustomerProfile = openCustomerProfile;
   const record = (id) => records.find((r) => String(r.id) === String(id));
   const button = (text, action, id = "", extra = "") =>
-    `<button class="btn ${['quote-home','quote'].includes(action)?'accent quote-launch-btn':'ghost sm'}" data-sale-action="${action}" data-id="${esc(id)}" ${extra}>${['quote-home','quote'].includes(action)?'<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18M5 6.5h14M5 17.5h14"/></svg>':''}<span>${esc(text)}</span></button>`;
+    `<button type="button" class="btn ${['quote-home','quote'].includes(action)?'accent quote-launch-btn':'ghost sm'}" data-sale-action="${action}" data-id="${esc(id)}" ${extra}>${['quote-home','quote'].includes(action)?'<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18M5 6.5h14M5 17.5h14"/></svg>':''}<span>${esc(text)}</span></button>`;
   function buildEarthQuote(id){
     if(!window.TK_EARTH_QUOTES?.open){toast('The Google Earth quote connection is still loading. Refresh TurnKey and try again.');return Promise.resolve(false);}
     return window.TK_EARTH_QUOTES.open(Number(id));
@@ -310,52 +313,129 @@
         ]),
       )}<p class="sale-muted">Revenue allocation requires frozen line prices. Direct cost excludes unallocated job overhead. Actual profit is unavailable without real job-cost data.</p></section><section class="sale-panel"><h3>Forecast · current open pipeline</h3><strong class="sale-number">${money(r.forecast)}</strong><p>Probability-weighted potential sales, separate from confirmed booked sales. Uses configured stage probabilities, falling back to the selected cohort's historical conversion rate. Without history or configured probabilities, forecast is zero.</p>${button("Configure stages & probabilities", "stages")}</section>${r.financialCoverage ? `<p class="sale-muted">Financial coverage: ${esc(r.financialCoverage)}. Invoice/payment totals describe linked ServiceM8 jobs whose sales were won in this period, not invoice/payment-date accounting.</p>` : ""}`;
   };
+  const isOpen = (r) => !["won", "lost"].includes(P.key(r));
+  const followupTime = (r) => {
+    const t = r.nextFollowUpAt ? new Date(r.nextFollowUpAt).getTime() : NaN;
+    return Number.isFinite(t) ? t : null;
+  };
+  const isOverdue = (r) => isOpen(r) && followupTime(r) != null && followupTime(r) < Date.now();
+  const stageLabel = (r) => stages.find((s) => s.key === P.key(r))?.label || P.key(r) || "Unassigned stage";
+  function stageBadge(r) {
+    const operational = { scheduled: "Scheduled", completed: "Completed", paid: "Paid" }[r.stage];
+    return `<span class="sale-state" data-sale-state="${esc(P.key(r))}">${esc(stageLabel(r))}</span>${operational ? `<span class="sale-state sale-state-operation">${operational}</span>` : ""}`;
+  }
+  function servicesLabel(r) {
+    return (r.requestedServices || []).map((x) => x.name || x).join(", ") ||
+      (r.services || []).map((x) => SERVICES[x.svc]?.label || x.svc).join(", ") || "Services to confirm";
+  }
+  function nextStep(r) {
+    const key = P.key(r);
+    if (key === "lost") return { action: "detail", label: "Review cancellation", note: r.lostReason || r.cancelReason || "Cancelled. Review the history before taking further action." };
+    if (key === "won") return { action: "detail", label: "Review confirmed sale", note: {scheduled:"Work is scheduled. Review the booking and customer details.",completed:"Work is completed. Review the sale and its history.",paid:"Payment is recorded. Review this customer's sale."}[r.stage] || "Quote accepted. Review the sale and arrange delivery." };
+    if (!r.email && !r.phone) return { action: "customer-edit", label: "Add contact details", note: "Add an email or phone number so you can reach this customer." };
+    if (key === "new") return { action: r.email ? "contact" : "call", label: r.email ? "Contact customer" : "Call customer", note: "Respond to the enquiry and confirm the work they need." };
+    if (key === "quoted") return { action: r.email ? "contact" : "call", label: r.email ? "Follow up" : "Call to follow up", note: "Ask about the quote and agree on the next step." };
+    if (!r.address) return { action: "customer-edit", label: "Add property address", note: "Confirm the property address before opening Earth to quote." };
+    return { action: "quote", label: "Build quote", note: "Open the property in Earth to measure and prepare a quote." };
+  }
+  function followupLabel(r) {
+    if (!isOpen(r)) return "";
+    const t = followupTime(r);
+    if (t == null) return '<span class="sale-followup sale-followup-unset">No follow-up scheduled</span>';
+    return `<span class="sale-followup ${isOverdue(r) ? 'sale-overdue' : ''}">${isOverdue(r) ? 'Overdue' : 'Follow-up'} · ${esc(dates(t))}</span>`;
+  }
+  function stepButton(r) {
+    const step = nextStep(r);
+    return step.action === 'call' ? `<a class="btn ghost sm" href="tel:${esc(r.phone.replace(/[^+\d]/g, ''))}">${esc(step.label)}</a>` : button(step.label, step.action, r.id);
+  }
+  function nextButton(r) {
+    return `<div class="sale-next-action">${stepButton(r).replace('class="btn ', 'class="btn sale-next ')}<p>${esc(nextStep(r).note)}</p></div>`;
+  }
+  function contactActions(r) {
+    return `${r.phone ? `<a class="btn ghost sm" href="tel:${esc(r.phone.replace(/[^+\d]/g, ""))}" aria-label="Call ${esc(r.name || 'customer')}">Call</a>` : ""}${r.email ? `<a class="btn ghost sm" href="mailto:${esc(r.email)}">Email</a>` : ""}`;
+  }
+  function recordActions(r) {
+    const step = nextStep(r);
+    return `<div class="sale-record-actions" aria-label="Actions for ${esc(r.name || 'customer')}">${contactActions(r)}${step.action !== 'contact' ? button('Contact', 'contact', r.id) : ''}${step.action !== 'quote' && P.key(r) !== 'lost' ? button(M.won(r) ? 'New quote' : 'Build quote', 'quote', r.id) : ''}${button('History', 'history', r.id)}${button('Edit customer', 'customer-edit', r.id)}</div>`;
+  }
+  function stageControl(r) {
+    return field("Sales stage", `<select data-sale-stage="${esc(r.id)}" aria-label="Sales stage">${options(stages.map((s) => [s.key, s.label]), P.key(r))}</select>`);
+  }
+  function recordHeading(r) {
+    return `<button type="button" class="sale-record-open" data-sale-action="detail" data-id="${esc(r.id)}" aria-label="Open ${esc(r.name || 'Unnamed enquiry')}">${esc(r.name || "Unnamed enquiry")}</button>`;
+  }
+  function customerInfo(r) {
+    return `<div class="sale-section-head"><div><span class="sale-eyebrow">CUSTOMER</span><h3>Contact &amp; property</h3></div>${button('Edit customer details', 'customer-edit', r.id)}</div><dl class="sale-dl"><dt>Name</dt><dd>${esc(r.name || 'Not set')}</dd><dt>Email</dt><dd>${r.email ? `<a href="mailto:${esc(r.email)}">${esc(r.email)}</a>` : 'Not set — add an email to send quotes'}</dd><dt>Phone</dt><dd>${r.phone ? `<a href="tel:${esc(r.phone.replace(/[^+\d]/g, ''))}">${esc(r.phone)}</a>` : 'Not set — add a phone number'}</dd><dt>Property</dt><dd>${esc([r.address, r.suburb].filter(Boolean).join(', ') || 'Not set — add the property to quote in Earth')}</dd><dt>Received</dt><dd>${esc(dates(M.leadTime(r)))}</dd><dt>Lead source</dt><dd>${esc(r.source || 'Manual')}</dd></dl><div class="sale-actions">${contactActions(r)}${button('Contact customer', 'contact', r.id)}${button('Conversations', 'inbox')}</div><p class="sale-muted">Customer details are shared across this customer's opportunities. Sales notes below belong to this opportunity.</p>`;
+  }
+  function detailNextActions(r) {
+    return `${P.key(r) === 'won' ? button('Open jobs & invoices', 'nav', 'operations') : P.key(r) === 'lost' ? button('View sales history', 'history', r.id) : stepButton(r)}${button('Set follow-up / add notes', 'sales-plan', r.id)}`;
+  }
+  function refreshCustomerSummary() {
+    const detail = document.getElementById('view-detail'), r = record(activeId);
+    if (!r || !detail.classList.contains('active') || !detail.querySelector('#sale-customer')) return;
+    // Shared customer saves rerender the list. Refresh contact context here while
+    // preserving any unsaved owner, follow-up, value or notes in the sales plan.
+    detail.querySelector('.sale-head h2').textContent = r.name || 'Sales opportunity';
+    detail.querySelector('.sale-head p').textContent = r.address || 'Property address not set';
+    detail.querySelector('#sale-customer').innerHTML = customerInfo(r);
+    const next = detail.querySelector('.sale-detail-next');
+    next.querySelector('h3').textContent = nextStep(r).label;
+    next.querySelector('p').textContent = nextStep(r).note;
+    next.querySelector('.sale-actions').innerHTML = detailNextActions(r);
+  }
   function card(r) {
-    const due = r.nextFollowUpAt && Date.parse(r.nextFollowUpAt) < Date.now();
-    const age = M.leadTime(r);
-    return `<article class="sale-card" draggable="true" data-record="${esc(r.id)}" tabindex="0" role="button" aria-label="Open ${esc(r.name)}"><div class="sale-card-top"><b>${esc(r.name || "Unnamed enquiry")}</b><span>${esc(money(r.total || r.opportunityValue || 0))}</span></div><p>${esc((r.requestedServices || []).map((x) => x.name || x).join(", ") || (r.services || []).map((x) => SERVICES[x.svc]?.label || x.svc).join(", ") || "Services to confirm")}</p><div class="sale-tags"><span>${esc(r.source || "Manual")}</span><span title="${esc(window.TK_LEADS.grade(r).description)}">${esc(window.TK_LEADS.grade(r).label)}</span><span>${age ? Math.max(0, Math.floor((Date.now() - age) / 86400000)) + "d old" : "Age unknown"}</span></div><small>${esc(r.salespersonName || "Unassigned")}${r.nextFollowUpAt ? " · Follow-up " + esc(new Date(r.nextFollowUpAt).toLocaleDateString()) : ""}</small>${due ? '<strong class="sale-overdue">Follow-up overdue</strong>' : ""}<select data-sale-stage="${esc(r.id)}" aria-label="Sales stage">${options(
-      stages.map((x) => [x.key, x.label]),
-      P.key(r),
-    )}</select><button class="btn ghost sm sale-next" data-sale-action="${P.next(r)}" data-id="${esc(r.id)}">${esc(defaults.find(s=>s.key===P.key(r))?.action||'View record')}</button></article>`;
+    const age = M.leadTime(r), value = window.TK_LEADS.value(r), grade = window.TK_LEADS.grade(r);
+    return `<article class="sale-card sale-opportunity" draggable="true" data-record="${esc(r.id)}" aria-label="${esc(r.name || 'Unnamed enquiry')}">
+      <div class="sale-state-row">${stageBadge(r)}</div>
+      <div class="sale-card-top">${recordHeading(r)}<div class="sale-card-value"><strong>${value == null ? 'Not estimated' : esc(money(value))}</strong><small>${r.total > 0 ? 'Quote incl. GST' : 'Estimated value'}</small></div></div>
+      <p class="sale-card-address">${esc(r.address || "Property address needed")}</p><p class="sale-card-services">${esc(servicesLabel(r))}</p>
+      <div class="sale-tags"><span>${esc(r.source || "Manual")}</span><span title="${esc(grade.description)}">${esc(grade.label)}</span><span>${age ? Math.max(0, Math.floor((Date.now() - age) / 86400000)) + "d old" : "Age unknown"}</span></div>
+      <div class="sale-card-owner">${esc(r.salespersonName || "Unassigned salesperson")}</div>${followupLabel(r)}
+      ${nextButton(r)}${recordActions(r)}<div class="sale-card-stage">${stageControl(r)}</div></article>`;
+  }
+  function resultBar(count, total, filtered, action, context) {
+    return `<div class="sale-results"><p role="status" aria-live="polite" aria-atomic="true">Showing <strong>${count}</strong> of <strong>${total}</strong> opportunities <span>· ${esc(context)}</span></p>${button('Reset filters', action, '', filtered ? '' : 'disabled')}</div>`;
+  }
+  function scopeButtons(action, selected, choices) {
+    return `<div class="sale-scope-tabs" role="group" aria-label="Opportunity filters">${choices.map(([key, label, count]) => `<button type="button" class="btn ${selected === key ? 'accent' : 'ghost'}" data-sale-action="${action}" data-id="${key}" aria-pressed="${selected === key}">${esc(label)} <span>${count}</span></button>`).join('')}</div>`;
   }
   render = function () {
     if (typeof saveState === "function") saveState();
-    document.getElementById("cnt-leads").textContent=records.filter(r=>r.stage==='new').length;
-    const scopeStages=stages.filter(s=>pipelineScope==='all' || (pipelineScope==='open' ? !['won','lost'].includes(s.key) : s.key===pipelineScope));
-    let list=records.filter(r=>P.visible(r,pipelineScope));
-    if(pipelineSearch)list=list.filter(r=>[r.name,r.address,r.email,r.phone,r.source].join(' ').toLowerCase().includes(pipelineSearch.toLowerCase()));
-    if(pipelineDueOnly)list=list.filter(r=>r.nextFollowUpAt&&Date.parse(r.nextFollowUpAt)<Date.now()&&!M.won(r)&&!M.lost(r));
-    document.getElementById('view-pipeline').innerHTML=header('Sales pipeline','New lead → Contacted → Quote sent → Quote confirmed. Cancel enquiries that are not proceeding.',button('+ New lead','new')+button('Build a quote','quote-home')+button('Pipeline settings','stages'))+
-    `<div class="sale-pipeline-toolbar"><div class="sale-scope-tabs" role="group" aria-label="Pipeline outcomes">${[['all','All'],['open','Open opportunities'],['won','Quote confirmed'],['lost','Cancelled']].map(([key,label])=>`<button class="btn ${pipelineScope===key?'accent':'ghost'}" data-sale-action="pipeline-scope" data-id="${key}" aria-pressed="${pipelineScope===key}">${label} <span>${records.filter(r=>P.visible(r,key)).length}</span></button>`).join('')}</div><label class="sale-field"><span>Search pipeline</span><input id="pipeline-search" type="search" value="${esc(pipelineSearch)}" placeholder="Customer, address or source"></label><label><input type="checkbox" id="pipeline-due" ${pipelineDueOnly?'checked':''}> Follow-ups overdue</label></div>`+
-    `<div class="sale-stage-jump" aria-label="Jump to stage">${scopeStages.map(s=>`<button class="btn ghost sm" data-sale-action="pipeline-jump" data-id="${s.key}">${esc(s.label)} · ${list.filter(r=>P.key(r)===s.key).length}</button>`).join('')}</div>`+
-    `<div class="sale-kanban" style="--pipeline-columns:${scopeStages.length}">${scopeStages.map(s=>{const rs=list.filter(r=>P.key(r)===s.key);return `<section class="sale-column" id="pipeline-${s.key}" data-drop-stage="${s.key}"><header><h3>${esc(s.label)} <span>${rs.length}</span></h3><small>${esc(money(rs.reduce((n,r)=>n+Number(r.total||r.opportunityValue||0),0)))}</small><p>${esc(defaults.find(d=>d.key===s.key)?.description||'')}</p></header>${rs.map(card).join('')||empty('No opportunities in this stage')}</section>`;}).join('')}</div>`;
+    document.getElementById("cnt-leads").textContent = records.filter(r => r.stage === 'new').length;
+    const scopeStages = stages.filter(s => pipelineScope === 'all' || (pipelineScope === 'open' ? !['won', 'lost'].includes(s.key) : s.key === pipelineScope));
+    let list = records.filter(r => P.visible(r, pipelineScope));
+    if (pipelineSearch.trim()) list = list.filter(r => [r.name, r.address, r.email, r.phone, r.source].join(' ').toLowerCase().includes(pipelineSearch.trim().toLowerCase()));
+    if (pipelineDueOnly) list = list.filter(isOverdue);
+    document.getElementById('view-pipeline').innerHTML = header('Sales pipeline', 'See where every opportunity stands and give each customer a clear next step.', button('+ New lead', 'new') + button('Build a quote', 'quote-home') + button('Pipeline settings', 'stages')) +
+      `<div class="sale-pipeline-toolbar">${scopeButtons('pipeline-scope', pipelineScope, [['all', 'All', records.length], ['open', 'Open opportunities', records.filter(isOpen).length], ['won', 'Quote confirmed', records.filter(r => P.key(r) === 'won').length], ['lost', 'Cancelled', records.filter(r => P.key(r) === 'lost').length]])}
+      ${field('Search pipeline', `<input id="pipeline-search" type="search" value="${esc(pipelineSearch)}" placeholder="Customer, address or source">`)}<label class="sale-check"><input type="checkbox" id="pipeline-due" ${pipelineDueOnly ? 'checked' : ''}> Follow-ups overdue</label></div>` +
+      resultBar(list.length, records.length, pipelineScope !== 'all' || pipelineSearch || pipelineDueOnly, 'pipeline-reset', pipelineDueOnly ? 'Overdue follow-ups' : pipelineScope === 'all' ? 'All stages' : pipelineScope === 'open' ? 'Open opportunities' : pipelineScope === 'won' ? 'Quote confirmed' : 'Cancelled') +
+      `<nav class="sale-stage-jump" aria-label="Jump to stage">${scopeStages.map(s => `<button class="btn ghost sm" data-sale-action="pipeline-jump" data-id="${s.key}">${esc(s.label)} · ${list.filter(r => P.key(r) === s.key).length}</button>`).join('')}</nav><p class="sale-board-hint">Open a customer name for details. Move an opportunity with its Sales stage menu or drag it to a stage.</p>` +
+      (!list.length ? `<div class="sale-no-results">${empty('No matching opportunities. Reset filters to see your pipeline.')}${button('Reset filters', 'pipeline-reset')}</div>` : '') +
+      `<div class="sale-kanban" style="--pipeline-columns:${scopeStages.length}">${scopeStages.map(s => {
+        const rs = list.filter(r => P.key(r) === s.key);
+        return `<section class="sale-column" id="pipeline-${s.key}" data-drop-stage="${s.key}"><header><h3>${esc(s.label)} <span>${rs.length}</span></h3><small>${esc(money(rs.reduce((n, r) => n + (window.TK_LEADS.value(r) || 0), 0)))}</small><p>${esc(defaults.find(d => d.key === s.key)?.description || '')}</p></header>${rs.map(card).join('') || empty('No opportunities in this stage')}</section>`;
+      }).join('')}</div>`;
+    refreshCustomerSummary();
     renderLeads();
   };
+  function leadsTable(rs) {
+    return `<div class="sale-table-wrap sale-leads-table-wrap"><table class="sale-table sale-leads-table"><caption class="sale-sr-only">Sales opportunities and next actions</caption><thead><tr>${['Customer / property', 'Stage / source', 'Value incl. GST', 'Next step', 'Actions'].map(t => `<th scope="col">${t}</th>`).join('')}</tr></thead><tbody>${rs.map(r => `<tr data-record="${esc(r.id)}"><td data-label="Customer / property">${recordHeading(r)}<p>${esc(r.address || 'Property address needed')}</p><small>${esc(servicesLabel(r))}</small></td><td data-label="Stage / source"><div class="sale-state-row">${stageBadge(r)}</div><p>${esc(r.source || 'Manual')} · ${esc(r.salespersonName || 'Unassigned')}</p>${stageControl(r)}</td><td data-label="Value incl. GST"><strong>${window.TK_LEADS.value(r) == null ? 'Not estimated' : esc(money(window.TK_LEADS.value(r)))}</strong><p>${r.total > 0 ? 'Saved quote' : 'Estimate'}</p></td><td data-label="Next step">${followupLabel(r)}${nextButton(r)}</td><td data-label="Actions">${recordActions(r)}</td></tr>`).join('')}</tbody></table></div>`;
+  }
   function renderLeads() {
-    let rs = records.filter(
-      (r) => P.visible(r, stageFilter ? 'all' : 'open'),
-    );
-    if (search)
-      rs = rs.filter((r) =>
-        [r.name, r.email, r.phone, r.address, r.source]
-          .join(" ")
-          .toLowerCase()
-          .includes(search.toLowerCase()),
-      );
-    if (sourceFilter)
-      rs = rs.filter((r) => (r.source || "Manual") === sourceFilter);
-    if (stageFilter) rs = rs.filter((r) => P.key(r) === stageFilter);
+    let rs = records.filter(r => stageFilter === 'all' || P.visible(r, stageFilter ? 'all' : 'open'));
+    if (search.trim()) rs = rs.filter(r => [r.name, r.email, r.phone, r.address, r.source].join(' ').toLowerCase().includes(search.trim().toLowerCase()));
+    if (sourceFilter) rs = rs.filter(r => (r.source || 'Manual') === sourceFilter);
+    if (stageFilter && stageFilter !== 'all') rs = rs.filter(r => P.key(r) === stageFilter);
+    if (leadsDueOnly) rs = rs.filter(isOverdue);
     rs = window.TK_LEADS.sort(rs, leadSort);
-    const sources = [
-      ...new Set(records.map((r) => r.source || "Manual")),
-    ].sort();
-    document.getElementById("view-leads").innerHTML =
-      header(
-        "Leads",
-        "Contact and quote stages update after successful sends and customer approval.",
-        button("+ New lead", "new") + button("Build a quote", "quote-home") + button("Import", "import"),
-      ) +
-      `<div class="sale-filters">${field("Search", `<input id="sale-search" type="search" value="${esc(search)}" placeholder="Name, email, phone or address">`)}${field("Source", `<select data-sale-filter="source">${options([["", "All sources"], ...sources.map((s) => [s, s])], sourceFilter)}</select>`)}${field("Sort by", `<select data-sale-filter="sort">${options([["newest","Newest first"],["oldest","Oldest first"],["value-high","Highest estimated value"],["value-low","Lowest estimated value"],["followup","Follow-up due first"],["name","Customer name"]],leadSort)}</select>`)}${field("Stage", `<select data-sale-filter="stage">${options([["", "All open stages"], ...stages.map((x) => [x.key, x.label])], stageFilter)}</select>`)}</div><div class="sale-lead-grid">${rs.map(card).join("") || empty("No matching enquiries. Add a lead, import contacts or connect a lead source.")}</div>`;
+    const sources = [...new Set(records.map(r => r.source || 'Manual'))].sort();
+    const filtered = search || sourceFilter || stageFilter || leadsDueOnly || leadSort !== 'newest';
+    document.getElementById('view-leads').innerHTML = header('Leads', 'Know who needs a response, what to do next, and which enquiries are ready to quote.', button('+ New lead', 'new') + button('Build a quote', 'quote-home') + button('Import', 'import')) +
+      `<div class="sale-leads-overview">${scopeButtons('leads-scope', stageFilter, [['', 'Open leads', records.filter(isOpen).length], ['all', 'All opportunities', records.length], ['won', 'Quote confirmed', records.filter(r => P.key(r) === 'won').length], ['lost', 'Cancelled', records.filter(r => P.key(r) === 'lost').length]])}</div>` +
+      `<div class="sale-filters">${field('Search leads', `<input id="sale-search" type="search" value="${esc(search)}" placeholder="Name, email, phone or address">`)}${field('Source', `<select data-sale-filter="source">${options([['', 'All sources'], ...sources.map(s => [s, s])], sourceFilter)}</select>`)}${field('Sales stage', `<select data-sale-filter="stage">${options([['', 'All open stages'], ['all', 'All opportunities'], ...stages.map(s => [s.key, s.label])], stageFilter)}</select>`)}${field('Sort by', `<select data-sale-filter="sort">${options([['newest','Newest first'],['oldest','Oldest first'],['value-high','Highest estimated value'],['value-low','Lowest estimated value'],['followup','Follow-up due first'],['name','Customer name']],leadSort)}</select>`)}<label class="sale-check"><input type="checkbox" id="sale-leads-due" ${leadsDueOnly ? 'checked' : ''}> Follow-ups overdue</label></div>` +
+      `<div class="sale-leads-results">${resultBar(rs.length, records.length, filtered, 'leads-reset', leadsDueOnly ? 'Overdue follow-ups' : stageFilter === 'all' ? 'All stages' : stageFilter ? stages.find(s => s.key === stageFilter)?.label || stageFilter : 'Open leads')}<div class="sale-layout-switch" role="group" aria-label="Lead layout">${['cards', 'table'].map(layout => `<button class="btn ghost sm" data-sale-action="leads-layout" data-id="${layout}" aria-pressed="${leadLayout === layout}">${layout === 'cards' ? 'Cards' : 'Table'}</button>`).join('')}</div></div>` +
+      (rs.length ? leadLayout === 'table' ? leadsTable(rs) : `<div class="sale-lead-grid">${rs.map(card).join('')}</div>` : `<div class="sale-no-results">${empty('No matching enquiries. Add a lead, import contacts or reset your filters.')}${button('Reset filters', 'leads-reset')}${button('+ New lead', 'new')}</div>`);
   }
   async function move(r, key) {
     if (!r) return;
@@ -428,54 +508,24 @@
     const r = record(id);
     if (!r) return;
     activeId = r.id;
-    const map = mappings.find(
-      (m) => m.local_id === r.jobId && m.object_type === "job",
-    );
+    const map = mappings.find(m => m.local_id === r.jobId && m.object_type === "job"), step = nextStep(r);
+    const stagePath = defaults.map(s => `<li ${s.key === P.key(r) ? 'aria-current="step"' : ''}><span>${esc(s.label)}</span></li>`).join('');
     document.getElementById("view-detail").innerHTML =
-      header(
-        r.name || "Sales opportunity",
-        r.address || "Property address not set",
-        button("← Pipeline", "pipeline") +
-          button(
-            M.won(r) ? "New quote for this customer" : "Build quote",
-            "quote",
-            r.id,
-          ) + (!M.won(r) && (r.services||[]).length ? button('Edit saved quote','edit-quote',r.id) : ''),
-      ) +
-      `<div class="sale-grid"><section class="sale-panel"><h3>Enquiry &amp; contact</h3><div class="sale-actions">${r.phone ? `<a class="btn ghost" href="tel:${esc(r.phone.replace(/[^+\d]/g, ""))}">Call</a>` : ""}${r.email ? `<a class="btn ghost" href="mailto:${esc(r.email)}">Email</a>` : ""}${button("Conversations", "inbox")}</div><dl class="sale-dl"><dt>Email</dt><dd>${esc(r.email || "Not set")}</dd><dt>Phone</dt><dd>${esc(r.phone || "Not set")}</dd><dt>Received</dt><dd>${esc(dates(M.leadTime(r)))}</dd><dt>Source</dt><dd>${esc(r.source || "Manual")}</dd></dl>${field(
-        "Sales stage",
-        `<select data-sale-stage="${esc(r.id)}">${options(
-          stages.map((s) => [s.key, s.label]),
-          P.key(r),
-        )}</select>`,
-      )}${field("Estimated opportunity value", `<input id="sale-opportunity" type="number" min="0" step="0.01" value="${esc(r.opportunityValue || 0)}">`)}${field("Salesperson", `<select id="sale-assignee">${options([["", "Unassigned"], ...staff.map((x) => [x.id, x.name || x.email])], r.assignedSalespersonId || "")}</select>`)}${field("Next follow-up", `<input id="sale-followup" type="datetime-local" value="${r.nextFollowUpAt ? esc(localDateTime(r.nextFollowUpAt)) : ""}">`)}${field("Sales notes", `<textarea id="sale-notes" rows="4">${esc(r.salesNotes || r.jobNotes || "")}</textarea>`)}${button("Save sales details", "save-details", r.id)}</section><section class="sale-panel"><h3>Quote &amp; profitability</h3>${table(
-        ["Metric", "Value"],
-        [
-          ["Customer quote (incl. GST)", money(r.total || 0)],
-          ["Estimated delivery costs", moneySafe(r.estimatedCost)],
-          [
-            "Estimated margin",
-            r.estimatedMarginPct == null
-              ? "Unavailable"
-              : r.estimatedMarginPct + "%",
-          ],
-          ["Quote sent", dates(r.quoteSentAt)],
-          ["Sale won", dates(M.winTime(r))],
-        ],
-      )}<p>${esc((r.services || []).map((x) => SERVICES[x.svc]?.label || x.svc).join(", "))}</p>${r.quotePublicToken ? `<a class="btn ghost" target="_blank" rel="noopener" href="quote.html?t=${encodeURIComponent(r.quotePublicToken)}">Open customer quote</a>` : ""}${!M.won(r)&&r.quoteId&&r.total>0?button('Confirm quote accepted','confirm-sale',r.id):''}${button("Quote history", "versions", r.id)}${!M.won(r)&&r.total>0?button("Send quote to ServiceM8","handoff-quote",r.id):""}<h3>ServiceM8 handoff</h3><p>Manage this job in TurnKey, or transfer it to your connected ServiceM8 account for delivery and billing.</p>${map ? `<a class="btn accent" target="_blank" rel="noopener" href="https://go.servicem8.com/OpenJob/${encodeURIComponent(map.external_uuid)}">Open in ServiceM8</a><p class="sale-muted">ServiceM8: ${esc(map.snapshot?.status||'Transferred')} · Last checked ${esc(dates(map.synced_at))}</p>` : button("Transfer approved sale", "handoff", r.id, M.won(r) ? "" : "disabled")}${!map&&M.won(r)&&!r.quoteId&&r.jobId?`<p class="sale-muted">This sale predates quote tracking — no quote was ever saved for it. Transferring will ask you to review its recorded amount and services before creating one.</p>`:""}<div id="sale-versions"></div></section></div><section class="sale-panel"><h3>Sales history</h3>${
-        (r.salesHistory || []).length
-          ? (r.salesHistory || [])
-              .slice()
-              .reverse()
-              .map(
-                (e) =>
-                  `<div class="sale-row"><div>${esc(e.label || e.to)}<small>${esc(dates(e.at))}</small></div></div>`,
-              )
-              .join("")
-          : empty(
-              "Historical stage timestamps are not available for this record.",
-            )
-      }</section>`;
+      header(r.name || "Sales opportunity", r.address || "Property address not set", button('← Pipeline', 'pipeline') + button('Leads', 'nav', 'leads') + button(M.won(r) ? 'New quote for this customer' : 'Build quote', 'quote', r.id)) +
+      `<section class="sale-detail-summary" aria-label="Opportunity overview"><div class="sale-state-row">${stageBadge(r)}${followupLabel(r)}</div><ol class="sale-stage-path" aria-label="Sales stages">${stagePath}</ol><div class="sale-detail-next"><div><span class="sale-eyebrow">${isOpen(r) ? 'NEXT STEP' : 'OUTCOME'}</span><h3>${esc(step.label)}</h3><p>${esc(step.note)}</p></div><div class="sale-actions">${detailNextActions(r)}</div></div></section>
+      <nav class="sale-detail-nav" aria-label="Opportunity sections"><a href="#sale-customer">Customer</a><a href="#sale-plan">Sales plan</a><a href="#sale-quote">Quote &amp; handoff</a><a href="#sale-history">Sales history</a></nav>
+      <div class="sale-detail-layout"><div>
+      <section class="sale-panel" id="sale-customer">${customerInfo(r)}</section>
+      <section class="sale-panel" id="sale-plan"><span class="sale-eyebrow">SALES PLAN</span><h3 tabindex="-1">Owner, follow-up &amp; notes</h3>${stageControl(r)}<p class="sale-muted">Contact and quote stages also update after a successful send. Confirming a sale requires a saved, complete quote.</p>
+      <div class="sale-form-pair">${field('Estimated opportunity value', `<input id="sale-opportunity" type="number" min="0" step="0.01" value="${esc(r.opportunityValue || 0)}">`)}${field('Salesperson', `<select id="sale-assignee">${options([['', 'Unassigned'], ...staff.map(x => [x.id, x.name || x.email])], r.assignedSalespersonId || '')}</select>`)}</div>${field('Next follow-up', `<input id="sale-followup" type="datetime-local" value="${followupTime(r) == null ? '' : esc(localDateTime(r.nextFollowUpAt))}">`)}${followupLabel(r)}${field('Sales notes', `<textarea id="sale-notes" rows="4" placeholder="What did you agree? What should happen next?">${esc(r.salesNotes || r.jobNotes || '')}</textarea>`)}${button('Save sales details', 'save-details', r.id)}</section></div>
+      <div><section class="sale-panel" id="sale-quote"><span class="sale-eyebrow">QUOTE</span><h3>Quote &amp; profitability</h3><p class="sale-quote-services">${esc(servicesLabel(r))}</p>${table(['Metric', 'Value'], [
+        ['Customer quote (incl. GST)', money(r.total || 0)],
+        ['Estimated delivery costs', moneySafe(r.estimatedCost)],
+        ['Estimated margin', r.estimatedMarginPct == null ? 'Unavailable' : r.estimatedMarginPct + '%'],
+        ['Quote sent', dates(r.quoteSentAt)], ['Sale won', dates(M.winTime(r))]
+      ])}<div class="sale-actions sale-quote-actions">${button(M.won(r) ? 'New quote for this customer' : 'Build quote', 'quote', r.id)}${!M.won(r) && (r.services || []).length ? button('Edit saved quote', 'edit-quote', r.id) : ''}${r.quotePublicToken ? `<a class="btn ghost" target="_blank" rel="noopener" href="quote.html?t=${encodeURIComponent(r.quotePublicToken)}">Open customer quote</a>` : ''}${!M.won(r) && r.quoteId && r.total > 0 ? button('Confirm quote accepted', 'confirm-sale', r.id) : ''}${button('Quote history', 'versions', r.id)}${!M.won(r) && r.total > 0 ? button('Send quote to ServiceM8', 'handoff-quote', r.id) : ''}</div>${!r.quoteId ? '<p class="sale-muted">No saved quote yet. Build a quote in Earth to start quoting this opportunity.</p>' : ''}<div id="sale-versions" tabindex="-1" aria-live="polite"></div>
+      <div class="sale-handoff"><h3>ServiceM8 handoff</h3><p>Manage this job in TurnKey, or transfer it to your connected ServiceM8 account for delivery and billing.</p>${map ? `<a class="btn accent" target="_blank" rel="noopener" href="https://go.servicem8.com/OpenJob/${encodeURIComponent(map.external_uuid)}">Open in ServiceM8</a><p class="sale-muted">ServiceM8: ${esc(map.snapshot?.status || 'Transferred')} · Last checked ${esc(dates(map.synced_at))}</p>` : button('Transfer approved sale', 'handoff', r.id, M.won(r) ? '' : 'disabled')}${!map && !M.won(r) ? '<p class="sale-muted">Available after the customer accepts a saved quote.</p>' : ''}${!map && M.won(r) && !r.quoteId && r.jobId ? '<p class="sale-muted">This sale predates quote tracking — no quote was ever saved for it. Transferring will ask you to review its recorded amount and services before creating one.</p>' : ''}</div></section></div></div>
+      <section class="sale-panel" id="sale-history"><span class="sale-eyebrow">ACTIVITY</span><h3 tabindex="-1">Sales history</h3>${(r.salesHistory || []).length ? `<ol class="sale-history-list">${r.salesHistory.slice().reverse().map(e => `<li><strong>${esc(e.label || e.to)}</strong><time>${esc(dates(e.at))}</time></li>`).join('')}</ol>` : empty('Historical stage timestamps are not available for this record.')}</section>`;
     switchView("detail");
   };
   function localDateTime(value) {
@@ -727,11 +777,11 @@
       saveState();
     }
   };
-  // Secondary conversation links open the sales record, rather than an operational customer hub.
-  openCustomerProfile = function (id) {
-    const r = record(id) || records.find((x) => x.customerId === id);
-    if (r) openDetail(r.id);
-    else toast("Select an opportunity in Leads.");
+  // Keep the original customer modal and its shared contact-save workflow reachable.
+  openCustomerProfile = async function (id) {
+    const r = record(id) || records.find(x => x.customerId === id);
+    if (!r) { toast("Select an opportunity in Leads."); return; }
+    await originalCustomerProfile(r.id);
   };
   openCustomerProfileByCustomerId = function (id) {
     const r = records.find((x) => x.customerId === id);
@@ -852,8 +902,10 @@
   // The Conversations bridge advances the stage only after Gmail confirms delivery.
   // Reminders never send customer messages automatically. Existing manual mail flow remains available.
   autoFollowUp = function () {};
+  const recordControl = '.ux-select,a,button,input,select,textarea,label,summary,[role="button"],[role="combobox"],[role="listbox"],[role="option"],[contenteditable]:not([contenteditable="false"])';
   document.addEventListener("dragstart", (e) => {
     const c = e.target.closest("[data-record]");
+    if (c && e.target.closest(recordControl)) { e.preventDefault(); return; }
     if (c) { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", c.dataset.record); }
   });
   document.addEventListener("dragover", (e) => {
@@ -865,10 +917,8 @@
     e.preventDefault();
     move(record(e.dataTransfer.getData("text/plain")), col.dataset.dropStage);
   });
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && e.target.matches("[data-record]"))
-      openDetail(record(e.target.dataset.record)?.id);
-  });
+  // Customer-name buttons supply native Enter/Space behaviour without nesting
+  // links, inputs or stage menus inside an article with role="button".
   document.addEventListener("input", (e) => {
     if(e.target.id==='pipeline-search'){pipelineSearch=e.target.value;const pos=e.target.selectionStart;render();const input=document.getElementById('pipeline-search');input.focus();input.setSelectionRange(pos,pos);return;}
 
@@ -883,9 +933,13 @@
   });
   document.addEventListener("change", async (e) => {
     if(e.target.id==='pipeline-due'){pipelineDueOnly=e.target.checked;render();return;}
+    if(e.target.id==='sale-leads-due'){leadsDueOnly=e.target.checked;renderLeads();return;}
 
     if (e.target.dataset.saleStage) {
       await move(record(e.target.dataset.saleStage), e.target.value);
+      // A blocked or cancelled move must leave the visible menu on its saved stage.
+      // Rebuild rejected controls so the parent's enhanced select also refreshes.
+      if (e.target.isConnected && e.target.value !== P.key(record(e.target.dataset.saleStage))) render();
       if (
         activeId != null &&
         document.getElementById("view-detail").classList.contains("active")
@@ -924,18 +978,33 @@
     if (period !== "custom" || (custom.start && custom.end)) refreshMetrics();
   });
   document.addEventListener("click", async (e) => {
+    if (e.defaultPrevented) return;
     const b = e.target.closest("[data-sale-action]");
     if (!b) {
       const c = e.target.closest("[data-record]");
-      if (c && !e.target.closest("select"))
+      if (c && !e.target.closest(recordControl) && !window.getSelection()?.toString())
         openDetail(record(c.dataset.record)?.id);
       return;
     }
     const a = b.dataset.saleAction,
       r = record(b.dataset.id);
     try {
-      if(a==='pipeline-scope'){pipelineScope=b.dataset.id;render();return;}
+      if(a==='pipeline-reset'){pipelineScope='all';pipelineSearch='';pipelineDueOnly=false;render();document.getElementById('pipeline-search')?.focus();return;}
+      if(a==='leads-reset'){search='';sourceFilter='';stageFilter='';leadSort='newest';leadsDueOnly=false;renderLeads();document.getElementById('sale-search')?.focus();return;}
+      if(a==='leads-layout'){leadLayout=b.dataset.id==='table'?'table':'cards';renderLeads();document.querySelector(`#view-leads [data-sale-action="leads-layout"][data-id="${leadLayout}"]`)?.focus();return;}
+      if(a==='leads-scope'){stageFilter=b.dataset.id;renderLeads();document.querySelector(`#view-leads [data-sale-action="leads-scope"][data-id="${stageFilter}"]`)?.focus();return;}
+      if(a==='pipeline-scope'){pipelineScope=b.dataset.id;render();document.querySelector(`#view-pipeline [data-sale-action="pipeline-scope"][data-id="${pipelineScope}"]`)?.focus();return;}
       if(a==='pipeline-jump'){document.getElementById('pipeline-'+b.dataset.id)?.scrollIntoView({behavior:'smooth',block:'nearest',inline:'start'});return;}
+      if(a==='customer-edit'){
+        await openCustomerProfile(r.id);
+        const input=document.getElementById('cp-name');
+        input?.scrollIntoView({block:'center'});input?.focus({preventScroll:true});return;
+      }
+      if(a==='history'){
+        if(activeId!==r.id||!document.getElementById('view-detail').classList.contains('active'))openDetail(r.id);
+        const title=document.querySelector('#sale-history h3');title?.scrollIntoView({block:'start'});title?.focus({preventScroll:true});return;
+      }
+      if(a==='sales-plan'){const input=document.getElementById('sale-followup');input?.scrollIntoView({block:'center'});input?.focus({preventScroll:true});return;}
       if(a==='contact'){openComposeModal({to:r.email||'',subject:P.key(r)==='quoted'?'Following up on your quote':'Your enquiry',customerId:r.customerId,jobId:r.jobId,opportunityId:String(r.id)});return;}
       if(a==='marketing'){window.TK_MARKETING?.open();return;}
       if(a==='confirm-sale'){if(confirm('Record this quote as accepted? If automatic handoff is enabled, the approved work will be sent to ServiceM8.')){await move(r,'won');openDetail(r.id);}return;}
@@ -1001,6 +1070,7 @@
         ];
         await syncRecordToSupabase(r);
         saveState();
+        openDetail(r.id);
         toast("Sales details saved");
       }
       if (a === "versions") {
@@ -1339,7 +1409,7 @@
     report: currentReport,
     reset: () => {
       pipelineScope="all"; pipelineSearch=""; pipelineDueOnly=false;
-      search=""; sourceFilter=""; stageFilter=""; leadSort="newest"; activeId=null;
+      search=""; sourceFilter=""; stageFilter=""; leadSort="newest"; leadLayout="cards"; leadsDueOnly=false; activeId=null;
       cloudGoals = [];
       spend = [];
       settings = {};
