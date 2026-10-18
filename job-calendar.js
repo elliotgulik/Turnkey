@@ -931,7 +931,7 @@
     if (nav.querySelector('button[data-view="calendar"]')) return true;
     const btn = document.createElement('button');
     btn.setAttribute('data-view', 'calendar');
-    btn.innerHTML = '<span class="nav-ico" data-icon="calendar"></span>Calendar';
+    btn.innerHTML = '<span class="nav-ico" data-icon="calendar">'+(typeof NAV_ICONS!=='undefined'?NAV_ICONS.calendar:'')+'</span>Calendar';
     const goals = nav.querySelector('button[data-view="goals"]');
     if (goals) goals.insertAdjacentElement('afterend', btn); else nav.appendChild(btn);
     return true;
@@ -947,7 +947,7 @@
       const row = document.createElement('button');
       row.className = 'more-row';
       row.setAttribute('data-tkjc-more', 'calendar');
-      row.innerHTML = '<span class="mr-label">Calendar</span><span class="mr-chev">›</span>';
+      row.innerHTML = '<span class="nav-ico" aria-hidden="true">'+(typeof NAV_ICONS!=='undefined'?NAV_ICONS.calendar:'')+'</span><span class="mr-label">Calendar</span><span class="mr-chev">›</span>';
       row.addEventListener('click', () => {
         if (typeof root.closeModal === 'function') root.closeModal('more-overlay');
         if (typeof root.switchView === 'function') root.switchView('calendar');

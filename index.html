@@ -8,6 +8,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
 <script src="config.js?v=20261017a"></script>
+<script src="session-flow.js?v=20261019a"></script>
 <script src="pricing-engine.js?v=20261017a"></script>
 <script src="cost-engine.js?v=20261018f"></script>
 <script src="sales-engine.js?v=20261017a"></script>
@@ -1376,10 +1377,16 @@
 </style>
 <link rel="stylesheet" href="sales-platform.css?v=20261018c">
 <link rel="stylesheet" href="quote-workspace.css?v=20261017a">
-<link rel="stylesheet" href="conversations.css?v=20261017a">
+<link rel="stylesheet" href="conversations.css?v=20261019a">
 <link rel="stylesheet" href="marketing-analytics.css?v=20261017a">
+<link rel="stylesheet" href="settings-experience.css?v=20261019a">
+<link rel="stylesheet" href="job-workspace.css?v=20261018.1">
+<link rel="stylesheet" href="job-calendar.css?v=20261018c">
+<link rel="stylesheet" href="operations-workspace.css?v=20261018c">
+<link rel="stylesheet" href="workspace-experience.css?v=20261019a">
 </head>
-<body>
+<body data-session-checking>
+<div id="workspace-loading" class="ux-boot" role="status" aria-live="polite"><img src="icon-192.png" width="48" height="48" alt="TurnKey"><h1>Opening your workspace</h1><p id="workspace-loading-message">Restoring your secure session…</p><button class="btn ghost" id="workspace-retry" hidden onclick="retryWorkspaceSession()">Try again</button></div>
 <div id="auth-overlay" class="auth-shell">
   <div class="auth-hero">
     <div class="auth-hero-badge"><img src="icon-192.png" alt="" width="26" height="26">Turnkey</div>
@@ -1423,21 +1430,25 @@
     <div class="sidebar-brand">
       <div class="logo">
         <img src="icon-192.png" alt="Turnkey logo" width="38" height="38" style="display:block">
-        <div><h1>Turnkey</h1><span class="phase">Sales & growth platform</span></div>
+        <div><h1>Turnkey</h1><span class="phase">Your business, in one place</span></div>
       </div>
     </div>
     <div class="sidebar-scroll">
       <div class="sidebar-nav">
+        <div class="sidebar-label">Workspace</div>
         <button data-view="dashboard" class="active"><span class="nav-ico" data-icon="dashboard"></span>Dashboard</button>
         <button data-view="leads"><span class="nav-ico" data-icon="leads"></span>Leads <span class="count" id="cnt-leads">0</span></button>
         <button data-view="pipeline"><span class="nav-ico" data-icon="pipeline"></span>Pipeline</button>
+        <button data-sale-action="quote-home"><span class="nav-ico" data-icon="pricing"></span>Quote builder</button>
         <button data-view="customers"><span class="nav-ico" data-icon="customers"></span>Customers</button>
         <button data-view="operations"><span class="nav-ico" data-icon="jobsflow"></span>Jobs &amp; invoices</button>
+        <button data-view="calendar"><span class="nav-ico" data-icon="calendar"></span>Calendar</button>
+        <button data-view="inbox"><span class="nav-ico" data-icon="inbox"></span>Conversations <span class="count" id="cnt-inbox">0</span></button>
+        <div class="sidebar-label">Business</div>
         <button data-view="sales"><span class="nav-ico" data-icon="sales"></span>Analytics</button>
         <button data-view="goals"><span class="nav-ico" data-icon="goals"></span>Goals</button>
         <button onclick="openConnections()"><span class="nav-ico" data-icon="settings"></span>Connections</button>
-        <div class="sidebar-label">Sales tools</div>
-        <button data-view="inbox"><span class="nav-ico" data-icon="inbox"></span>Conversations <span class="count" id="cnt-inbox">0</span></button>
+        <button data-view="pricing"><span class="nav-ico" data-icon="pricing"></span>Pricing &amp; costs</button>
         <button onclick="openImportWizard()"><span class="nav-ico" data-icon="customers"></span>Import records</button>
       </div>
     </div>
@@ -2889,6 +2900,7 @@ function switchView(v){
   document.querySelectorAll('.view').forEach(s=>s.classList.remove('active'));
   document.getElementById('view-'+v).classList.add('active');
   setAccent(v);
+  if(currentBusinessId)try{sessionStorage.setItem('turnkey-view:'+currentBusinessId,v);}catch(e){}
   if(v==='calendar')renderCalendar();
   if(v==='inbox')renderInbox();
   if(v==='jobsflow')renderJobsFlow();
@@ -8787,12 +8799,14 @@ let currentBusinessProfile=null;
 let supabaseSyncTimer=null;
 
 function showAuth(){
+  document.body.removeAttribute('data-session-checking');
   document.getElementById('auth-overlay').style.display='grid';
   document.querySelector('.app').style.display='none';
   document.getElementById('auth-card-recovery').style.display='none';
   document.getElementById('auth-card-normal').style.display='';
 }
 function showApp(){
+  document.body.removeAttribute('data-session-checking');
   document.getElementById('auth-overlay').style.display='none';
   document.querySelector('.app').style.display='';
 }
@@ -8802,6 +8816,7 @@ function showApp(){
 // the app with no prompt to actually set a new password, which is a dead
 // end for the one flow the whole reset process exists for.
 function showPasswordRecovery(){
+  document.body.removeAttribute('data-session-checking');
   document.getElementById('auth-overlay').style.display='grid';
   document.querySelector('.app').style.display='none';
   document.getElementById('auth-card-normal').style.display='none';
@@ -8902,7 +8917,7 @@ async function handlePasswordRecoverySubmit(){
   const {data:{session}}=await sb.auth.getSession();
   document.getElementById('auth-recovery-btn').disabled=false;
   if(session){
-    setTimeout(()=>{ document.getElementById('auth-card-recovery').style.display='none'; handleAuthedSession(session); },700);
+    setTimeout(()=>{ document.getElementById('auth-card-recovery').style.display='none';authRecoveryActive=false;appSessionGate.start(session); },700);
   }else{
     // No session for some reason (expired recovery link, etc.) — fall
     // back to a normal sign-in screen with the new password already usable,
@@ -8935,15 +8950,21 @@ async function resolveProfile(userId){
   if(!data?.business_id||!['owner','manager','technician'].includes(data.role))throw new Error('Your account does not have a business profile yet. Ask your business owner to finish your invitation.');
   return {businessId:data.business_id,role:data.role};
 }
+function showWorkspaceLoading(){
+  showAuth();
+  document.body.setAttribute('data-session-checking','');
+  document.getElementById('workspace-loading-message').textContent='Restoring your secure session…';
+  document.getElementById('workspace-retry').hidden=true;
+}
 async function handleAuthedSession(session){
   const version=++businessSessionVersion;
   businessStateReady=false;
   clearTimeout(supabaseSyncTimer);
-  showAuth();
+  showWorkspaceLoading();
   currentUserId=session.user.id;
   let profile;
   try{profile=await resolveProfile(session.user.id);}catch(e){
-    if(version===businessSessionVersion){records=[];currentBusinessId=null;currentUserRole='technician';window.TK_OPERATIONS?.reset();setAuthMsg(e.message);}
+    if(version===businessSessionVersion){showAuth();records=[];currentBusinessId=null;currentUserRole='technician';window.TK_OPERATIONS?.reset();setAuthMsg(e.message);}
     return;
   }
   if(version!==businessSessionVersion||currentUserId!==session.user.id)return;
@@ -8957,7 +8978,8 @@ async function handleAuthedSession(session){
   loadState();
   applyRoleVisibility();
   const loaded=await loadFromSupabase();
-  if(version!==businessSessionVersion||!loaded)return;
+  if(version!==businessSessionVersion)return;
+  if(!loaded){document.getElementById('workspace-loading-message').textContent='Could not load your workspace. Check your connection and try again.';document.getElementById('workspace-retry').hidden=false;return;}
   businessStateReady=true;
   showApp();
   subscribeRealtime();
@@ -8967,14 +8989,16 @@ async function handleAuthedSession(session){
   if(version!==businessSessionVersion)return;
   seedDocTemplateFromProfile();
   preloadLogoDataUrl();
-  switchView(currentUserRole==='technician'?'operations':'dashboard');
+  let resumeView=currentUserRole==='technician'?'operations':'dashboard';
+  try{const saved=sessionStorage.getItem('turnkey-view:'+currentBusinessId);if(saved&&saved!=='detail'&&document.getElementById('view-'+saved)&&!(currentUserRole==='technician'&&TECH_HIDDEN_VIEWS.includes(saved)))resumeView=saved;}catch(e){}
+  switchView(resumeView);
   // A push notification's url (e.g. /index.html?open=pipeline — see
   // sendNotification() call sites) lands here when the app was closed and
   // the OS notification click opened it fresh — takes priority over the
   // technician default above since it's a more specific, just-expressed intent.
   try{
     const openView=new URLSearchParams(location.search).get('open');
-    if(openView&&document.getElementById('view-'+openView))switchView(openView);
+    if(openView&&document.getElementById('view-'+openView)){switchView(openView);const url=new URL(location.href);url.searchParams.delete('open');history.replaceState(null,'',url.pathname+url.search+url.hash);}
   }catch(e){}
   fetchLiveWeather();
   fetchClimateNormals();
@@ -10544,16 +10568,31 @@ function importData(input){
 
 setAccent('pipeline');
 preserveLegacyState(); // Keep unassigned device backups; never load them into a business automatically.
+async function retryWorkspaceSession(){
+  const {data,error}=await sb.auth.getSession();
+  if(error||!data?.session){showAuth();setAuthMsg('Your session expired. Please sign in again.');return;}
+  return appSessionGate.start(data.session);
+}
+let authRecoveryActive=false;
+const appSessionGate=TK_SESSION_FLOW.create({
+  isReady:userId=>currentUserId===userId&&businessStateReady&&!!currentBusinessId,
+  initialize:session=>handleAuthedSession(session),
+  beforeInitialize:userId=>{if(currentUserId&&currentUserId!==userId){++businessSessionVersion;businessStateReady=false;showWorkspaceLoading();}}
+});
 if(sb){
-  sb.auth.getSession().then(({data:{session}})=>{
-    if(session)handleAuthedSession(session);else showAuth();
-  });
+  sb.auth.getSession().then(({data:{session},error})=>{
+    if(error)throw error;
+    if(authRecoveryActive)return;
+    if(session)return appSessionGate.start(session);
+    if(!appSessionGate.isPending()&&!businessStateReady)showAuth();
+  }).catch(()=>{if(!businessStateReady){showAuth();setAuthMsg('Could not restore your session. Check your connection and try again.');}});
   sb.auth.onAuthStateChange((event,session)=>{
-    if(event==='PASSWORD_RECOVERY'){showPasswordRecovery();return;}
-    if(event==='SIGNED_IN'&&session)handleAuthedSession(session);
-    if(event==='SIGNED_OUT'){++businessSessionVersion;businessStateReady=false;clearTimeout(supabaseSyncTimer);goals=[];goalSeq=1;seq=1;followSeq=1;window.TK_SALES_PLATFORM?.reset();unsubscribeRealtime();stopLastSeenHeartbeat();records=[];currentBusinessId=null;currentUserId=null;currentUserRole='owner';staff=[];pendingInvites=[];render();renderAll();showAuth();}
+    if(event==='PASSWORD_RECOVERY'){authRecoveryActive=true;appSessionGate.reset();++businessSessionVersion;businessStateReady=false;showPasswordRecovery();return;}
+    if(!authRecoveryActive&&(event==='SIGNED_IN'||event==='INITIAL_SESSION')&&session)void appSessionGate.start(session).catch(()=>{if(!businessStateReady){showAuth();setAuthMsg('Could not load your workspace. Please try again.');}});
+    if(event==='SIGNED_OUT'){appSessionGate.reset();++businessSessionVersion;businessStateReady=false;clearTimeout(supabaseSyncTimer);goals=[];goalSeq=1;seq=1;followSeq=1;window.TK_SALES_PLATFORM?.reset();unsubscribeRealtime();stopLastSeenHeartbeat();records=[];currentBusinessId=null;currentUserId=null;currentUserRole='owner';staff=[];pendingInvites=[];render();renderAll();showAuth();}
   });
 }else{
+  showAuth();
   setAuthMsg('Turnkey isn\u2019t finished setting up yet \u2014 contact support');
 }
 
@@ -10767,21 +10806,21 @@ async function retryPendingPhotos(){
 <script src="sales-metrics.js?v=20261017a"></script>
 <script src="pipeline-model.js?v=20261018e"></script>
 <script src="lead-priority.js?v=20261017a"></script>
-<script src="sales-platform.js?v=20261018e"></script>
+<script src="sales-platform.js?v=20261019a"></script>
 <script type="module" src="measurement-import.js?v=20261017a"></script>
 <script src="quote-workspace.js?v=20261017a"></script>
-<script src="conversations.js?v=20261017a"></script>
+<script src="conversations.js?v=20261019a"></script>
 <script src="conversations-bridge.js?v=20261018e"></script>
 <script src="servicem8-import.js?v=20261017a"></script>
 <script src="marketing-analytics.js?v=20261017a"></script>
-<footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a> · <span id="tk-app-version">v20261017a</span></footer>
+<footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a> · <span id="tk-app-version">v20261019a</span></footer>
 <script src="extension-quote-link.js?v=20261018f"></script>
-<link rel="stylesheet" href="job-workspace.css?v=20261018.1">
 <script src="job-workspace.js?v=20261018"></script>
-<link rel="stylesheet" href="job-calendar.css?v=20261018c">
 <script src="job-calendar.js?v=20261018d"></script>
-<link rel="stylesheet" href="operations-workspace.css?v=20261018c">
 <script src="operations-workspace.js?v=20261018c"></script>
 <script src="operations-bridge.js?v=20261018c"></script>
+<script src="workspace-controls.js?v=20261019a"></script>
+<script src="settings-experience.js?v=20261019a"></script>
+<script src="workspace-experience.js?v=20261019a"></script>
 </body>
 </html>

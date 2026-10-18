@@ -6,7 +6,7 @@ const html=fs.readFileSync(require('node:path').join(__dirname,'../index.html'),
 function section(from,to){const start=html.indexOf(from);assert.ok(start>=0);return html.slice(start,html.indexOf(to,start));}
 function context(extra={}){
  const storage=new Map();
- return vm.createContext({currentBusinessId:'A',businessSessionVersion:1,businessStateReady:true,records:[],goals:[],seq:1,goalSeq:1,followSeq:1,docTemplate:{},CHEMICALS:{},SERVICES:{},COST_INPUTS:{},recordBusinesses:new WeakMap(),localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v)},scheduleSupabaseSync(){},render(){},renderAll(){},toast(){},console,...extra});
+ return vm.createContext({currentBusinessId:'A',businessSessionVersion:1,businessStateReady:true,records:[],goals:[],seq:1,goalSeq:1,followSeq:1,docTemplate:{},TK_COST:{chemicalConfig:()=>({}),applyChemicalConfig(){}},CHEMICALS:{},SERVICES:{},COST_INPUTS:{},recordBusinesses:new WeakMap(),localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v)},scheduleSupabaseSync(){},render(){},renderAll(){},toast(){},console,...extra});
 }
 test('legacy state is preserved but never assigned; business caches stay isolated',()=>{
  const ctx=context();
@@ -55,7 +55,7 @@ test('startup waits for database load and no longer loads an unscoped cache',()=
 });
 test('auth clears the old business before waiting and never reveals an obsolete session',async()=>{
  let finishLoad;let shown=0;let hidden=0;
- const ctx=context({records:[{name:'A customer'}],goals:[{label:'A goal'}],currentUserId:'user-A',supabaseSyncTimer:null,clearTimeout(){},showAuth(){hidden++},showApp(){shown++},resolveProfile:async()=>({businessId:'B',role:'owner'}),window:{TK_SALES_PLATFORM:{reset(){}}},loadState(){return false},applyRoleVisibility(){},loadFromSupabase:()=>new Promise(resolve=>finishLoad=resolve)});
+ const ctx=context({records:[{name:'A customer'}],goals:[{label:'A goal'}],currentUserId:'user-A',supabaseSyncTimer:null,clearTimeout(){},showWorkspaceLoading(){hidden++},showAuth(){hidden++},showApp(){shown++},resolveProfile:async()=>({businessId:'B',role:'owner'}),window:{TK_SALES_PLATFORM:{reset(){}}},loadState(){return false},applyRoleVisibility(){},loadFromSupabase:()=>new Promise(resolve=>finishLoad=resolve)});
  vm.runInContext(section('async function handleAuthedSession(session){','// Real "last active'),ctx);
  const auth=ctx.handleAuthedSession({user:{id:'user-B'}});
  await new Promise(resolve=>setImmediate(resolve));
