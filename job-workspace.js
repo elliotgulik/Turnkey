@@ -1,0 +1,575 @@
+/* Job records: worker-submitted work hours, TurnKey's own staff calendar
+   (actual logged hours — not scheduling/payroll), equipment runtime and
+   service-due tracking, and before/after job photos.
+   Mount after index.html's own application script (which defines
+   window.openDetail, currentBusinessId/currentUserId/sb/records/etc as
+   globals) — wraps openDetail to append a card, and adds a small
+   floating launcher for the staff calendar / equipment views that aren't
+   tied to a single job. No dependency on, or edits to, ServiceM8/quote/
+   sales/booking/extension files.
+
+   TK_JOB_WORK.configure({...}) lets tests substitute every external
+   dependency (request/business/user/version/records) the same way
+   marketing-analytics.js's TK_MARKETING.configure() does — see
+   tests/job-workspace-browser.cjs. */
+(function (root) {
+  'use strict';
+  let config = {};
+  const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const tenant = () => (config.getBusinessId ? config.getBusinessId() : (typeof currentBusinessId !== 'undefined' ? currentBusinessId : null));
+  const tenantUser = () => (config.getUserId ? config.getUserId() : (typeof currentUserId !== 'undefined' ? currentUserId : null));
+  const tenantVersion = () => (config.getVersion ? config.getVersion() : (typeof businessSessionVersion !== 'undefined' ? businessSessionVersion : 0));
+  const notify = (m) => { if (config.notify) return config.notify(m); if (typeof toast === 'function') toast(m); else console.log('[Job records]', m); };
+  const staleError = () => Object.assign(Error('Business session changed'), { stale: true });
+
+  /* A scope is captured once, at the moment a user action starts (a click,
+     opening a dialog, picking a file) — every async step after that
+     (await getSession(), await fetch(), await FileReader, a form submit
+     days later) re-checks it before doing anything observable, so a
+     business switch or sign-out mid-flight can't write stale data into the
+     wrong tenant's view or a different job's card. */
+  function makeScope() {
+    const biz = tenant(), user = tenantUser(), version = tenantVersion();
+    return { biz, user, version, isStale() { return tenant() !== biz || tenantUser() !== user || tenantVersion() !== version; } };
+  }
+
+  async function request(path, options = {}, scope) {
+    if (scope && scope.isStale()) throw staleError();
+    if (config.request) {
+      const result = await config.request(path, options);
+      if (scope && scope.isStale()) throw staleError();
+      return result;
+    }
+    const client = typeof sb !== 'undefined' ? sb : null;
+    const base = (typeof backendUrl === 'function' ? backendUrl() : (root.TURNKEY_CONFIG && root.TURNKEY_CONFIG.backendUrl)) || '';
+    if (!client || !base) throw Error('Connect the TurnKey backend and sign in to use job records.');
+    const { data, error } = await client.auth.getSession();
+    if (scope && scope.isStale()) throw staleError();
+    if (error || !data.session) throw Error('Please sign in again.');
+    const res = await fetch(base.replace(/\/$/, '') + '/api/job-work' + path, {
+      ...options,
+      credentials: 'omit',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + data.session.access_token },
+      signal: AbortSignal.timeout(30000)
+    });
+    if (scope && scope.isStale()) throw staleError();
+    const body = await res.json().catch(() => ({}));
+    if (scope && scope.isStale()) throw staleError();
+    if (res.status === 503) throw Object.assign(Error(body.error || 'Job records are not set up on this server yet.'), { notMigrated: true });
+    if (!res.ok) throw Error(body.error || 'Request failed');
+    return body;
+  }
+
+  const fmtDuration = (minutes) => {
+    const h = Math.floor(minutes / 60), m = minutes % 60;
+    return (h ? h + 'h ' : '') + (m || !h ? m + 'm' : '');
+  };
+  const fmtDateTime = (iso) => new Date(iso).toLocaleString('en-NZ', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+  const toIso = (dateStr, timeStr) => new Date(dateStr + 'T' + timeStr + ':00').toISOString();
+  // Local calendar date (never toISOString().slice(0,10) — that converts to
+  // UTC first, which is off by a day for any timezone ahead of UTC, e.g.
+  // NZ, for a good chunk of the day).
+  const localDateStr = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  // Local midnight on the Monday of the week containing `d` — built from
+  // the (year,month,date) constructor, which is local-time by definition,
+  // so weekStart.toISOString() always serializes the correct UTC instant
+  // for "local midnight", regardless of the viewer's offset from UTC.
+  function weekStartOf(d) {
+    const day = d.getDay();
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate() - (day === 0 ? 6 : day - 1));
+  }
+  async function stableRequestId(payload) {
+    const bytes = new TextEncoder().encode(JSON.stringify(payload));
+    const digest = await crypto.subtle.digest('SHA-256', bytes);
+    const hex = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+  }
+
+  /* ===================== staff role (cached per tenant+user+session) ===================== */
+  let roleCache = null, roleCacheKey = null, staffListCache = null;
+  async function myRole(scope) {
+    const key = scope.biz + ':' + scope.user + ':' + scope.version;
+    if (roleCache && roleCacheKey === key) return roleCache;
+    const data = await request('/staff', {}, scope);
+    if (scope.isStale()) throw staleError();
+    roleCache = data.role; roleCacheKey = key; staffListCache = data.staff;
+    return roleCache;
+  }
+  const isPrivileged = (r) => r === 'owner' || r === 'manager';
+
+  /* ===================== job records card (appended into openDetail) ===================== */
+
+  function findRecord(id) {
+    if (config.getRecords) return config.getRecords().find((x) => x.id === id) || null;
+    if (typeof records === 'undefined') return null;
+    return records.find((x) => x.id === id) || null;
+  }
+
+  async function renderJobCard(recordId) {
+    const host = document.getElementById('view-detail');
+    if (!host) return;
+    const scope = makeScope();
+
+    const old = document.getElementById('tkj-card');
+    if (old) old.remove();
+    const card = document.createElement('div');
+    card.id = 'tkj-card';
+    card.dataset.recordId = String(recordId);
+    card.className = 'panel tkj-panel';
+    const anchor = host.querySelector('.detail-grid') || host;
+    anchor.appendChild(card);
+    // Checked before every DOM write below — not just "does #tkj-card
+    // exist", but "is it literally THIS node, for THIS record" — otherwise
+    // a quick re-open of a different job (new card, same #id) could have an
+    // earlier card's async load land on top of it.
+    const isCurrentCard = () => card.isConnected && document.getElementById('tkj-card') === card && card.dataset.recordId === String(recordId);
+
+    const r = findRecord(recordId);
+    if (!r) { card.innerHTML = '<h4>Job records</h4><p class="tkj-empty">Opportunity not found.</p>'; return; }
+    if (!r.jobId) {
+      card.innerHTML = '<h4>Job records</h4><p class="tkj-empty">Save/sync this job to TurnKey\'s database before logging hours or photos against it.</p>';
+      return;
+    }
+
+    card.innerHTML = `<h4>Job records <span class="eng-badge">Hours &amp; photos</span></h4>
+      <div class="tkj-actions">
+        <button class="btn primary sm" data-tkj="log-hours">Log hours</button>
+        <button class="btn ghost sm" data-tkj="upload" data-kind="before_photo">Add before photo</button>
+        <button class="btn ghost sm" data-tkj="upload" data-kind="after_photo">Add after photo</button>
+        <button class="btn ghost sm" data-tkj="calendar">Staff calendar</button>
+        <button class="btn ghost sm" data-tkj="equipment">Equipment &amp; service</button>
+      </div>
+      <p class="tkj-message" role="status" aria-live="polite">Loading…</p>
+      <div class="tkj-photos"></div>
+      <div class="tkj-logs"></div>
+      <input type="file" accept="image/jpeg,image/png,image/webp" class="tkj-file-input" hidden>`;
+
+    card.querySelectorAll('[data-tkj]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const action = btn.dataset.tkj;
+        if (action === 'log-hours') openLogHoursDialog(r);
+        else if (action === 'calendar') openCalendar();
+        else if (action === 'equipment') openEquipment();
+        else if (action === 'upload') pickAndUploadPhoto(r, btn.dataset.kind, card);
+      });
+    });
+
+    const message = (text, error) => {
+      if (!isCurrentCard()) return;
+      const el = card.querySelector('.tkj-message');
+      if (el) { el.textContent = text; el.classList.toggle('tkj-error', !!error); }
+    };
+
+    try {
+      const [logsData, photosData] = await Promise.all([
+        request('/logs?' + new URLSearchParams({ jobId: r.jobId }), {}, scope),
+        request('/jobs/' + encodeURIComponent(r.jobId) + '/photos', {}, scope)
+      ]);
+      if (!isCurrentCard() || scope.isStale()) return;
+      renderPhotos(card, photosData.photos);
+      renderLogs(card, logsData.logs);
+      message(logsData.logs.length ? '' : 'No hours logged against this job yet.');
+    } catch (e) {
+      if (e.stale) return; // business/session changed mid-load — drop silently, no stale message on screen
+      message(e.notMigrated ? e.message : 'Could not load job records: ' + e.message, true);
+    }
+  }
+
+  function renderPhotos(card, photos) {
+    const el = card.querySelector('.tkj-photos');
+    if (!photos.length) { el.innerHTML = ''; return; }
+    const group = (kind, label) => {
+      const rows = photos.filter((p) => p.kind === kind);
+      if (!rows.length) return '';
+      return `<div class="tkj-photo-group"><div class="tkj-photo-label">${label}</div><div class="tkj-thumbs">${rows.map((p) => p.url
+        ? `<a href="${esc(p.url)}" target="_blank" rel="noopener"><img src="${esc(p.url)}" alt="${esc(label)}" loading="lazy"></a>`
+        : `<span class="tkj-thumb-broken" title="Could not load photo">!</span>`).join('')}</div></div>`;
+    };
+    el.innerHTML = group('before_photo', 'Before') + group('after_photo', 'After');
+  }
+
+  function renderLogs(card, logs) {
+    const el = card.querySelector('.tkj-logs');
+    if (!logs.length) { el.innerHTML = ''; return; }
+    el.innerHTML = '<div class="tkj-log-list">' + logs.slice(0, 8).map((l) => `<div class="tkj-log-row">
+      <span>${esc(fmtDateTime(l.start_at))} – ${esc(fmtDateTime(l.end_at))}</span>
+      <span>${esc(fmtDuration(l.minutes))}</span>
+      ${l.notes ? `<span class="tkj-log-notes">${esc(l.notes)}</span>` : ''}
+    </div>`).join('') + '</div>';
+  }
+
+  function pickAndUploadPhoto(r, kind, card) {
+    const scope = makeScope();
+    const input = card.querySelector('.tkj-file-input');
+    input.value = '';
+    input.onchange = () => {
+      const file = input.files[0];
+      if (!file) return;
+      // Captured the instant the user actually picked a file — the native
+      // file picker is a real-world async gap a tenant switch can happen
+      // across, same as the FileReader read itself below.
+      if (scope.isStale() || document.getElementById('tkj-card') !== card || !card.isConnected) return;
+      if (file.size > 8 * 1024 * 1024) { notify('Photos must be 8MB or smaller'); return; }
+      const reader = new FileReader();
+      reader.onload = async () => {
+        if (scope.isStale()) return;
+        try {
+          await request('/jobs/' + encodeURIComponent(r.jobId) + '/photos', {
+            method: 'POST',
+            body: JSON.stringify({ kind, dataUrl: reader.result, filename: file.name })
+          }, scope);
+          if (scope.isStale()) return;
+          notify('Photo saved');
+          if (document.getElementById('tkj-card') === card) renderJobCard(r.id);
+        } catch (e) {
+          if (e.stale) return;
+          notify(e.message);
+        }
+      };
+      reader.readAsDataURL(file);
+    };
+    input.click();
+  }
+
+  /* ===================== log hours dialog ===================== */
+
+  function overlay(html, scope) {
+    const host = document.createElement('div');
+    host.className = 'tkj-overlay';
+    host.innerHTML = html;
+    document.body.appendChild(host);
+    let watcher = null;
+    const onKey = (e) => { if(e.key==='Escape'){ e.preventDefault(); close(); } };
+    const close = () => { clearInterval(watcher); document.removeEventListener('keydown',onKey); host.remove(); };
+    document.addEventListener('keydown',onKey);
+    if (scope) watcher = setInterval(() => { if (scope.isStale()) close(); }, 250);
+    host.addEventListener('click', (e) => { if (e.target === host) close(); });
+
+    const firstFocusable = host.querySelector('button,input,select,textarea');
+    if (firstFocusable) firstFocusable.focus();
+    return { host, close };
+  }
+
+  async function openLogHoursDialog(r) {
+    const scope = makeScope();
+    let role, staff = [], equipment = [];
+    try {
+      role = await myRole(scope);
+      if (isPrivileged(role)) staff = staffListCache || [];
+      equipment = (await request('/equipment', {}, scope)).equipment;
+    } catch (e) { if (!e.stale) notify(e.message); return; }
+    if (scope.isStale()) return;
+
+    const today = localDateStr(new Date());
+    const { host, close } = overlay(`
+      <form class="tkj-dialog" data-tkj-form="log-hours" role="dialog" aria-modal="true" aria-labelledby="tkj-log-title">
+        <h3 id="tkj-log-title">Log hours — ${esc(r.name || 'Job')}</h3>
+        <p class="tkj-dialog-message" role="alert"></p>
+        ${staff.length ? `<label>Worker<select name="userId">${staff.map((u) => `<option value="${esc(u.id)}" ${u.id === scope.user ? 'selected' : ''}>${esc(u.email || u.id)}</option>`).join('')}</select></label>` : ''}
+        <div class="tkj-row">
+          <label>Date<input type="date" name="date" value="${today}" required></label>
+          <label>Start<input type="time" name="startTime" required></label>
+          <label>End<input type="time" name="endTime" required></label>
+        </div>
+        <label>Notes<textarea name="notes" maxlength="2000"></textarea></label>
+        <fieldset class="tkj-equipment-rows"><legend>Equipment used (optional)</legend></fieldset>
+        <button type="button" data-tkj="add-equipment">+ Add equipment used</button>
+        <div class="tkj-dialog-actions">
+          <button type="button" data-tkj="cancel">Cancel</button>
+          <button type="submit" class="btn primary">Save hours</button>
+        </div>
+      </form>`, scope);
+
+    const addEquipmentRow = () => {
+      const fieldset = host.querySelector('.tkj-equipment-rows');
+      const row = document.createElement('div');
+      row.className = 'tkj-equipment-row';
+      row.innerHTML = `<select name="assetId">${equipment.map((a) => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('')}</select>
+        <input type="number" name="hours" min="0" max="24" step="0.1" placeholder="Hours used">
+        <input type="text" name="eqNotes" placeholder="Notes" maxlength="500">
+        <button type="button" data-tkj="remove-equipment" aria-label="Remove equipment row">×</button>`;
+      fieldset.appendChild(row);
+      row.querySelector('[data-tkj="remove-equipment"]').addEventListener('click', () => row.remove());
+    };
+    host.querySelector('[data-tkj="add-equipment"]').addEventListener('click', addEquipmentRow);
+    host.querySelector('[data-tkj="cancel"]').addEventListener('click', close);
+
+    host.querySelector('form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (scope.isStale()) { close(); return; }
+      const form = e.target;
+      const message = (text) => { host.querySelector('.tkj-dialog-message').textContent = text; };
+      const startAt = toIso(form.date.value, form.startTime.value);
+      const endAt = toIso(form.date.value, form.endTime.value);
+      const durationHours = (new Date(endAt) - new Date(startAt)) / 3600000;
+      const equipmentEntries = [...host.querySelectorAll('.tkj-equipment-row')].map((row) => ({
+        assetId: row.querySelector('[name="assetId"]').value,
+        hours: Number(row.querySelector('[name="hours"]').value || 0),
+        notes: row.querySelector('[name="eqNotes"]').value || undefined
+      })).filter((eq) => eq.hours > 0);
+      if (equipmentEntries.some((eq) => eq.hours > durationHours)) { message('Equipment hours cannot exceed the logged work duration'); return; }
+
+      const payload = {
+        jobId: r.jobId,
+        userId: form.userId ? form.userId.value : scope.user,
+        startAt, endAt,
+        notes: form.notes.value || undefined,
+        equipment: equipmentEntries
+      };
+      // Deterministic, not random: an identical resubmit (double-click,
+      // network retry) reuses the exact same id so the backend's dedupe
+      // recognizes it as the same submission; any actual change to the
+      // payload naturally produces a different id instead.
+      const requestId = await stableRequestId(payload);
+      if (scope.isStale()) { close(); return; }
+      const submit = form.querySelector('button[type="submit"]');
+      submit.disabled = true;
+      try {
+        await request('/logs', { method: 'POST', body: JSON.stringify({ ...payload, requestId }) }, scope);
+        if (scope.isStale()) { close(); return; }
+        notify('Hours logged');
+        root.dispatchEvent(new Event('turnkey:equipment-changed'));
+        close();
+        renderJobCard(r.id);
+      } catch (e2) {
+        if (e2.stale) { close(); return; }
+        message(e2.message);
+        submit.disabled = false;
+      }
+    });
+  }
+
+  /* ===================== staff calendar (actual logged hours) ===================== */
+
+  async function openCalendar() {
+    const scope = makeScope();
+    let role, staff = [];
+    try { role = await myRole(scope); staff = staffListCache || []; } catch (e) { if (!e.stale) notify(e.message); return; }
+    if (scope.isStale()) return;
+    let weekStart = weekStartOf(new Date());
+    let selectedUserId = isPrivileged(role) ? '' : scope.user;
+    let loadSeq = 0;
+
+    const { host, close } = overlay(`
+      <section class="tkj-panel-modal" role="dialog" aria-modal="true" aria-labelledby="tkj-cal-title">
+        <header><div><span>JOB RECORDS</span><h2 id="tkj-cal-title">Staff calendar — actual logged hours</h2><p class="tkj-sub">This shows hours workers have logged, not a schedule or payroll total.</p></div><button data-tkj="close" aria-label="Close staff calendar">Close</button></header>
+        <div class="tkj-filters">
+          <button data-tkj="prev-week">← Previous week</button>
+          <span class="tkj-week-label"></span>
+          <button data-tkj="next-week">Next week →</button>
+          ${isPrivileged(role) ? `<select data-tkj="staff-filter"><option value="">All staff</option>${staff.map((u) => `<option value="${esc(u.id)}">${esc(u.email || u.id)}</option>`).join('')}</select>` : ''}
+        </div>
+        <p class="tkj-message" role="status" aria-live="polite">Loading…</p>
+        <div class="tkj-week-grid"></div>
+      </section>`, scope);
+
+    host.querySelector('[data-tkj="close"]').addEventListener('click', close);
+    host.querySelector('[data-tkj="prev-week"]').addEventListener('click', () => { weekStart = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() - 7); load(); });
+    host.querySelector('[data-tkj="next-week"]').addEventListener('click', () => { weekStart = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + 7); load(); });
+    const filterEl = host.querySelector('[data-tkj="staff-filter"]');
+    if (filterEl) filterEl.addEventListener('change', () => { selectedUserId = filterEl.value; load(); });
+
+    async function load() {
+      const seq = ++loadSeq;
+      const days = [...Array(7)].map((_, i) => new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + i));
+      const weekEnd = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + 7);
+      const label = host.querySelector('.tkj-week-label');
+      label.textContent = localDateStr(days[0]) + ' – ' + localDateStr(days[6]);
+      const message = (text, error) => { const el = host.querySelector('.tkj-message'); el.textContent = text; el.classList.toggle('tkj-error', !!error); };
+      message('Loading…');
+      try {
+        const params = { from: weekStart.toISOString(), to: weekEnd.toISOString() };
+        if (selectedUserId) params.userId = selectedUserId;
+        const data = await request('/logs?' + new URLSearchParams(params), {}, scope);
+        // A slower earlier request (e.g. the previous week, still in
+        // flight) landing after a newer one would silently show the wrong
+        // week — discard anything that isn't the most recent load() call.
+        if (scope.isStale() || seq !== loadSeq) return;
+        renderWeek(host, days, data.logs, staff);
+        message(data.logs.length ? '' : 'No logged hours in this week.');
+      } catch (e) {
+        if (e.stale || seq !== loadSeq) return;
+        message(e.notMigrated ? e.message : 'Could not load the calendar: ' + e.message, true);
+      }
+    }
+    load();
+  }
+
+  function renderWeek(host, days, logs, staff) {
+    const byUser = new Map();
+    for (const l of logs) {
+      if (!byUser.has(l.user_id)) byUser.set(l.user_id, []);
+      byUser.get(l.user_id).push(l);
+    }
+    const dayStrs = days.map(localDateStr);
+    const nameFor = (uid) => (staff.find((u) => u.id === uid) || {}).email || uid;
+    const grid = host.querySelector('.tkj-week-grid');
+    if (!byUser.size) { grid.innerHTML = ''; return; }
+    grid.innerHTML = [...byUser.entries()].map(([uid, entries]) => {
+      const perDay = dayStrs.map((ds) => entries.filter((l) => localDateStr(new Date(l.start_at)) === ds));
+      const totalMinutes = entries.reduce((s, l) => s + l.minutes, 0);
+      return `<div class="tkj-week-row">
+        <div class="tkj-week-worker">${esc(nameFor(uid))}<small>${esc(fmtDuration(totalMinutes))} total</small></div>
+        <div class="tkj-week-days">${perDay.map((dayLogs, i) => `<div class="tkj-week-day"><div class="tkj-week-day-label">${esc(days[i].toLocaleDateString('en-NZ', { weekday: 'short', day: 'numeric' }))}</div>${dayLogs.map((l) => `<div class="tkj-week-entry" title="${esc(l.notes || '')}">${esc(fmtDuration(l.minutes))}</div>`).join('') || '<div class="tkj-week-empty">—</div>'}</div>`).join('')}</div>
+      </div>`;
+    }).join('');
+  }
+
+  /* ===================== equipment & service ===================== */
+
+  async function openEquipment() {
+    const scope = makeScope();
+    let role;
+    try { role = await myRole(scope); } catch (e) { if (!e.stale) notify(e.message); return; }
+    if (scope.isStale()) return;
+    const { host, close } = overlay(`
+      <section class="tkj-panel-modal" role="dialog" aria-modal="true" aria-labelledby="tkj-eq-title">
+        <header><div><span>JOB RECORDS</span><h2 id="tkj-eq-title">Equipment &amp; service</h2></div><button data-tkj="close" aria-label="Close equipment">Close</button></header>
+        <p class="tkj-message" role="status" aria-live="polite">Loading…</p>
+        <div class="tkj-equipment-list"></div>
+        ${isPrivileged(role) ? `<details><summary>Add equipment</summary>
+          <form class="tkj-dialog" data-tkj-form="add-asset">
+            <label>Name<input type="text" name="name" maxlength="200" required></label>
+            <label>Service interval (hours)<input type="number" name="serviceIntervalHours" min="0.01" step="0.1" required></label>
+            <label>Baseline hours already on this asset (cannot be changed later)<input type="number" name="baselineHours" min="0" step="0.1" value="0"></label>
+            <p class="tkj-dialog-message" role="alert"></p>
+            <button type="submit" class="btn primary">Add equipment</button>
+          </form></details>` : ''}
+      </section>`, scope);
+    host.querySelector('[data-tkj="close"]').addEventListener('click', close);
+    let loadSeq = 0;
+
+    async function load() {
+      const seq = ++loadSeq;
+      const message = (text, error) => { const el = host.querySelector('.tkj-message'); el.textContent = text; el.classList.toggle('tkj-error', !!error); };
+      message('Loading…');
+      try {
+        const data = await request('/equipment', {}, scope);
+        if (scope.isStale() || seq !== loadSeq) return;
+        renderEquipmentList(host, data.equipment, role);
+        message(data.equipment.length ? '' : 'No equipment configured yet.');
+      } catch (e) {
+        if (e.stale || seq !== loadSeq) return;
+        message(e.notMigrated ? e.message : 'Could not load equipment: ' + e.message, true);
+      }
+    }
+
+    const addForm = host.querySelector('[data-tkj-form="add-asset"]');
+    if (addForm) addForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (scope.isStale()) { close(); return; }
+      const message = (text) => { addForm.querySelector('.tkj-dialog-message').textContent = text; };
+      try {
+        await request('/equipment', {
+          method: 'POST',
+          body: JSON.stringify({
+            name: addForm.name.value,
+            serviceIntervalHours: Number(addForm.serviceIntervalHours.value),
+            baselineHours: Number(addForm.baselineHours.value || 0)
+          })
+        }, scope);
+        if (scope.isStale()) { close(); return; }
+        addForm.reset();
+        notify('Equipment added');
+        root.dispatchEvent(new Event('turnkey:equipment-changed'));
+        load();
+      } catch (e2) { if (!e2.stale) message(e2.message); }
+    });
+
+    host.addEventListener('click', async (e) => {
+      const btn = e.target.closest('[data-tkj="mark-serviced"]');
+      if (!btn) return;
+      if (scope.isStale()) { close(); return; }
+      if (!confirm('Mark "' + btn.dataset.name + '" as serviced now?')) return;
+      try {
+        await request('/equipment/' + encodeURIComponent(btn.dataset.id) + '/service', { method: 'POST', body: JSON.stringify({}) }, scope);
+        if (scope.isStale()) { close(); return; }
+        notify('Marked serviced');
+        root.dispatchEvent(new Event('turnkey:equipment-changed'));
+        load();
+      } catch (e3) { if (!e3.stale) notify(e3.message); }
+    });
+
+    load();
+  }
+
+  function renderEquipmentList(host, equipment, role) {
+    const el = host.querySelector('.tkj-equipment-list');
+    el.innerHTML = equipment.map((a) => `<div class="tkj-asset ${a.due ? 'tkj-asset-due' : ''}">
+      <div class="tkj-asset-head">
+        <strong>${esc(a.name)}</strong>
+        ${a.due ? '<span class="tkj-due-badge">Service due</span>' : ''}
+        ${isPrivileged(role) ? `<button data-tkj="mark-serviced" data-id="${esc(a.id)}" data-name="${esc(a.name)}">Mark serviced</button>` : ''}
+      </div>
+      <div class="tkj-asset-stats">
+        <span>Runtime: ${a.runtimeHours.toFixed(1)}h</span>
+        <span>Since last service: ${a.sinceServiceHours.toFixed(1)}h${a.hasServiceHistory ? '' : ' (no service on record — full runtime counts)'}</span>
+        <span>${a.remainingHours > 0 ? a.remainingHours.toFixed(1) + 'h remaining' : (-a.remainingHours).toFixed(1) + 'h overdue'}</span>
+        <span>Interval: ${a.service_interval_hours}h</span>
+      </div>
+      ${a.recentServiceEvents.length ? `<details><summary>Service history (${a.recentServiceEvents.length})</summary><ul class="tkj-service-history">${a.recentServiceEvents.map((ev) => `<li>${esc(fmtDateTime(ev.serviced_at))} — meter ${Number(ev.meter_hours).toFixed(1)}h${ev.notes ? ': ' + esc(ev.notes) : ''}</li>`).join('')}</ul></details>` : '<p class="tkj-sub">No service recorded yet.</p>'}
+    </div>`).join('') || '';
+  }
+
+  /* ===================== mount ===================== */
+
+  function wrapOpenDetail() {
+    if (typeof root.openDetail !== 'function' || root.openDetail.__tkJobWork) return false;
+    const original = root.openDetail;
+    const wrapped = function (recordId) {
+      original(recordId);
+      renderJobCard(recordId);
+    };
+    wrapped.__tkJobWork = true;
+    root.openDetail = wrapped;
+    return true;
+  }
+
+  let launcherVisibilityTimer = null;
+  function mountLauncher() {
+    if (document.getElementById('tkj-launcher')) return;
+    const bar = document.createElement('div');
+    bar.id = 'tkj-launcher';
+    bar.className = 'tkj-launcher';
+    bar.innerHTML = `<button data-tkj="calendar" title="Staff calendar — actual logged hours">Staff calendar</button>
+      <button data-tkj="equipment" title="Equipment runtime and service status">Equipment &amp; service</button>`;
+    bar.querySelector('[data-tkj="calendar"]').addEventListener('click', openCalendar);
+    bar.querySelector('[data-tkj="equipment"]').addEventListener('click', openEquipment);
+    document.body.appendChild(bar);
+    let alertKey=null;
+    const updateVisibility = () => {
+      const scope=makeScope();
+      bar.style.display=scope.biz&&scope.user?'':'none';
+      const key=scope.biz+':'+scope.user+':'+scope.version;
+      if(key===alertKey)return;
+      alertKey=key;
+      const button=bar.querySelector('[data-tkj="equipment"]');
+      button.textContent='Equipment & service';
+      if(!scope.biz||!scope.user)return;
+      request('/equipment',{},scope).then(data=>{
+        if(scope.isStale())return;
+        const due=data.equipment.filter(a=>a.due).length;
+        button.textContent='Equipment & service'+(due?' · '+due+' due':'');
+        button.style.color=due?'#b91c1c':'';
+      }).catch(()=>{});
+    };
+    root.addEventListener('turnkey:equipment-changed',()=>{alertKey=null;updateVisibility();});
+    updateVisibility();
+    clearInterval(launcherVisibilityTimer);
+    launcherVisibilityTimer = setInterval(updateVisibility, 1000);
+  }
+
+  function init() {
+    if (!wrapOpenDetail()) { setTimeout(init, 200); return; }
+    mountLauncher();
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+  else init();
+
+  root.TK_JOB_WORK = {
+    configure(options) { config = { ...options }; roleCache = null; roleCacheKey = null; staffListCache = null; },
+    openCalendar,
+    openEquipment,
+    renderJobCard
+  };
+})(window);

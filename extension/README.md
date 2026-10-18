@@ -1,6 +1,12 @@
 # TurnKey — Google Earth Instant Quote (Chrome extension)
 
-## Version 0.2.1: edit the outline and the quote price
+## Version 0.2.2: customer-linked Google Earth quoting
+
+Use **Build quote** in TurnKey to open the saved customer address in Google Earth. Sign the extension into the same business first. The quote panel stays linked to that customer, and saving creates a new draft under their existing file. Existing accepted quotes are preserved. If the extension is missing, TurnKey shows an address link and installation instructions; opening Earth without the extension does not bind a quote automatically.
+
+Download the versioned ZIP from TurnKey, unzip it, then select the folder containing `manifest.json` with **Load unpacked**. Disable older copies and refresh both TurnKey and Earth after updating.
+
+### Outline editing, expenses and editable pricing
 
 - **2D:** drag a numbered corner. Click or drag a **+** handle to insert a corner between existing points.
 - **Either view:** choose **Insert point** and an edge, then click its new position; or choose a corner and **Move corner**, then click the correct position. **Delete corner** and **Undo** also work.
@@ -38,8 +44,7 @@ operator's real TurnKey login.
 The extension reads its Supabase connection details from your TurnKey site's
 own public `config.js` at connect time, parsed with a small set of
 allowlisted regexes rather than executing it — see `api/turnkey-api.js`'s
-`fetchSiteConfig()`. Nothing beyond the anon key and site URL (both already
-public, by the app's own design) is ever stored.
+`fetchSiteConfig()`. Connection settings and the signed-in Supabase session are stored in this extension's local browser storage. Never paste service-role credentials into it. Tokens and customer identifiers are not placed in Google Earth URLs.
 
 ## How measuring actually works (read this before the "known limitations")
 

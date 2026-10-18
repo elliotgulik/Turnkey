@@ -40,7 +40,11 @@ export function renderQuotePanel(container, ctx, actions) {
   const estimatedAt=new Date().toISOString();
   const priceModel=()=>instantPricing(ctx.TK_PRICING,ctx.TK_COST,computeLines(),{targetMargin:localMargin,price:customPrice,travelKm,estimatedAt});
   const extraLines = []; // ad-hoc services not tied to a drawn measurement
-  let selectedCustomer = null; // {id,name} | null = "new customer"
+  // When this tab was opened from an existing customer's "Build quote"
+  // button (see app.js's loadBoundCustomerContext()), the quote is for
+  // THAT customer and nothing else — no re-picking, no "new customer" path.
+  const customerLocked = !!ctx.boundCustomer;
+  let selectedCustomer = ctx.boundCustomer ? { id: ctx.boundCustomer.id, name: ctx.boundCustomer.name } : null; // {id,name} | null = "new customer"
   let newCustomer = { name: '', phone: '', email: '' };
 
   function computeLines() {
@@ -113,7 +117,9 @@ export function renderQuotePanel(container, ctx, actions) {
             <div class="tk-section-label">Customer</div>
             <div class="tk-customer-picker">
               ${
-                selectedCustomer
+                customerLocked
+                  ? `<div class="tk-customer-chip tk-customer-locked">${escapeHtml(selectedCustomer.name || 'Saved customer')}<span class="tk-modal-sub">Saved to this customer — opened from their TurnKey profile, so this draft goes straight back to them.</span></div>`
+                  : selectedCustomer
                   ? `<div class="tk-customer-chip">${escapeHtml(selectedCustomer.name)} <button type="button" data-clear-customer>Change</button></div>`
                   : `
                 <input type="text" class="tk-input" placeholder="Search TurnKey customers…" data-role="customer-search"/>

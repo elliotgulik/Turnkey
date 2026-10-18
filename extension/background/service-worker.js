@@ -21,6 +21,10 @@
 import { fetchSiteConfig, TurnKeyClient } from '../api/turnkey-api.js';
 import { Storage } from '../api/storage.js';
 import { dataUrlToBlob } from '../content/panel/screenshot.js';
+import { registerCustomerHandoff } from './customer-handoff.js';
+
+// Customer → Google Earth handoff (TK_CUSTOMER_LAUNCH / TK_GET_CUSTOMER_CONTEXT) — see customer-handoff.js.
+registerCustomerHandoff();
 
 // ── 1. Screenshot ────────────────────────────────────────────────────────
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -240,7 +244,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 // deliberately not a generic "fetch this URL"/"run this REST path" proxy.
 const API_ACTIONS = new Set([
   'fetchSiteConfig', 'signIn', 'refresh', 'getProfile', 'getBusiness',
-  'listCustomers', 'createCustomer', 'createQuote', 'createJob',
+  'listCustomers', 'getCustomer', 'createCustomer', 'createQuote', 'createJob',
   'logActivity', 'uploadScreenshotDataUrl'
 ]);
 

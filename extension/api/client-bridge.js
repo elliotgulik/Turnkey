@@ -23,6 +23,7 @@ export const TurnKeyApi = {
   getProfile: () => call('getProfile'),
   getBusiness: (businessId) => call('getBusiness', businessId),
   listCustomers: (businessId) => call('listCustomers', businessId),
+  getCustomer: (businessId, customerId) => call('getCustomer', businessId, customerId),
   createCustomer: (businessId, payload) => call('createCustomer', businessId, payload),
   createQuote: (businessId, payload) => call('createQuote', businessId, payload),
   createJob: (businessId, payload) => call('createJob', businessId, payload),

@@ -20,6 +20,8 @@ const assets = [
   "measure.css",
   "measurement-editor.js",
   "extension-quote-link.js",
+  "job-workspace.js",
+  "job-workspace.css",
   "privacy.html",
   "404.html",
   "config.js",

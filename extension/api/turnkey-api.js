@@ -173,6 +173,12 @@ export class TurnKeyClient {
     return this._rest('customers?business_id=eq.' + encodeURIComponent(businessId) + '&select=id,name,email,phone,address,suburb&order=created_at.desc&limit=500');
   }
 
+  /** Single customer, scoped to the business — used by the customer→Google Earth handoff (background/customer-handoff.js) to get the authoritative saved address before ever opening a tab. */
+  async getCustomer(businessId, customerId) {
+    const rows = await this._rest('customers?id=eq.' + encodeURIComponent(customerId) + '&business_id=eq.' + encodeURIComponent(businessId) + '&select=id,name,email,phone,address,suburb');
+    return rows && rows[0] ? rows[0] : null;
+  }
+
   async createCustomer(businessId, payload) {
     return this._createStable('customers', { ...payload, business_id: businessId });
   }

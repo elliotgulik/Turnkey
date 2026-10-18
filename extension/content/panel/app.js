@@ -116,7 +116,10 @@ export async function init(shadowRoot) {
     lng: null,
     measurements: [],
     screenshotDataUrl: null,
-    pendingMeasureRequests: {} // requestId -> {category, categoryLabel, kind, serviceId}
+    pendingMeasureRequests: {}, // requestId -> {category, categoryLabel, kind, serviceId}
+    boundCustomer: null, // {id,name,address} when this tab was opened from an existing customer's "Build quote" button
+    boundCustomerBusinessId: null,
+    addressLocked: false // true once boundCustomer is set — the Earth-camera address polling below must not overwrite it
   };
 
   async function hydrate() {
@@ -124,6 +127,34 @@ export async function init(shadowRoot) {
     state = { ...state, ...stored };
   }
   await hydrate();
+
+  /**
+   * Asks the background worker (customer-handoff.js) whether THIS tab was
+   * opened for a specific customer — see extension-quote-link.js's
+   * launchViaExtension()/TK_CUSTOMER_LAUNCH. The background worker already
+   * re-checks the signed-in business before answering; `businessId` is
+   * compared again here so a business switched in THIS tab's own session
+   * (not just the background worker's) never binds to a foreign customer.
+   */
+  async function loadBoundCustomerContext() {
+    const res = await new Promise((resolve) => {
+      try {
+        chrome.runtime.sendMessage({ type: 'TK_GET_CUSTOMER_CONTEXT' }, resolve);
+      } catch {
+        resolve(null);
+      }
+    });
+    if (!res || !res.ok || !res.data) return;
+    const ctx = res.data;
+    if (!state.profile || ctx.businessId !== state.profile.business_id) return;
+    state.boundCustomer = { id: ctx.customerId, name: ctx.customerName || '', address: ctx.address };
+    state.boundCustomerBusinessId = ctx.businessId;
+    if (ctx.address) {
+      state.address = ctx.address;
+      state.addressLocked = true;
+    }
+  }
+  await loadBoundCustomerContext();
 
   const toolbar = mountToolbar(root, {
     onAction: handleToolbarAction,
@@ -158,7 +189,10 @@ export async function init(shadowRoot) {
     if (!cam) return;
     state.lat = cam.lat;
     state.lng = cam.lng;
-    if (cam.addressGuess && cam.addressGuess !== state.address) {
+    // A bound-customer address (see loadBoundCustomerContext() above) is
+    // authoritative for this tab — Earth's own camera/search URL polling
+    // must never silently swap it out from under the operator.
+    if (cam.addressGuess && cam.addressGuess !== state.address && !state.addressLocked) {
       state.address = cam.addressGuess;
       toolbar.update(state);
     }
@@ -298,7 +332,7 @@ export async function init(shadowRoot) {
     state.quoteCreateProgress = null; // fresh quote-panel session — any earlier partial create attempt is unrelated
     renderQuotePanel(
       modalLayer,
-      { measurements: state.measurements, address: state.address, TK_PRICING, TK_COST, business: state.business },
+      { measurements: state.measurements, address: state.address, TK_PRICING, TK_COST, business: state.business, boundCustomer: state.boundCustomer },
       {
         onCancel: closeModal,
         onSearchCustomer: async (query) => {
@@ -388,6 +422,15 @@ export async function init(shadowRoot) {
   chrome.storage.onChanged.addListener(async (changes, area) => {
     if (area !== 'local') return;
     await hydrate();
+    // The signed-in business changed since this tab bound to a customer
+    // (operator disconnected/reconnected a different TurnKey account) —
+    // that bound context is now for a different business and must be
+    // dropped rather than carried forward.
+    if (state.boundCustomer && (!state.profile || state.boundCustomerBusinessId !== state.profile.business_id)) {
+      state.boundCustomer = null;
+      state.boundCustomerBusinessId = null;
+      state.addressLocked = false;
+    }
     toolbar.update(state);
   });
 

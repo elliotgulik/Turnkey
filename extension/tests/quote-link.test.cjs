@@ -4,7 +4,12 @@ function setup(business='A',owner='A'){
  const row={id:42,jobId:id},events={},opened=[],messages=[],urls=[];
  const ctx={URL,location:{href:'https://turnkeycrm.net/index.html?open=pipeline&job='+id},history:{replaceState:(_,__,url)=>urls.push(url)},
   currentBusinessId:business,businessSessionVersion:2,businessStateReady:true,records:[row],recordBusinesses:new WeakMap([[row,owner]]),
-  openDetail:ref=>opened.push(ref),toast:m=>messages.push(m),window:{addEventListener:(name,fn)=>events[name]=fn}};
+  openDetail:ref=>opened.push(ref),toast:m=>messages.push(m),window:{addEventListener:(name,fn)=>events[name]=fn,postMessage:()=>{}},
+  // The Google Earth customer-handoff IIFE appended later in this same file
+  // (see customer-earth-handoff-link.test.cjs for its own dedicated tests)
+  // needs document.addEventListener to exist — a no-op stub is enough here,
+  // since this test file only exercises the earlier job-import IIFE.
+  document:{addEventListener:()=>{}}};
  vm.runInNewContext(fs.readFileSync('extension-quote-link.js','utf8'),ctx);
  return {ctx,events,opened,messages,urls};
 }
