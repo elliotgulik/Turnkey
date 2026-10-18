@@ -2,7 +2,7 @@
 
 ## Version 0.2.4: automatic signed-in account connection
 
-Use **Build quote** in TurnKey to open the saved customer address in Google Earth. Sign the extension into the same business first. The quote panel stays linked to that customer, and saving creates a new draft under their existing file. Existing accepted quotes are preserved. If the extension is missing, TurnKey shows an address link and installation instructions; opening Earth without the extension does not bind a quote automatically.
+Open TurnKey, sign in, then open the extension popup and choose **Connect to signed-in TurnKey** once. It adopts the verified session and business from the active TurnKey tab; it does not ask for a CRM URL, email, or password. After that, **Build quote** opens the saved customer address in Google Earth, and saving creates a new draft under that customer's file. Existing accepted quotes are preserved.
 
 Download the versioned ZIP from TurnKey, unzip it, then select the folder containing `manifest.json` with **Load unpacked**. Disable older copies and refresh both TurnKey and Earth after updating.
 
