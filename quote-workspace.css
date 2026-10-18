@@ -25,3 +25,7 @@
 .qw-transfer[hidden]{display:none!important}.qw-transfer-status{padding:14px 18px;background:#eef6f3;border:1px solid #b7d9cf;border-radius:12px;color:#214c42;line-height:1.5}
 .qw-transfer-status[role=alert]{background:#fff3ec;border-color:#e9bd9e;color:#873b1e}
 @media(max-width:600px){.qw-overlay .modal-foot .qw-transfer{flex-basis:100%;order:3}.qw-overlay .modal-foot #qw-next{margin-left:auto}}
+.qw-import-zone{border:1px solid var(--line,#dce4e6);border-radius:12px;padding:14px 16px;margin-bottom:18px;background:#fbfdfc}
+.qw-import-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 0;border-bottom:1px solid var(--line,#dce4e6)}
+.qw-import-row span{flex:1 1 180px;font-size:13px}.qw-import-row select{padding:8px;border-radius:8px;border:1px solid #abc8bf;font:inherit}
+.qw-import-error{color:#9a381c}

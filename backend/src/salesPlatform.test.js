@@ -817,6 +817,23 @@ function quoteHandoffFixture() {
 }
 const handoffRequest=(jobId,extra={})=>({...owner,body:{jobId,...extra}});
 
+test('queueing a handoff wakes the worker immediately instead of waiting for its poll, without blocking the request',async()=>{
+  const f=quoteHandoffFixture();
+  // Mimics what the real claim_integration_task() SQL function does atomically
+  // (assign id/lease_token, flip to running) — the JS fixture's generic insert()
+  // mock does not simulate Postgres column defaults.
+  let claimed=false;f.db.rpc=async()=>{
+    if(claimed)return {data:[]};
+    claimed=true;const task=f.db.tables.integration_tasks[0];
+    Object.assign(task,{id:id(900),state:'running',lease_token:id(901),attempts:1});
+    return {data:[task]};
+  };
+  const res=await f.route('POST','/api/sales/servicem8/handoff',handoffRequest(f.jobId,{mode:'quote'}));
+  assert.equal(res.statusCode,202,'The request itself resolves without waiting for delivery');
+  for(let i=0;i<50 && f.db.tables.integration_tasks[0]?.state!=='succeeded';i++)await new Promise(r=>setTimeout(r,5));
+  assert.equal(f.db.tables.integration_tasks[0].state,'succeeded','Enqueue must wake the worker without an explicit tick() call');
+});
+
 test('explicit quote mode queues an immutable saved version, delivers Quote lines/PDF and repeats without duplicates',async()=>{
   const f=quoteHandoffFixture(),before=JSON.stringify([f.db.tables.jobs,f.db.tables.quotes]);
   let res=await f.route('POST','/api/sales/servicem8/handoff',handoffRequest(f.jobId,{mode:'quote'}));
@@ -929,6 +946,31 @@ test('legacy approved handoff requires explicit review, captures server snapshot
   await f.worker.tick();assert.equal(f.db.tables.integration_tasks[0].state,'succeeded');
   assert.equal([...f.objects.entries()].find(([p])=>p.startsWith('/job/'))[1].status,'Work Order');
   assert.equal(JSON.stringify([f.db.tables.quotes,f.db.tables.jobs,f.db.tables.quote_versions]),before);
+});
+
+test('completed job with no quote row at all requires review, creates one quote from the recorded total and never retries silently',async()=>{
+  const f=quoteHandoffFixture();
+  f.db.tables.jobs[0].status='completed';f.db.tables.jobs[0].quote_id=null;
+  f.db.tables.jobs[0].details={...f.db.tables.jobs[0].details,total:115};
+  f.db.tables.quotes=[];f.db.tables.quote_versions=[];
+  let res=await f.route('POST','/api/sales/servicem8/handoff',handoffRequest(f.jobId));
+  assert.equal(res.statusCode,409);assert.equal(res.body.code,'LEGACY_REVIEW_REQUIRED');
+  assert.equal(f.db.tables.quotes.length,0,'no quote fabricated before explicit review');
+  res=await f.route('POST','/api/sales/servicem8/handoff',handoffRequest(f.jobId,{reviewLegacy:true}));
+  assert.equal(res.statusCode,202);assert.equal(f.db.tables.quotes.length,1);
+  assert.equal(f.db.tables.quotes[0].amount,115);assert.equal(f.db.tables.quotes[0].status,'accepted');
+  assert.equal(f.db.tables.jobs[0].quote_id,f.db.tables.quotes[0].id);
+  const task=structuredClone(f.db.tables.integration_tasks[0]);
+  assert.equal(task.payload.snapshot.provenance,'legacy-reviewed');assert.equal(task.payload.snapshot.amount,115);
+});
+
+test('completed job with no quote row and no recorded total cannot be reviewed into a fabricated amount',async()=>{
+  const f=quoteHandoffFixture();
+  f.db.tables.jobs[0].status='completed';f.db.tables.jobs[0].quote_id=null;
+  f.db.tables.jobs[0].details={...f.db.tables.jobs[0].details,total:0};
+  f.db.tables.quotes=[];f.db.tables.quote_versions=[];
+  const res=await f.route('POST','/api/sales/servicem8/handoff',handoffRequest(f.jobId,{reviewLegacy:true}));
+  assert.equal(res.statusCode,409);assert.equal(f.db.tables.quotes.length,0);
 });
 
 test('legacy reviews fail closed for changed amount, quote link, customer, services, provenance, hash and approval',async()=>{

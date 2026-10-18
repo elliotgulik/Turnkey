@@ -49,10 +49,19 @@ function mapsSDKFixture() {
       return {rows:[{elements:[mode==='zero'?{status:'ZERO_RESULTS'}:mode==='malformed'?{status:'OK',distance:{value:NaN}}:{status:'OK',distance:{value:12500},duration:{value:900}}]}]};
     }
   }
+  class Geocoder {
+    async geocode(request){
+      window.qwFixture.geocodes=window.qwFixture.geocodes||[];window.qwFixture.geocodes.push(request);
+      if(window.qwFixture.geocodeMode==='denied')throw Error('REQUEST_DENIED');
+      if(window.qwFixture.geocodeMode==='zero')return {results:[]};
+      return {results:[{geometry:{location:{lat:()=>-36.8,lng:()=>174.75}}}]};
+    }
+  }
   window.google={maps:{importLibrary:async name=>{
     window.qwFixture.imports.push(name);
     if(name==='places')return {PlaceAutocompleteElement:FixturePlaces};
     if(name==='routes')return {DistanceMatrixService};
+    if(name==='geocoding')return {Geocoder};
     throw Error('Unexpected Google library: '+name);
   }}};
   const callback=new URL(document.currentScript.src).searchParams.get('callback');
@@ -80,7 +89,7 @@ function mapsSDKFixture() {
       await page.route('**/*',route=>{
         const url=route.request().url();
         if(/\/distancematrix\/json/.test(url)){restRouting.push(url);return route.abort();}
-        if(url===base+'/config.js')return route.fulfill({contentType:'text/javascript',body:'window.TURNKEY_CONFIG={supabaseUrl:"https://fixture.invalid",supabaseAnonKey:"fixture-not-a-key",mapsKey:"fixture-not-a-key"};'});
+        if(new URL(url).pathname==='/config.js')return route.fulfill({contentType:'text/javascript',body:'window.TURNKEY_CONFIG={supabaseUrl:"https://fixture.invalid",supabaseAnonKey:"fixture-not-a-key",mapsKey:"fixture-not-a-key"};'});
         if(url===base+'/api/sales/servicem8/handoff'){
           handoffs.push({body:route.request().postDataJSON(),authorization:route.request().headers().authorization});
           return route.fulfill({status:handoffMode==='error'?503:200,contentType:'application/json',body:handoffMode==='error'?'{"error":"ServiceM8 temporarily unavailable"}':'{"queued":true}'});
@@ -117,6 +126,19 @@ function mapsSDKFixture() {
       assert.deepEqual(routeRequest.origins,[{lat:-36.79,lng:174.73}]);assert.deepEqual(routeRequest.destinations,[{lat:-36.77,lng:174.74}]);assert.equal(routeRequest.travelMode,'DRIVING');
       assert.deepEqual(await page.evaluate(()=>quoteTravelInfo),{km:25,mins:30,source:'google'});
       await page.locator('#qw-next').click();assert.match(await page.locator('#qw-message').innerText(),/quantity/);
+      // Direct in-app KML/GeoJSON import (no extension) — real parser, real review mapping, real quote-area write.
+      const geojson=JSON.stringify({type:'Polygon',coordinates:[[[174.75,-36.8],[174.751,-36.8],[174.751,-36.801],[174.75,-36.801],[174.75,-36.8]]]});
+      await page.locator('#qw-import-zone button',{hasText:'Import KML / GeoJSON file'}).click();
+      await page.locator('#qw-import-zone input[type=file]').setInputFiles({name:'shape.geojson',mimeType:'application/json',buffer:Buffer.from(geojson)});
+      const importRow=page.locator('#qw-import-zone .qw-import-row');await importRow.waitFor();
+      await importRow.locator('select').first().selectOption('driveway');
+      await page.locator('#qw-import-zone button',{hasText:'Add to this quote'}).click();
+      await page.getByRole('button',{name:'Add to this quote'}).click(); // Confirm the shared review dialog.
+      await page.waitForFunction(()=>draftLines.some(l=>l.svc==='driveway'&&parseFloat(l.qty)>0));
+      const importedQty=await page.evaluate(()=>draftLines.find(l=>l.svc==='driveway').qty);
+      assert(importedQty>9000&&importedQty<10500,'Imported polygon area must be computed from real coordinates, not a placeholder');
+      // Reset the import before the manual-draw assertions below, which expect a clean slate.
+      await page.evaluate(()=>{const r=records.find(r=>r.id===701);r.areaPolys=[];renderQuoteMap(r);renderSvcLines();});
       // Draw using the real map pointer handlers, then verify map → service sync.
       await page.locator('#qe-svc-pick button').first().click();
       const stage=page.locator('#qe-stage');await stage.scrollIntoViewIfNeeded();

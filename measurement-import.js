@@ -1,7 +1,74 @@
-import {validatePayload} from './chrome-extension/measurement.js';
+import {validatePayload, parseImport, UNITS, LIMITS} from './chrome-extension/measurement.js';
 
 // Page messages are untrusted. Import only into an open, editable quote after review.
 let reviewing=false;
+
+/* ===== In-app direct KML/GeoJSON file import — the Chrome extension's own
+ * popup.js flow (choose a file, map each outline to a service/unit, confirm),
+ * reused here without any install step. Builds the exact same validated
+ * payload and dispatches it through the SAME postMessage listener below, so
+ * review/add-to-quote stays one implementation, not two. */
+function buildImportZone() {
+  const zone = document.createElement('section');
+  zone.id = 'qw-import-zone'; zone.className = 'qw-import-zone';
+  const button = document.createElement('button');
+  button.type = 'button'; button.className = 'btn ghost sm'; button.textContent = 'Import KML / GeoJSON file';
+  const input = document.createElement('input');
+  input.type = 'file'; input.accept = '.kml,.geojson,.json'; input.hidden = true;
+  const help = document.createElement('p'); help.className = 'qw-help';
+  help.textContent = 'Import outlines you already exported from Google Earth, Google My Maps or similar (.kml, .geojson or .json, up to 1 MB, 50 shapes). You map each shape to a service before anything is added — nothing is guessed automatically. Supports simple Polygon/LineString outlines only (no holes-with-overlaps, KMZ, or network links); export individual shapes if your file is rejected.';
+  button.onclick = () => input.click();
+  input.onchange = () => { handleFile(input.files[0], zone); input.value = ''; };
+  const advanced = document.createElement('p'); advanced.className = 'qw-help';
+  advanced.textContent = 'This covers most exports. A Chrome extension for bulk Google Earth workflows is also available from your TurnKey administrator — it uses the same file format and limits, just outside the browser tab.';
+  zone.append(button, input, help, advanced);
+  return zone;
+}
+async function handleFile(file, zone) {
+  zone.querySelectorAll('.qw-import-rows,.qw-import-error').forEach(n => n.remove());
+  if (!file) return;
+  try {
+    if (file.size > LIMITS.bytes) throw Error('File exceeds 1 MB.');
+    const ext = file.name.split('.').pop().toLowerCase();
+    const items = parseImport(await file.text(), ext);
+    const rows = document.createElement('div'); rows.className = 'qw-import-rows';
+    const entries = items.map((item, index) => {
+      const row = document.createElement('div'); row.className = 'qw-import-row';
+      const label = document.createElement('span'); label.textContent = (index + 1) + '. ' + item.geometry.type + ' · ' + item.siValue.toLocaleString(undefined, {maximumFractionDigits: 1}) + ' ' + (item.kind === 'area' ? 'm²' : 'm');
+      const svc = document.createElement('select');
+      svc.innerHTML = '<option value="">Choose a service…</option>' + Object.entries(SERVICES)
+        .filter(([, v]) => (v.unit === 'm²') === (item.kind === 'area'))
+        .map(([key, v]) => `<option value="${key}">${v.label}</option>`).join('');
+      const unit = document.createElement('select');
+      Object.entries(UNITS).filter(([, u]) => u.kind === item.kind).forEach(([key]) => { const o = document.createElement('option'); o.value = key; o.textContent = {m: 'metres', ft: 'feet', m2: 'square metres', ft2: 'square feet'}[key]; unit.append(o); });
+      row.append(label, svc, unit); rows.append(row);
+      return {item, svc, unit};
+    });
+    const apply = document.createElement('button'); apply.type = 'button'; apply.className = 'btn accent sm'; apply.textContent = 'Add to this quote';
+    apply.onclick = () => {
+      try {
+        const missing = entries.find(e => !e.svc.value);
+        if (missing) throw Error('Choose a service for every imported shape, or remove the file and re-import without it.');
+        const payload = validatePayload({version: 1, measurements: entries.map(({item, svc, unit}) => ({geometry: item.geometry, kind: item.kind, service: svc.value, unit: unit.value, value: item.siValue * UNITS[unit.value].factor}))});
+        window.postMessage({type: 'TK_MEASUREMENT_IMPORT', payload}, location.origin);
+        rows.remove(); apply.remove();
+      } catch (e) { toast('Import: ' + e.message); }
+    };
+    rows.append(apply); zone.append(rows);
+  } catch (e) {
+    const error = document.createElement('p'); error.className = 'qw-import-error qw-help'; error.setAttribute('role', 'alert');
+    error.textContent = 'Could not read that file: ' + e.message;
+    zone.append(error);
+  }
+}
+function injectImportZone() {
+  const target = document.getElementById('qw-step-1');
+  if (!target || target.querySelector('#qw-import-zone')) return;
+  const mapIntro = target.querySelector('.qw-section-head');
+  (mapIntro || target).after(buildImportZone());
+}
+const originalOpenForImport = window.openQuoteModal;
+window.openQuoteModal = function (id) { const result = originalOpenForImport(id); injectImportZone(); return result; };
 window.addEventListener('message',event=>{
   if(event.source!==window||event.origin!==location.origin||event.data?.type!=='TK_MEASUREMENT_IMPORT'||reviewing)return;
   try {

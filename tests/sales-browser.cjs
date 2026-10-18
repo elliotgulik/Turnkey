@@ -63,7 +63,7 @@ const { chromium } = require("playwright"),
       await page.route("**/*", (route) => {
         const url = route.request().url();
         if (url.startsWith(base)) {
-          if (url.endsWith("/config.js"))
+          if (new URL(url).pathname === "/config.js")
             return route.fulfill({
               contentType: "text/javascript",
               body: "window.TURNKEY_CONFIG={};",

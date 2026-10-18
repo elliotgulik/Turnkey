@@ -458,7 +458,7 @@
           ["Quote sent", dates(r.quoteSentAt)],
           ["Sale won", dates(M.winTime(r))],
         ],
-      )}<p>${esc((r.services || []).map((x) => SERVICES[x.svc]?.label || x.svc).join(", "))}</p>${r.quotePublicToken ? `<a class="btn ghost" target="_blank" rel="noopener" href="quote.html?t=${encodeURIComponent(r.quotePublicToken)}">Open customer quote</a>` : ""}${!M.won(r)&&r.quoteId&&r.total>0?button('Confirm quote accepted','confirm-sale',r.id):''}${button("Quote history", "versions", r.id)}${!M.won(r)&&r.total>0?button("Send quote to ServiceM8","handoff-quote",r.id):""}<h3>ServiceM8 handoff</h3><p>TurnKey owns the sale. ServiceM8 owns scheduling, delivery, invoices and payments.</p>${map ? `<a class="btn accent" target="_blank" rel="noopener" href="https://go.servicem8.com/OpenJob/${encodeURIComponent(map.external_uuid)}">Open in ServiceM8</a><p class="sale-muted">ServiceM8: ${esc(map.snapshot?.status||'Transferred')} · Last checked ${esc(dates(map.synced_at))}</p>` : button("Transfer approved sale", "handoff", r.id, M.won(r) ? "" : "disabled")}<div id="sale-versions"></div></section></div><section class="sale-panel"><h3>Sales history</h3>${
+      )}<p>${esc((r.services || []).map((x) => SERVICES[x.svc]?.label || x.svc).join(", "))}</p>${r.quotePublicToken ? `<a class="btn ghost" target="_blank" rel="noopener" href="quote.html?t=${encodeURIComponent(r.quotePublicToken)}">Open customer quote</a>` : ""}${!M.won(r)&&r.quoteId&&r.total>0?button('Confirm quote accepted','confirm-sale',r.id):''}${button("Quote history", "versions", r.id)}${!M.won(r)&&r.total>0?button("Send quote to ServiceM8","handoff-quote",r.id):""}<h3>ServiceM8 handoff</h3><p>TurnKey owns the sale. ServiceM8 owns scheduling, delivery, invoices and payments.</p>${map ? `<a class="btn accent" target="_blank" rel="noopener" href="https://go.servicem8.com/OpenJob/${encodeURIComponent(map.external_uuid)}">Open in ServiceM8</a><p class="sale-muted">ServiceM8: ${esc(map.snapshot?.status||'Transferred')} · Last checked ${esc(dates(map.synced_at))}</p>` : button("Transfer approved sale", "handoff", r.id, M.won(r) ? "" : "disabled")}${!map&&M.won(r)&&!r.quoteId&&r.jobId?`<p class="sale-muted">This sale predates quote tracking — no quote was ever saved for it. Transferring will ask you to review its recorded amount and services before creating one.</p>`:""}<div id="sale-versions"></div></section></div><section class="sale-panel"><h3>Sales history</h3>${
         (r.salesHistory || []).length
           ? (r.salesHistory || [])
               .slice()
@@ -1034,7 +1034,7 @@
       }
       if (a === "versions") {
         const host=document.getElementById("sale-versions");
-        if(!r?.quoteId){host.innerHTML=empty("No saved quote yet. Build and save a quote to start its history.");return;}
+        if(!r?.quoteId){host.innerHTML=empty(r&&M.won(r)&&r.jobId?"This sale predates quote tracking and has no saved quote. Use “Transfer approved sale” to review and record its details.":r?.total>0?"An estimate is on file but no quote has been saved yet. Open “Build / edit quote” and continue through to Preview & send to save it and start its history.":"No saved quote yet. Build and save a quote to start its history.");return;}
         host.innerHTML='<p role="status">Loading saved quotes…</p>';
         b.disabled=true;
         try {
@@ -1189,7 +1189,12 @@
         try {
           if(a==='handoff-quote'&&r.stage==='new')r.stage='quoting';
           await syncRecordToSupabase(r);
-          if(!r.jobId||!r.quoteId)throw Error("Save a complete quote before transferring it.");
+          if(!r.jobId)throw Error("Save this opportunity before transferring it.");
+          // A draft quote transfer always needs an actual saved quote object.
+          // An approved-sale transfer can still proceed without one — a
+          // pre-quote-tracking legacy sale goes through the explicit review
+          // below instead (backend never fabricates a quote without it).
+          if(a==='handoff-quote'&&!r.quoteId)throw Error("Save a complete quote before transferring it.");
           let reviewedGst;
           const transfer=reviewLegacy=>api("/api/sales/servicem8/handoff", {
             method: "POST",
@@ -1198,6 +1203,7 @@
           try {await transfer(false);}
           catch(e){
             if(e.code!=='LEGACY_REVIEW_REQUIRED')throw e;
+            if(e.missingFields?.includes('amount'))throw Error('This legacy opportunity has no recorded quote amount to transfer. Enter and save a quote total first, then retry the transfer.');
             if(e.missingFields?.includes('gstRegistered')){
               const tax=prompt('This historical quote has no saved GST treatment. Check the original quote. Type GST if the accepted total includes 15% GST, or NO GST if no GST was charged. Cancel stops the transfer.');
               if(tax===null)return;

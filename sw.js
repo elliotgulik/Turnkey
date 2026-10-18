@@ -13,7 +13,7 @@
 // ever requests it directly — see netlify.toml's explicit passthrough rule
 // for why that file has to exist as a real, non-redirected file.
 importScripts('https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.sw.js');
-const CACHE='turnkey-sales-v7'; // Quote workflow and measurement-import release: refresh cached browser assets.
+const CACHE='turnkey-sales-v8'; // 2026-10-17: cache-busted asset URLs (?v=) + draft-quote auto-handoff/import/legacy-review release.
 // Note: HTML pages are deliberately NOT precached here — they're handled by the
 // network-first navigate branch below so refreshes always pick up the newest deploy.
 const SHELL=['./config.js','./manifest.webmanifest','./icon-192.png','./icon-512.png'];

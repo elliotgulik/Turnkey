@@ -287,6 +287,26 @@
       }, {signal});
     } catch (_) { if (!signal.aborted) help.textContent = 'Places unavailable. Enter the full property address manually; the map will attempt a lookup.'; }
   }
+  // The original qeGeocodeGoogle() called the Geocoding REST endpoint with a
+  // raw browser fetch() and the key in the URL — Google's Geocoding API does
+  // not support CORS for browser callers, so a referrer-restricted key (the
+  // kind this app tells businesses to create) fails that call every time
+  // regardless of billing, silently falling back to the street map. Routing
+  // the same lookup through the already-loaded Maps JavaScript SDK's
+  // Geocoder (same mechanism Places/DistanceMatrix already use below) is the
+  // supported browser path for a referrer-restricted key.
+  let lastMapError = null;
+  qeGeocodeGoogle = function () {
+    lastMapError = null;
+    deadline(library('geocoding').then(({ Geocoder }) => new Geocoder().geocode({ address: qe.addr + ', ' + qe.geoRegion })), 8000)
+      .then(({ results }) => {
+        const loc = results?.[0]?.geometry?.location;
+        if (!loc) { qeLoadOsm(); return; }
+        qe.provider = 'google';
+        qeReloadAt(loc.lat(), loc.lng(), QE_ZOOM_DEFAULT);
+      })
+      .catch(error => { lastMapError = error?.message || String(error); qeLoadOsm(); });
+  };
   // A Places-selected property already has coordinates. Keep the proven map
   // renderer/projection and imagery fallbacks, without re-geocoding that selection.
   const originalMapLoad = qeLoadMap;
@@ -309,7 +329,7 @@
     let status = $('qw-map-status');
     if (!status) { status = document.createElement('p'); status.id = 'qw-map-status'; status.className = 'qw-map-status'; status.setAttribute('role','status'); toolbar.after(status); }
     status.textContent = qe.provider === 'google' ? (qe.mapType === 'satellite' ? 'Satellite imagery' : 'Street map') + ' · zoom ' + qe.zoom + ' · outlines stay anchored when you change view.'
-      : qe.provider === 'osm' ? 'Street map fallback. Satellite imagery is unavailable; existing measurements are retained.'
+      : qe.provider === 'osm' ? 'Street map fallback. Satellite imagery is unavailable; existing measurements are retained.' + (lastMapError ? ' (Google Maps error: ' + lastMapError + ' — check the Maps API key and billing in Google Cloud Console.)' : '')
       : qe.provider === 'grid' ? 'Drawing grid only — not a satellite image or a scaled property measurement.' : 'Locating property and loading imagery…';
     toolbar.querySelectorAll('button').forEach(button => { if (!button.getAttribute('aria-label')) button.setAttribute('aria-label',button.title || button.textContent.trim()); });
   };

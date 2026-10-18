@@ -7,12 +7,12 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
-<script src="config.js"></script>
-<script src="pricing-engine.js"></script>
-<script src="cost-engine.js"></script>
-<script src="sales-engine.js"></script>
-<script src="map-snapshot.js"></script>
-<script src="format-utils.js"></script>
+<script src="config.js?v=20261017a"></script>
+<script src="pricing-engine.js?v=20261017a"></script>
+<script src="cost-engine.js?v=20261017a"></script>
+<script src="sales-engine.js?v=20261017a"></script>
+<script src="map-snapshot.js?v=20261017a"></script>
+<script src="format-utils.js?v=20261017a"></script>
 <!-- OneSignal Web Push SDK — harmless to load even when onesignalAppId is
      unset (initOneSignal() below just never calls OneSignal.init() in that
      case), so this stays a plain unconditional tag like every other CDN
@@ -1365,10 +1365,10 @@
   .conn-note{font-size:12px;color:var(--ink-faint);text-align:center;padding:8px 4px 2px}
 
 </style>
-<link rel="stylesheet" href="sales-platform.css">
-<link rel="stylesheet" href="quote-workspace.css">
-<link rel="stylesheet" href="conversations.css">
-<link rel="stylesheet" href="marketing-analytics.css">
+<link rel="stylesheet" href="sales-platform.css?v=20261017a">
+<link rel="stylesheet" href="quote-workspace.css?v=20261017a">
+<link rel="stylesheet" href="conversations.css?v=20261017a">
+<link rel="stylesheet" href="marketing-analytics.css?v=20261017a">
 </head>
 <body>
 <div id="auth-overlay" class="auth-shell">
@@ -10309,8 +10309,17 @@ async function persistRecordToSupabase(r){
     if(error)throw error;
     if(quote.status==='accepted')acceptedDetails=await reconcileAccepted(quote);
   }
-  if(!acceptedDetails&&r.total>0&&r.stage!=='new'){
-    if(isWon(r)&&(!r.quoteId||!r.jobId))throw new Error('Save a sent quote on this opportunity before marking it won.');
+  // A record with no jobId yet has never been persisted — move() already
+  // blocks marking that won without a saved quote, so reaching this with
+  // isWon(r) true and no jobId means the transition itself is broken, not a
+  // legacy record. A record that DOES have a jobId but no quoteId is a
+  // pre-quote-tracking legacy sale: skip writing/creating a quote row for it
+  // here rather than throwing on every background autosave cycle forever —
+  // transferring it to ServiceM8 goes through the explicit legacy review
+  // flow (handoff's reviewLegacy path), never a silently fabricated quote.
+  r.legacyQuoteMissing=!!(isWon(r)&&!r.quoteId&&r.jobId);
+  if(isWon(r)&&!r.jobId)throw new Error('Save a sent quote on this opportunity before marking it won.');
+  if(!acceptedDetails&&r.total>0&&r.stage!=='new'&&!r.legacyQuoteMissing){
     const quotePayload={business_id:biz,lead_id:r.customerId,amount:r.total,status:isWon(r)?'accepted':isLost(r)?'declined':r.quoteSentAt?'sent':'draft'};
     if(r.quoteId){
       // The predicate closes the read/update race with public acceptance.
@@ -10720,17 +10729,17 @@ async function retryPendingPhotos(){
   }
 }
 </script>
-<script src="sales-metrics.js"></script>
-<script src="pipeline-model.js"></script>
-<script src="lead-priority.js"></script>
-<script src="sales-platform.js"></script>
-<script type="module" src="measurement-import.js"></script>
-<script src="quote-workspace.js"></script>
-<script src="conversations.js"></script>
-<script src="conversations-bridge.js"></script>
-<script src="servicem8-import.js"></script>
-<script src="marketing-analytics.js"></script>
-<footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a></footer>
+<script src="sales-metrics.js?v=20261017a"></script>
+<script src="pipeline-model.js?v=20261017a"></script>
+<script src="lead-priority.js?v=20261017a"></script>
+<script src="sales-platform.js?v=20261017a"></script>
+<script type="module" src="measurement-import.js?v=20261017a"></script>
+<script src="quote-workspace.js?v=20261017a"></script>
+<script src="conversations.js?v=20261017a"></script>
+<script src="conversations-bridge.js?v=20261017a"></script>
+<script src="servicem8-import.js?v=20261017a"></script>
+<script src="marketing-analytics.js?v=20261017a"></script>
+<footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a> · <span id="tk-app-version">v20261017a</span></footer>
 <script src="extension-quote-link.js?v=0.2.3"></script>
 <link rel="stylesheet" href="job-workspace.css?v=20261018.1">
 <script src="job-workspace.js?v=20261018"></script>

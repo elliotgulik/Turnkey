@@ -347,6 +347,11 @@ export function installSalesPlatform(
       .from("integration_tasks")
       .insert({ business_id: businessId, kind, dedupe_key: key, payload });
     if (error && error.code !== "23505") throw error;
+    // Wake the worker immediately rather than waiting up to 15s for its next
+    // poll — fire-and-forget so an explicit transfer/save request never
+    // blocks on (or fails because of) the delivery itself; the task row
+    // just queued is the actual durable record of "queued," not this call.
+    tick().catch((e) => console.error("[Sales handoff] immediate wake failed", e.code || e.name));
   }
   app.get(
     "/api/sales/servicem8/status",
@@ -674,7 +679,33 @@ export function installSalesPlatform(
       const health = connectionHealth(c);
       if (!health.serverConfigured || !health.credentialsReady || health.reconnectRequired)
         throw fail("Check ServiceM8 configuration and reconnect before transferring.", 409);
-      if (!job.quote_id) throw fail("Save a quote before transferring.", 409);
+      // Pre-quote-tracking legacy jobs (won/completed with no quotes row at
+      // all) can only reach "approved" mode here, and only via an explicit
+      // human review — never silently fabricated during a background sync.
+      // The review captures the job's existing recorded amount/details as a
+      // durable quote + snapshot; nothing about the historical price changes.
+      if (!job.quote_id) {
+        if (mode !== "approved" || !["won", "scheduled", "completed", "paid"].includes(job.status))
+          throw fail("Save a quote before transferring.", 409);
+        if (req.body.reviewLegacy !== true) {
+          const amount = Number(job.details?.total);
+          throw Object.assign(fail(
+            "This opportunity predates quote tracking and has no saved quote. Review its recorded amount and services, then retry with reviewLegacy: true.", 409),
+            { publicCode: "LEGACY_REVIEW_REQUIRED", missingFields: [
+              ...(Number.isFinite(amount) && amount > 0 ? [] : ["amount"]),
+              ...(typeof job.details?.gstRegistered !== "boolean" ? ["gstRegistered"] : []),
+            ] });
+        }
+        const amount = Number(job.details?.total);
+        if (!Number.isFinite(amount) || amount <= 0)
+          throw fail("This legacy opportunity has no recorded amount to transfer. Enter and save a quote total first.", 409);
+        const created = await unwrap(db.from("quotes").insert({
+          business_id: req.businessId, lead_id: job.customer_id, amount, status: "accepted",
+        }).select("id,status,amount").single());
+        await unwrap(db.from("jobs").update({ quote_id: created.id })
+          .eq("id", job.id).eq("business_id", req.businessId));
+        job.quote_id = created.id;
+      }
       const q = await unwrap(db.from("quotes").select("id,status,amount")
         .eq("business_id", req.businessId).eq("id", job.quote_id).maybeSingle());
       if (!q) throw fail("Quote not found.", 404);
