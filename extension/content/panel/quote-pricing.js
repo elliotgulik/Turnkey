@@ -10,12 +10,8 @@ export function configureCosts(engine,config={}){
     if(key==='gstRegistered'){if(typeof value==='boolean')engine.COST_INPUTS[key]=value;continue;}
     if(typeof value==='number'&&Number.isFinite(value)&&value>=0&&(key!=='targetMargin'||value<1)&&(key!=='crew'||value>0))engine.COST_INPUTS[key]=value;
   }
-  for(const [key,value] of Object.entries(config.chemicals||{}))if(Object.hasOwn(engine.CHEMICALS,key)&&Number.isFinite(value)&&value>=0)engine.CHEMICALS[key].perL=value;
+  engine.applyChemicalConfig(config);
   for(const [key,value] of Object.entries(config.overheads||{}))if(Object.hasOwn(engine.OVERHEADS,key)&&Number.isFinite(value)&&value>=0)engine.OVERHEADS[key].perMonth=value;
-  for(const [key,value] of Object.entries(config.svcCost||{}))if(Object.hasOwn(engine.SVC_COST,key)&&value){
-    if(Number.isFinite(value.m2ph)&&value.m2ph>0)engine.SVC_COST[key].m2ph=value.m2ph;
-    if(Number.isFinite(value.litrePerM2)&&value.litrePerM2>=0)engine.SVC_COST[key].litrePerM2=value.litrePerM2;
-  }
 }
 export function instantPricing(pricing,cost,lines,{targetMargin,price,travelKm,estimatedAt}={}){
   if(!lines.length)return {total:0,lines:[],breakdown:null};

@@ -30,7 +30,9 @@ window.TK_COST = (function(){
   // Chemical prices per litre (concentrate) — editable in the Pricing tab.
   const CHEMICALS = {
     sodiumHypo:{ label:'Sodium hypochlorite (12%)', perL:3.20 },
-    softWash:{ label:'Soft-wash mix (surfactant)', perL:5.80 },
+    mossMould:{ label:'Moss & mould killer', perL:null },
+    surfactant:{ label:'Surfactant', perL:null },
+    softWash:{ label:'Soft-wash mix (legacy)', perL:5.80 },
     degreaser:{ label:'Degreaser', perL:4.50 }
   };
   // Every field here is editable in the Pricing tab (setCostInput()) and
@@ -90,13 +92,55 @@ window.TK_COST = (function(){
     const c=SVC_COST[line.svc]; if(!c)return 0;
     return ((parseFloat(line.qty)||0)/c.m2ph)*60;
   }
+  // Concentrate litres per service unit, keyed by chemical ID. Missing
+  // chemicals retains legacy single-product settings; {} means no chemicals.
+  function serviceChemicals(svc){
+    const c=SVC_COST[svc]; if(!c)return {};
+    return c.chemicals!==undefined?{...c.chemicals}:
+      (CHEMICALS[c.chem]?{[c.chem]:c.litrePerM2}:{});
+  }
   function lineLitres(line){
-    const c=SVC_COST[line.svc]; if(!c)return 0;
-    return (parseFloat(line.qty)||0)*c.litrePerM2;
+    return (parseFloat(line.qty)||0)*Object.values(serviceChemicals(line.svc)).reduce((s,n)=>s+n,0);
   }
   function lineChemCost(line){
-    const c=SVC_COST[line.svc]; if(!c)return 0;
-    return lineLitres(line)*(CHEMICALS[c.chem]?CHEMICALS[c.chem].perL:0);
+    const qty=parseFloat(line.qty)||0;
+    return Object.entries(serviceChemicals(line.svc))
+      .reduce((s,[id,litres])=>s+(qty*litres)*(CHEMICALS[id].perL??0),0);
+  }
+  function unsetChemicals(lines){
+    return [...new Set((lines||[]).filter(l=>Number(l.qty)>0).flatMap(l=>
+      Object.entries(serviceChemicals(l.svc)).filter(([id,n])=>n>0&&CHEMICALS[id].perL===null).map(([id])=>id)))];
+  }
+  const chemicalDefaults=JSON.parse(JSON.stringify(CHEMICALS));
+  const serviceDefaults=JSON.parse(JSON.stringify(SVC_COST));
+  function chemicalConfig(){
+    return {
+      chemicals:Object.fromEntries(Object.entries(CHEMICALS).map(([k,v])=>[k,v.perL])),
+      svcCost:JSON.parse(JSON.stringify(SVC_COST))
+    };
+  }
+  // Reset each business before applying its saved configuration. Shared by
+  // CRM reloads and Earth so selections and unset costs have one meaning.
+  function applyChemicalConfig(config={}){
+    for(const [k,v] of Object.entries(chemicalDefaults))Object.assign(CHEMICALS[k],v);
+    for(const [k,v] of Object.entries(serviceDefaults)){
+      delete SVC_COST[k].chemicals;
+      Object.assign(SVC_COST[k],v);
+    }
+    for(const [k,v] of Object.entries(config.chemicals||{})){
+      if(Object.hasOwn(CHEMICALS,k)&&(v===null||(Number.isFinite(v)&&v>=0)))CHEMICALS[k].perL=v;
+    }
+    for(const [k,v] of Object.entries(config.svcCost||{})){
+      if(!Object.hasOwn(SVC_COST,k)||!v)continue;
+      const c=SVC_COST[k];
+      if(Number.isFinite(v.m2ph)&&v.m2ph>0)c.m2ph=v.m2ph;
+      if(v.chem==='none'||Object.hasOwn(CHEMICALS,v.chem))c.chem=v.chem;
+      if(Number.isFinite(v.litrePerM2)&&v.litrePerM2>=0)c.litrePerM2=v.litrePerM2;
+      if(v.chemicals&&typeof v.chemicals==='object'&&!Array.isArray(v.chemicals)){
+        c.chemicals=Object.fromEntries(Object.entries(v.chemicals).filter(([id,n])=>
+          Object.hasOwn(CHEMICALS,id)&&Number.isFinite(n)&&n>=0));
+      }
+    }
   }
 
   // Full cost + recommended-price breakdown for a set of quote lines.
@@ -168,6 +212,7 @@ window.TK_COST = (function(){
     });
 
     return {
+      ...(unsetChemicals(active).length?{unsetChemicals:unsetChemicals(active)}:{}),
       lines:perLine,
       labourMin:Math.round(totalLabourMin), labourHrs:totalLabourHrs,
       wageCost:totalWageCost, chem:totalChemCost, litres:totalLitres,
@@ -193,5 +238,5 @@ window.TK_COST = (function(){
   function profit(revenueIncl,cost){
     return exGst(revenueIncl)-(cost||0);
   }
-  return {targetMargin,SVC_COST,CHEMICALS,COST_INPUTS,OVERHEADS,GST_RATE,lineCleanMin,lineLitres,lineChemCost,costBreakdown,marginPct,profit,exGst,inclGst,overheadsMonthly,overheadPerJob};
+  return {serviceChemicals,unsetChemicals,chemicalConfig,applyChemicalConfig,targetMargin,SVC_COST,CHEMICALS,COST_INPUTS,OVERHEADS,GST_RATE,lineCleanMin,lineLitres,lineChemCost,costBreakdown,marginPct,profit,exGst,inclGst,overheadsMonthly,overheadPerJob};
 })();

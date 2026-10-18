@@ -4373,7 +4373,8 @@ function renderEstimate(){
       <div class="est-head"><span class="est-h">Cost &amp; time estimate</span><span class="est-time">\u23f1 ${fmtDur(e.labourMin)} on site</span></div>
       <div class="est-rows">
         <div class="est-r"><span>Wages (${COST_INPUTS.crew} crew \u00d7 ${e.labourHrs.toFixed(1)}h \u00d7 $${COST_INPUTS.wage})</span><span>${money(e.wageCost)}</span></div>
-        <div class="est-r"><span>Chemicals (${e.litres.toFixed(1)} L)</span><span>${money(e.chem)}</span></div>
+        <div class="est-r"><span>Chemicals (${e.litres.toFixed(1)} L)</span><span>${e.unsetChemicals?.length?'Incomplete':money(e.chem)}</span></div>
+        ${e.unsetChemicals?.length?`<div class="profit-warn" role="status">Supplier cost not set: ${e.unsetChemicals.map(id=>CHEMICALS[id].label).join(', ')}. Costs, recommended price and margin are incomplete. Enter actual supplier costs in Pricing.</div>`:''}
         <div class="est-r"><span>${quoteTravelInfo?`Travel — ${e.travelKm.toFixed(1)}km round trip${e.travelMins?' · ~'+fmtDur(Math.round(e.travelMins))+' drive':''}${quoteTravelInfo.source==='estimate'?' (estimated)':''}`:`Fuel (${e.travelKm}km round trip — add a home address in Settings for an accurate estimate)`}</span><span>${money(e.fuelCost)}</span></div>
         <div class="est-r"><span>Equipment wear</span><span>${money(e.equipmentCost)}</span></div>
         <div class="est-r"><span>Consumables</span><span>${money(e.consumablesCost)}</span></div>
@@ -6376,21 +6377,16 @@ function renderPricing(){
       <p style="font-size:13px;color:var(--ink-soft);margin:-4px 0 14px">Set what you pay per litre of concentrate. These feed straight into the cost &amp; recommended price on every quote.</p>
       ${Object.entries(CHEMICALS).map(([ck,cv])=>`
         <div class="rate-tier" style="padding:9px 0;border-bottom:1px solid var(--line-soft)">
-          <label>${cv.label}</label>
-          <div class="ri"><span>$</span><input type="number" step="0.10" value="${cv.perL.toFixed(2)}" onchange="setChemPrice('${ck}',this.value)"><span>/L</span></div>
+          <label>${cv.label}${cv.perL===null?' — supplier cost not set':''}</label>
+          <div class="ri"><span>$</span><input type="number" step="0.10" min="0" placeholder="Not set" value="${cv.perL===null?'':cv.perL.toFixed(2)}" onchange="setChemPrice('${ck}',this.value)"><span>/L</span></div>
         </div>`).join('')}
       <div style="margin-top:16px">
         <div style="font-size:11px;font-weight:600;letter-spacing:.02em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:9px">Usage per service</div>
         ${Object.entries(SERVICES).map(([k,v])=>{
           const sc=SVC_COST[k]; if(!sc) return '';
-          const chem=CHEMICALS[sc.chem];
-          const costPerUnit=(sc.litrePerM2*(chem?chem.perL:0));
-          // A whole-dollar money() reads as "$0" for almost every real
-          // chemical-per-unit cost (a few cents per m²) — accurate but looks
-          // like the chemical is free. This is the one figure in the app
-          // small enough that cents actually matter, so it gets 2 decimals
-          // instead of the whole-dollar rounding every job/invoice total uses.
-          return `<div class="kv"><span class="k">${v.label.split(' (')[0]}</span><span class="v">${(sc.litrePerM2*1000).toFixed(0)} mL/${v.unit} ${chem?'· '+chem.label.split(' (')[0]:''} · $${costPerUnit.toFixed(2)}/${v.unit}</span></div>`;
+          const usage=Object.entries(TK_COST.serviceChemicals(k));
+          const unset=TK_COST.unsetChemicals([{svc:k,qty:1}]);
+          return `<div class="kv"><span class="k">${v.label.split(' (')[0]}</span><span class="v">${usage.length?usage.map(([id,n])=>`${Number((n*1000).toFixed(3))} mL/${v.unit} · ${CHEMICALS[id].label}`).join(' + '):'No chemicals'} · ${unset.length?'Supplier cost not set — estimate incomplete':`$${TK_COST.lineChemCost({svc:k,qty:1}).toFixed(2)}/${v.unit}`}</span></div>`;
         }).join('')}
       </div>
     </div>
@@ -6436,7 +6432,11 @@ function renderProductivityPanel(){
     const sc=SVC_COST[k]; if(!sc)return '';
     return `<div class="rate-tier" style="padding:9px 0;border-bottom:1px solid var(--line-soft)"><label>${v.label}</label>
       <div class="ri"><input type="number" min="1" value="${sc.m2ph}" onchange="setSvcCost('${k}','m2ph',this.value)"><span>${v.unit}/hr</span>
-      ${sc.chem!=='none'?`<input type="number" step="1" min="0" value="${Math.round(sc.litrePerM2*1000)}" onchange="setSvcCost('${k}','litrePerM2',this.value/1000)" style="margin-left:10px"><span>mL/${v.unit}</span>`:''}</div></div>`;
+      </div></div>
+      ${Object.entries(CHEMICALS).map(([id,chemical])=>{
+        const usage=TK_COST.serviceChemicals(k),selected=Object.hasOwn(usage,id);
+        return `<div class="rate-tier" style="padding:9px 0;border-bottom:1px solid var(--line-soft)"><label><input type="checkbox" ${selected?'checked':''} onchange="setSvcChemical('${k}','${id}',this.checked)"> ${chemical.label}</label><div class="ri"><input type="number" min="0" step="any" ${selected?'':'disabled'} value="${selected?usage[id]:0}" onchange="setSvcChemicalUsage('${k}','${id}',this.value)"><span>L concentrate/${v.unit}${chemical.perL===null?' · supplier cost not set':''}</span></div></div>`;
+      }).join('')}`;
   }).join('');
   return `<div class="panel" style="margin-top:14px"><h4>Productivity <span class="demo-tag">per crew</span></h4>
     <p style="font-size:13px;color:var(--ink-soft);margin:-4px 0 14px">How much the crew gets through per hour and how much chemical each unit uses. If jobs keep running over the estimated time, lower the rate here.</p>
@@ -6445,6 +6445,17 @@ function renderProductivityPanel(){
 }
 function setOverhead(k,val){TK_COST.OVERHEADS[k].perMonth=parseFloat(val)||0;saveState();savePricingConfig();renderPricing();toast('Overhead updated');}
 function setSvcCost(k,field,val){const n=parseFloat(val);if(!(n>=0)||(field==='m2ph'&&!(n>0))){toast('Enter a number above zero');renderPricing();return;}SVC_COST[k][field]=n;saveState();savePricingConfig();toast(SERVICES[k].label+' productivity updated');}
+function setSvcChemical(k,id,on){
+  const usage=TK_COST.serviceChemicals(k);
+  if(on)usage[id]=0;else delete usage[id];
+  SVC_COST[k].chemicals=usage;saveState();savePricingConfig();renderPricing();
+}
+function setSvcChemicalUsage(k,id,val){
+  const n=Number(val);
+  if(val.trim()===''||!Number.isFinite(n)||n<0){toast('Enter concentrate litres of zero or more');renderPricing();return;}
+  SVC_COST[k].chemicals={...TK_COST.serviceChemicals(k),[id]:n};
+  saveState();savePricingConfig();renderPricing();
+}
 function setCostFlag(key,on){COST_INPUTS[key]=!!on;saveState();savePricingConfig();renderPricing();toast('Pricing input updated');}
 // Per-service statistics: real counts from records, not fabricated —
 // how often each service has been quoted, its win rate, and the average
@@ -6481,7 +6492,11 @@ function renderPricingStats(){
 }
 function setRate(k,val){SERVICES[k].rate=parseFloat(val)||0;saveState();savePricingConfig();toast(SERVICES[k].label+' rate updated')}
 function setRoofRate(k,rk,val){const base=parseFloat(val)/ROOF_TYPES[rk].mult;SERVICES[k].rate=base;savePricingConfig();toast(SERVICES[k].label+' rate updated')}
-function setChemPrice(ck,val){CHEMICALS[ck].perL=parseFloat(val)||0;saveState();savePricingConfig();renderPricing();toast(CHEMICALS[ck].label.split(' (')[0]+' price updated')}
+function setChemPrice(ck,val){
+  const n=val.trim()===''?null:Number(val);
+  if(n!==null&&(!Number.isFinite(n)||n<0)){toast('Enter a supplier cost of zero or more');renderPricing();return;}
+  CHEMICALS[ck].perL=n;saveState();savePricingConfig();renderPricing();toast(CHEMICALS[ck].label+' price updated');
+}
 function setCostInput(key,val){COST_INPUTS[key]=parseFloat(val)||0;saveState();savePricingConfig();toast('Pricing input updated')}
 // Every rate/chemical price/cost input is business-specific and persisted
 // server-side (not a shared hardcoded default) — this snapshots the whole
@@ -6494,20 +6509,19 @@ async function savePricingConfig(){
     chemicals:Object.fromEntries(Object.entries(CHEMICALS).map(([k,v])=>[k,v.perL])),
     costInputs:Object.assign({},COST_INPUTS),
     overheads:Object.fromEntries(Object.entries(TK_COST.OVERHEADS).map(([k,v])=>[k,v.perMonth])),
-    svcCost:Object.fromEntries(Object.entries(SVC_COST).map(([k,v])=>[k,{m2ph:v.m2ph,litrePerM2:v.litrePerM2}])),
+    svcCost:TK_COST.chemicalConfig().svcCost,
     sourceSpend:Object.assign({},salesSourceSpend)
   };
   const {error}=await sb.from('businesses').upsert({id:currentBusinessId,pricing_config:config});
   if(error)console.error('Save pricing config failed',error);
 }
 function applyPricingConfig(config){
+  TK_COST.applyChemicalConfig(config||{});
   if(!config)return;
   if(config.rates)Object.entries(config.rates).forEach(([k,v])=>{if(SERVICES[k])SERVICES[k].rate=v;});
-  if(config.chemicals)Object.entries(config.chemicals).forEach(([k,v])=>{if(CHEMICALS[k])CHEMICALS[k].perL=v;});
   if(config.costInputs)Object.assign(COST_INPUTS,config.costInputs);
   if(config.overheads)Object.entries(config.overheads).forEach(([k,v])=>{if(TK_COST.OVERHEADS[k]&&typeof v==='number')TK_COST.OVERHEADS[k].perMonth=v;});
   if(config.sourceSpend&&typeof config.sourceSpend==='object')salesSourceSpend=Object.assign({},config.sourceSpend);
-  if(config.svcCost)Object.entries(config.svcCost).forEach(([k,v])=>{if(SVC_COST[k]&&v){if(typeof v.m2ph==='number'&&v.m2ph>0)SVC_COST[k].m2ph=v.m2ph;if(typeof v.litrePerM2==='number')SVC_COST[k].litrePerM2=v.litrePerM2;}});
 }
 
 function toggleWorkflowSetting(key){workflowConfig[key]=!workflowConfig[key];openSettings();}
@@ -8749,7 +8763,7 @@ function saveState(){
     preserveLegacyState();
     localStorage.setItem(businessStoreKey(),JSON.stringify({
       v:1,businessId:currentBusinessId,records,seq,goals,goalSeq,followSeq,docTemplate,
-      chemicals:Object.fromEntries(Object.entries(CHEMICALS).map(([k,c])=>[k,c.perL])),
+      ...TK_COST.chemicalConfig(),
       rates:Object.fromEntries(Object.entries(SERVICES).map(([k,s])=>[k,s.rate])),
       costInputs:COST_INPUTS,
       savedAt:Date.now()
@@ -10492,7 +10506,7 @@ function loadState(){
     records=d.records||[];records.forEach(r=>recordBusinesses.set(r,currentBusinessId));seq=d.seq||1;
     goals=d.goals||[];goalSeq=d.goalSeq||1;followSeq=d.followSeq||1;
     if(d.docTemplate)docTemplate=d.docTemplate;
-    if(d.chemicals)Object.entries(d.chemicals).forEach(([k,v])=>{if(CHEMICALS[k])CHEMICALS[k].perL=v});
+    TK_COST.applyChemicalConfig(d);
     if(d.rates)Object.entries(d.rates).forEach(([k,v])=>{if(SERVICES[k])SERVICES[k].rate=v});
     if(d.costInputs)Object.assign(COST_INPUTS,d.costInputs);
     return true;
