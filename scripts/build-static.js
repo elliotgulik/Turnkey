@@ -27,7 +27,6 @@ const assets = [
   "operations-workspace.js",
   "operations-workspace.css",
   "operations-bridge.js",
-  "crm-theme.css",
   "privacy.html",
   "404.html",
   "config.js",

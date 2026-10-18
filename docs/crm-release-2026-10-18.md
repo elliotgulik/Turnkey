@@ -2,7 +2,7 @@
 
 ## Delivered
 
-- Shared responsive visual theme, retaining the navigation icons.
+- The visual theme was reverted at the user’s request; existing styling and navigation icons are retained. Functional and workflow changes remain.
 - Customers and independent Jobs / Invoices workspaces in primary navigation.
 - Searchable customer selection for new jobs; existing lifecycle, document and payment actions reused.
 - Native calendar appointments, busy blocks, crew booking and safe unscheduling. Imported Google events remain read-only; removing a local booking does not delete its Google event.
