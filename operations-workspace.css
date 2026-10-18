@@ -1,0 +1,17 @@
+/* Scoped standalone operations workspace; no global CRM overrides. */
+.tko-workspace{color:var(--ink,#17332c);font:14px/1.5 system-ui,sans-serif;max-width:1600px;margin:auto;padding:24px}
+.tko-workspace *{box-sizing:border-box}
+.tko-workspace button,.tko-workspace input,.tko-workspace select{font:inherit;min-height:44px;border:1px solid #b9ccc5;border-radius:8px;padding:9px 12px;background:var(--surface,#fff);color:inherit}
+.tko-workspace button{cursor:pointer}.tko-workspace button:hover{background:#eaf4f0}.tko-workspace button:disabled{opacity:.5;cursor:default}
+.tko-workspace :focus-visible{outline:3px solid #138a72;outline-offset:3px}
+.tko-workspace .tko-nav,.tko-workspace header,.tko-workspace .tko-tools,.tko-workspace .tko-new,.tko-workspace .tko-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.tko-workspace .tko-nav{margin-bottom:24px}.tko-workspace button[aria-current=page],.tko-workspace button[aria-current=page]:hover{background:#173f34;color:white;border-color:#173f34}
+.tko-workspace header{justify-content:space-between}.tko-workspace h2{font-size:28px;margin:0}.tko-workspace h3{margin-top:0}.tko-workspace header p{margin:4px 0 20px;color:#526c63}
+.tko-workspace label{display:flex;flex-direction:column;gap:5px;font-weight:600}.tko-workspace .tko-tools{margin:20px 0;align-items:end}.tko-workspace .tko-tools label:first-child{flex:1;min-width:220px}
+.tko-workspace .tko-new{align-items:end}.tko-workspace .tko-new select{max-width:100%}
+.tko-workspace table{width:100%;border-collapse:collapse;background:var(--surface,#fff)}.tko-workspace th{text-align:left;color:#526c63;font-size:12px}.tko-workspace td,.tko-workspace th{padding:14px 10px;border-bottom:1px solid #dce6e1;vertical-align:top;overflow-wrap:anywhere}
+.tko-workspace small{display:block;margin-top:4px;color:#526c63}.tko-workspace .tko-status{background:#eaf4f0;border-radius:20px;padding:4px 9px;display:inline-block}
+.tko-workspace .tko-actions{min-width:130px}.tko-workspace .tko-actions button{font-size:13px}.tko-workspace .tko-empty{padding:40px 20px;background:#f2f6f4;text-align:center;border-radius:12px}
+.tko-workspace .tko-board{display:flex;gap:16px;overflow-x:auto;align-items:flex-start;padding:4px 4px 16px}.tko-workspace .tko-column{flex:0 0 285px;background:#f2f6f4;border-radius:12px;padding:16px}.tko-workspace article{background:var(--surface,#fff);padding:16px;border:1px solid #dce6e1;border-radius:8px;margin:12px 0}.tko-workspace h4{margin:0;font-size:16px}
+.tko-workspace details{margin-top:24px;padding:16px;border:1px solid #dce6e1;border-radius:8px}.tko-workspace summary{cursor:pointer;font-weight:600;min-height:32px}.tko-workspace .tko-terms{white-space:pre-wrap}.tko-workspace .tko-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+@media(max-width:760px){.tko-workspace{padding:16px 12px}.tko-workspace .tko-tools>label{flex:1;min-width:125px}.tko-workspace .tko-tools>label:first-child{flex-basis:100%}.tko-workspace table,.tko-workspace tbody,.tko-workspace tr,.tko-workspace td{display:block}.tko-workspace thead{display:none}.tko-workspace tr{padding:12px;border:1px solid #dce6e1;border-radius:12px;margin-bottom:12px}.tko-workspace td{border:0;padding:6px 0}.tko-workspace td:before{content:attr(data-label);display:block;font-size:11px;font-weight:600;color:#526c63}.tko-workspace .tko-board{scroll-snap-type:x proximity}.tko-workspace .tko-column{flex-basis:min(285px,85vw);scroll-snap-align:start}.tko-workspace .tko-new label{min-width:0;flex:1}}
