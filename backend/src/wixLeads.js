@@ -64,7 +64,7 @@ function wixRequestedServices(body){
   for(const wrapper of new Set([data,submission,b,contact,labels])){
     for(const key of serviceKeys){
       const values=answerValues(wrapper===labels?wrapper[labelKey(key)]:wrapper[key]);
-      if(values.length)return values.map(value=>value.slice(0,500));
+      if(values.length)return values.flatMap(value=>value.split(/[,;\n]+/)).map(value=>value.trim().slice(0,500)).filter(Boolean).slice(0,100);
     }
   }
   return [];

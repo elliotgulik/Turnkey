@@ -309,3 +309,9 @@ test('Nova residential form labels preserve address, service choices and enquiry
   assert.equal(stored.customer.notes,'Please quote the outside windows');
   assert.deepEqual(stored.requestedServices,['House Clean','Window Clean (Outside Only)','Driveway Clean']);
 });
+
+test('Wix checkbox labels supplied as a joined answer become separate requested services',async()=>{
+ let saved;
+ await handleWixLead({token:'t',body:{name:'Fixture',submissions:[{label:'Select Services Required',value:'House Clean, Roof Treatment; Driveway Clean'}]},lookupSource:async()=>({business_id:'A'}),addLead:async p=>{saved=p;return{id:'saved'}}});
+ assert.deepEqual(saved.requestedServices,['House Clean','Roof Treatment','Driveway Clean']);
+});
