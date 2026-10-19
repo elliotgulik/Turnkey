@@ -296,3 +296,16 @@ test('native answer normalization still rejects invalid contact fields before st
   assert.equal(result.status, 400)
   assert.match(result.body.error, /email/i)
 })
+
+test('Nova residential form labels preserve address, service choices and enquiry text',async()=>{
+  let stored;
+  const body={data:{submissionId:'nova-form-fixture',contact:{name:{first:'Fixture',last:'Customer'}},submissions:[
+    {label:'Select an Address',value:'42 Example Road, Auckland'},
+    {label:'Select Services Required',value:['House Clean','Window Clean (Outside Only)','Driveway Clean']},
+    {label:'Leave us a message...',value:'Please quote the outside windows'}
+  ]}};
+  const result=await handleWixLead({token:'test',body,lookupSource:async()=>({business_id:'A'}),addLead:async p=>{stored=p;return{id:'saved'}}});
+  assert.equal(result.status,200);assert.equal(stored.customer.address,'42 Example Road, Auckland');
+  assert.equal(stored.customer.notes,'Please quote the outside windows');
+  assert.deepEqual(stored.requestedServices,['House Clean','Window Clean (Outside Only)','Driveway Clean']);
+});

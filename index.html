@@ -8277,6 +8277,12 @@ function openSettings(){
     ${settingsGroup('Calendar',settingsRow('Calendar sync',calConnected?'Connected — avoids double-booking':'Connect Google Calendar or iCloud',"closeModal('settings-overlay');openConnections()"))}
     ${settingsGroup('Email',settingsRow('Gmail — inbox &amp; sending',emailAccount?`Connected as ${emailAccount.email_address}`:'Not connected',"closeModal('settings-overlay');openConnections()"))}
     ${settingsGroup('Integrations',`
+    ${settingsRow('All connections','Manage every connected service',"closeModal('settings-overlay');openConnections()")}
+    ${settingsRow('Wix Forms','Website form leads, webhook setup and delivery status',"closeModal('settings-overlay');openConnections()")}
+    ${settingsRow('Meta — Facebook &amp; Instagram','Lead Ads connection, reconnect and lead delivery checks',"closeModal('settings-overlay');openConnections()")}
+    ${settingsRow('ServiceM8','Account connection, quote transfers and sync status',"closeModal('settings-overlay');openConnections()")}
+    ${settingsRow('Gmail','Inbox, email sending and attachments',"closeModal('settings-overlay');openConnections()")}
+    ${settingsRow('Google Calendar &amp; iCloud','Connect calendars, sync events and busy time',"closeModal('settings-overlay');openConnections()")}
     ${settingsRow('Card payments (Stripe)',stripeStatus.configured?'Connected — customers can pay invoices by card':'Not set up yet',"closeModal('settings-overlay');openConnections()")}
     <div class="conn-card" style="margin-top:8px">
       <div class="conn-top"><span class="conn-name">Satellite maps on quotes</span><span class="conn-badge ${mapsKey?'on':'off'}">${mapsKey?'● ON':'basic map'}</span></div>
@@ -10646,8 +10652,10 @@ if('serviceWorker' in navigator && (location.protocol==='https:'||location.hostn
 // map picker's SERVICES labels) — normalized here so both resolve to the
 // same service_id rather than needing two copies of every entry.
 const REQ_SVC_LABEL_TO_ID={
-  'exterior house wash':'housewash','house wash':'housewash',
-  'roof treatment':'roof',
+  'exterior house wash':'housewash','house wash':'housewash','house clean':'housewash',
+  'window clean (outside only)':'windows','window clean (outside + inside)':'windows','window cleaning':'windows',
+  'pavers/concrete clean':'driveway',
+  'roof treatment':'rooftreatment',
   'solar panel clean':'solar',
   'driveway clean':'driveway','driveway / patio cleaning':'driveway','driveway patio cleaning':'driveway',
   'pavers clean':'pavers',
@@ -10837,14 +10845,14 @@ async function retryPendingPhotos(){
 <script src="conversations-bridge.js?v=20261018e"></script>
 <script src="servicem8-import.js?v=20261017a"></script>
 <script src="marketing-analytics.js?v=20261017a"></script>
-<footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a> · <span id="tk-app-version">v20261019c</span></footer>
+<footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a> · <span id="tk-app-version">v20261019d</span></footer>
 <script src="extension-quote-link.js?v=20261019c"></script>
 <script src="job-workspace.js?v=20261018"></script>
 <script src="job-calendar.js?v=20261018d"></script>
 <script src="operations-workspace.js?v=20261018c"></script>
 <script src="operations-bridge.js?v=20261018c"></script>
 <script src="workspace-controls.js?v=20261019a"></script>
-<script src="settings-experience.js?v=20261019a"></script>
+<script src="settings-experience.js?v=20261019d"></script>
 <script src="workspace-experience.js?v=20261019b"></script>
 </body>
 </html>

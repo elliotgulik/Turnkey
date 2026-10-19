@@ -102,7 +102,7 @@ export async function ingestMetaWebhook({
     const first = key => fields[key]?.[0] || "";
     const name = first("full_name") || [first("first_name"), first("last_name")].filter(Boolean).join(" ") || "Meta lead";
     const contactFields = new Set(["full_name", "first_name", "last_name", "email", "phone_number", "phone", "street_address", "city"]);
-    const serviceFields = new Set(["requestedservices", "requestedservice", "services", "service", "servicesrequired", "servicerequired"]);
+    const serviceFields = new Set(["requestedservices", "requestedservice", "services", "service", "servicesrequired", "servicerequired", "selectservicesrequired", "whatservicesdoyourequire", "whatservicesdoyouneed"]);
     const requestedServices = [];
     let notes = "";
     for (const [key, values] of Object.entries(fields)) {

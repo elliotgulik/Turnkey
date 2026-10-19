@@ -26,7 +26,7 @@ const object = value => value && typeof value==='object' && !Array.isArray(value
 const text = value => typeof value==='string' ? value.trim() : '';
 const labelKey = value => text(value).toLowerCase().replace(/[^a-z0-9]/g,'');
 const answerValues = value => (Array.isArray(value) ? value.slice(0,100) : [value]).map(text).filter(Boolean);
-const serviceKeys = ['requestedServices','requested_services','requestedService','requested_service','services','service','Services required','Service required'];
+const serviceKeys = ['requestedServices','requested_services','requestedService','requested_service','services','service','Services required','Service required','Select Services Required','What services do you require?','What services do you need?'];
 function wixEvent(body) {
   const b=object(body),data=Object.keys(object(b.data)).length?object(b.data):b;
   const submission=object(data.submission),contact=object(data.contact||submission.contact),labels=Object.create(null);
@@ -52,8 +52,8 @@ export function mapWixPayload(body) {
     name,
     email:field('email','emailAddress','email_address','Email address')||undefined,
     phone:field('phone','phoneNumber','phone_number','Phone number','Mobile number')||undefined,
-    address:field('address','streetAddress','street_address','Property address')||text(address.formatted)||text(address.formattedAddress)||[text(address.addressLine1),text(address.city),text(address.subdivision),text(address.postalCode)].filter(Boolean).join(', ')||undefined,
-    notes:field('message','notes','comment','comments','Enquiry message','How can we help','Tell us about your job')||undefined,
+    address:field('address','streetAddress','street_address','Property address','Select an Address')||text(address.formatted)||text(address.formattedAddress)||[text(address.addressLine1),text(address.city),text(address.subdivision),text(address.postalCode)].filter(Boolean).join(', ')||undefined,
+    notes:field('message','notes','comment','comments','Enquiry message','How can we help','Tell us about your job','Leave us a message...')||undefined,
     source:'Wix'
   };
 }
