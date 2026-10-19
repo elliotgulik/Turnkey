@@ -24,10 +24,13 @@ export function fetchMetaObject(
 
 // Edges must be separate path segments; encoding "page/subscribed_apps" as
 // one object ID produces an invalid Graph request.
-export function fetchMetaEdge(objectId, edge, { token, fields, method = 'GET', body, env = process.env, fetchImpl = fetch }) {
-  if (edge !== 'subscribed_apps') throw new Error('Unsupported Meta edge');
+export function fetchMetaEdge(objectId, edge, { token, fields, method = 'GET', body, after, limit, env = process.env, fetchImpl = fetch }) {
+  if (!['subscribed_apps', 'leadgen_forms', 'leads'].includes(edge)) throw new Error('Unsupported Meta edge');
   const url = metaGraphUrl(objectId, fields, env);
   url.pathname += '/' + edge;
+  if (edge !== 'subscribed_apps' && method !== 'GET') throw new Error('Lead edges are read-only');
+  if (after) url.searchParams.set('after', after);
+  if (limit) url.searchParams.set('limit', String(limit));
   return fetchImpl(url, {
     method,
     headers: { Authorization: `Bearer ${token}`, Accept: 'application/json', ...(body ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {}) },

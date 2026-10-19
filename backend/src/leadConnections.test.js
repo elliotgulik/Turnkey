@@ -349,3 +349,16 @@ test('a missing Meta mapping and unreadable credential cannot trigger external r
   const res = await setup(fakeDb([meta]), options)('POST /api/connections/meta/check');
   assert.equal(res.statusCode, 503); assert.doesNotMatch(JSON.stringify(res.body), /private key details/);
 });
+
+test('Meta historical import ignores client tenant/Page IDs and stores only mapped business leads', async () => {
+  const db = fakeDb([meta, {...meta,id:'other',business_id:'B',external_id:'222'}]);
+  const saved=[];
+  const route=setup(db,{addLead:async p=>{saved.push(p);return {id:'saved'};},fetchEdge:async(id,edge)=>({ok:true,json:async()=>({data:edge==='leadgen_forms'?(assert.equal(id,'111'),[{id:'333'}]):[{id:'444',form_id:'333',created_time:'2026-09-01',field_data:[{name:'full_name',values:['Fixture']}]}]})})});
+  const res=await route('POST /api/connections/meta/import',{body:{businessId:'B',pageId:'222',formId:'999'}});
+  assert.equal(res.statusCode,200);assert.equal(res.body.imported,1);assert.equal(saved[0].business_id,'A');assert.equal(saved[0].historicalImport,true);assert.equal(saved[0].external_id,'444');assert.equal(JSON.stringify(res.body).includes('private-page-token'),false);
+});
+test('Meta import storage failure is retryable and never claims completion', async () => {
+  const db=fakeDb([meta]);
+  const route=setup(db,{addLead:async()=>{throw Error('secret db failure');},fetchEdge:async(id,edge)=>({ok:true,json:async()=>({data:edge==='leadgen_forms'?[{id:'333'}]:[{id:'444',field_data:[]}]})})});
+  const res=await route('POST /api/connections/meta/import');assert.equal(res.statusCode,503);assert.equal(res.body.done,undefined);assert.doesNotMatch(res.body.error,/secret/);
+});

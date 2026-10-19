@@ -516,7 +516,7 @@ app.post('/api/leads/meta', async (req, res) => {
         return { business_id: data.business_id, pageToken: decryptToken(data.token_enc) }
       },
       fetchLead: async (leadgenId, pageToken) => {
-        const graphRes = await fetchMetaObject(leadgenId, { token: pageToken, fields: 'id,field_data' })
+        const graphRes = await fetchMetaObject(leadgenId, { token: pageToken, fields: 'id,created_time,field_data,form_id,ad_id' })
         if (!graphRes.ok) throw Object.assign(new Error('Meta Graph API lead fetch failed'), { status: 503 })
         return graphRes.json()
       },
@@ -539,7 +539,7 @@ app.post('/api/leads/meta', async (req, res) => {
 /* ----- Connections management (requireBusiness-gated — these configure
    the mapping above, distinct from the public webhook routes themselves) ----- */
 
-installLeadConnections(app,{db:authClient,requireBusiness})
+installLeadConnections(app,{db:authClient,requireBusiness,addLead:payload=>storage.addLead(payload)})
 
 
 /* =====================================================================

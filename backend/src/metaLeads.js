@@ -66,6 +66,51 @@ function metaFields(leadData) {
   return fields;
 }
 
+export function normalizeMetaLead(leadData, businessId, { historical = false, now = Date.now } = {}) {
+  const leadgenId = String(leadData?.id || "");
+  if (!leadgenId.trim() || leadgenId.length > 200 || !businessId) throw new MetaWebhookError("Meta returned an invalid lead identity");
+  const fields = metaFields(leadData);
+  const first = key => fields[key]?.[0] || "";
+  const name = first("full_name") || [first("first_name"), first("last_name")].filter(Boolean).join(" ") || "Meta lead";
+  const contactFields = new Set(["full_name", "first_name", "last_name", "email", "phone_number", "phone", "street_address", "city"]);
+  const serviceFields = new Set(["requestedservices", "requestedservice", "services", "service", "servicesrequired", "servicerequired", "selectservicesrequired", "whatservicesdoyourequire", "whatservicesdoyouneed"]);
+  const requestedServices = [];
+  let notes = "";
+  for (const [key, values] of Object.entries(fields)) {
+    if (contactFields.has(key)) continue;
+    // Bound both the intermediate answer text and the stored notes, while
+    // allowing a long custom answer to use the validator's full notes budget.
+    if (notes.length < 4000) {
+      const line = `${key}: ${values.map(value => value.slice(0, 4000)).join(", ")}`;
+      notes += `${notes ? "\n" : ""}${line}`.slice(0, 4000 - notes.length);
+    }
+    if (serviceFields.has(key.replace(/[^a-z0-9]/g, "")))
+      requestedServices.push(...values.slice(0, 100 - requestedServices.length).map(value => value.slice(0, 500)));
+  }
+  const payload = {
+    business_id: businessId,
+    customer: {
+      name,
+      email: first("email") || undefined,
+      phone: first("phone_number") || first("phone") || undefined,
+      address: [first("street_address"), first("city")].filter(Boolean).join(", ") || undefined,
+      ...(notes ? { notes } : {}),
+      source: "Meta",
+    },
+    source: "meta",
+    requestedServices,
+    ...(historical ? { historicalImport: true } : {}),
+    ...(leadData.form_id ? { form_id: String(leadData.form_id) } : {}),
+    ...(leadData.ad_id ? { ad_id: String(leadData.ad_id) } : {}),
+    external_id: leadgenId,
+    submittedAt: Number.isFinite(Date.parse(leadData.created_time)) ? Date.parse(leadData.created_time) : now(),
+  };
+  const validationError = validateLeadPayload(payload);
+  if (validationError)
+    throw new MetaWebhookError("Meta returned lead fields that failed validation");
+  return payload;
+}
+
 /**
  * Verify and durably ingest each Meta lead before the HTTP route acknowledges
  * the webhook. If any fetch or insert fails, the caller returns a retryable
@@ -98,42 +143,7 @@ export async function ingestMetaWebhook({
     const leadData = await dependencyCall(fetchLead, leadgenId, source.pageToken);
     if (!leadData || String(leadData.id) !== leadgenId)
       throw new MetaWebhookError("Meta returned a mismatched lead record");
-    const fields = metaFields(leadData);
-    const first = key => fields[key]?.[0] || "";
-    const name = first("full_name") || [first("first_name"), first("last_name")].filter(Boolean).join(" ") || "Meta lead";
-    const contactFields = new Set(["full_name", "first_name", "last_name", "email", "phone_number", "phone", "street_address", "city"]);
-    const serviceFields = new Set(["requestedservices", "requestedservice", "services", "service", "servicesrequired", "servicerequired", "selectservicesrequired", "whatservicesdoyourequire", "whatservicesdoyouneed"]);
-    const requestedServices = [];
-    let notes = "";
-    for (const [key, values] of Object.entries(fields)) {
-      if (contactFields.has(key)) continue;
-      // Bound both the intermediate answer text and the stored notes, while
-      // allowing a long custom answer to use the validator's full notes budget.
-      if (notes.length < 4000) {
-        const line = `${key}: ${values.map(value => value.slice(0, 4000)).join(", ")}`;
-        notes += `${notes ? "\n" : ""}${line}`.slice(0, 4000 - notes.length);
-      }
-      if (serviceFields.has(key.replace(/[^a-z0-9]/g, "")))
-        requestedServices.push(...values.slice(0, 100 - requestedServices.length).map(value => value.slice(0, 500)));
-    }
-    const payload = {
-      business_id: source.business_id,
-      customer: {
-        name,
-        email: first("email") || undefined,
-        phone: first("phone_number") || first("phone") || undefined,
-        address: [first("street_address"), first("city")].filter(Boolean).join(", ") || undefined,
-        ...(notes ? { notes } : {}),
-        source: "Meta",
-      },
-      source: "meta",
-      requestedServices,
-      external_id: leadgenId,
-      submittedAt: now(),
-    };
-    const validationError = validateLeadPayload(payload);
-    if (validationError)
-      throw new MetaWebhookError("Meta returned lead fields that failed validation");
+    const payload = normalizeMetaLead(leadData, source.business_id, { now });
     const saved = await dependencyCall(addLead, payload);
     if (!saved || !saved.id)
       throw new MetaWebhookError("Lead storage did not confirm a saved lead");
@@ -141,7 +151,7 @@ export async function ingestMetaWebhook({
     else {
       accepted++;
       try {
-        Promise.resolve(onNewLead({ businessId: source.business_id, name })).catch(() => {});
+        Promise.resolve(onNewLead({ businessId: source.business_id, name: payload.customer.name })).catch(() => {});
       } catch {
         // A notification outage must not turn a successfully stored lead into
         // a failed webhook response and needless duplicate delivery.

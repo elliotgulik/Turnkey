@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { importMetaBatch } from "./metaImport.js";
 import express from "express";
 import { generateWixToken, hashWixToken } from "./wixLeads.js";
 import { encryptToken, decryptToken } from "./crypto.js";
@@ -73,6 +74,7 @@ export function installLeadConnections(
     encrypt = encryptToken,
     generateToken = generateWixToken,
     env = process.env,
+    addLead,
   },
 ) {
   const wrap = (message, fn) => async (req, res) => {
@@ -129,6 +131,25 @@ export function installLeadConnections(
       }),
     );
   }
+  const importing = new Set();
+  app.post('/api/connections/meta/import', requireBusiness, async (req, res) => {
+    const businessId = req.businessId;
+    if (importing.has(businessId)) return res.status(409).json({ error: 'An import batch is already running. Retry shortly.' });
+    importing.add(businessId);
+    try {
+      if (!addLead) return res.status(503).json({ error: 'Lead import storage is unavailable.' });
+      const row = await unwrap(db.from('lead_sources').select('external_id,token_enc')
+        .eq('business_id', businessId).eq('provider', 'meta').maybeSingle());
+      if (!row) return res.status(404).json({ error: 'Connect a Meta Page first.' });
+      const result = await importMetaBatch({ businessId, pageId: row.external_id, token: decrypt(row.token_enc),
+        cursor: req.body?.cursor, encrypt, decrypt, fetchEdge, addLead });
+      res.json(result);
+    } catch (error) {
+      console.error('[Meta import]', error.code || error.name);
+      res.status([400, 403].includes(error.status) ? error.status : 503).json({
+        error: error.publicMessage || 'Import stopped before completion. Saved leads are safe; retry to continue without duplicates.' });
+    } finally { importing.delete(businessId); }
+  });
   for (const action of ["check", "repair"]) {
     app.post(`/api/connections/meta/${action}`, requireBusiness,
       wrap("Meta could not be reached. Retry the connection check.", async (req, res) => {
