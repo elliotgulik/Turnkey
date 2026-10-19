@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { metaGraphUrl, fetchMetaObject } from "./metaGraph.js";
+import { metaGraphUrl, fetchMetaObject, fetchMetaEdge } from "./metaGraph.js";
 test("both Meta read shapes use current default and explicit requested fields", () => {
   for (const [id, fields] of [
     ["123", "id,field_data"],
@@ -48,4 +48,13 @@ test("tokens are in authorization headers, with bounded fetch and redirects disa
   assert.equal(request.options.redirect, "error");
   assert.ok(request.options.signal instanceof AbortSignal);
   assert.equal(request.url.href.includes("fake-test-token"), false);
+});
+
+test('Page subscription uses a real Graph edge and an encoded POST body, keeping token out of URL', async () => {
+  let request;
+  await fetchMetaEdge('123', 'subscribed_apps', { token: 'test-secret', method: 'POST', body: { subscribed_fields: 'leadgen' }, env: {}, fetchImpl: async (url, options) => {request={url,options};return {ok:true};} });
+  assert.equal(request.url.pathname, '/v26.0/123/subscribed_apps');
+  assert.equal(request.options.body, 'subscribed_fields=leadgen');
+  assert.equal(request.options.headers.Authorization,'Bearer test-secret');
+  assert.equal(request.url.href.includes('test-secret'),false);
 });

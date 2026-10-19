@@ -216,3 +216,83 @@ test('a storage adapter that does not confirm a lead id cannot cause a false 200
  const result=await handleWixLead({token:'t',body:{name:'Jane'},lookupSource:async()=>({business_id:'business-a'}),addLead:async()=>({})});
  assert.equal(result.status,500);assert.equal(result.body.ok,undefined);
 });
+
+test('requestedServices arrays survive common Wix wrappers without coercing structured values', async () => {
+  const fields = { name: 'Jane', requestedServices: [' House wash ', 'Driveway wash', {}, ['Roof wash'], true, null, ''] }
+  const bodies = [fields, { data: fields }, { contact: fields }, { submission: fields },
+    { data: { contact: fields } }, { data: { submission: fields } }]
+  for (const body of bodies) {
+    const result = await handleWixLead({ token: 't', body, lookupSource: async () => ({ business_id: 'A' }),
+      addLead: async payload => {
+        assert.deepEqual(payload.requestedServices, ['House wash', 'Driveway wash'])
+        return { id: 'saved' }
+      } })
+    assert.equal(result.status, 200)
+  }
+})
+
+test('plural native service labels retain separate answers in flat and nested submissions', async () => {
+  for (const label of ['Requested services', 'Requested service', 'Services', 'Services required']) {
+    const fields = { submissions: [
+      { label: 'Full name', value: ' Jane Doe ' },
+      { label: 'Email address', value: 'jane@example.test' },
+      { label, value: [' House wash ', 'Roof wash', { value: 'invalid' }] },
+    ] }
+    for (const body of [fields, { data: fields }, { submission: fields }, { data: { submission: fields } }]) {
+      const result = await handleWixLead({ token: 't', body, lookupSource: async () => ({ business_id: 'A' }),
+        addLead: async payload => {
+          assert.equal(payload.customer.name, 'Jane Doe')
+          assert.equal(payload.customer.email, 'jane@example.test')
+          assert.deepEqual(payload.requestedServices, ['House wash', 'Roof wash'])
+          return { id: 'saved' }
+        } })
+      assert.equal(result.status, 200)
+    }
+  }
+})
+
+test('Wix service answers and native field scans stay bounded', async () => {
+  for (const body of [
+    { name: 'Jane', requestedServices: Array(110).fill('x'.repeat(600)) },
+    { name: 'Jane', submissions: [{ label: 'Requested services', value: Array(110).fill('x'.repeat(600)) }] },
+  ]) {
+    const result = await handleWixLead({ token: 't', body, lookupSource: async () => ({ business_id: 'A' }),
+      addLead: async payload => {
+        assert.equal(payload.requestedServices.length, 100)
+        assert.ok(payload.requestedServices.every(value => value.length === 500))
+        return { id: 'saved' }
+      } })
+    assert.equal(result.status, 200)
+  }
+  assert.equal(mapWixPayload({ submissions: [
+    ...Array(100).fill({ label: 'Unknown', value: 'ignored' }), { label: 'Name', value: 'Too late' },
+  ] }).name, '')
+})
+
+test('repeat contacts do not become duplicate submissions, but explicit submission IDs survive wrappers', async () => {
+  const wrap = fields => [fields, { data: fields }, { submission: fields }, { data: { submission: fields } }]
+  for (const contact of [{ id: 'same-contact' }, { _id: 'same-contact' }]) {
+    for (const body of wrap({ name: 'Jane', contact })) {
+      const externalIds = []
+      const invoke = () => handleWixLead({ token: 't', body, lookupSource: async () => ({ business_id: 'A' }),
+        addLead: async payload => { externalIds.push(payload.external_id); return { id: `saved-${externalIds.length}` } } })
+      const first = await invoke(), second = await invoke()
+      assert.deepEqual([first.status, second.status], [200, 200])
+      assert.deepEqual(externalIds, [null, null])
+      assert.notEqual(first.body.id, second.body.id)
+    }
+  }
+  for (const body of wrap({ name: 'Jane', contact: { id: 'contact', submissionId: 'sub-explicit' } })) {
+    const result = await handleWixLead({ token: 't', body, lookupSource: async () => ({ business_id: 'A' }),
+      addLead: async payload => { assert.equal(payload.external_id, 'sub-explicit'); return { id: 'saved' } } })
+    assert.equal(result.status, 200)
+  }
+})
+
+test('native answer normalization still rejects invalid contact fields before storage', async () => {
+  const result = await handleWixLead({ token: 't', body: { data: { submission: { submissions: [
+    { label: 'Name', value: 'Jane' }, { label: 'Email', value: ['bad-email'] },
+  ] } } }, lookupSource: async () => ({ business_id: 'A' }), addLead: async () => assert.fail('invalid lead persisted') })
+  assert.equal(result.status, 400)
+  assert.match(result.body.error, /email/i)
+})

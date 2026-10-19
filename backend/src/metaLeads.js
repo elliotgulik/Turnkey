@@ -38,14 +38,13 @@ function getMetaEvents(body) {
       if (change?.field !== "leadgen") continue;
       const value = change.value;
       const leadgenId = value?.leadgen_id;
-      const pageId = value?.page_id;
+      const pageId = value?.page_id ?? entry.id;
+      const validId = id => (typeof id === "string" || (typeof id === "number" && Number.isFinite(id))) && String(id).trim() && String(id).length <= 200;
       if (
-        (typeof leadgenId !== "string" && typeof leadgenId !== "number") ||
-        (typeof pageId !== "string" && typeof pageId !== "number") ||
-        !String(leadgenId).trim() || !String(pageId).trim() ||
-        String(leadgenId).length > 200 || String(pageId).length > 200
+        !validId(leadgenId) || !validId(pageId) ||
+        (entry.id != null && (!validId(entry.id) || String(entry.id).trim() !== String(pageId).trim()))
       ) throw new MetaWebhookError("Invalid Meta lead event", 400);
-      events.push({ leadgenId: String(leadgenId), pageId: String(pageId) });
+      events.push({ leadgenId: String(leadgenId).trim(), pageId: String(pageId).trim() });
     }
   }
   if (events.length > 100)
@@ -57,10 +56,12 @@ function metaFields(leadData) {
   if (!Array.isArray(leadData?.field_data))
     throw new MetaWebhookError("Meta returned an invalid lead record");
   const fields = Object.create(null);
-  for (const item of leadData.field_data) {
-    if (typeof item?.name !== "string" || !Array.isArray(item.values)) continue;
-    const value = item.values.find(v => typeof v === "string" || typeof v === "number");
-    if (value !== undefined) fields[item.name.toLowerCase()] = String(value).trim();
+  for (const item of leadData.field_data.slice(0, 100)) {
+    if (typeof item?.name !== "string" || !item.name.trim() || item.name.length > 120 || !Array.isArray(item.values)) continue;
+    const values = item.values.slice(0, 100)
+      .filter(v => typeof v === "string" || (typeof v === "number" && Number.isFinite(v)))
+      .map(v => String(v).trim()).filter(Boolean);
+    if (values.length) fields[item.name.trim().toLowerCase()] = values;
   }
   return fields;
 }
@@ -98,17 +99,35 @@ export async function ingestMetaWebhook({
     if (!leadData || String(leadData.id) !== leadgenId)
       throw new MetaWebhookError("Meta returned a mismatched lead record");
     const fields = metaFields(leadData);
-    const name = fields.full_name || [fields.first_name, fields.last_name].filter(Boolean).join(" ") || "Meta lead";
+    const first = key => fields[key]?.[0] || "";
+    const name = first("full_name") || [first("first_name"), first("last_name")].filter(Boolean).join(" ") || "Meta lead";
+    const contactFields = new Set(["full_name", "first_name", "last_name", "email", "phone_number", "phone", "street_address", "city"]);
+    const serviceFields = new Set(["requestedservices", "requestedservice", "services", "service", "servicesrequired", "servicerequired"]);
+    const requestedServices = [];
+    let notes = "";
+    for (const [key, values] of Object.entries(fields)) {
+      if (contactFields.has(key)) continue;
+      // Bound both the intermediate answer text and the stored notes, while
+      // allowing a long custom answer to use the validator's full notes budget.
+      if (notes.length < 4000) {
+        const line = `${key}: ${values.map(value => value.slice(0, 4000)).join(", ")}`;
+        notes += `${notes ? "\n" : ""}${line}`.slice(0, 4000 - notes.length);
+      }
+      if (serviceFields.has(key.replace(/[^a-z0-9]/g, "")))
+        requestedServices.push(...values.slice(0, 100 - requestedServices.length).map(value => value.slice(0, 500)));
+    }
     const payload = {
       business_id: source.business_id,
       customer: {
         name,
-        email: fields.email || undefined,
-        phone: fields.phone_number || fields.phone || undefined,
-        address: [fields.street_address, fields.city].filter(Boolean).join(", ") || undefined,
+        email: first("email") || undefined,
+        phone: first("phone_number") || first("phone") || undefined,
+        address: [first("street_address"), first("city")].filter(Boolean).join(", ") || undefined,
+        ...(notes ? { notes } : {}),
         source: "Meta",
       },
       source: "meta",
+      requestedServices,
       external_id: leadgenId,
       submittedAt: now(),
     };

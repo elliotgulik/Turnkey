@@ -1,8 +1,9 @@
 import crypto from "node:crypto";
 import express from "express";
 import { generateWixToken, hashWixToken } from "./wixLeads.js";
-import { encryptToken } from "./crypto.js";
-import { fetchMetaObject } from "./metaGraph.js";
+import { encryptToken, decryptToken } from "./crypto.js";
+import { fetchMetaObject, fetchMetaEdge } from "./metaGraph.js";
+import { checkMetaConnection } from "./metaConnectionHealth.js";
 
 export function installWixBodyParser(app) {
   app.use("/api/leads/wix", express.json({ limit: "64kb" }));
@@ -67,6 +68,8 @@ export function installLeadConnections(
     db,
     requireBusiness,
     fetchPage = fetchMetaObject,
+    fetchEdge = fetchMetaEdge,
+    decrypt = decryptToken,
     encrypt = encryptToken,
     generateToken = generateWixToken,
     env = process.env,
@@ -104,11 +107,11 @@ export function installLeadConnections(
             .eq("provider", provider)
             .maybeSingle(),
         );
-        res.json(
-          provider === "meta"
-            ? { connected: !!row, pageId: row?.external_id || null }
-            : { connected: !!row },
-        );
+        const latest = await unwrap(db.from("leads").select("created_at,acked_at")
+          .eq("business_id", req.businessId).eq("source", provider)
+          .order("created_at", { ascending: false }).limit(1).maybeSingle());
+        res.json({ connected: !!row, ...(provider === "meta" ? { pageId: row?.external_id || null } : {}),
+          lastReceivedAt: latest?.created_at || null, lastIngested: !!latest?.acked_at });
       }),
     );
     app.post(
@@ -125,6 +128,20 @@ export function installLeadConnections(
         res.json({ ok: true });
       }),
     );
+  }
+  for (const action of ["check", "repair"]) {
+    app.post(`/api/connections/meta/${action}`, requireBusiness,
+      wrap("Meta could not be reached. Retry the connection check.", async (req, res) => {
+        const row = await unwrap(db.from("lead_sources").select("external_id,token_enc")
+          .eq("business_id", req.businessId).eq("provider", "meta").maybeSingle());
+        if (!row) return res.status(404).json({ error: "Connect a Meta Page first." });
+        let token;
+        try { token = decrypt(row.token_enc); } catch {
+          return res.status(503).json({ error: "The saved Meta credential cannot be read. Reconnect the Page; if this continues, check the backend encryption key." });
+        }
+        const health = await checkMetaConnection({ pageId: row.external_id, token, repair: action === "repair", appId: env.META_APP_ID, fetchPage, fetchEdge });
+        res.json({ connected: true, pageId: row.external_id, ...health });
+      }));
   }
   app.post(
     "/api/connections/wix/connect",
@@ -146,7 +163,7 @@ export function installLeadConnections(
     wrap("Could not connect this Meta Page.", async (req, res) => {
       const pageId = String(req.body?.pageId || "").trim(),
         pageToken = String(req.body?.pageToken || "").trim();
-      if (!pageId || !pageToken)
+      if (!/^\d{1,40}$/.test(pageId) || !pageToken || pageToken.length > 10000)
         return res
           .status(400)
           .json({ error: "Page ID and Page Access Token are required" });
@@ -178,7 +195,10 @@ export function installLeadConnections(
         external_id: pageId,
         token_enc: encrypt(pageToken),
       });
-      res.json({ ok: true, pageName: page.name || null });
+      let health;
+      try { health = await checkMetaConnection({ pageId, token: pageToken, repair: true, fetchPage, fetchEdge }); }
+      catch { health = { health: 'error', message: 'Page saved, but lead delivery could not be enabled. Retry Enable lead delivery.' }; }
+      res.json({ ok: true, connected: true, pageId, pageName: page.name || null, ...health });
     }),
   );
 }

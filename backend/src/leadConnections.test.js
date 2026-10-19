@@ -17,6 +17,8 @@ function fakeDb(initial = []) {
         select() {
           return q;
         },
+        order() { return q; },
+        limit() { return q; },
         eq(k, v) {
           filters.push((r) => r[k] === v);
           return q;
@@ -91,6 +93,8 @@ function setup(db, options = {}) {
     db,
     requireBusiness: (req, res, next) => next(),
     encrypt: (t) => "encrypted-" + t,
+    decrypt: () => "private-page-token",
+    fetchEdge: async () => ({ ok: true, json: async () => ({ success: true }) }),
     generateToken: () => "new-test-token",
     fetchPage: async (id) => ({
       ok: true,
@@ -316,4 +320,32 @@ test("Wix parser rejects oversized JSON before the general 25mb parser", async (
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
+});
+
+test('Meta repair uses only authenticated business mapping and never returns credentials', async () => {
+  const db = fakeDb([meta, { ...meta, id: 'B', business_id: 'B', external_id: '222' }]);
+  let observed;
+  const route = setup(db, { fetchEdge: async (id, edge, opts) => {
+    observed = { id, edge, opts }; return { ok: true, json: async () => ({ success: true }) };
+  }});
+  const res = await route('POST /api/connections/meta/repair', { body: { pageId: '222' } });
+  assert.equal(res.body.health, 'ready'); assert.equal(observed.id, '111');
+  assert.equal(observed.opts.method, 'POST'); assert.equal(observed.opts.body.subscribed_fields, 'leadgen');
+  assert.doesNotMatch(JSON.stringify(res.body), /private-page-token|working-encrypted-token/);
+  assert.equal(db.writes.length, 0);
+});
+test('expired Meta credential reports reconnect even when a connection row exists', async () => {
+  const res = await setup(fakeDb([meta]), { fetchPage: async () => ({ ok: false, json: async () => ({ error: { code: 190, message: 'private details' } }) }) })('POST /api/connections/meta/check');
+  assert.equal(res.body.health, 'reconnect'); assert.equal(res.body.connected, true);
+  assert.doesNotMatch(JSON.stringify(res.body), /private details/);
+});
+test('another subscribed app cannot produce a healthy status for this app', async () => {
+  const res = await setup(fakeDb([meta]), { env: { META_APP_ID: 'ours' }, fetchEdge: async () => ({ ok: true, json: async () => ({ data: [{ id: 'other', subscribed_fields: ['leadgen'] }] }) }) })('POST /api/connections/meta/check');
+  assert.equal(res.body.health, 'subscription_missing'); assert.equal(res.body.subscribed, false);
+});
+test('a missing Meta mapping and unreadable credential cannot trigger external requests', async () => {
+  const options = { fetchPage: async () => assert.fail('must not request Meta'), decrypt: () => { throw new Error('private key details'); } };
+  assert.equal((await setup(fakeDb(), options)('POST /api/connections/meta/repair')).statusCode, 404);
+  const res = await setup(fakeDb([meta]), options)('POST /api/connections/meta/check');
+  assert.equal(res.statusCode, 503); assert.doesNotMatch(JSON.stringify(res.body), /private key details/);
 });

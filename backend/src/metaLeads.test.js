@@ -126,3 +126,112 @@ test("invalid Meta contact fields are rejected before storage", async () => {
   }), error => error.status === 503);
   assert.equal(inserted, false);
 });
+
+test("Meta retains every selected service and custom answer in notes without object coercion", async () => {
+  let saved;
+  await ingestMetaWebhook({
+    ...signed(payloadFor("lead-answers")), appSecret: SECRET,
+    lookupPage: async () => ({ business_id: "business-a", pageToken: "token" }),
+    fetchLead: async id => ({ ...lead(id), field_data: [...lead(id).field_data,
+      { name: "Requested services", values: [" House wash ", "Driveway wash", {}, ["Roof wash"], null, true, ""] },
+      { name: "best_time_to_call", values: ["Morning", "Afternoon"] },
+      { name: "number_of_storeys", values: [2] },
+      { name: "job_details", values: ["Details ".repeat(100)] },
+      { name: "malformed", values: "ignored" },
+      { name: "structured", values: [{ value: "ignored" }] },
+    ] }),
+    addLead: async payload => { saved = payload; return { id: "saved" }; },
+  });
+  assert.deepEqual(saved.requestedServices, ["House wash", "Driveway wash"]);
+  assert.equal(saved.customer.notes, "requested services: House wash, Driveway wash\nbest_time_to_call: Morning, Afternoon\nnumber_of_storeys: 2\njob_details: " + "Details ".repeat(100).trim());
+  assert.equal(saved.customer.email, "jane@example.com");
+});
+
+test("Meta service aliases preserve array answers", async () => {
+  for (const name of ["requestedServices", "requested_services", "requested_service", "services", "service", "Services required"]) {
+    await ingestMetaWebhook({
+      ...signed(payloadFor("lead-services")), appSecret: SECRET,
+      lookupPage: async () => ({ business_id: "business-a", pageToken: "token" }),
+      fetchLead: async id => ({ id, field_data: [{ name, values: ["House wash", "Roof wash"] }] }),
+      addLead: async payload => {
+        assert.deepEqual(payload.requestedServices, ["House wash", "Roof wash"]);
+        assert.equal(payload.customer.notes, `${name.toLowerCase()}: House wash, Roof wash`);
+        return { id: "saved" };
+      },
+    });
+  }
+});
+
+test("Meta bounds custom fields, selected services and notes while retaining validator checks", async () => {
+  let saved;
+  await ingestMetaWebhook({
+    ...signed(payloadFor("lead-bounded")), appSecret: SECRET,
+    lookupPage: async () => ({ business_id: "business-a", pageToken: "token" }),
+    fetchLead: async id => ({ id, field_data: [
+      { name: "services", values: Array(110).fill("x".repeat(600)) },
+      ...Array(99).fill({ name: "custom", values: ["Answer"] }),
+      { name: "email", values: ["beyond-field-limit"] },
+    ] }),
+    addLead: async payload => { saved = payload; return { id: "saved" }; },
+  });
+  assert.equal(saved.requestedServices.length, 100);
+  assert.ok(saved.requestedServices.every(value => value.length === 500));
+  assert.equal(saved.customer.notes.length, 4000);
+  assert.equal(saved.customer.email, undefined);
+
+  for (const field of [{ name: "full_name", values: ["x".repeat(201)] }, { name: "phone", values: ["1".repeat(41)] }]) {
+    await assert.rejects(() => ingestMetaWebhook({
+      ...signed(payloadFor("lead-invalid")), appSecret: SECRET,
+      lookupPage: async () => ({ business_id: "business-a", pageToken: "token" }),
+      fetchLead: async id => ({ id, field_data: [field, { name: "services", values: ["House wash", "Roof wash"] }] }),
+      addLead: async () => assert.fail("invalid contact persisted"),
+    }), error => error.status === 503 && /validation/.test(error.message));
+  }
+});
+
+test("signed Meta entry.id supplies a missing page_id using only that page's tenant mapping", async () => {
+  for (const pageId of ["page-a", 123]) {
+    const body = { object: "page", business_id: "spoofed", entry: [{ id: pageId,
+      changes: [{ field: "leadgen", value: { leadgen_id: "lead-entry", business_id: "spoofed" } }],
+    }] };
+    const result = await ingestMetaWebhook({
+      ...signed(body), appSecret: SECRET,
+      lookupPage: async id => { assert.equal(id, String(pageId)); return { business_id: `owner-${id}`, pageToken: "token" }; },
+      fetchLead: async id => lead(id),
+      addLead: async payload => {
+        assert.equal(payload.business_id, `owner-${pageId}`);
+        assert.equal(payload.external_id, "lead-entry");
+        return { id: "saved", deduped: true };
+      },
+    });
+    assert.deepEqual(result, { received: true, accepted: 0, duplicates: 1 });
+  }
+});
+
+test("contradictory or invalid Meta page identities fail before any lookup, fetch or save", async () => {
+  for (const [entryId, pageId] of [
+    ["page-a", "page-b"], ["page-a", ""], ["page-a", {}], [{}, "page-a"],
+    ["x".repeat(201), undefined], [undefined, undefined],
+  ]) {
+    const body = payloadFor("lead-1");
+    body.entry[0].id = entryId;
+    body.entry[0].changes[0].value.page_id = pageId;
+    await assert.rejects(() => ingestMetaWebhook({
+      ...signed(body), appSecret: SECRET,
+      lookupPage: async () => assert.fail("invalid page looked up"),
+      fetchLead: async () => assert.fail("invalid page fetched"),
+      addLead: async () => assert.fail("invalid page persisted"),
+    }), error => error.status === 400);
+  }
+});
+
+test("matching entry and event page IDs accept numeric IDs normalized to strings", async () => {
+  const body = payloadFor("lead-1");
+  body.entry[0].id = 123;
+  body.entry[0].changes[0].value.page_id = "123";
+  await ingestMetaWebhook({
+    ...signed(body), appSecret: SECRET,
+    lookupPage: async id => { assert.equal(id, "123"); return { business_id: "business-a", pageToken: "token" }; },
+    fetchLead: async id => lead(id), addLead: async () => ({ id: "saved" }),
+  });
+});

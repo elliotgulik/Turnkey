@@ -25,18 +25,26 @@ export function hashWixToken(token) {
 const object = value => value && typeof value==='object' && !Array.isArray(value) ? value : {};
 const text = value => typeof value==='string' ? value.trim() : '';
 const labelKey = value => text(value).toLowerCase().replace(/[^a-z0-9]/g,'');
+const answerValues = value => (Array.isArray(value) ? value.slice(0,100) : [value]).map(text).filter(Boolean);
+const serviceKeys = ['requestedServices','requested_services','requestedService','requested_service','services','service','Services required','Service required'];
 function wixEvent(body) {
   const b=object(body),data=Object.keys(object(b.data)).length?object(b.data):b;
   const submission=object(data.submission),contact=object(data.contact||submission.contact),labels=Object.create(null);
   // Native Old Wix Forms sends an array of label/value answers, not name/email keys.
-  for(const field of (Array.isArray(data.submissions)?data.submissions:[]).slice(0,100)){
-    const key=labelKey(field?.label);if(key&&key.length<=120&&!labels[key])labels[key]=text(field.value)|| (Array.isArray(field.value)?field.value.filter(v=>typeof v==='string').join(', '):'');
+  let remaining=100;
+  for(const wrapper of new Set([data,submission,b])){
+    for(const field of (Array.isArray(wrapper.submissions)?wrapper.submissions:[]).slice(0,remaining)){
+      remaining--;
+      const key=labelKey(field?.label);
+      const values=answerValues(field?.value);
+      if(key&&key.length<=120&&!labels[key]&&values.length)labels[key]=values;
+    }
   }
   return {b,data,submission,contact,labels};
 }
 export function mapWixPayload(body) {
   const {b,data,submission,contact,labels}=wixEvent(body);
-  const field=(...names)=>{for(const n of names){const v=text(data[n])||text(submission[n])||text(b[n])||text(contact[n])||text(labels[labelKey(n)]);if(v)return v;}return '';};
+  const field=(...names)=>{for(const n of names){const v=text(data[n])||text(submission[n])||text(b[n])||text(contact[n])||labels[labelKey(n)]?.join(', ');if(v)return v;}return '';};
   const person=object(contact.name),address=object(contact.address);
   const name=field('name','fullName','full_name','contactName','Full name','Your name')||
     [field('firstName','first_name','First name')||text(person.first),field('lastName','last_name','Last name')||text(person.last)].filter(Boolean).join(' ');
@@ -49,7 +57,18 @@ export function mapWixPayload(body) {
     source:'Wix'
   };
 }
-function wixRequestedServices(body){const {data,submission,labels}=wixEvent(body);const value=text(data.service)||text(data.requestedService)||text(submission.service)||text(submission.requestedService)||text(labels.requestedservice)||text(labels.services)||text(labels.service);return value?[value.slice(0,500)]:[];}
+function wixRequestedServices(body){
+  const {b,data,submission,contact,labels}=wixEvent(body);
+  // Prefer explicit fields, then native form labels. Keep each selected
+  // service separate; arbitrary objects are never coerced into strings.
+  for(const wrapper of new Set([data,submission,b,contact,labels])){
+    for(const key of serviceKeys){
+      const values=answerValues(wrapper===labels?wrapper[labelKey(key)]:wrapper[key]);
+      if(values.length)return values.map(value=>value.slice(0,500));
+    }
+  }
+  return [];
+}
 
 // A Wix submission's own id, if present, used as the idempotency key so a
 // redelivered webhook event (Wix Automations retries on failure, same as
@@ -57,8 +76,9 @@ function wixRequestedServices(body){const {data,submission,labels}=wixEvent(body
 // one, there's nothing safe to dedupe on, so the lead is still accepted —
 // just without redelivery protection for that one submission.
 function extractExternalId(body) {
-  const data = object(body?.data), submission = object(data.submission), contact = object(body?.contact)
-  const id = body?.submissionId ?? body?.submission_id ?? body?.id ?? body?._id ?? data.submissionId ?? data.submission_id ?? data.id ?? data._id ?? submission.submissionId ?? submission.submission_id ?? submission.id ?? submission._id ?? contact.submissionId ?? contact.submission_id ?? contact.id ?? contact._id
+  const {b,data,submission,contact} = wixEvent(body)
+  const topContact = object(b.contact)
+  const id = b.submissionId ?? b.submission_id ?? b.id ?? b._id ?? data.submissionId ?? data.submission_id ?? data.id ?? data._id ?? submission.submissionId ?? submission.submission_id ?? submission.id ?? submission._id ?? contact.submissionId ?? contact.submission_id ?? topContact.submissionId ?? topContact.submission_id
   return (typeof id === 'string' || typeof id === 'number') && String(id).trim() ? String(id).trim().slice(0, 200) : null
 }
 

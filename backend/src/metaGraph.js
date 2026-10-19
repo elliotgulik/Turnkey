@@ -21,3 +21,17 @@ export function fetchMetaObject(
     signal: AbortSignal.timeout(20000),
   });
 }
+
+// Edges must be separate path segments; encoding "page/subscribed_apps" as
+// one object ID produces an invalid Graph request.
+export function fetchMetaEdge(objectId, edge, { token, fields, method = 'GET', body, env = process.env, fetchImpl = fetch }) {
+  if (edge !== 'subscribed_apps') throw new Error('Unsupported Meta edge');
+  const url = metaGraphUrl(objectId, fields, env);
+  url.pathname += '/' + edge;
+  return fetchImpl(url, {
+    method,
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json', ...(body ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {}) },
+    ...(body ? { body: new URLSearchParams(body).toString() } : {}),
+    redirect: 'error', signal: AbortSignal.timeout(20000),
+  });
+}

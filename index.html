@@ -8347,17 +8347,10 @@ function openConnections(){
         <p style="font-size:12px;color:var(--ink-faint);margin-top:12px">In Wix: Automations → create a rule → trigger "Form submitted" → action "Send a webhook" → paste the URL above. Submissions land straight in Leads.</p>
         <button class="btn ghost sm" style="margin-top:8px" onclick="connectWix()">Regenerate URL</button> <button class="btn ghost sm" onclick="disconnectWix()">Disconnect</button>`
       :wixStatus.connected
-        ?`<p><b>Connected.</b> Submissions from the Wix Automation using this webhook land straight in Leads.</p><button class="btn ghost sm" onclick="connectWix()">Regenerate URL</button> <button class="btn ghost sm" onclick="disconnectWix()">Disconnect</button>`
+        ?`<p><b>Webhook configured.</b> ${leadReceiptLabel(wixStatus)} Your Wix automation must send every form field, including the services answer, to this URL.</p><button class="btn ghost sm" onclick="refreshLeadConnections()">Check delivery</button> <button class="btn ghost sm" onclick="connectWix()">Regenerate URL</button> <button class="btn ghost sm" onclick="disconnectWix()">Disconnect</button>`
         :`<p>Get a webhook URL to paste into a Wix Automation ("When a form is submitted → Send a webhook") — submissions land straight in Leads, no manual copy-paste.</p><button class="btn accent sm" onclick="connectWix()">Connect Wix</button>`}
     </div>
-    <div class="conn-card ${metaStatus.connected?'live':''}">
-      <div class="conn-top"><span class="conn-name">Meta — Facebook &amp; Instagram lead ads</span><span class="conn-badge ${metaStatus.connected?'on':'off'}">${metaStatus.connected?'● CONNECTED':'not connected'}</span></div>
-      ${metaStatus.connected
-        ?`<p><b>Connected</b> to Page ${metaStatus.pageId}. New Lead Ads submissions land straight in Leads.</p><button class="btn ghost sm" onclick="disconnectMeta()">Disconnect</button>`
-        :`<p>Connect a Facebook Page to pull its Lead Ads submissions straight into Leads. Needs a Meta App with the <code>leads_retrieval</code> permission (Meta App Review required) and a long-lived Page Access Token — paste them below.</p>
-          <div class="conn-keyrow"><input id="conn-meta-pageid" placeholder="Page ID"></div>
-          <div class="conn-keyrow" style="margin-top:6px"><input id="conn-meta-token" placeholder="Page Access Token" type="password"><button class="btn accent sm" onclick="connectMeta()">Connect</button></div>`}
-    </div>
+    ${renderMetaConnectionCard()}
     <div class="conn-note">${emailAccount?"You're fully connected. Nice.":"Connect Gmail to send quotes and invoices straight from Turnkey."}</div>`;
   openModal('conn-overlay');
 }
@@ -8498,6 +8491,30 @@ async function loadStripeStatus(){
    lead flow itself. ===== */
 let wixStatus={connected:false};
 let metaStatus={connected:false,pageId:null};
+function leadReceiptLabel(status){
+  return status.lastReceivedAt?`Last lead received ${escapeHtmlSafe(new Date(status.lastReceivedAt).toLocaleString())}${status.lastIngested?' · added to Leads.':' · awaiting the next Leads refresh.'}`:'No webhook lead has been received yet. Test the form and check delivery here.';
+}
+function renderMetaConnectionCard(){
+  const m=metaStatus,ready=m.health==='ready';
+  return `<div class="conn-card ${ready?'live':''}">
+    <div class="conn-top"><span class="conn-name">Meta — Facebook &amp; Instagram lead ads</span><span class="conn-badge ${ready?'on':'off'}">${ready?'● LEAD NOTIFICATIONS ENABLED':m.connected?'CHECK DELIVERY':'not connected'}</span></div>
+    ${m.connected?`<p>Page ${escapeHtmlSafe(m.pageId)}${m.pageName?' · '+escapeHtmlSafe(m.pageName):''}</p><p>${escapeHtmlSafe(m.message||'A credential is saved. Check it with Meta to verify access and lead notifications.')}</p><p>${leadReceiptLabel(m)}</p><div class="quote-action-row"><button class="btn ghost sm" onclick="checkMetaDelivery(false,this)">Check connection</button><button class="btn accent sm" onclick="checkMetaDelivery(true,this)">Enable lead delivery</button><button class="btn ghost sm" onclick="disconnectMeta()">Disconnect</button></div>`:''}
+    <details ${!m.connected||m.health==='reconnect'||m.health==='permissions'?'open':''}><summary>${m.connected?'Reconnect Page':'Connect your Page'}</summary>
+      <p>Use a Page Access Token for this Page with leads_retrieval and pages_manage_metadata. In Meta, enable the app’s Page leadgen webhook and grant it Leads Access for this Page. App review or access restrictions may still limit real ad leads.</p>
+      <div class="conn-keyrow"><input id="conn-meta-pageid" aria-label="Meta Page ID" placeholder="Page ID" value="${escapeHtmlSafe(m.pageId||'')}"></div>
+      <div class="conn-keyrow" style="margin-top:6px"><input id="conn-meta-token" aria-label="Meta Page Access Token" placeholder="Page Access Token" type="password" autocomplete="off"><button class="btn accent sm" onclick="connectMeta()">${m.connected?'Reconnect':'Connect'}</button></div>
+    </details></div>`;
+}
+async function refreshLeadConnections(){await Promise.all([loadWixStatus(),loadMetaStatus()]);openConnections();}
+async function checkMetaDelivery(repair,button){
+  if(button){button.disabled=true;button.textContent='Checking…';}
+  try{
+    const {data:{session}}=await sb.auth.getSession();if(!session)throw new Error('Please sign in again');
+    const res=await fetch(`${backendUrl()}/api/connections/meta/${repair?'repair':'check'}`,{method:'POST',headers:{Authorization:'Bearer '+session.access_token}});
+    const j=await res.json();if(!res.ok)throw new Error(j.error||'Could not check Meta');
+    metaStatus={...metaStatus,...j};openConnections();toast(j.message||'Connection checked');
+  }catch(e){toast(e.message||'Could not reach Meta');if(button){button.disabled=false;button.textContent=repair?'Enable lead delivery':'Check connection';}}
+}
 async function loadWixStatus(){
   const url=backendUrl();
   const {data:{session}}=await sb.auth.getSession();
@@ -8505,7 +8522,7 @@ async function loadWixStatus(){
   try{
     const res=await fetch(`${url}/api/connections/wix/status`,{headers:{Authorization:'Bearer '+session.access_token}});
     const j=await res.json();
-    if(res.ok)wixStatus={connected:!!j.connected};
+    if(res.ok)wixStatus={...wixStatus,...j,connected:!!j.connected};
   }catch(e){console.error('Load Wix status failed',e);}
 }
 async function loadMetaStatus(){
@@ -8515,7 +8532,7 @@ async function loadMetaStatus(){
   try{
     const res=await fetch(`${url}/api/connections/meta/status`,{headers:{Authorization:'Bearer '+session.access_token}});
     const j=await res.json();
-    if(res.ok)metaStatus={connected:!!j.connected,pageId:j.pageId||null};
+    if(res.ok)metaStatus={...metaStatus,...j,connected:!!j.connected,pageId:j.pageId||null};
   }catch(e){console.error('Load Meta status failed',e);}
 }
 // The webhook token is only ever returned in THIS response — only its hash
@@ -8556,9 +8573,9 @@ async function connectMeta(){
     const res=await fetch(`${url}/api/connections/meta/connect`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.access_token},body:JSON.stringify({pageId,pageToken})});
     const j=await res.json();
     if(!res.ok){toast(j.error||'Could not connect this Meta Page');return;}
-    metaStatus={connected:true,pageId};
+    metaStatus={...j,connected:true,pageId};
     openConnections();
-    toast('Meta Page connected'+(j.pageName?' — '+j.pageName:''));
+    toast(j.health==='ready'?'Meta lead notifications enabled':j.message||'Page saved. Check lead delivery.');
   }catch(e){toast(describeConnectError(e));}
 }
 async function disconnectMeta(){
@@ -10816,7 +10833,7 @@ async function retryPendingPhotos(){
 <script src="conversations-bridge.js?v=20261018e"></script>
 <script src="servicem8-import.js?v=20261017a"></script>
 <script src="marketing-analytics.js?v=20261017a"></script>
-<footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a> · <span id="tk-app-version">v20261019a</span></footer>
+<footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a> · <span id="tk-app-version">v20261019b</span></footer>
 <script src="extension-quote-link.js?v=20261018f"></script>
 <script src="job-workspace.js?v=20261018"></script>
 <script src="job-calendar.js?v=20261018d"></script>
