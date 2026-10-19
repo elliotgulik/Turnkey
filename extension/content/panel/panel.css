@@ -187,3 +187,14 @@
 .tk-created-transfer { border-top:1px solid var(--line); padding-top:14px; margin-top:14px; }
 .tk-created-transfer .tk-btn { margin:4px 0; width:100%; }
 .tk-created-transfer [hidden] { display:none; }
+
+/* Linked context remains readable inside the compact Earth toolbar. */
+.tk-client-context {font-size:12px; margin:10px 0; max-height:240px; overflow:auto;}
+.tk-context-row {display:grid; grid-template-columns:95px minmax(0,1fr); gap:8px; padding:3px 0;}
+.tk-context-row span {white-space:pre-wrap; overflow-wrap:anywhere;}
+.tk-requested-actions {display:flex; flex-wrap:wrap; gap:8px;}
+.tk-line-row {flex-wrap:wrap;}
+
+.tk-toolbar {max-height:calc(100vh - 104px); display:flex; flex-direction:column;}
+.tk-toolbar-body {overflow-y:auto;}
+.tk-toolbar[hidden] {display:none;}

@@ -8351,7 +8351,7 @@ function openConnections(){
         :`<p>Get a webhook URL to paste into a Wix Automation ("When a form is submitted → Send a webhook") — submissions land straight in Leads, no manual copy-paste.</p><button class="btn accent sm" onclick="connectWix()">Connect Wix</button>`}
     </div>
     ${renderMetaConnectionCard()}
-    <div class="conn-note">${emailAccount?"You're fully connected. Nice.":"Connect Gmail to send quotes and invoices straight from Turnkey."}</div>`;
+    <div class="conn-note">${emailAccount?"Lead delivery and inbox connections are managed separately above.":"Connect Gmail to send quotes and invoices straight from Turnkey."}</div>`;
   openModal('conn-overlay');
 }
 // Generic copy-to-clipboard for any of the booking-link/embed-code readonly
@@ -8507,32 +8507,36 @@ function renderMetaConnectionCard(){
 }
 async function refreshLeadConnections(){await Promise.all([loadWixStatus(),loadMetaStatus()]);openConnections();}
 async function checkMetaDelivery(repair,button){
+  const biz=currentBusinessId,version=businessSessionVersion;
   if(button){button.disabled=true;button.textContent='Checking…';}
   try{
     const {data:{session}}=await sb.auth.getSession();if(!session)throw new Error('Please sign in again');
     const res=await fetch(`${backendUrl()}/api/connections/meta/${repair?'repair':'check'}`,{method:'POST',headers:{Authorization:'Bearer '+session.access_token}});
     const j=await res.json();if(!res.ok)throw new Error(j.error||'Could not check Meta');
+    if(biz!==currentBusinessId||version!==businessSessionVersion)return;
     metaStatus={...metaStatus,...j};openConnections();toast(j.message||'Connection checked');
   }catch(e){toast(e.message||'Could not reach Meta');if(button){button.disabled=false;button.textContent=repair?'Enable lead delivery':'Check connection';}}
 }
 async function loadWixStatus(){
+  const biz=currentBusinessId,version=businessSessionVersion;
   const url=backendUrl();
   const {data:{session}}=await sb.auth.getSession();
   if(!url||!session)return;
   try{
     const res=await fetch(`${url}/api/connections/wix/status`,{headers:{Authorization:'Bearer '+session.access_token}});
     const j=await res.json();
-    if(res.ok)wixStatus={...wixStatus,...j,connected:!!j.connected};
+    if(res.ok&&biz===currentBusinessId&&version===businessSessionVersion)wixStatus={...wixStatus,...j,connected:!!j.connected};
   }catch(e){console.error('Load Wix status failed',e);}
 }
 async function loadMetaStatus(){
+  const biz=currentBusinessId,version=businessSessionVersion;
   const url=backendUrl();
   const {data:{session}}=await sb.auth.getSession();
   if(!url||!session)return;
   try{
     const res=await fetch(`${url}/api/connections/meta/status`,{headers:{Authorization:'Bearer '+session.access_token}});
     const j=await res.json();
-    if(res.ok)metaStatus={...metaStatus,...j,connected:!!j.connected,pageId:j.pageId||null};
+    if(res.ok&&biz===currentBusinessId&&version===businessSessionVersion)metaStatus={...metaStatus,...j,connected:!!j.connected,pageId:j.pageId||null};
   }catch(e){console.error('Load Meta status failed',e);}
 }
 // The webhook token is only ever returned in THIS response — only its hash
@@ -10833,8 +10837,8 @@ async function retryPendingPhotos(){
 <script src="conversations-bridge.js?v=20261018e"></script>
 <script src="servicem8-import.js?v=20261017a"></script>
 <script src="marketing-analytics.js?v=20261017a"></script>
-<footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a> · <span id="tk-app-version">v20261019b</span></footer>
-<script src="extension-quote-link.js?v=20261018f"></script>
+<footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a> · <span id="tk-app-version">v20261019c</span></footer>
+<script src="extension-quote-link.js?v=20261019c"></script>
 <script src="job-workspace.js?v=20261018"></script>
 <script src="job-calendar.js?v=20261018d"></script>
 <script src="operations-workspace.js?v=20261018c"></script>

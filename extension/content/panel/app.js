@@ -1,4 +1,4 @@
-import { Storage } from '../../api/storage.js';
+import { Storage, connectionChanged } from '../../api/storage.js';
 import { TurnKeyApi } from '../../api/client-bridge.js';
 import { mountToolbar } from './toolbar.js';
 import { renderQuotePanel, renderQuoteCreated } from './quote.js';
@@ -119,8 +119,15 @@ export async function init(shadowRoot) {
     pendingMeasureRequests: {}, // requestId -> {category, categoryLabel, kind, serviceId}
     boundCustomer: null, // {id,name,address} when this tab was opened from an existing customer's "Build quote" button
     boundCustomerBusinessId: null,
+    boundJob: null,
+    boundRecordId: null,
     addressLocked: false // true once boundCustomer is set — the Earth-camera address polling below must not overwrite it
   };
+
+  let connectionGeneration = 0;
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && connectionChanged(changes)) connectionGeneration++;
+  });
 
   async function hydrate() {
     const stored = await Storage.loadAll();
@@ -137,6 +144,9 @@ export async function init(shadowRoot) {
    * (not just the background worker's) never binds to a foreign customer.
    */
   async function loadBoundCustomerContext() {
+    const generation = connectionGeneration;
+    const businessId = state.profile?.business_id;
+    const userId = state.session?.userId;
     const res = await new Promise((resolve) => {
       try {
         chrome.runtime.sendMessage({ type: 'TK_GET_CUSTOMER_CONTEXT' }, resolve);
@@ -144,17 +154,23 @@ export async function init(shadowRoot) {
         resolve(null);
       }
     });
-    if (!res || !res.ok || !res.data) return;
+    if (generation !== connectionGeneration || businessId !== state.profile?.business_id || userId !== state.session?.userId) throw new Error('Your account changed while loading this customer. Reopen Google Earth from TurnKey.');
+    if (!res || !res.ok || !res.data) {
+      if (state.boundCustomer || res?.ok === false) throw new Error(res?.error || 'The linked customer context expired. Reopen Google Earth from TurnKey.');
+      return;
+    }
     const ctx = res.data;
-    if (!state.profile || ctx.businessId !== state.profile.business_id) return;
-    state.boundCustomer = { id: ctx.customerId, name: ctx.customerName || '', address: ctx.address };
+    if (!state.session || !state.profile || ctx.businessId !== state.profile.business_id) throw new Error('Your business changed. Reopen Google Earth from TurnKey.');
+    state.boundCustomer = ctx.customer || { id: ctx.customerId, name: ctx.customerName || '', address: ctx.address };
+    state.boundJob = ctx.job || null;
+    state.boundRecordId = ctx.recordId;
     state.boundCustomerBusinessId = ctx.businessId;
     if (ctx.address) {
       state.address = ctx.address;
       state.addressLocked = true;
     }
   }
-  await loadBoundCustomerContext();
+  try { await loadBoundCustomerContext(); } catch (error) { state.contextError = error.message; toast(root, error.message, 'error'); }
 
   const toolbar = mountToolbar(root, {
     onAction: handleToolbarAction,
@@ -292,6 +308,8 @@ export async function init(shadowRoot) {
       service: pending.serviceId,
       unit: result.unit || (pending.kind === 'area' ? 'm²' : 'm'),
       size: Math.round(result.value * 10) / 10,
+      quantities: pending.kind === 'line' ? null : {area: result.mode === 'surface' ? result.surfaceArea : result.groundArea, perimeter: result.perimeter},
+      mode: result.mode || 'ground',
       points: toDisplayPoints(geoPts),
       geoPts,
       method: result.method || (pending.kind === 'area' ? 'ground' : 'haversine'),
@@ -314,14 +332,21 @@ export async function init(shadowRoot) {
     return match || Object.keys(SERVICES)[0];
   }
 
-  async function openQuotePanel() {
+  async function openQuotePanel(manualWindows = false) {
     if (!requireConnected()) return;
-    if (!state.measurements.length) {
+    if (!state.measurements.length && !manualWindows) {
       toast(root, 'Measure at least one area or distance first.', 'error');
       return;
     }
+    if (state.contextError) { toast(root, state.contextError, 'error'); return; }
+    const businessId = state.profile?.business_id;
+    const generation = connectionGeneration;
     try {
-      const business=await TurnKeyApi.getBusiness(state.profile.business_id);
+      await loadBoundCustomerContext();
+      const profile = await TurnKeyApi.getProfile();
+      if (!businessId || profile.business_id !== businessId) throw new Error('Your business changed. Reconnect before quoting.');
+      const business=await TurnKeyApi.getBusiness(businessId);
+      if (generation !== connectionGeneration || state.profile?.business_id !== businessId) throw new Error('Your account changed. Reopen the quote.');
       if(!business)throw new Error('Reconnect the extension to load your business pricing.');
       state.business=business;
     }catch(error){toast(root,error.message,'error');return;}
@@ -329,16 +354,18 @@ export async function init(shadowRoot) {
     if (state.business && state.business.pricing_config && state.business.pricing_config.rates) {
       applyRateOverrides(state.business.pricing_config.rates);
     }
+    const binding = state.boundCustomer ? Object.freeze({businessId, customerId:state.boundCustomer.id, jobId:state.boundJob?.id || null, quoteId:state.boundJob?.quote_id || null, recordId:state.boundRecordId}) : null;
     state.quoteCreateProgress = null; // fresh quote-panel session — any earlier partial create attempt is unrelated
     renderQuotePanel(
       modalLayer,
-      { measurements: state.measurements, address: state.address, TK_PRICING, TK_COST, business: state.business, boundCustomer: state.boundCustomer },
+      { measurements: state.measurements, address: state.address, TK_PRICING, TK_COST, business: state.business, boundCustomer: state.boundCustomer, boundJob: state.boundJob, manualWindows },
       {
         onCancel: closeModal,
         onSearchCustomer: async (query) => {
           if (!query || query.length < 2) return [];
           try {
-            const all = await TurnKeyApi.listCustomers(state.profile.business_id);
+            const all = await TurnKeyApi.listCustomers(businessId);
+            if (generation !== connectionGeneration || state.profile?.business_id !== businessId) return [];
             const q = query.toLowerCase();
             return all.filter((c) => (c.name || '').toLowerCase().includes(q)).slice(0, 8);
           } catch (e) {
@@ -347,7 +374,7 @@ export async function init(shadowRoot) {
         },
         onCreateQuote: async (payload) => {
           try {
-            await createQuoteFlow(payload);
+            await createQuoteFlow(payload, businessId, binding, generation);
           } catch (err) {
             toast(root, err.message || 'Could not save this draft. Please retry.', 'error');
             throw err;
@@ -364,10 +391,14 @@ export async function init(shadowRoot) {
    * openQuotePanel() opens, or after a successful create here), so a retry
    * after a partial failure reuses ids instead of duplicating them.
    */
-  async function createQuoteFlow(payload) {
-    const businessId = state.profile.business_id;
+  async function createQuoteFlow(payload, businessId, binding, generation) {
+    const profile = await TurnKeyApi.getProfile();
+    if (generation !== connectionGeneration || !state.session || state.profile?.business_id !== businessId || profile.business_id !== businessId) throw new Error('Your business changed. Reopen the quote before saving.');
+    if (binding && (binding.businessId !== businessId || payload.customer.id !== binding.customerId || payload.isNewCustomer)) throw new Error('This quote must stay linked to its original customer.');
+    if (binding?.recordId != null && !binding.jobId) throw new Error('This CRM launch is missing its saved job ID. Update TurnKey and reopen this opportunity before saving.');
     const progress = state.quoteCreateProgress || (state.quoteCreateProgress = {});
-    const { quote, job, warning } = await createQuoteDraft(TurnKeyApi, progress, { businessId, payload, screenshotDataUrl: state.screenshotDataUrl });
+    const { quote, job, warning } = await createQuoteDraft(TurnKeyApi, progress, { businessId, payload, binding, screenshotDataUrl: state.screenshotDataUrl });
+    if (generation !== connectionGeneration || !state.session || state.profile?.business_id !== businessId) return;
     state.quoteCreateProgress = null; // this intent fully succeeded — a future quote starts a clean one
 
     const publicUrl = state.config.siteUrl + '/quote.html?t=' + quote.public_token;
@@ -413,6 +444,8 @@ export async function init(shadowRoot) {
     } else if (action === 'measure-distance') {
       if (!requireLocation()) return;
       openCategoryPicker('open');
+    } else if (action === 'manual-windows') {
+      openQuotePanel(true);
     } else if (action === 'screenshot') {
       handleScreenshot();
     } else if (action === 'instant-quote') {
@@ -423,15 +456,37 @@ export async function init(shadowRoot) {
   // Refresh cached auth/business state if the popup connects/disconnects while this tab is open.
   chrome.storage.onChanged.addListener(async (changes, area) => {
     if (area !== 'local') return;
+    const previousBusinessId = state.profile?.business_id;
+    const changed = connectionChanged(changes);
+    if (changed) {
+      closeModal();
+      state.boundCustomer = null;
+      state.boundJob = null;
+      state.address = '';
+      state.measurements = [];
+      state.pendingMeasureRequests = {};
+      state.screenshotDataUrl = null;
+      state.quoteCreateProgress = null;
+      state.contextError = 'Your account changed. Reopen Google Earth from TurnKey.';
+      toolbar.update(state);
+    }
     await hydrate();
     // The signed-in business changed since this tab bound to a customer
     // (operator disconnected/reconnected a different TurnKey account) —
     // that bound context is now for a different business and must be
     // dropped rather than carried forward.
-    if (state.boundCustomer && (!state.profile || state.boundCustomerBusinessId !== state.profile.business_id)) {
+    if (changed || !state.session || previousBusinessId !== state.profile?.business_id) {
+      closeModal();
+      state.measurements = [];
+      state.screenshotDataUrl = null;
+      state.quoteCreateProgress = null;
+      state.boundJob = null;
+      state.boundRecordId = null;
       state.boundCustomer = null;
       state.boundCustomerBusinessId = null;
       state.addressLocked = false;
+      state.address = '';
+      state.contextError = 'Your account changed. Reopen Google Earth from TurnKey.';
     }
     toolbar.update(state);
   });

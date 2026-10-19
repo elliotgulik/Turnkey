@@ -51,3 +51,11 @@ export const Storage = {
     return { config, session, profile, business, settings };
   }
 };
+
+// Token rotation alone is harmless; identity/tenant/deployment changes
+// invalidate any context read already in flight, even after switching back.
+export function connectionChanged(changes) {
+  const changed = (key, fields) => changes[key] && fields.some(field => changes[key].oldValue?.[field] !== changes[key].newValue?.[field]);
+  return !!(changed(KEYS.session, ['userId']) || changed(KEYS.profile, ['business_id']) || changed(KEYS.config, ['siteUrl','supabaseUrl','backendUrl'])
+    || (changes[KEYS.session] && !!changes[KEYS.session].oldValue !== !!changes[KEYS.session].newValue));
+}

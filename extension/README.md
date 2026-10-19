@@ -1,6 +1,6 @@
 # TurnKey — Google Earth Instant Quote (Chrome extension)
 
-## Version 0.2.5: per-service chemical costs
+## Version 0.2.6: per-service chemical costs
 
 Choose chemicals and concentrate usage per service in TurnKey → Pricing. Set your actual per-litre supplier prices there. Earth uses these saved settings; missing prices are flagged as incomplete. Update your unpacked extension to this folder and refresh Earth.
 
@@ -277,3 +277,60 @@ background worker's request-bridging security checks (wrong tab, spoofed
 origin, expiry, duplicate Finish, allowlist rejection, and surviving a
 simulated service-worker restart via `chrome.storage.session`), and
 idempotent/business-bound quote-draft creation.
+
+
+### Saved customer / opportunity context
+
+The CRM `TK_LAUNCH` message must carry `{recordId, jobId, customerId,
+businessId, nonce}`. `jobId` is the persisted `jobs.id`, **not** the local
+numeric `records[].id`. Save a new opportunity before launching it. The
+extension verifies that exact job against both business and customer and
+keeps the identity in tab-scoped session storage; it never guesses a
+customer's latest job. Customer-profile launches without an opportunity
+may omit both `recordId` and `jobId` and still create a fresh draft.
+A launch with `recordId` but no `jobId` can measure, but cannot save a
+replacement opportunity: the CRM must be updated to supply the saved ID.
+
+A consolidated backend context response, if the parent adds one, should
+return `{businessId, customerId, jobId, recordId, customer, job}`. `customer`
+needs `{id, business_id, name, phone, email, address, suburb, notes, source}`;
+`job` needs `{id, business_id, customer_id, quote_id, status, details}` with
+`details.requestedServices` (`[{name, service_id}]`), `windowsRequested`,
+`jobNotes`, `services` (`[{svc, qty}]`, including saved pane counts) and
+`source`. Return `job: null` for customer-only launches. Derive business
+from authentication and verify the exact job/customer relationship; never
+return another customer's job or infer a job from newest-first ordering.
+
+Pending reads are invalidated if identity, business or deployment changes,
+even after switching away and back. Ordinary token rotation is allowed.
+
+Context is re-read when the Earth toolbar loads and whenever the quote
+dialog opens using the existing authenticated REST API: customer contact
+fields, notes and source; and the exact job's `details.requestedServices`,
+`windowsRequested`, `jobNotes` and legacy `services`/request notes. No new
+backend context endpoint is required. Opportunity saves retain existing
+request/operational details, update the same job and its editable draft,
+and keep screenshot/activity/ServiceM8 references on that job. Sent or
+approved quotes require editing in TurnKey. These saves use multiple REST
+writes with stable IDs and conditional updates, like the existing draft
+creation flow; they are not a database transaction.
+
+Closed traces retain area and perimeter; each selected service chooses its
+own unit, and Reuse outline adds another independently priced service.
+Windows use an explicit manual whole-pane count (or an already saved pane
+count), never a geographic measurement. Item prices are the saved
+`instantPricing().lines[].fixedPrice`, allocated in integer cents from
+cost-model weights; manual total adjustments are included in those items.
+The extension preserves fractional-dollar totals. The root pricing
+engine's `quoteTotal()` still rounds to whole dollars and must be handled
+by the parent if CRM quote editing must preserve cents as well.
+
+Focused checks (no full suite):
+
+```sh
+node --test extension/tests/service-context.test.cjs extension/tests/fresh-bound-context.test.cjs extension/tests/bound-quote-save.test.cjs
+node --test extension/tests/quote-itemisation-ui.test.cjs
+```
+
+The UI fixture uses the project's Playwright dependency and an isolated
+headless browser; it does not access the live CRM, Maps or Supabase.

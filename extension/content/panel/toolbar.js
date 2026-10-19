@@ -1,3 +1,4 @@
+import { escapeHtml, renderCustomerContext } from './customer-context.js';
 // The floating TurnKey toolbar overlaid on Google Earth (build brief §4).
 // Mounted once; `update()` patches the dynamic bits in place afterwards so
 // drag position, scroll, and any open sub-panel survive a state change.
@@ -13,6 +14,7 @@ export function mountToolbar(root, actions) {
     </div>
     <div class="tk-toolbar-body">
       <div class="tk-status" data-role="status"></div>
+      <div data-role="customer-context"></div>
       <div class="tk-actions">
         <button type="button" class="tk-btn" data-action="measure-area">
           <span class="tk-btn-ico">▣</span> Outline
@@ -20,6 +22,7 @@ export function mountToolbar(root, actions) {
         <button type="button" class="tk-btn" data-action="measure-distance">
           <span class="tk-btn-ico">📏</span> Distance
         </button>
+        <button type="button" class="tk-btn" data-action="manual-windows">Windows (manual panes)</button>
         <button type="button" class="tk-btn" data-action="screenshot">
           <span class="tk-btn-ico">📸</span> Screenshot
         </button>
@@ -94,10 +97,10 @@ export function mountToolbar(root, actions) {
     el.innerHTML = list
       .map(
         (m) =>
-          `<div class="tk-meas-row" data-id="${m.id}">
-            <span class="tk-meas-label">${m.categoryLabel}</span>
+          `<div class="tk-meas-row" data-id="${escapeHtml(m.id)}">
+            <span class="tk-meas-label">${escapeHtml(m.categoryLabel)}</span>
             <span class="tk-meas-value">${m.size}${m.unit === 'm²' ? ' m²' : ' m'}</span>
-            <button type="button" class="tk-meas-remove" data-remove="${m.id}" aria-label="Remove">×</button>
+            <button type="button" class="tk-meas-remove" data-remove="${escapeHtml(m.id)}" aria-label="Remove">×</button>
           </div>`
       )
       .join('');
@@ -117,7 +120,7 @@ export function mountToolbar(root, actions) {
       actionButtons.forEach((b) => (b.disabled = true));
     } else {
       const biz = state.business ? state.business.name || 'Your business' : 'Connected';
-      el.innerHTML = `<span class="tk-status-dot on"></span> ${biz}`;
+      el.innerHTML = `<span class="tk-status-dot on"></span> ${escapeHtml(biz)}`;
       actionButtons.forEach((b) => (b.disabled = false));
     }
   }
@@ -126,6 +129,7 @@ export function mountToolbar(root, actions) {
     el: wrap,
     update(state) {
       renderStatus(state);
+      wrap.querySelector('[data-role="customer-context"]').innerHTML = renderCustomerContext(state.boundCustomer, state.boundJob);
       addressInput.value = state.address || '';
       renderMeasurements(state.measurements);
     }

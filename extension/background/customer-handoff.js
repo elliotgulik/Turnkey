@@ -22,11 +22,16 @@
 // in service-worker.js (MV3 can suspend/restart this worker between any two
 // messages); see that file's own comment for why storage.session specifically.
 import { TurnKeyClient } from '../api/turnkey-api.js';
-import { Storage } from '../api/storage.js';
+import { Storage, connectionChanged } from '../api/storage.js';
 
 const EARTH_ORIGIN = 'https://earth.google.com';
 const CONTEXT_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
 const CONTEXT_KEY = 'tk_pending_customer_context';
+let connectionGeneration = 0;
+chrome.storage.onChanged?.addListener((changes, area) => {
+  if (area === 'local' && connectionChanged(changes)) connectionGeneration++;
+});
+const connectionKey = client => JSON.stringify([client?.session?.userId, client?.cfg?.siteUrl, client?.cfg?.supabaseUrl, client?.cfg?.backendUrl]);
 
 // Same allowlist as service-worker.js's BRIDGE_ALLOWED_ORIGINS — the CRM
 // origins this extension is actually built to talk to. Kept as its own
@@ -127,7 +132,8 @@ async function handleLaunch(msg, sender) {
   if (!sender.tab || !sender.url || !crmOriginAllowed(sender.url)) {
     throw new Error('The Google Earth handoff can only be started from your TurnKey site.');
   }
-  const { recordId, customerId, businessId } = msg;
+  const generation = connectionGeneration;
+  const { recordId, jobId, customerId, businessId } = msg;
   if (!customerId) throw new Error('This opportunity has no saved customer yet.');
   if (!businessId) throw new Error('Could not determine your signed-in business.');
 
@@ -140,9 +146,12 @@ async function handleLaunch(msg, sender) {
 
   const customer = await client.getCustomer(businessId, customerId);
   if (!customer) throw new Error('This customer could not be found in your TurnKey account.');
+  if (jobId && !await client.getJob(businessId, jobId, customerId)) throw new Error('This opportunity could not be found for this customer in your business.');
   const address = [customer.address, customer.suburb].filter(Boolean).join(', ');
   if (!address) throw new Error('This customer has no saved address yet — add one before using the Google Earth handoff.');
 
+  const current = await buildClient();
+  if (!current || (await current.getProfile()).business_id !== businessId || generation !== connectionGeneration || connectionKey(current) !== connectionKey(client)) throw new Error('Your business changed. Reopen this opportunity from TurnKey.');
   await sweepExpired();
   const tab = await chrome.tabs.create({ url: 'about:blank', active: true });
   // Store the verified context BEFORE navigating the tab — app.js's own
@@ -154,6 +163,7 @@ async function handleLaunch(msg, sender) {
     customerName: customer.name || '',
     address,
     recordId: recordId != null ? recordId : null,
+    jobId: jobId || null,
     createdAt: Date.now()
   });
   try {
@@ -175,6 +185,7 @@ async function handleLaunch(msg, sender) {
 }
 
 async function handleGetContext(sender) {
+  const generation = connectionGeneration;
   // Exact origin match, not startsWith — `https://earth.google.com.evil.example`
   // starts with EARTH_ORIGIN as a STRING but is a completely different
   // origin, and startsWith would let it through.
@@ -185,11 +196,20 @@ async function handleGetContext(sender) {
   const client = await buildClient();
   const profile = client ? await client.getProfile().catch(() => null) : null;
   if (!profile || profile.business_id !== ctx.businessId) return null;
+  // Reload saved records on every request. The stored identity remains fixed.
+  const customer = await client.getCustomer(ctx.businessId, ctx.customerId);
+  if (!customer || customer.id !== ctx.customerId || (customer.business_id && customer.business_id !== ctx.businessId)) throw new Error('The linked customer is no longer available.');
+  const job = ctx.jobId ? await client.getJob(ctx.businessId, ctx.jobId, ctx.customerId) : null;
+  if (ctx.jobId && !job) throw new Error('The linked opportunity is no longer available for this customer.');
+  // Recheck tenant after the awaited reads, before returning any customer data.
+  const current = await buildClient();
+  if (!current || (await current.getProfile()).business_id !== ctx.businessId || generation !== connectionGeneration || connectionKey(current) !== connectionKey(client)) return null;
   return {
     businessId: ctx.businessId,
     customerId: ctx.customerId,
-    customerName: ctx.customerName,
-    address: ctx.address,
+    customerName: customer.name || '',
+    address: [customer.address, customer.suburb].filter(Boolean).join(', '),
+    customer, job, jobId: ctx.jobId || null,
     recordId: ctx.recordId
   };
 }

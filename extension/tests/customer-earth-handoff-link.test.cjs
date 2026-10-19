@@ -86,7 +86,7 @@ function setup({ records, currentBusinessId = 'biz1', businessStateReady = true 
   let nextTimerId = 1;
 
   const recordBusinesses = new WeakMap();
-  (records || []).forEach((r) => recordBusinesses.set(r, currentBusinessId));
+  (records || []).forEach((r) => { if(r.customerId && !Object.hasOwn(r,'jobId'))r.jobId='job-'+r.id; recordBusinesses.set(r, currentBusinessId); });
 
   const fakeWindow = {
     location: { href: 'https://turnkeycrm.net/index.html', origin: 'https://turnkeycrm.net' },
@@ -160,7 +160,7 @@ test('a "Build quote" click is intercepted even when the extension is not ready 
   assert.match(text, /Address: 1 Test St, Ponsonby/);
   assert.ok(findByAttr(modal, 'data-eh-earth-link'), 'a manual Open Google Earth link must be present');
   assert.ok(findByAttr(modal, 'data-eh-install'), 'install/update instructions must be shown while the extension is not ready');
-  assert.match(text, /turnkey-earth-extension-0\.2\.5\.zip/);
+  assert.match(text, /turnkey-earth-extension-0\.2\.6\.zip/);
 });
 
 test('the manual Earth link encodes the exact customer address and points at earth.google.com', () => {
@@ -349,4 +349,14 @@ test('programmatic new-customer creation has a public Earth entry point and prob
  await s.ctx.window.TK_EARTH_QUOTES.open(44);
  assert.equal(s.opened.length,0);
  assert.ok(findByAttr(s.lastModal(),'data-eh-earth-link'));
+});
+
+test('a customer-only local record is persisted before its exact job is handed to Earth',async()=>{
+  const r={id:19,name:'Jane',customerId:'cust19',jobId:null,address:'19 Test St'};
+  const s=setup({records:[r]});s.extensionReady();
+  s.ctx.syncRecordToSupabase=async row=>{row.jobId='saved-job-19'};
+  s.click(makeElement({onclick:'openQuoteModal(19)',text:'Build quote'}));
+  await s.flush();
+  assert.equal(s.lastLaunch().jobId,'saved-job-19');
+  assert.equal(s.lastLaunch().customerId,'cust19');
 });

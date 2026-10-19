@@ -41,7 +41,7 @@
   'use strict';
   const PAGE_SOURCE='turnkey-crm-page', EXT_SOURCE='turnkey-customer-launch';
   const LAUNCH_TIMEOUT_MS=8000;
-  const ZIP_URL='/assets/turnkey-earth-extension-0.2.5.zip';
+  const ZIP_URL='/assets/turnkey-earth-extension-0.2.6.zip';
   let extensionReady=false;
   const pendingLaunches=new Map(); // nonce -> {resolve,reject,timer}
 
@@ -63,7 +63,7 @@
   // loads. Ask again instead of depending on that one-time announcement.
   window.postMessage({source:PAGE_SOURCE,type:'TK_HELLO'},window.location.origin);
 
-  function launchViaExtension(recordId,customerId,businessId){
+  function launchViaExtension(recordId,customerId,businessId,jobId){
     return new Promise(function(resolve,reject){
       const nonce=(window.crypto&&window.crypto.randomUUID)?window.crypto.randomUUID():('n'+Date.now()+'_'+Math.random().toString(36).slice(2));
       const timer=setTimeout(function(){
@@ -71,7 +71,7 @@
         reject(new Error('The TurnKey extension did not respond — check the extension is up to date and try again.'));
       },LAUNCH_TIMEOUT_MS);
       pendingLaunches.set(nonce,{resolve:resolve,reject:reject,timer:timer});
-      window.postMessage({source:PAGE_SOURCE,type:'TK_LAUNCH',nonce:nonce,recordId:recordId,customerId:customerId,businessId:businessId},window.location.origin);
+      window.postMessage({source:PAGE_SOURCE,type:'TK_LAUNCH',nonce:nonce,recordId:recordId,customerId:customerId,businessId:businessId,jobId:jobId},window.location.origin);
     });
   }
 
@@ -204,7 +204,7 @@
         const zip=document.createElement('a');
         zip.setAttribute('href',ZIP_URL);
         zip.setAttribute('data-eh-zip-link','');
-        zip.textContent='Download turnkey-earth-extension-0.2.5.zip';
+        zip.textContent='Download turnkey-earth-extension-0.2.6.zip';
         install.appendChild(zip);
         const steps=document.createElement('ol');
         steps.className='tk-eh-steps';
@@ -248,7 +248,7 @@
     }
     const picker=document.getElementById('sales-dialog');
     if(picker&&picker.open&&typeof picker.close==='function')picker.close();
-      if(!r.customerId&&typeof syncRecordToSupabase==='function'){
+      if((!r.customerId||!r.jobId)&&typeof syncRecordToSupabase==='function'){
         const biz=currentBusinessId,version=typeof businessSessionVersion!=='undefined'?businessSessionVersion:null;
         try{await syncRecordToSupabase(r);}catch(e){/* handled below as a validation error in the modal */}
         // The business session can change WHILE this await was in flight
@@ -264,7 +264,7 @@
       const modal=openEarthLaunchModal(r,extensionReady);
       if(extensionReady&&!modal.errors.length){
         try{
-          await launchViaExtension(recordId,r.customerId,currentBusinessId);
+          await launchViaExtension(recordId,r.customerId,currentBusinessId,r.jobId);
           modal.close();
           toast('Opening Google Earth for '+(r.name||'this customer')+'…');
         }catch(err){

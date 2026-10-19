@@ -87,7 +87,7 @@
         const nonce = msg.nonce;
         if (typeof nonce !== 'string' || !nonce) return;
         chrome.runtime.sendMessage(
-          { type: 'TK_CUSTOMER_LAUNCH', recordId: msg.recordId, customerId: msg.customerId, businessId: msg.businessId },
+          { type: 'TK_CUSTOMER_LAUNCH', recordId: msg.recordId, jobId: msg.jobId, customerId: msg.customerId, businessId: msg.businessId },
           (res) => {
             if (chrome.runtime.lastError) {
               postToPage('TK_LAUNCH_ERROR', { nonce, error: chrome.runtime.lastError.message });

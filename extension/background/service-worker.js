@@ -19,7 +19,7 @@
 // would needlessly survive a full browser restart for what's meant to be a
 // short-lived handshake) — see loadPending()/savePending() below.
 import { fetchSiteConfig, TurnKeyClient, TURNKEY_CRM_ORIGINS, TURNKEY_SUPABASE_ORIGIN } from '../api/turnkey-api.js';
-import { Storage } from '../api/storage.js';
+import { Storage, connectionChanged } from '../api/storage.js';
 import { dataUrlToBlob } from '../content/panel/screenshot.js';
 import { registerCustomerHandoff } from './customer-handoff.js';
 
@@ -244,11 +244,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 // deliberately not a generic "fetch this URL"/"run this REST path" proxy.
 const API_ACTIONS = new Set([
   'refresh', 'getProfile', 'getBusiness',
-  'listCustomers', 'getCustomer', 'createCustomer', 'createQuote', 'createJob',
+  'listCustomers', 'getCustomer', 'getJob', 'saveBoundQuote', 'createCustomer', 'createQuote', 'createJob',
   'logActivity', 'uploadScreenshotDataUrl', 'sendQuoteToServiceM8', 'serviceM8TransferStatus'
 ]);
 
 let client = null;
+let apiConnectionGeneration = 0;
 async function ensureClient() {
   if (client) return client;
   const { config, session } = await Storage.loadAll();
@@ -258,12 +259,19 @@ async function ensureClient() {
 }
 
 chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && connectionChanged(changes)) apiConnectionGeneration++;
   if (area === 'local' && (changes.tk_config || changes.tk_session)) client = null;
 });
 
 async function handleApiAction(action, args) {
+  const generation = apiConnectionGeneration;
   const c = await ensureClient();
   if (!c) throw new Error('Not connected to a TurnKey site yet.');
+  if (action === 'saveBoundQuote') {
+    return c.saveBoundQuote(...args, async () => {
+      if (generation !== apiConnectionGeneration) throw new Error('Your account changed. Reopen this opportunity before saving.');
+    });
+  }
   if (action === 'uploadScreenshotDataUrl') {
     const [businessId, customerId, jobId, dataUrl] = args;
     return c.uploadScreenshot(businessId, customerId, jobId, dataUrlToBlob(dataUrl));

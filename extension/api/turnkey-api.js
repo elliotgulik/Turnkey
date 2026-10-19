@@ -246,13 +246,69 @@ export class TurnKeyClient {
 
   /** Substring search over this business's customers — same client-side-filter model index.html uses (no server-side search endpoint exists). */
   async listCustomers(businessId) {
-    return this._rest('customers?business_id=eq.' + encodeURIComponent(businessId) + '&select=id,name,email,phone,address,suburb&order=created_at.desc&limit=500');
+    return this._rest('customers?business_id=eq.' + encodeURIComponent(businessId) + '&select=id,business_id,name,email,phone,address,suburb,notes,source&order=created_at.desc&limit=500');
   }
 
   /** Single customer, scoped to the business — used by the customer→Google Earth handoff (background/customer-handoff.js) to get the authoritative saved address before ever opening a tab. */
   async getCustomer(businessId, customerId) {
-    const rows = await this._rest('customers?id=eq.' + encodeURIComponent(customerId) + '&business_id=eq.' + encodeURIComponent(businessId) + '&select=id,name,email,phone,address,suburb');
-    return rows && rows[0] ? rows[0] : null;
+    const rows = await this._rest('customers?id=eq.' + encodeURIComponent(customerId) + '&business_id=eq.' + encodeURIComponent(businessId) + '&select=id,business_id,name,email,phone,address,suburb,notes,source');
+    const customer = rows?.[0];
+    return customer && customer.id === customerId && customer.business_id === businessId ? customer : null;
+  }
+
+  /** Exact job lookup: never guess the latest job for a customer. */
+  async getJob(businessId, jobId, customerId) {
+    const rows = await this._rest('jobs?id=eq.' + encodeURIComponent(jobId) + '&business_id=eq.' + encodeURIComponent(businessId) + '&customer_id=eq.' + encodeURIComponent(customerId) + '&select=id,business_id,customer_id,quote_id,status,details');
+    const job = rows?.[0];
+    if (!job || job.business_id !== businessId || job.customer_id !== customerId || job.id !== jobId) return null;
+    return job;
+  }
+
+  /** Save to the exact launched opportunity; never substitute another job. */
+  async saveBoundQuote(businessId, {binding, quoteId, total, details}, assertConnection = async () => {}) {
+    const assertBusiness = async () => {
+      if ((await this.getProfile()).business_id !== businessId || binding.businessId !== businessId) throw new Error('Your business changed. Reopen the quote before saving.');
+      await assertConnection();
+    };
+    await assertBusiness();
+    const job = await this.getJob(businessId, binding.jobId, binding.customerId);
+    if (!job || !['new','contacted','qualified','quoted','followup','quoting'].includes(job.status)) throw new Error('This opportunity is no longer editable. Reopen it in TurnKey.');
+    const targetQuoteId = binding.quoteId || quoteId;
+    if ((job.quote_id || null) !== (binding.quoteId || null) && job.quote_id !== targetQuoteId) throw new Error('The linked quote changed. Reopen this opportunity.');
+    const quotePath = 'quotes?id=eq.' + encodeURIComponent(targetQuoteId) + '&business_id=eq.' + encodeURIComponent(businessId) + '&lead_id=eq.' + encodeURIComponent(binding.customerId);
+    let quote;
+    if (binding.quoteId || job.quote_id) {
+      const rows = await this._rest(quotePath + '&select=*');
+      quote = rows?.[0];
+      if (!quote || quote.status !== 'draft') throw new Error('This quote is already sent or approved. Edit it in TurnKey.');
+      await assertBusiness();
+      const saved = await this._rest(quotePath + '&status=eq.draft&amount=eq.' + encodeURIComponent(quote.amount), {
+        method:'PATCH', headers:{Prefer:'return=representation'}, body:JSON.stringify({amount:total})
+      });
+      quote = saved?.[0];
+      if (!quote) throw new Error('The quote changed while saving. Reopen this opportunity.');
+    } else {
+      quote = await this.createQuote(businessId, {id:targetQuoteId, customerId:binding.customerId, amount:total});
+    }
+    await assertBusiness();
+    // Preserve enquiry/request/operational fields and reject a concurrent edit.
+    const merged = {...job.details, ...details};
+    const path = 'jobs?id=eq.' + encodeURIComponent(job.id) + '&business_id=eq.' + encodeURIComponent(businessId) + '&customer_id=eq.' + encodeURIComponent(binding.customerId)
+      + '&status=eq.' + encodeURIComponent(job.status) + '&quote_id=' + (job.quote_id ? 'eq.' + encodeURIComponent(job.quote_id) : 'is.null')
+      + (job.details == null ? '&details=is.null' : '&details=eq.' + encodeURIComponent(JSON.stringify(job.details)));
+    let saved;
+    try {
+      const rows = await this._rest(path, {method:'PATCH', headers:{Prefer:'return=representation'}, body:JSON.stringify({quote_id:targetQuoteId, status:job.status, details:merged})});
+      saved = rows?.[0];
+      if (!saved) throw new Error('The opportunity changed while saving. Reopen it in TurnKey.');
+    } catch (error) {
+      // A lost PATCH response may already have saved the exact same draft.
+      const current = await this.getJob(businessId, job.id, binding.customerId);
+      const same = current?.quote_id === targetQuoteId && Object.entries(details).every(([key,value]) => JSON.stringify(current.details?.[key]) === JSON.stringify(value));
+      if (!same) throw error;
+      saved = current;
+    }
+    return {quote, job:saved};
   }
 
   async createCustomer(businessId, payload) {

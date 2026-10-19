@@ -5,7 +5,11 @@
 // quote-panel is opened, or after a success here) — each step only runs
 // once per intent, so retrying after a failed step reuses the ids already
 // created instead of creating duplicate customers/quotes/jobs.
-export async function createQuoteDraft(api, progress, { businessId, payload, screenshotDataUrl }) {
+export async function createQuoteDraft(api, progress, { businessId, payload, binding = null, screenshotDataUrl }) {
+  if (binding && (binding.businessId !== businessId || payload.isNewCustomer || payload.customer.id !== binding.customerId)) throw new Error('This draft must stay linked to its original business and customer.');
+  if (binding?.recordId != null && !binding.jobId) throw new Error('Reopen this opportunity from an updated TurnKey CRM with its saved job ID.');
+  if (progress.binding && JSON.stringify(progress.binding) !== JSON.stringify(binding)) throw new Error('This draft must stay linked to its original opportunity.');
+  if (binding) progress.binding = {...binding};
   // Business-bound intent: if the signed-in business changed since an
   // earlier attempt with this SAME progress object (e.g. the operator
   // disconnected and reconnected a different TurnKey account while the
@@ -42,32 +46,26 @@ export async function createQuoteDraft(api, progress, { businessId, payload, scr
     progress.customerId = customerId;
   }
 
-  let quote = progress.quote;
-  if (!quote) {
-    quote = await api.createQuote(businessId, { id: progress.ids.quote, customerId, amount: payload.total });
-    progress.quote = quote;
-  }
-
-  let job = progress.job;
-  if (!job) {
-    job = await api.createJob(businessId, {
-      id: progress.ids.job,
-      customerId,
-      quoteId: quote.id,
-      details: {
-        address: payload.address || '',
-        services: payload.lines,
-        total: payload.total,
-        areaPolys: payload.areaPolys,
-        ...(payload.costSnapshot ? {costSnapshot:payload.costSnapshot,estimatedCost:payload.estimatedCost,estimatedMarginPct:payload.estimatedMarginPct,gstRegistered:payload.gstRegistered,targetMargin:payload.targetMargin} : {}),
-        source: 'Google Earth Extension'
-        // No `quoteSentAt` — this creates a DRAFT (see turnkey-api.js's
-        // createQuote status: 'draft'); nothing has actually been sent to
-        // the customer yet, so the CRM's own follow-up timers must not
-        // start as if it had been.
-      }
-    });
-    progress.job = job;
+  const details = {
+    address:payload.address || '', services:payload.lines, total:payload.total, areaPolys:payload.areaPolys,
+    ...(payload.costSnapshot ? {costSnapshot:payload.costSnapshot,estimatedCost:payload.estimatedCost,estimatedMarginPct:payload.estimatedMarginPct,gstRegistered:payload.gstRegistered,targetMargin:payload.targetMargin} : {})
+  };
+  let quote = progress.quote, job = progress.job;
+  if (binding?.jobId) {
+    if (!job) {
+      ({quote,job} = await api.saveBoundQuote(businessId, {binding,quoteId:progress.ids.quote,total:payload.total,details}));
+      progress.quote = quote;
+      progress.job = job;
+    }
+  } else {
+    if (!quote) {
+      quote = await api.createQuote(businessId, {id:progress.ids.quote,customerId,amount:payload.total});
+      progress.quote = quote;
+    }
+    if (!job) {
+      job = await api.createJob(businessId, {id:progress.ids.job,customerId,quoteId:quote.id,details:{...details,source:'Google Earth Extension'}});
+      progress.job = job;
+    }
   }
 
   if (screenshotDataUrl && !progress.screenshotUploaded) {

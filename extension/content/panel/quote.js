@@ -1,4 +1,6 @@
 import { instantPricing } from './quote-pricing.js';
+import { measurementQuantity, measurementForService } from './measurements.js';
+import { renderCustomerContext, requestedServices } from './customer-context.js';
 // Instant Quote panel (build brief §9-§12) — turns the measurements list
 // into priced service lines using TurnKey's own shared pricing engine
 // (vendor/pricing-engine.js, the exact same window.TK_PRICING loaded by
@@ -39,37 +41,34 @@ export function renderQuotePanel(container, ctx, actions) {
   let customPrice=null, localMargin=ctx.TK_COST.targetMargin(ctx.TK_COST.COST_INPUTS.targetMargin), travelKm=ctx.TK_COST.COST_INPUTS.avgKm;
   const estimatedAt=new Date().toISOString();
   const priceModel=()=>instantPricing(ctx.TK_PRICING,ctx.TK_COST,computeLines(),{targetMargin:localMargin,price:customPrice,travelKm,estimatedAt});
-  const extraLines = []; // ad-hoc services not tied to a drawn measurement
+  const savedWindows = ctx.boundJob?.details?.services?.find(line => line.svc === 'windows');
+  const paneCount = Number.isInteger(savedWindows?.qty) && savedWindows.qty > 0 ? savedWindows.qty : 0;
+  const wantsWindows = ctx.manualWindows || requestedServices(ctx.boundCustomer || {},ctx.boundJob).some(service => service.service_id === 'windows');
+  const extraLines = wantsWindows ? [{include:true,svc:'windows',qty:paneCount}] : []; // ad-hoc services not tied to a drawn measurement
   // When this tab was opened from an existing customer's "Build quote"
   // button (see app.js's loadBoundCustomerContext()), the quote is for
   // THAT customer and nothing else — no re-picking, no "new customer" path.
   const customerLocked = !!ctx.boundCustomer;
-  let selectedCustomer = ctx.boundCustomer ? { id: ctx.boundCustomer.id, name: ctx.boundCustomer.name } : null; // {id,name} | null = "new customer"
+  let selectedCustomer = ctx.boundCustomer ? { ...ctx.boundCustomer } : null; // {id,name} | null = "new customer"
   let newCustomer = { name: '', phone: '', email: '' };
 
   function computeLines() {
-    const included = lineState.filter((l) => l.include).map((l) => ({ svc: l.svc, qty: l.qty }));
-    const extras = extraLines.filter((l) => l.include).map((l) => ({ svc: l.svc, qty: l.qty }));
+    const included = lineState.filter(l => l.include).map(l => ({svc:l.svc, qty:measurementQuantity(ctx.measurements.find(m => m.id === l.measurementId), SERVICES[l.svc])}));
+    const extras = extraLines.filter(l => l.include).map(l => ({svc:l.svc, qty:l.qty}));
     return included.concat(extras);
   }
 
-  /**
-   * `measurementType` is the measurement's `kind` ('area'|'perimeter'|
-   * 'line') — filtered by BOTH the service's click-interaction shape
-   * ('closed' for area/perimeter, 'open' for line) AND its unit. Shape
-   * alone isn't enough: House ('perimeter', unit 'm') and Roof ('area',
-   * unit 'm²') both trace a closed outline, but a perimeter measurement's
-   * quantity is metres — assigning it to an m²-priced service would price
-   * the wrong quantity, not just mislabel it.
-   */
-  function renderServiceOptions(selected, measurementType) {
-    const wantShape = measurementType === 'line' ? 'open' : measurementType ? 'closed' : null;
-    const wantUnit = measurementType === 'area' ? 'm²' : measurementType ? 'm' : null;
+  // Offer only services with an available quantity for this outline.
+  function renderServiceOptions(selected, measurement) {
     return Object.entries(SERVICES)
-      .filter(([, s]) => !wantShape || (s.shape === wantShape && s.unit === wantUnit))
-      .map(([key, s]) => `<option value="${key}" ${key === selected ? 'selected' : ''}>${s.label}</option>`)
-      .join('');
+      .filter(([, service]) => !measurement || measurementQuantity(measurement, service) !== null)
+      .map(([key, service]) => `<option value="${escapeHtml(key)}" ${key === selected ? 'selected' : ''}>${escapeHtml(service.label)} (${escapeHtml(service.unit)})</option>`).join('');
   }
+
+  function measuredQuantity(line) {
+    return measurementQuantity(ctx.measurements.find(m => m.id === line.measurementId), SERVICES[line.svc]);
+  }
+
 
   function paint() {
     const lines = computeLines();
@@ -88,17 +87,21 @@ export function renderQuotePanel(container, ctx, actions) {
             <button type="button" class="tk-icon-btn" data-close aria-label="Close">×</button>
           </div>
           <div class="tk-modal-body">
+            ${renderCustomerContext(selectedCustomer, ctx.boundJob, SERVICES)}
             <div class="tk-section-label">Measurements &amp; services</div>
+            <p class="tk-modal-sub">Driveways use area (m²); house wash uses perimeter (m). Reuse a closed outline for another compatible service. Windows require a manual pane count.</p>
+            <div class="tk-requested-actions">${requestedServices(selectedCustomer || {},ctx.boundJob).filter(s => SERVICES[s.service_id]).map(s => `<button type="button" class="tk-link-btn" data-add-request="${escapeHtml(s.service_id)}">+ ${escapeHtml(SERVICES[s.service_id].label)} (manual ${escapeHtml(SERVICES[s.service_id].unit)})</button>`).join('')}</div>
             <div class="tk-lines" data-role="lines">
               ${lineState
                 .map(
                   (l, i) => `
-                <label class="tk-line-row">
-                  <input type="checkbox" data-line="${i}" ${l.include ? 'checked' : ''}/>
-                  <span class="tk-line-cat">${l.categoryLabel}</span>
-                  <select class="tk-select" data-line-svc="${i}">${renderServiceOptions(l.svc, ctx.measurements[i].type)}</select>
-                  <span class="tk-line-qty">${l.qty}${l.unit === 'm²' ? ' m²' : ' m'}</span>
-                </label>`
+                <div class="tk-line-row">
+                  <input type="checkbox" aria-label="Include ${escapeHtml(l.categoryLabel)}" data-line="${i}" ${l.include ? 'checked' : ''}/>
+                  <span class="tk-line-cat">${escapeHtml(l.categoryLabel)}</span>
+                  <select class="tk-select" data-line-svc="${i}">${renderServiceOptions(l.svc, ctx.measurements.find(m => m.id === l.measurementId))}</select>
+                  <span class="tk-line-qty">${measuredQuantity(l)} ${escapeHtml(SERVICES[l.svc]?.unit)}</span>
+                  <button type="button" class="tk-link-btn" data-reuse="${i}">Reuse outline</button>
+                </div>`
                 )
                 .join('')}
               ${extraLines
@@ -107,12 +110,15 @@ export function renderQuotePanel(container, ctx, actions) {
                 <label class="tk-line-row">
                   <input type="checkbox" data-extra="${i}" ${l.include ? 'checked' : ''}/>
                   <select class="tk-select" data-extra-svc="${i}">${renderServiceOptions(l.svc, null)}</select>
-                  <input type="number" min="0" step="1" class="tk-qty-input" data-extra-qty="${i}" value="${l.qty}"/>
+                  <input type="number" min="0" step="${SERVICES[l.svc]?.unit === 'panes' ? '1' : '0.1'}" class="tk-qty-input" aria-label="Manual ${escapeHtml(SERVICES[l.svc]?.unit)} for ${escapeHtml(SERVICES[l.svc]?.label)}" data-extra-qty="${i}" value="${l.qty || ''}"/>
+                  <span class="tk-line-qty">Manual ${escapeHtml(SERVICES[l.svc]?.unit)}</span>
                 </label>`
                 )
                 .join('')}
             </div>
-            <button type="button" class="tk-link-btn" data-add-extra">+ Add another service</button>
+            <button type="button" class="tk-link-btn" data-add-extra>+ Add a manual service</button>
+
+            <button type="button" class="tk-link-btn" data-add-windows>+ Windows — manual pane count</button>
 
             <div class="tk-section-label">Customer</div>
             <div class="tk-customer-picker">
@@ -133,6 +139,9 @@ export function renderQuotePanel(container, ctx, actions) {
             </div>
 
             <div class="tk-price-block">
+              <div class="tk-section-label">Itemised service prices</div>
+              <div data-role="itemised-prices">${(model.lines || []).map(l => `<div class="tk-price-line" data-service-price="${escapeHtml(l.svc)}"><span>${escapeHtml(SERVICES[l.svc]?.label || l.svc)} · ${l.qty} ${escapeHtml(SERVICES[l.svc]?.unit)}</span><strong>${money(l.fixedPrice)}</strong></div>`).join('')}</div>
+              ${customPrice !== null && bd ? `<p class="tk-modal-sub" data-price-adjustment>Manual total adjustment: ${money(total - bd.recommended)} from recommended ${money(bd.recommended)}. Included in the itemised prices above.</p>` : ''}
               <div class="tk-section-label">Internal delivery estimate</div>
               <p class="tk-modal-sub">Based on your business’s saved cost settings. Travel is an estimate, not a live route calculation.</p>
               ${bd ? [ ['Labour + setup ('+bd.labourHrs.toFixed(1)+' hours × '+ctx.TK_COST.COST_INPUTS.crew+' crew)',bd.wageCost],['Materials / chemicals',bd.unsetChemicals?.length?null:bd.chem],['Travel / fuel',bd.fuelCost],['Equipment',bd.equipmentCost],['Consumables',bd.consumablesCost],['Allocated overheads',bd.overheadCost],['Total estimated costs (ex GST)',bd.costUnrounded] ].map(([label,value])=>`<div class="tk-price-line"><span>${label}</span><strong>${value===null?'Incomplete':money(value)}</strong></div>`).join('') : ''}
@@ -140,7 +149,7 @@ export function renderQuotePanel(container, ctx, actions) {
               <label class="tk-price-line">Round-trip travel estimate (km) <input class="tk-qty-input" aria-label="Round-trip travel estimate in km" data-travel type="number" min="0" step="0.1" value="${travelKm}"></label>
               <label class="tk-price-line">Target gross margin (%) <input class="tk-qty-input" aria-label="Target gross margin" data-margin type="number" min="0" max="99" step="1" value="${Math.round(localMargin*100)}"></label>
               <div class="tk-price-line"><span>Recommended customer price${ctx.TK_COST.COST_INPUTS.gstRegistered?' (incl GST)':''}</span><strong data-recommended>${money(bd?.recommended||0)}</strong></div>
-              <label class="tk-price-line">Final customer price${ctx.TK_COST.COST_INPUTS.gstRegistered?' (incl GST)':''} <input class="tk-qty-input" style="width:120px" aria-label="Final customer price" data-price type="number" min="1" step="1" value="${total}"></label>
+              <label class="tk-price-line">Final customer price${ctx.TK_COST.COST_INPUTS.gstRegistered?' (incl GST)':''} <input class="tk-qty-input" style="width:120px" aria-label="Final customer price" data-price type="number" min="1" step="0.01" value="${total}"></label>
               <button type="button" class="tk-link-btn" data-use-recommended>Use recommended price</button>
               <div class="tk-price-line"><span>Expected gross profit</span><strong data-profit>${money(model.profit||0)}</strong></div>
               <div class="tk-price-line"><span>Expected gross margin</span><strong data-margin-result>${(model.marginPct||0).toFixed(1)}%</strong></div>
@@ -194,10 +203,20 @@ export function renderQuotePanel(container, ctx, actions) {
         paint();
       })
     );
+    container.querySelectorAll('[data-reuse]').forEach(button => button.addEventListener('click', () => {
+      const original = lineState[+button.getAttribute('data-reuse')];
+      const measurement = ctx.measurements.find(m => m.id === original.measurementId);
+      const next = Object.keys(SERVICES).find(key => key !== original.svc && measurementQuantity(measurement, SERVICES[key]) !== null);
+      lineState.push({...original, svc:next || original.svc, include:true});
+      paint();
+    }));
+    const addManual = svc => { extraLines.push({include:true,svc,qty:0}); paint(); };
+    container.querySelector('[data-add-windows]').addEventListener('click', () => addManual('windows'));
+    container.querySelectorAll('[data-add-request]').forEach(button => button.addEventListener('click', () => addManual(button.getAttribute('data-add-request'))));
     const addExtraBtn = container.querySelector('[data-add-extra]');
     if (addExtraBtn)
       addExtraBtn.addEventListener('click', () => {
-        extraLines.push({ include: true, svc: Object.keys(SERVICES)[0], qty: 1 });
+        extraLines.push({ include: true, svc: Object.keys(SERVICES)[0], qty: 0 });
         paint();
       });
 
@@ -216,7 +235,7 @@ export function renderQuotePanel(container, ctx, actions) {
           resultsEl.querySelectorAll('[data-pick]').forEach((b) =>
             b.addEventListener('click', () => {
               const id = b.getAttribute('data-pick');
-              selectedCustomer = { id, name: results.find((r) => r.id === id).name };
+              selectedCustomer = { ...results.find((r) => r.id === id) };
               paint();
             })
           );
@@ -239,16 +258,16 @@ export function renderQuotePanel(container, ctx, actions) {
       const createBtn = container.querySelector('[data-create]');
       createBtn.disabled = true;
       createBtn.textContent = 'Creating…';
-      const finalModel=priceModel();
-      const finalLines=finalModel.lines, finalTotal=finalModel.total;
       try {
+        const finalModel=priceModel();
+        const finalLines=finalModel.lines, finalTotal=finalModel.total;
         await actions.onCreateQuote({
           customer: selectedCustomer || newCustomer,
           isNewCustomer: !selectedCustomer,
           address: ctx.address,
           lines: finalLines,
           total: finalTotal,
-          areaPolys: ctx.measurements.filter(m=>lineState.some(l=>l.include&&l.measurementId===m.id)).map(m=>({...m,service:lineState.find(l=>l.measurementId===m.id).svc})),
+          areaPolys: lineState.filter(l=>l.include).map((l,i)=>({...measurementForService(ctx.measurements.find(m=>m.id===l.measurementId),l.svc,SERVICES[l.svc]),id:l.measurementId+'_'+i})),
           costSnapshot:finalModel.snapshot,
           estimatedCost:finalModel.breakdown.costUnrounded,
           estimatedMarginPct:finalModel.marginPct,
@@ -281,7 +300,7 @@ export function renderQuoteCreated(container, { address, total, lines, SERVICES,
         <p class="tk-modal-sub">${escapeHtml(address)}</p>
         <div class="tk-created-total">${money(total)}</div>
         <div class="tk-created-lines">
-          ${lines.map((l) => `<div class="tk-kv"><span>${SERVICES[l.svc] ? SERVICES[l.svc].label : l.svc}</span><span>${l.qty}${SERVICES[l.svc] && SERVICES[l.svc].unit === 'm²' ? ' m²' : ''}</span></div>`).join('')}
+          ${lines.map((l) => `<div class="tk-kv"><span>${escapeHtml(SERVICES[l.svc] ? SERVICES[l.svc].label : l.svc)}</span><span>${l.qty} ${escapeHtml(SERVICES[l.svc]?.unit || '')} · ${money(l.fixedPrice)}</span></div>`).join('')}
         </div>
         <div class="tk-modal-foot tk-created-foot">
           <button type="button" class="tk-btn" data-copy>Copy Quote Link</button>

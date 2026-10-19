@@ -99,10 +99,10 @@ export function measureGeometry(input,options={}) {
   const segment=(a,b)=>mode==='surface'?norm(sub(ecef(a),ecef(b))):distanceMeters(a,b);
   for(let i=1;i<points.length;i++)length+=segment(points[i-1],points[i]);
   perimeter=length+(kind!=='line'?segment(points.at(-1),points[0]):0);
-  const groundArea=kind==='area'?sphereArea(points):undefined;
-  const surface=kind==='area'&&mode==='surface'?surfaceArea(points):undefined;
+  const groundArea=kind!=='line'?sphereArea(points):undefined;
+  const surface=kind!=='line'&&mode==='surface'?surfaceArea(points):undefined;
   const value=kind==='area'?(mode==='surface'?surface:groundArea):kind==='perimeter'?perimeter:length;
   if(!Number.isFinite(value)||value<=1e-6)fail('The measurement is too small or invalid.');
-  return {value,unit:kind==='area'?'m²':'m',groundArea,surfaceArea:surface,length,perimeter,points,
+  return {value,mode,unit:kind==='area'?'m²':'m',groundArea,surfaceArea:surface,length,perimeter,points,
     method:mode==='surface'?'3D vertex surface estimate; trace each flat face separately':'Geodesic ground measurement'};
 }
