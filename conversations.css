@@ -114,3 +114,31 @@
   .cv-compose-actions button{flex:1}
   .cv-compose-actions button[type=submit]{flex-basis:100%;margin:2px 0 0}
 }
+
+/* Quote → email → acceptance → invoice: scoped to the existing detail/composer. */
+.qf-workflow{margin:18px 0;padding:22px;border:1px solid #cbded9;border-radius:14px;background:var(--surface,#fff);border-left:4px solid var(--teal,#138a72)}
+.qf-workflow h3{margin:0 0 8px;font-size:19px;color:var(--ink,#20352f)}
+.qf-workflow p{max-width:780px;margin:0;color:var(--ink-muted,#536760);font-size:13px;line-height:1.6}
+.qf-steps{display:flex;gap:8px;list-style:none;margin:18px 0;padding:0;counter-reset:qf-step;flex-wrap:wrap}
+.qf-steps li{counter-increment:qf-step;padding:8px 12px;background:#f3f6f5;border-radius:8px;font-size:12px;color:#55665f}
+.qf-steps li::before{content:counter(qf-step) '. ';font-weight:700}
+.qf-steps li[aria-current=step]{background:#e1f3ed;color:#08634c;box-shadow:inset 0 0 0 1px #b9ddcf;font-weight:700}
+.qf-steps li.qf-done::before{content:'✓ ';color:#08634c}
+.qf-actions{display:flex;gap:8px;flex-wrap:wrap}
+.cv-document-context{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;border:1px solid var(--cv-border);border-radius:8px;margin:14px 0;background:var(--cv-soft,#f1f7f5);font-size:12px;line-height:1.5}
+.cv-document-context button{flex-shrink:0}
+#doc-preview-foot{flex-wrap:wrap}
+@media(max-width:600px){.qf-workflow{padding:16px}.qf-actions .btn{width:100%}.qf-steps{gap:5px}.qf-steps li{flex:1 1 40%}.cv-document-context{align-items:flex-start;flex-direction:column}#doc-preview-foot .btn{flex:1 1 100%}}
+/* Keep the next action on-screen while the document itself scrolls. */
+#doc-preview-overlay{align-items:center;overflow:hidden}
+#doc-preview-overlay .modal-doc{display:flex;flex-direction:column;max-height:calc(100dvh - 48px)}
+#doc-preview-overlay .modal-head,#doc-preview-foot{flex-shrink:0}
+#doc-preview-body{min-height:0;overflow:auto;flex:1 1 auto}
+@media(max-width:600px){
+  #doc-preview-overlay{align-items:flex-end;padding:12px 0 0}
+  #doc-preview-overlay .modal-doc{max-height:calc(100dvh - 12px)}
+  #doc-preview-foot{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:12px 16px max(12px,env(safe-area-inset-bottom))}
+  #doc-preview-foot>div{display:none}
+  #doc-preview-foot .btn{width:100%;min-width:0;margin:0}
+  #doc-preview-foot .btn:first-child,#doc-preview-foot .btn:last-child{grid-column:1/-1}
+}

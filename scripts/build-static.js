@@ -43,6 +43,7 @@ const assets = [
   "sales-metrics.js",
   "pipeline-model.js",
   "sales-platform.js",
+  "meta-import.js",
   "lead-priority.js",
   "measurement-import.js",
   "quote-workspace.js",

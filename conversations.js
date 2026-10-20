@@ -34,7 +34,7 @@
     template.content.querySelectorAll('p,div,tr,li,h1,h2,h3').forEach(n => n.append('\n'));
     return template.content.textContent.trim() || message.snippet || '';
   }
-  function mount({ root, request, onConnect = () => {}, onCount = () => {}, listQuotes = () => [], buildQuoteAttachment, onSent = () => {} }) {
+  function mount({ root, request, onConnect = () => {}, onCount = () => {}, listQuotes = () => [], buildQuoteAttachment, beforeSend = () => {}, onDocument = () => {}, onSent = () => {} }) {
     if (!root || typeof request !== 'function') throw Error('Conversations requires a root and authenticated request function');
     let messages = [], stars = [], drafts = [], account = null, folder = 'inbox', selected = null;
     let quoteFiles = null, quoteChoices = [], query = '', loaded = false;
@@ -45,6 +45,7 @@
       return searchText.get(m);
     };
     const dateLabel = value => Number.isNaN(new Date(value).getTime()) ? 'Date unavailable' : new Date(value).toLocaleString();
+    let lastDocument = null;
     let composer = null, notice = '', pending = false, destroyed = false, timer, hasMore = false, loading = false;
     let saveQueue = Promise.resolve();
     const api = (path, method = 'GET', body) => request('/api/conversations' + path, { method, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
@@ -93,6 +94,7 @@
       root.classList.add('tk-conversations');
       root.innerHTML = `<header class="cv-head"><div><h2>Conversations</h2><p>${account ? '<span class="cv-connected">Gmail connected</span> ' + esc(account.email_address) : 'Customer emails, replies and saved drafts.'}</p></div><div>${button('Connections', 'connect')}${button(pending ? 'Working…' : 'Sync', 'sync', pending || !account ? 'disabled' : '')}${button('Compose', 'compose', pending ? 'disabled class="cv-primary"' : 'class="cv-primary"')}</div></header>
         <p class="cv-notice" role="status" aria-live="polite">${esc(notice)}</p>
+        ${lastDocument && !composer ? `<div class="cv-document-context"><span>${lastDocument.mode === 'quote' ? 'Next: track acceptance on the opportunity.' : 'Next: track payment on the opportunity.'}</span>${button('Open opportunity', 'document')}</div>` : ''}
         <nav class="cv-folders" aria-label="Mail folders">${folders.map(([id, label]) => button(`${label} <span>${id === 'drafts' ? activeDrafts().length : category(groups, id).length}</span>`, 'folder', `data-folder="${id}" aria-current="${folder === id ? 'page' : 'false'}"`)).join('')}</nav>
         <div class="cv-search-bar"><label>Search messages<input type="search" name="cvQuery" placeholder="Search names, subjects or message text…" value="${esc(query)}" autocomplete="off"></label>${button('Clear search', 'clear-search', query ? '' : 'hidden')}</div>
         <div class="cv-results">${mailboxHtml(groups)}</div>${composer ? composeHtml() : ''}`;
@@ -101,8 +103,8 @@
     }
     function composeHtml() {
       const locked = pending || composer.status !== 'draft';
-      const fileNames = composer.payload.attachments.map((f, i) => `<li><span><b>${esc(f.filename)}</b><small>${f.savedAttachmentId ? 'Saved quote PDF' : f.mimeType === 'application/pdf' ? 'PDF document' : 'File attachment'}</small></span>${button('Remove', 'remove-file', `data-index="${i}" aria-label="Remove ${esc(f.filename)}" ${locked ? 'disabled' : ''}`)}</li>`).join('');
-      return `<section class="cv-composer" aria-label="Email composer"><header><div><h3>${composer.payload.replyToId ? 'Reply' : 'New email'}</h3><p>Your draft saves as you type. Send when you are ready.</p></div>${button(composer.status === 'draft' ? 'Save & close' : 'Close', 'close', pending ? 'disabled' : '')}</header><form data-cv-form>
+      const fileNames = composer.payload.attachments.map((f, i) => `<li><span><b>${esc(f.filename)}</b><small>${f.savedAttachmentId ? 'Saved quote PDF' : f.mimeType === 'application/pdf' ? 'PDF document' : 'File attachment'}</small></span>${button('Remove', 'remove-file', `data-index="${i}" aria-label="Remove ${esc(f.filename)}" ${locked || (composer.payload.document && i === 0) ? 'disabled' : ''}`)}</li>`).join('');
+      return `<section class="cv-composer" aria-label="Email composer"><header><div><h3>${composer.payload.document ? (composer.payload.document.mode === 'quote' ? 'Quote email' : 'Invoice email') : composer.payload.replyToId ? 'Reply' : 'New email'}</h3><p>Your draft saves as you type. Send when you are ready.</p></div>${button(composer.status === 'draft' ? 'Save & close' : 'Close', 'close', pending ? 'disabled' : '')}</header>${composer.payload.document ? `<div class="cv-document-context"><span>PDF attached · Your saved email template is ready to edit. Sending updates this opportunity.</span>${button('Open opportunity', 'document', pending ? 'disabled' : '')}</div>` : ''}<form data-cv-form>
         <label>To<input name="to" type="email" autocomplete="email" placeholder="customer@example.com" required maxlength="2000" value="${esc(composer.payload.to)}" ${locked ? 'disabled' : ''}></label>
         <label>Subject<input name="subject" placeholder="What is this email about?" required maxlength="998" value="${esc(composer.payload.subject)}" ${locked ? 'disabled' : ''}></label>
         <label>Message<textarea name="bodyText" rows="9" placeholder="Write your message…" required maxlength="100000" ${locked ? 'disabled' : ''}>${esc(composer.payload.bodyText)}</textarea></label>
@@ -143,10 +145,12 @@
       if (pending || !account || !composer || composer.status !== 'draft') return;
       clearTimeout(timer); pending = true; notice = ''; draw();
       try {
+        await beforeSend(composer.payload);
         await persist();
         const result = await api('/send', 'POST', { draftId: composer.id });
         if (!result.ok || !result.id) throw Error('Gmail did not confirm this send. Your draft is preserved; check Sent before trying again.');
         const sentPayload = composer.payload;
+        lastDocument = sentPayload.document || null;
         composer = null;
         notice = result.warning || 'Email sent.';
         try { await onSent(sentPayload, result); } catch { notice += ' Email was sent, but the opportunity could not be updated. Do not resend.'; }
@@ -167,6 +171,7 @@
       try {
         if (name === 'connect') return onConnect();
         if (name === 'compose') return await startCompose();
+        if (name === 'document') { const doc = composer?.payload.document || lastDocument; await persist(); if(doc)await onDocument(doc); return; }
         if (name === 'clear-search') { query = ''; const search = root.querySelector('[name=cvQuery]'); search.value = ''; search.focus(); }
         if (name === 'back') selected = null;
         if (name === 'inbox' || name === 'folder') { folder = name === 'inbox' ? 'inbox' : b.dataset.folder; selected = null; await persist(); draw(); }
@@ -184,7 +189,7 @@
         if (name === 'save' || name === 'close') { clearTimeout(timer); await persist(); notice = composer.status === 'draft' ? 'Draft saved.' : 'Draft kept. Check Sent or sync to verify delivery.'; if (name === 'close') composer = null; draw(); }
         if (name === 'discard') { clearTimeout(timer); await saveQueue.catch(() => {}); await api('/drafts/' + composer.id, 'DELETE'); drafts = drafts.filter(d => d.id !== composer.id); composer = null; draw(); }
         if (name === 'draft') { await persist(); const d = drafts.find(d => d.id === b.dataset.id); quoteFiles = null; quoteChoices = []; composer = { ...d, payload: JSON.parse(JSON.stringify(d.payload)), dirty: false }; draw(); root.querySelector('[name=to]')?.focus(); }
-        if (name === 'remove-file') { composer.payload.attachments.splice(Number(b.dataset.index), 1); composer.dirty = true; await persist(); draw(); }
+        if (name === 'remove-file') { if(composer.payload.document && Number(b.dataset.index) === 0) return; composer.payload.attachments.splice(Number(b.dataset.index), 1); composer.dirty = true; await persist(); draw(); }
         if (name === 'quotes') {
           if (quoteFiles) { quoteFiles = null; return; }
           pending = true; draw();
@@ -269,7 +274,7 @@
   // Host adapter: capture the business/user at mount time and reject late
   // requests after a login or business switch. Call render.reset() from the
   // host's existing business/auth cleanup before replacing session state.
-  function createRenderer({ root, getContext, onConnect, onCount, listQuotes, buildQuoteAttachment, onSent, fetchImpl = global.fetch.bind(global) }) {
+  function createRenderer({ root, getContext, onConnect, onCount, listQuotes, buildQuoteAttachment, beforeSend, onDocument, onSent, fetchImpl = global.fetch.bind(global) }) {
     let view = null, activeKey = '', epoch = 0;
     function reset() { epoch++; view?.destroy(); view = null; activeKey = ''; }
     async function render() {
@@ -284,7 +289,7 @@
           const now = getContext();
           return now.client === context.client && now.businessId === context.businessId && now.userId === context.userId && activeKey === key && epoch === generation;
         };
-        view = mount({ root, onConnect, onCount, listQuotes, buildQuoteAttachment, onSent, request: async (path, options = {}) => {
+        view = mount({ root, onConnect, onCount, listQuotes, buildQuoteAttachment, beforeSend, onDocument, onSent, request: async (path, options = {}) => {
           if (!sameContext()) throw Error('Your session changed. Reopen Conversations.');
           if (!context.backendUrl) throw Error('Connect your TurnKey backend first.');
           const { data, error } = await context.client.auth.getSession();

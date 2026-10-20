@@ -128,8 +128,9 @@ window.TK_PRICING = (function(){
   // PDF, invoice and public quote page — one formula, so the split always
   // adds back up to the same total shown everywhere else.
   function gstFromInclusive(total){
-    const gst=Math.round((total||0)-(total||0)/1.15);
-    return {exGst:(total||0)-gst, gst};
+    const amount=Number.isFinite(Number(total))?Math.round(Number(total)*100)/100:0;
+    const gst=Math.round((amount-amount/1.15)*100)/100;
+    return {exGst:Math.round((amount-gst)*100)/100, gst};
   }
   // Applies a business's saved rate overrides (Settings → Pricing) onto the
   // shared table — call once per page load after fetching pricing_config.

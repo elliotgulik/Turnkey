@@ -9,7 +9,7 @@
 <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
 <script src="config.js?v=20261017a"></script>
 <script src="session-flow.js?v=20261019a"></script>
-<script src="pricing-engine.js?v=20261017a"></script>
+<script src="pricing-engine.js?v=20261021a"></script>
 <script src="cost-engine.js?v=20261018f"></script>
 <script src="sales-engine.js?v=20261017a"></script>
 <script src="map-snapshot.js?v=20261017a"></script>
@@ -1377,7 +1377,7 @@
 </style>
 <link rel="stylesheet" href="sales-platform.css?v=20261018c">
 <link rel="stylesheet" href="quote-workspace.css?v=20261017a">
-<link rel="stylesheet" href="conversations.css?v=20261019a">
+<link rel="stylesheet" href="conversations.css?v=20261020a">
 <link rel="stylesheet" href="marketing-analytics.css?v=20261017a">
 <link rel="stylesheet" href="sales-experience.css?v=20261019a">
 <link rel="stylesheet" href="settings-experience.css?v=20261019a">
@@ -1643,7 +1643,7 @@
 </div></div>
 
 <div class="overlay" id="doc-preview-overlay"><div class="modal modal-doc">
-  <div class="modal-head"><div><h3>Preview</h3><p>This is exactly what the customer receives.</p></div><button class="x" aria-label="Close" onclick="closeDocPreview()">×</button></div>
+  <div class="modal-head"><div><h3 id="doc-preview-title">Document preview</h3><p id="doc-preview-help">Review the itemised document, then prepare your email in TurnKey.</p></div><button class="x" aria-label="Close" onclick="closeDocPreview()">×</button></div>
   <div class="modal-body doc-scroll" id="doc-preview-body"></div>
   <div class="modal-foot" id="doc-preview-foot"></div>
 </div></div>
@@ -4430,6 +4430,7 @@ function confirmQuoteSend(){
   const lines=draftLines.filter(l=>(parseFloat(l.qty)||0)>0);
   if(!lines.length){toast('Add at least one service with a quantity');return}
   const r=records.find(x=>x.id===activeLeadId);
+  if(!r||isWon(r)||r.quoteStatus==='accepted'){toast('Approved quote is locked.');return;}
   // Capture the pre-edit amount so a re-opened, already-sent quote whose
   // price gets changed leaves an old->new audit trail — the amount alone
   // isn't self-explanatory in the timeline otherwise. Only sent quotes
@@ -4708,6 +4709,16 @@ function hexToRgb(hex){
   return m?{r:parseInt(m[0],16),g:parseInt(m[1],16),b:parseInt(m[2],16)}:{r:19,g:138,b:114};
 }
 
+// Public document amounts: use frozen line prices and explain any difference
+// between the itemised lines and the agreed total (access, discount, rounding).
+function docMoney(value){return new Intl.NumberFormat('en-NZ',{style:'currency',currency:'NZD'}).format(Number(value)||0);}
+function docFinancials(r){
+  const cents=n=>Math.round((Number(n)||0)*100)/100;
+  const lines=(r.services||[]).map(l=>cents(l.priceSnapshot??TK_PRICING.lineTotal(l)));
+  const total=cents(r.total),taxed=r.gstRegistered!==false;
+  const paid=r.stage==='paid'?total:cents((r.payments||[]).reduce((sum,p)=>sum+(Number(p.amount)||0),0));
+  return {lines,taxed,gst:taxed?cents(TK_PRICING.gstFromInclusive(total).gst):0,adjustment:cents(total-lines.reduce((a,b)=>a+b,0)),paid,balance:Math.max(0,cents(total-paid))};
+}
 function buildDocPDF(mode,r,outputType){
   const jsPDF=window.jspdf.jsPDF;
   const doc=new jsPDF({unit:'mm',format:'a4'});
@@ -4716,7 +4727,7 @@ function buildDocPDF(mode,r,outputType){
   const ac=hexToRgb(t.accent||'#138a72');
   const today=new Date().toLocaleDateString('en-NZ',{day:'numeric',month:'long',year:'numeric'});
   const num=docNumber(mode,r);
-  const gst=TK_PRICING.gstFromInclusive(r.total).gst;
+  const financials=docFinancials(r),gst=financials.gst;
   const bizName=docBizName();
 
   // header bar
@@ -4746,7 +4757,7 @@ function buildDocPDF(mode,r,outputType){
   doc.text(t.tagline||'',ML+17,16);
   // doc type + number
   doc.setFont('helvetica','bold');doc.setFontSize(14);
-  doc.text(mode==='quote'?'QUOTE':'TAX INVOICE',MR,11,{align:'right'});
+  doc.text(mode==='quote'?'QUOTE':financials.taxed?'TAX INVOICE':'INVOICE',MR,11,{align:'right'});
   doc.setFont('helvetica','normal');doc.setFontSize(8);
   doc.text(num+'   \u00b7   '+today,MR,16,{align:'right'});
 
@@ -4788,28 +4799,31 @@ function buildDocPDF(mode,r,outputType){
 
   // service rows
   doc.setTextColor(30,40,50);
-  r.services.forEach(function(s){
-    var v=SERVICES[s.svc];
+  r.services.forEach(function(s,index){
+    if(y>245){doc.addPage();y=24;}
+    var v=SERVICES[s.svc]||{label:s.svc||'Service',unit:''};
     var rate=TK_PRICING.effectiveRate(s);
-    var lineAmt=Math.round(TK_PRICING.lineTotal(s));
+    var lineAmt=financials.lines[index];
     var note=lineVariantNote(s);
     doc.setFont('helvetica','bold');doc.setFontSize(9.5);
     doc.text(v.label,ML,y);
-    doc.text(money(lineAmt),MR,y,{align:'right'});
+    doc.text(docMoney(lineAmt),MR,y,{align:'right'});
     y+=4.5;
     doc.setFont('helvetica','normal');doc.setFontSize(8);
     doc.setTextColor(100,110,120);
-    var sub=s.fixedPrice!=null?(s.qty+' '+v.unit+' \u00b7 fixed price'):(s.qty+' '+v.unit+' \u00d7 $'+rate.toFixed(2)+'/'+v.unit+(note?' \u00b7 '+note:''));
+    var sub=s.priceSnapshot!=null||s.fixedPrice!=null?(s.qty+' '+v.unit+' \u00b7 agreed price'):(s.qty+' '+v.unit+' \u00d7 $'+rate.toFixed(2)+'/'+v.unit+(note?' \u00b7 '+note:''));
     doc.text(sub,ML,y);
     doc.setTextColor(30,40,50);
     y+=7;
   });
 
   // totals
+  if(y>225){doc.addPage();y=24;}
+  if(financials.adjustment){doc.setFont('helvetica','normal');doc.setFontSize(9);doc.text('Quote adjustment',ML,y);doc.text(docMoney(financials.adjustment),MR,y,{align:'right'});y+=7;}
   y+=2;
   doc.setLineWidth(0.2);doc.setDrawColor(210,215,220);doc.line(ML,y,MR,y);y+=5;
   var totCol=MR-55;
-  [[('Subtotal (excl. GST)'),money(r.total-gst)],['GST 15%',money(gst)]].forEach(function(row){
+  (financials.taxed?[[('Subtotal (excl. GST)'),docMoney(r.total-gst)],['GST 15%',docMoney(gst)]]:[['GST','Not charged']]).concat(mode==='invoice'&&financials.paid?[['Invoice total',docMoney(r.total)],['Payments received',docMoney(financials.paid)]]:[]).forEach(function(row){
     doc.setFont('helvetica','normal');doc.setFontSize(8.5);doc.setTextColor(80,90,100);
     doc.text(row[0],totCol,y);doc.text(row[1],MR,y,{align:'right'});y+=5;
   });
@@ -4817,7 +4831,7 @@ function buildDocPDF(mode,r,outputType){
   doc.setDrawColor(ac.r,ac.g,ac.b);doc.setLineWidth(0.8);doc.line(totCol,y,MR,y);y+=5;
   doc.setFont('helvetica','bold');doc.setFontSize(12);doc.setTextColor(30,40,50);
   doc.text(mode==='quote'?'Quote total':'Amount due',totCol,y);
-  doc.text(money(r.total),MR,y,{align:'right'});
+  doc.text(docMoney(mode==='invoice'?financials.balance:r.total),MR,y,{align:'right'});
   y+=12;
 
   // PNG includes measured outlines and their quantity legend. A labelled
@@ -4905,67 +4919,44 @@ function docMapSectionHtml(r){
 }
 
 function renderDocHTML(mode,r){
-  const t=docTemplate;
+  const t=docTemplate,f=docFinancials(r),esc=escapeHtmlSafe;
+  const accent=/^#[0-9a-f]{6}$/i.test(t.accent||'')?t.accent:'#138a72';
   const today=new Date().toLocaleDateString('en-NZ',{day:'numeric',month:'short',year:'numeric'});
-  const rows=r.services.map(s=>{
-    const v=SERVICES[s.svc];
-    const rate=TK_PRICING.effectiveRate(s);
-    const line=Math.round(TK_PRICING.lineTotal(s));
-    const note=lineVariantNote(s);
-    return `<tr><td><div class="di-name">${v.label}</div><div class="di-sub">${s.fixedPrice!=null?'fixed price':s.qty+' '+v.unit+' @ $'+rate.toFixed(2)+'/'+v.unit+(note?' · '+note:'')}</div></td><td class="di-amt">${money(line)}</td></tr>`;
+  const rows=(r.services||[]).map((s,i)=>{
+    const v=SERVICES[s.svc]||{label:s.svc||'Service',unit:''};
+    const note=lineVariantNote(s),fixed=s.priceSnapshot!=null||s.fixedPrice!=null;
+    return `<tr><td><div class="di-name">${esc(v.label)}</div><div class="di-sub">${esc(s.qty+' '+v.unit+(fixed?' · agreed price':' @ '+docMoney(TK_PRICING.effectiveRate(s))+'/'+v.unit)+(note?' · '+note:''))}</div></td><td class="di-amt">${docMoney(f.lines[i])}</td></tr>`;
   }).join('');
-  const subtotal=r.total;
-  const gst=TK_PRICING.gstFromInclusive(subtotal).gst;
   const terms=mode==='quote'?t.quoteTerms:t.invoiceTerms;
-  const title=mode==='quote'?'QUOTE':'TAX INVOICE';
-  // Graceful fallbacks — a business that hasn't set up its profile/template
-  // yet still gets a clean-looking document, never a literal "undefined" or
-  // a stray " · " with nothing on either side.
-  const bizName=docBizName();
-  const initials=(t.business||'').trim()?t.business.trim().split(/\s+/).map(w=>w[0]).slice(0,2).join('').toUpperCase():'TK';
-  const fromContact=[t.phone,t.email].filter(Boolean).join(' · ');
-  const toContact=[r.phone,r.email].filter(Boolean).join(' · ');
-  return `<div class="doc" style="--doc-accent:${t.accent}">
-    <div class="doc-top">
-      <div class="doc-brand">
-        <div class="doc-logo" style="background:${t.accent}">${currentBusinessProfile&&currentBusinessProfile.logo_url?`<img src="${currentBusinessProfile.logo_url}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:12px">`:initials}</div>
-        <div><div class="doc-biz">${bizName}</div>${t.tagline?`<div class="doc-tag">${t.tagline}</div>`:''}</div>
-      </div>
-      <div class="doc-meta">
-        <div class="doc-title">${title}</div>
-        <div class="doc-num">${docNumber(mode,r)}</div>
-        <div class="doc-date">${today}</div>
-        ${mode==='quote'&&r.quoteSentAt?`<div class="doc-date">Submitted ${TK_FORMAT.submitted(r.quoteSentAt).full}</div>`:''}
-      </div>
-    </div>
-    <div class="doc-parties">
-      <div><div class="dp-label">From</div><div class="dp-name">${bizName}</div>${fromContact?`<div class="dp-line">${fromContact}</div>`:''}${t.gstNo?`<div class="dp-line">GST ${t.gstNo}</div>`:''}</div>
-      <div><div class="dp-label">${mode==='quote'?'Prepared for':'Billed to'}</div><div class="dp-name">${r.name}</div>${TK_FORMAT.address(r)?`<div class="dp-line">${TK_FORMAT.address(r)}</div>`:''}${toContact?`<div class="dp-line">${toContact}</div>`:''}</div>
-    </div>
+  const title=mode==='quote'?'QUOTE':f.taxed?'TAX INVOICE':'INVOICE';
+  const bizName=docBizName(),initials=bizName.split(/\s+/).map(w=>w[0]).slice(0,2).join('').toUpperCase();
+  const fromContact=[t.phone,t.email].filter(Boolean).join(' · '),toContact=[r.phone,r.email].filter(Boolean).join(' · ');
+  const logo=currentBusinessProfile?.logo_url;
+  return `<div class="doc" style="--doc-accent:${accent}">
+    <div class="doc-top"><div class="doc-brand"><div class="doc-logo" style="background:${accent}">${logo&&/^https?:\/\//i.test(logo)?`<img src="${esc(logo)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:12px">`:esc(initials)}</div><div><div class="doc-biz">${esc(bizName)}</div>${t.tagline?`<div class="doc-tag">${esc(t.tagline)}</div>`:''}</div></div>
+      <div class="doc-meta"><div class="doc-title">${title}</div><div class="doc-num">${esc(docNumber(mode,r))}</div><div class="doc-date">${today}</div>${mode==='quote'&&r.quoteSentAt?`<div class="doc-date">Submitted ${esc(TK_FORMAT.submitted(r.quoteSentAt).full)}</div>`:''}${mode==='invoice'&&r.dueDate?`<div class="doc-date">Due ${esc(r.dueDate)}</div>`:''}</div></div>
+    <div class="doc-parties"><div><div class="dp-label">From</div><div class="dp-name">${esc(bizName)}</div>${fromContact?`<div class="dp-line">${esc(fromContact)}</div>`:''}${f.taxed&&t.gstNo?`<div class="dp-line">GST ${esc(t.gstNo)}</div>`:''}</div>
+      <div><div class="dp-label">${mode==='quote'?'Prepared for':'Billed to'}</div><div class="dp-name">${esc(r.name||'Customer')}</div><div class="dp-line">${esc(TK_FORMAT.address(r)||'')}</div>${toContact?`<div class="dp-line">${esc(toContact)}</div>`:''}</div></div>
     ${docMapSectionHtml(r)}
-    <table class="doc-table"><thead><tr><th>Service</th><th class="r">Amount</th></tr></thead><tbody>${rows}</tbody></table>
-    <div class="doc-totals">
-      <div class="dt-row"><span>Subtotal (excl. GST)</span><span>${money(subtotal-gst)}</span></div>
-      <div class="dt-row"><span>GST 15%</span><span>${money(gst)}</span></div>
-      <div class="dt-row dt-grand"><span>${mode==='quote'?'Quote total':'Amount due'}</span><span>${money(subtotal)}</span></div>
-    </div>
-    <div class="doc-terms"><div class="dt-h">${mode==='quote'?'Terms':'Payment'}</div><p>${terms}</p></div>
-    <div class="doc-foot">${t.footer}</div>
-  </div>`;
+    <table class="doc-table"><thead><tr><th>Service</th><th class="r">Amount</th></tr></thead><tbody>${rows}${f.adjustment?`<tr><td>Quote adjustment</td><td class="di-amt">${docMoney(f.adjustment)}</td></tr>`:''}</tbody></table>
+    <div class="doc-totals">${f.taxed?`<div class="dt-row"><span>Subtotal (excl. GST)</span><span>${docMoney(r.total-f.gst)}</span></div><div class="dt-row"><span>GST 15%</span><span>${docMoney(f.gst)}</span></div>`:'<div class="dt-row"><span>GST</span><span>Not charged</span></div>'}
+      ${mode==='invoice'&&f.paid?`<div class="dt-row"><span>Invoice total</span><span>${docMoney(r.total)}</span></div><div class="dt-row"><span>Payments received</span><span>${docMoney(f.paid)}</span></div>`:''}
+      <div class="dt-row dt-grand"><span>${mode==='quote'?'Quote total':'Amount due'}</span><span>${docMoney(mode==='invoice'?f.balance:r.total)}</span></div></div>
+    <div class="doc-terms"><div class="dt-h">${mode==='quote'?'Terms':'Payment'}</div><p style="white-space:pre-wrap">${esc(terms||'')}</p></div><div class="doc-foot">${esc(t.footer||'')}</div></div>`;
 }
 function openDocPreview(mode,id){
-  docPreview={mode,recordId:id};
   const r=records.find(x=>x.id===id);
+  if(!['quote','invoice'].includes(mode)||!r||!r.services?.length||!(r.total>0)){toast('Save a quote with services and a total first.');return;}
+  if(!businessStateReady||recordBusinesses.get(r)!==currentBusinessId){toast('Wait for your business to finish loading.');return;}
+  docPreview={mode,recordId:id};
+  document.getElementById('doc-preview-title').textContent=(mode==='quote'?'Quote':'Invoice')+' preview · '+docNumber(mode,r);
+  const invoiceReady=mode!=='invoice'||['completed','paid'].includes(r.stage);
+  document.getElementById('doc-preview-help').textContent=invoiceReady?'1. Review document & template → 2. Compose email → 3. Send when ready': 'Invoice draft from the accepted quote. Complete the work before issuing this invoice.';
   document.getElementById('doc-preview-body').innerHTML=renderDocHTML(mode,r);
-  const foot=document.getElementById('doc-preview-foot');
-  const sendFn=mode==='quote'?'sendQuoteDoc()':'sendInvoiceDoc()';
-  const sendLabel=mode==='quote'?'Send quote to '+r.name.split(' ')[0]:'Send invoice';
-  foot.innerHTML=`
-    <button class="btn ghost" onclick="openTemplateEditor()">✎ Edit template</button>
-    <div style="flex:1"></div>
-    ${mode==='invoice'&&r.stage!=='paid'?`<button class="btn ghost" onclick="openPaymentModal(${id})">${(r.payments&&r.payments.length)?'Record another payment':'Record payment'}</button>`:''}
-    <button class="btn ghost" onclick="closeDocPreview()">Close</button>
-    <button class="btn primary" onclick="${sendFn}">${sendLabel}</button>`;
+  document.getElementById('doc-preview-foot').innerHTML=`
+    <button class="btn ghost" onclick="openTemplateEditor()">Edit document &amp; email templates</button>
+    <div style="flex:1"></div><button class="btn ghost" onclick="closeDocPreview()">Back</button>
+    <button class="btn primary" ${invoiceReady?'':'disabled'} onclick="${mode==='quote'?'sendQuoteDoc()':'sendInvoiceDoc()'}">Compose ${mode} email →</button>`;
   openModal('doc-preview-overlay');
 }
 function closeDocPreview(){closeModal('doc-preview-overlay');}
@@ -6955,7 +6946,46 @@ function renderJobsFlow(){
     </div>`;
 }
 // workflow transition helpers
-async function markWon(id){const r=records.find(x=>x.id===id);if(!r)return;if(!sb||!currentBusinessId||!r.quoteId||!r.jobId||!(r.total>0)){toast('Save a sent quote on this opportunity before marking it won.');return;}try{await syncRecordToSupabase(r);}catch(e){toast('Could not save quote: '+e.message);return;}if(isWon(r))return;if(!r.services.length){toast('Build a quote first');openQuoteModal(id);return;}r.stage='won';r.clientResponded=true;if(!r.wonAt)r.wonAt=Date.now();render();renderAll();openSchedule(id);notifyOwner('quote_accepted','Quote accepted — '+r.name,r.name+' accepted their quote for '+money(r.total||0)+'. Time to book it in.');triggerPush({type:'quote_accepted',title:'Quote approved',message:r.name+' approved your quote',url:'/index.html?open=pipeline'});}
+const acceptanceSaves=new WeakMap();
+async function markWon(id){
+  const r=records.find(x=>x.id===id);if(!r)return false;
+  if(acceptanceSaves.has(r))return acceptanceSaves.get(r);
+  if(!sb||!businessStateReady||recordBusinesses.get(r)!==currentBusinessId||!canEditJobStatus(r)){toast('You cannot accept this quote in the current business.');return false;}
+  if(!r.quoteId||!r.jobId||!(r.total>0)||!r.services?.length){toast('Save a quote with services and a total before recording acceptance.');return false;}
+  if(isLost(r)){toast('This opportunity is cancelled. Review it before accepting a quote.');return false;}
+  const biz=currentBusinessId,version=businessSessionVersion;
+  const current=()=>biz===currentBusinessId&&version===businessSessionVersion&&recordBusinesses.get(r)===biz&&records.includes(r);
+  const pending=(async()=>{
+    let previous;
+    try{
+      // Save the commercial snapshot first. The existing quote guard creates
+      // the immutable approval version when the second save accepts it.
+      await syncRecordToSupabase(r);
+      if(!current())return false;
+      if(isWon(r)){render();renderAll();return true;}
+      previous={stage:r.stage,wonAt:r.wonAt,clientResponded:r.clientResponded,nextFollowUpAt:r.nextFollowUpAt,salesHistory:r.salesHistory};
+      r.stage='won';r.wonAt=r.wonAt||Date.now();r.clientResponded=true;r.nextFollowUpAt=null;
+      r.salesHistory=[...(r.salesHistory||[]),{at:r.wonAt,to:'won',label:'Quote accepted'}];
+      await syncRecordToSupabase(r);
+      if(!current())return false;
+      render();renderAll();
+      logActivity(r.customerId,r.jobId,'quote_accepted','Staff recorded customer acceptance of '+docNumber('quote',r)+' for '+money(r.total));
+      toast('Quote accepted. Pipeline and sales updated.');
+      return true;
+    }catch(e){
+      if(current()){
+        if(previous)Object.assign(r,previous);
+        // A network failure may follow a committed approval; reload its
+        // authoritative state instead of claiming a successful local win.
+        try{await loadFromSupabase();}catch(_){}
+        if(current()){render();renderAll();toast('Could not confirm acceptance. Reload this opportunity before retrying: '+e.message);}
+      }
+      return false;
+    }
+  })();
+  acceptanceSaves.set(r,pending);
+  try{return await pending;}finally{acceptanceSaves.delete(r);}
+}
 function markPaid(id,method){const r=records.find(x=>x.id===id);r.stage='paid';r.paidAt=Date.now();r.paymentStatus='paid';r.paymentMethod=method||r.paymentMethod||'Not specified';render();renderAll();if(document.getElementById('view-jobsflow').classList.contains('active'))renderJobsFlow();toast(`${r.name} marked paid ✓`);sendLifecycleEmail(r,'review_request');notifyOwner('payment_received','Payment received — '+money(r.total||0),r.name+' paid '+money(r.total||0)+' ('+(method||'method not specified')+').');triggerPush({type:'payment_received',title:'Payment received',message:'Payment received from '+r.name,url:'/index.html?open=pipeline'});}
 
 /* ===== Payments ledger — supports partial/multiple payments per job.
@@ -7249,9 +7279,10 @@ function manualStatusOptions(r){
   const current=jobStatusKeyOf(r);
   return Object.keys(MANUAL_STATUS_MAP).map(k=>`<option value="${k}" ${current===k?'selected':''}>${JOB_STATUS_META[k].label}</option>`).join('');
 }
-function setManualStatus(id,key){
+async function setManualStatus(id,key){
   const r=records.find(x=>x.id===id);if(!r)return;
   if(!canEditJobStatus(r)){toast('You can only change the status of your own assigned jobs');return;}
+  if(key==='quote_accepted'){if(await markWon(id))openDetail(id);return;}
   const target=MANUAL_STATUS_MAP[key];
   if(!target){toast('That status follows automatically — nothing to set manually');return;}
   r.stage=target.stage;r.jobStatus=target.jobStatus;
@@ -8504,7 +8535,7 @@ function renderMetaConnectionCard(){
   const m=metaStatus,ready=m.health==='ready';
   return `<div class="conn-card ${ready?'live':''}">
     <div class="conn-top"><span class="conn-name">Meta — Facebook &amp; Instagram lead ads</span><span class="conn-badge ${ready?'on':'off'}">${ready?'● LEAD NOTIFICATIONS ENABLED':m.connected?'CHECK DELIVERY':'not connected'}</span></div>
-    ${m.connected?`<p>Page ${escapeHtmlSafe(m.pageId)}${m.pageName?' · '+escapeHtmlSafe(m.pageName):''}</p><p>${escapeHtmlSafe(m.message||'A credential is saved. Check it with Meta to verify access and lead notifications.')}</p><p>${leadReceiptLabel(m)}</p><div class="quote-action-row"><button class="btn ghost sm" onclick="checkMetaDelivery(false,this)">Check connection</button><button class="btn accent sm" onclick="checkMetaDelivery(true,this)">Enable lead delivery</button><button class="btn ghost sm" onclick="disconnectMeta()">Disconnect</button></div>`:''}
+    ${m.connected?`<p>Page ${escapeHtmlSafe(m.pageId)}${m.pageName?' · '+escapeHtmlSafe(m.pageName):''}</p><p>${escapeHtmlSafe(m.message||'A credential is saved. Check it with Meta to verify access and lead notifications.')}</p><p>${leadReceiptLabel(m)}</p><div class="quote-action-row"><button class="btn ghost sm" onclick="checkMetaDelivery(false,this)">Check connection</button><button class="btn accent sm" onclick="checkMetaDelivery(true,this)">Enable lead delivery</button><button class="btn accent sm" onclick="TK_META_IMPORT.start()">Import existing leads</button><button class="btn ghost sm" onclick="disconnectMeta()">Disconnect</button></div><p id="meta-import-progress" role="status"></p>`:''}
     <details ${!m.connected||m.health==='reconnect'||m.health==='permissions'?'open':''}><summary>${m.connected?'Reconnect Page':'Connect your Page'}</summary>
       <p>Use a Page Access Token for this Page with leads_retrieval and pages_manage_metadata. In Meta, enable the app’s Page leadgen webhook and grant it Leads Access for this Page. App review or access restrictions may still limit real ad leads.</p>
       <div class="conn-keyrow"><input id="conn-meta-pageid" aria-label="Meta Page ID" placeholder="Page ID" value="${escapeHtmlSafe(m.pageId||'')}"></div>
@@ -10384,7 +10415,7 @@ async function persistRecordToSupabase(r){
     if(error)throw error;
     if(!job||r.jobId&&r.jobId!==job.id)throw new Error('Approved quote needs its original saved opportunity. Reload before saving.');
     const editable={};
-    for(const key of ['salesNotes','nextFollowUpAt','assignedSalespersonId','salespersonName'])if(Object.hasOwn(r,key))editable[key]=r[key];
+    for(const key of ['salesNotes','nextFollowUpAt','assignedSalespersonId','salespersonName','invoiceSent'])if(Object.hasOwn(r,key))editable[key]=r[key];
     // Restore the complete server snapshot, including removed commercial fields.
     const excluded=['id','customerId','jobId','invoiceId','quoteId','assignedStaffId','stage','scheduledDate','scheduledDateISO','name','email','phone','address','suburb','notes','source','paymentStatus','paymentMethod','dueDate','_mapSnapshotDataUrl','_mapSnapshotWidth','_mapSnapshotHeight','_mapSnapshotPromise'];
     for(const key of Object.keys(r))if(!excluded.includes(key))delete r[key];
@@ -10408,7 +10439,7 @@ async function persistRecordToSupabase(r){
   // flow (handoff's reviewLegacy path), never a silently fabricated quote.
   r.legacyQuoteMissing=!!(isWon(r)&&!r.quoteId&&r.jobId);
   if(isWon(r)&&!r.jobId)throw new Error('Save a sent quote on this opportunity before marking it won.');
-  if(!acceptedDetails&&r.total>0&&r.stage!=='new'&&!r.legacyQuoteMissing){
+  if(!acceptedDetails&&r.total>0&&r.services?.length&&!r.legacyQuoteMissing){
     const quotePayload={business_id:biz,lead_id:r.customerId,amount:r.total,status:isWon(r)?'accepted':isLost(r)?'declined':r.quoteSentAt?'sent':'draft'};
     if(r.quoteId){
       // The predicate closes the read/update race with public acceptance.
@@ -10706,7 +10737,7 @@ function ingestQuoteRequest(payload){
   if(!payload) return;
   // Dedup: reject if we already have a record with same submittedAt timestamp
   const sid=payload.submittedAt||null;
-  if(sid&&records.some(r=>r._submittedAt===sid))return;
+  if(sid&&!payload.external_id&&records.some(r=>r._submittedAt===sid))return;
   const c=payload.customer||{};
   // map the customer's mapped areas → CRM service lines (carry storeys through)
   const services=(payload.areas||[]).map(a=>({
@@ -10777,6 +10808,8 @@ function ingestQuoteRequest(payload){
   // "Send" — sid is the same value, but that field only exists for the
   // dedup check above and isn't meant to be read as a display timestamp.
   rec.requestSubmittedAt=sid;
+  if(payload.historicalImport&&sid)rec.createdAt=sid;
+  rec.historicalImport=!!payload.historicalImport;
   if(sid)rec._submittedAt=sid;
   records.unshift(rec);
   render();renderAll();
@@ -10793,11 +10826,11 @@ function ingestQuoteRequest(payload){
   // synced to Supabase), so this activity-log entry rides along after that
   // sync instead of blocking the rest of ingest on it.
   ensureRecordSynced(rec).then(()=>logActivity(rec.customerId,rec.jobId||null,'lead_created','New lead from '+rec.name+(rec.suburb?' — '+rec.suburb:'')));
-  sendLifecycleEmail(rec,'new_lead');
+  if(!payload.historicalImport)sendLifecycleEmail(rec,'new_lead');
   const notifyDetail=rec.selfPriced
     ?'('+services.length+' area'+(services.length!==1?'s':'')+', '+money(total)+' self-estimated'+(payload.windowsRequested?' + windows requested':'')+').'
     :(payload.windowsRequested?'(windows quote — no price yet, prepare one manually).':'(quick quote request — no price yet, prepare one manually).');
-  notifyOwner('new_lead','New lead — '+rec.name,rec.name+' requested a quote for '+(rec.suburb||rec.address||'an address you’ll want to check')+' '+notifyDetail);
+  if(!payload.historicalImport)notifyOwner('new_lead','New lead — '+rec.name,rec.name+' requested a quote for '+(rec.suburb||rec.address||'an address you’ll want to check')+' '+notifyDetail);
 }
 
 /* ===== Upload photos that arrived with a lead (public booking page can't
@@ -10838,14 +10871,15 @@ async function retryPendingPhotos(){
 <script src="sales-metrics.js?v=20261017a"></script>
 <script src="pipeline-model.js?v=20261018e"></script>
 <script src="lead-priority.js?v=20261017a"></script>
+<script src="meta-import.js?v=20261020a"></script>
 <script src="sales-platform.js?v=20261019b"></script>
 <script type="module" src="measurement-import.js?v=20261017a"></script>
 <script src="quote-workspace.js?v=20261017a"></script>
-<script src="conversations.js?v=20261019a"></script>
-<script src="conversations-bridge.js?v=20261018e"></script>
+<script src="conversations.js?v=20261020a"></script>
+<script src="conversations-bridge.js?v=20261020a"></script>
 <script src="servicem8-import.js?v=20261017a"></script>
 <script src="marketing-analytics.js?v=20261017a"></script>
-<footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a> · <span id="tk-app-version">v20261019d</span></footer>
+<footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a> · <span id="tk-app-version">v20261021a</span></footer>
 <script src="extension-quote-link.js?v=20261019c"></script>
 <script src="job-workspace.js?v=20261018"></script>
 <script src="job-calendar.js?v=20261018d"></script>

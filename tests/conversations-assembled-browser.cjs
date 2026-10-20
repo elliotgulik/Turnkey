@@ -74,6 +74,19 @@ const fs = require('node:fs'), path = require('node:path'), assert = require('no
     await page.waitForFunction(() => document.querySelector('.cv-composer [name=to]')?.value==='gmail@example.com');
     assert.equal(await page.locator('a[href^="mailto:"], a[href*="mail.google.com"]').count(),0);
     assert.equal(await page.evaluate(() => assembledFixture.opens.length),0);assert.equal(sends,0);assert.deepEqual(escapes,[]);assert.equal(context.pages().length,1);
+    await page.evaluate(() => openDetail(701));
+    await page.locator('.qf-workflow').waitFor();
+    assert.equal(await page.locator('[data-qf-action=quote]').count(),1);
+    await page.locator('[data-qf-action=quote]').click();
+    await page.locator('#doc-preview-overlay.open').waitFor();
+    assert.match(await page.locator('#doc-preview-body').innerText(), /Driveway/);
+    assert.match(await page.locator('#doc-preview-foot').innerText(), /Compose/i);
+    await page.screenshot({path:'/private/tmp/turnkey-quote-workflow-desktop.png',fullPage:false});
+    await page.setViewportSize({width:390,height:844});
+    await page.waitForTimeout(350);
+    await page.screenshot({path:'/private/tmp/turnkey-quote-workflow-mobile.png',fullPage:false});
+    assert.ok(await page.locator('#doc-preview-foot').evaluate(el=>el.getBoundingClientRect().bottom<=window.innerHeight+1));
+    assert.ok(await page.locator('#doc-preview-overlay').evaluate(el=>el.getBoundingClientRect().right<=window.innerWidth+1));
     assert.deepEqual(errors,[]);
     console.log('Assembled Conversations passed: real index/module order, real quote PDF helper/save path, PDF draft restore, captured mailto/Gmail links, no external mail navigation or email sends.');
   } finally { await browser.close(); }

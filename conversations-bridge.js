@@ -41,25 +41,49 @@
     // buildDocPDF is the existing customer-facing renderer. Give it only its
     // public inputs, never internal costs, margins, notes or attachments.
     const out = {};
-    for (const k of ['id', 'name', 'email', 'phone', 'address', 'suburb', 'total', 'quotePublicToken', '_mapSnapshotDataUrl', '_mapSnapshotWidth', '_mapSnapshotHeight', 'areaPolys']) {
+    for (const k of ['id', 'name', 'email', 'phone', 'address', 'suburb', 'total', 'gstRegistered', 'stage', 'dueDate', 'quotePublicToken', '_mapSnapshotDataUrl', '_mapSnapshotWidth', '_mapSnapshotHeight', 'areaPolys']) {
       if (r[k] !== undefined) out[k] = structuredClone(r[k]);
     }
     out.services = (r.services || []).map(line => {
       const safe = {};
-      for (const k of ['svc', 'qty', 'customRate', 'fixedPrice', 'roofType', 'storeys', 'sides']) if (line[k] !== undefined) safe[k] = structuredClone(line[k]);
+      for (const k of ['svc', 'qty', 'customRate', 'fixedPrice', 'priceSnapshot', 'roofType', 'storeys', 'sides']) if (line[k] !== undefined) safe[k] = structuredClone(line[k]);
       return safe;
     });
+    out.payments = (r.payments || []).map(p => ({ amount: Number(p.amount) || 0 }));
     return out;
   }
+  function canonical(value) {
+    if (Array.isArray(value)) return value.map(canonical);
+    if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort().filter(k => value[k] !== undefined).map(k => [k, canonical(value[k])]));
+    return value;
+  }
+  async function documentFingerprint(mode, r) {
+    const safe = publicRecord(r);
+    // Exclude render caches and pipeline timestamps: only customer-visible
+    // document inputs participate, including current rates for unfrozen lines.
+    for (const k of ['_mapSnapshotDataUrl','_mapSnapshotWidth','_mapSnapshotHeight','stage']) delete safe[k];
+    if(mode === 'quote'){delete safe.payments;delete safe.dueDate;}
+    safe.financials = docFinancials(mode === 'quote' ? {...r, payments:[], stage:''} : r);
+    safe.services = safe.services.map(line => ({...line, label:SERVICES[line.svc]?.label || line.svc, unit:SERVICES[line.svc]?.unit || '', rate:line.priceSnapshot != null || line.fixedPrice != null ? null : TK_PRICING.effectiveRate(line)}));
+    const bytes = new TextEncoder().encode(JSON.stringify(canonical({mode, businessId:context().businessId, number:docNumber(mode,r), record:safe, template:docTemplate,
+      logo:typeof cachedLogoDataUrl !== 'undefined' ? cachedLogoDataUrl : null})));
+    const digest = await global.crypto.subtle.digest('SHA-256',bytes);
+    return Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join('').slice(0,32);
+  }
+  const documentFilename = (mode,r,fingerprint) => (mode === 'quote' ? 'Quote-' : 'Invoice-') + docNumber(mode,r) + '-' + fingerprint + '.pdf';
   async function prepareDocument(mode, value) {
     if (!['quote', 'invoice'].includes(mode)) throw Error('Choose a quote or invoice.');
     const start = scope(), r = recordFor(value);
     if (!Array.isArray(r.services) || !r.services.length || !Number.isFinite(Number(r.total)) || Number(r.total) <= 0) throw Error('Build and save the quote lines before attaching a PDF.');
     if (typeof buildDocPDF !== 'function') throw Error('The PDF renderer is unavailable. Please reload TurnKey.');
-    if (mode === 'quote') await syncRecordToSupabase(r);
-    else await ensureRecordSynced(r);
+    if (mode === 'invoice' && !['completed', 'paid'].includes(r.stage)) throw Error('Complete the work before issuing an invoice. You can preview an invoice draft from the accepted quote.');
+    // Both documents must use the server's accepted commercial snapshot.
+    // A saved customer/job alone does not guarantee a current invoice/quote.
+    await syncRecordToSupabase(r);
     assertScope(start);
     if (recordFor(r.id) !== r) throw Error('The opportunity changed. Select it again.');
+    if (mode === 'quote' && !r.quotePublicToken) throw Error('The quote approval link is not ready. Save the quote and retry. Nothing was sent.');
+    if (mode === 'invoice' && !['completed', 'paid'].includes(r.stage)) throw Error('The job status changed. Reopen the opportunity before issuing an invoice.');
     // Preload the owned record, not a detached copy, so preview/send share
     // in-flight work and the loader can enforce the business/session guard.
     if (typeof preloadMapSnapshot === 'function') {
@@ -68,6 +92,8 @@
     if (recordFor(r.id) !== r) throw Error('The opportunity changed. Select it again.');
     if (global.TK_MAP_SNAPSHOT?.getAreas(r.areaPolys).length && !r._mapSnapshotDataUrl) throw Error('The property outline could not be prepared. Please retry. Nothing was sent.');
     const safe = publicRecord(r);
+    const fingerprint = await documentFingerprint(mode,r);
+    assertScope(start);
     // Actual helper contract: buildDocPDF(mode, record, 'base64') returns raw
     // base64; its default returns a Blob and is intentionally not used here.
     const contentBase64 = buildDocPDF(mode, safe, 'base64');
@@ -77,7 +103,7 @@
     try { decoded = atob(contentBase64); } catch { throw Error('The PDF could not be generated. Nothing was sent.'); }
     if (!decoded.startsWith('%PDF-')) throw Error('The PDF renderer did not return a valid PDF. Nothing was sent.');
     assertScope(start);
-    return { record: r, start, attachment: { filename: (mode === 'quote' ? 'Quote-' : 'Invoice-') + docNumber(mode, r) + '.pdf', mimeType: 'application/pdf', contentBase64 } };
+    return { record: r, start, attachment: { filename: documentFilename(mode,r,fingerprint), mimeType: 'application/pdf', contentBase64 } };
   }
   function bodyFor(mode, r) {
     const first = (r.name || '').split(' ')[0] || 'there', number = docNumber(mode, r);
@@ -117,7 +143,8 @@
       r.clientResponded = false; r.selfPriced = false;
       r.nextFollowUpAt=r.nextFollowUpAt||new Date(Date.now()+2*86400000).toISOString();
     } else {
-      r.invoiceSent = true; r.paymentStatus = 'sent';
+      r.invoiceSent = true;
+      if (r.stage !== 'paid' && !['paid','partial'].includes(r.paymentStatus)) r.paymentStatus = 'sent';
       if (!r.dueDate && typeof addDaysISO === 'function') r.dueDate = addDaysISO(todayISO(), 7);
     }
     await syncRecordToSupabase(r); assertScope(start);
@@ -131,6 +158,30 @@
     onCount: count => { const el = document.getElementById('cnt-inbox'); if (el) el.textContent = count; },
     listQuotes,
     buildQuoteAttachment: async id => (await prepareDocument('quote', id)).attachment,
+    beforeSend: async payload => {
+      if (!payload.document) return;
+      const start=scope(), r = recordFor(payload.document.recordId), mode = payload.document.mode;
+      const mismatch = () => Error('This document has changed since the draft was prepared. Reopen the opportunity, preview the latest document and compose again. Nothing was sent.');
+      const filename = documentFilename(mode,r,await documentFingerprint(mode,r));
+      assertScope(start);
+      if (!payload.attachments.some(a => a.filename === filename && a.mimeType === 'application/pdf' && a.contentBase64)) throw mismatch();
+      if(!r.jobId||!r.quoteId)throw mismatch();
+      // Read only: an older draft must never overwrite a newer saved quote.
+      const [job,quote]=await Promise.all([
+        start.client.from('jobs').select('id,status,details,quote_id').eq('business_id',start.businessId).eq('id',r.jobId).single(),
+        start.client.from('quotes').select('id,amount,status,public_token').eq('business_id',start.businessId).eq('id',r.quoteId).single()
+      ]);
+      assertScope(start);
+      if(job.error||quote.error||!job.data||!quote.data)throw Error('Could not verify the saved document. Check your connection and retry. Nothing was sent.');
+      if(String(job.data.quote_id)!==String(quote.data.id))throw mismatch();
+      const saved={...r,...job.data.details,total:Number(quote.data.amount),stage:job.data.status,quotePublicToken:quote.data.public_token};
+      if(filename!==documentFilename(mode,saved,await documentFingerprint(mode,saved)))throw mismatch();
+      assertScope(start);
+      if(mode==='quote'&&quote.data.status==='declined')throw Error('This quote was declined. Review the opportunity before sending it again.');
+      if (mode === 'invoice' && !['completed','paid'].includes(r.stage)) throw Error('Complete the work before issuing this invoice.');
+      if (mode === 'invoice' && !['completed','paid'].includes(saved.stage)) throw Error('The saved job is not completed. Reopen the opportunity before issuing this invoice.');
+    },
+    onDocument: payload => { const r = recordFor(payload.recordId); if (typeof openDetail === 'function') openDetail(r.id); },
     onSent,
   });
   const resetRenderer = renderer.reset;
@@ -160,8 +211,10 @@
   async function composeDocument(mode, value, overrides = {}) {
     const { record: r, start, attachment } = await prepareDocument(mode, value);
     const number = docNumber(mode, r), business = docBizName();
+    const savedSubject = typeof emailTemplates !== 'undefined' && typeof fillTemplate === 'function' && typeof emailTemplateVars === 'function'
+      ? fillTemplate((emailTemplates[mode] || EMAIL_TEMPLATE_DEFAULTS[mode]).subject, emailTemplateVars(r, mode)) : '';
     const payload = {
-      to: r.email || '', subject: mode === 'quote' ? 'Your quote from ' + business + ' — ' + number : 'Invoice ' + number + ' from ' + business,
+      to: r.email || '', subject: savedSubject || (mode === 'quote' ? 'Your quote from ' + business + ' — ' + number : 'Invoice ' + number + ' from ' + business),
       bodyText: bodyFor(mode, r), ...overrides,
       attachments: [attachment], document: { mode, recordId: String(r.id) },
     };
@@ -247,5 +300,49 @@
   });
   global.sendComposeModal = guarded(() => compose({ to: document.getElementById('cmp-to')?.value || '', subject: document.getElementById('cmp-subject')?.value || '', bodyText: document.getElementById('cmp-body')?.value || '', attachments: [] }));
   global.TK_CONVERSATIONS_BRIDGE = { render: renderer, reset, compose: guarded(compose), composeDocument: guarded(composeDocument), listQuotes };
+  // Install before extension-quote-link.js: an Earth return opens this same
+  // detail view, so saved quotes have a clear next action immediately.
+  if (typeof global.openDetail === 'function') {
+    const originalDetail = global.openDetail;
+    global.openDetail = function (id) {
+      const result = originalDetail.apply(this, arguments);
+      let r; try { r = recordFor(id); } catch { return result; }
+      const host = document.getElementById('view-detail');
+      if (!host || !r.services?.length || !(r.total > 0)) return result;
+      host.querySelector('.qf-workflow')?.remove();
+      const won = typeof isWon === 'function' && isWon(r), cancelled = global.TK_PIPELINE.key(r) === 'lost';
+      const invoiced = r.invoiceSent || ['sent','partial','paid'].includes(r.paymentStatus), done = ['completed','paid'].includes(r.stage);
+      const card = document.createElement('section'); card.className = 'qf-workflow'; card.setAttribute('aria-label','Quote and invoice workflow');
+      const title = cancelled ? 'Quote history' : invoiced ? 'Invoice issued' : won ? 'Quote accepted — ready for the next step' : r.quoteSentAt ? 'Quote sent — awaiting a decision' : 'Your quote is ready to review';
+      const help = cancelled ? 'Review saved documents for this cancelled opportunity.' : won ? 'Accepted pricing is locked. Preview the invoice now; complete the work before issuing it.' : r.quoteSentAt ? 'Customers can approve through their quote link. Record acceptance here if they confirmed by phone or email.' : 'Check the services and price, choose your template, then compose your email. Nothing is sent until you press Send email.';
+      const heading = document.createElement('h3'); heading.textContent = title;
+      const note = document.createElement('p'); note.textContent = help;
+      const path = document.createElement('ol'); path.className = 'qf-steps'; path.setAttribute('aria-label','Document progress');
+      const current = invoiced ? 3 : won ? 2 : r.quoteSentAt ? 1 : 0;
+      ['Review quote','Send quote','Acceptance','Invoice'].forEach((label,i) => { const step = document.createElement('li'); step.textContent = label; if(i === current)step.setAttribute('aria-current','step'); if(i < current)step.className = 'qf-done'; path.append(step); });
+      const actions = document.createElement('div'); actions.className = 'qf-actions';
+      const add = (label, action, primary = false) => { const button = document.createElement('button'); button.type = 'button'; button.className = 'btn ' + (primary ? 'primary' : 'ghost'); button.textContent = label; button.dataset.qfAction = action; button.dataset.recordId = String(r.id); actions.append(button); };
+      add(won || cancelled ? 'View quote' : 'Preview quote & compose email', 'quote', !won && !cancelled);
+      if (!cancelled && !won && r.quoteId) add('Record quote accepted', 'accept');
+      if (won) { add(done ? 'Preview invoice & compose email' : 'Preview invoice draft', 'invoice', done); if(!done)add('Schedule work','schedule',true); }
+      card.append(heading,note,path,actions);
+      const summary = host.querySelector('.sale-detail-summary'); if(summary)summary.after(card);else host.prepend(card);
+      return result;
+    };
+    document.addEventListener('click', event => {
+      const button = event.target.closest?.('[data-qf-action],[data-sale-action="confirm-sale"]');
+      if (!button || button.disabled) return;
+      event.preventDefault(); event.stopImmediatePropagation();
+      void guarded(async () => {
+        const r = recordFor(button.dataset.recordId || button.dataset.id), action = button.dataset.qfAction || 'accept';
+        if(action === 'accept') {
+          if (!confirm('Record this customer’s acceptance of ' + docNumber('quote',r) + ' for ' + money(r.total) + '? Accepted pricing will be locked. Existing automatic handoff settings still apply.')) return;
+          button.disabled = true;
+          try { if(await markWon(r.id))openDetail(r.id); } finally { if(button.isConnected)button.disabled=false; }
+        } else if(action === 'schedule')openSchedule(r.id);
+        else openDocPreview(action,r.id);
+      })();
+    }, true);
+  }
   if (root.classList.contains('active')) void renderer();
 })(window);

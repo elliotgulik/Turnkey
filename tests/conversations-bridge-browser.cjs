@@ -16,7 +16,8 @@ const fs = require('node:fs'), path = require('node:path'), assert = require('no
     await page.addStyleTag({ path: path.resolve('conversations.css') });
     await page.addScriptTag({ content: `
       let currentBusinessId='A', currentUserId='11111111-1111-4111-8111-111111111111', businessStateReady=true;
-      let sb={auth:{getSession:async()=>({data:{session:{user:{id:currentUserId},access_token:'fake-token'}}})}};
+      let savedRecords=new Map();
+      let sb={from(table){let id;const q={select(){return q},eq(k,v){if(k==='id')id=v;return q},async single(){const r=[...savedRecords.values()].find(r=>r.jobId===id||r.quoteId===id);return {data:!r?null:table==='jobs'?{id:r.jobId,status:r.stage,details:structuredClone(r),quote_id:r.quoteId}:{id:r.quoteId,amount:r.total,status:r.stage==='won'?'accepted':'sent',public_token:r.quotePublicToken},error:null}}};return q},auth:{getSession:async()=>({data:{session:{user:{id:currentUserId},access_token:'fake-token'}}})}};
       let records=[{id:1,business_id:'A',name:'Alice',email:'alice@example.com',phone:'021123',address:'1 Test Street',suburb:'Test',total:200,stage:'new',services:[{svc:'driveway',qty:20,customRate:10,internalCost:77}],estimatedCost:99,margin:0.3,salesNotes:'PRIVATE_SALES_NOTES'},
         {id:2,business_id:'A',name:'Bob',email:'bob@example.com',address:'2 Test Street',total:300,stage:'quoted',services:[{svc:'driveway',qty:30,customRate:10}]},
         {id:3,business_id:'B',name:'FOREIGN_CUSTOMER',total:400,services:[{svc:'driveway',qty:40}]}];
@@ -34,7 +35,7 @@ const fs = require('node:fs'), path = require('node:path'), assert = require('no
       function defaultFollows(){return [{dayOffset:0,state:'pending'}]}
       function todayISO(){return '2026-10-16'} function addDaysISO(){return '2026-10-23'}
       function logActivity(...args){bridgeFixture.activities.push(args)}
-      async function syncRecordToSupabase(r){bridgeFixture.syncs.push(r.id); if(bridgeFixture.pauseSync)await new Promise(resolve=>bridgeFixture.resumeSync=resolve);r.quotePublicToken='quote-token-'+r.id;}
+      async function syncRecordToSupabase(r){bridgeFixture.syncs.push(r.id); if(bridgeFixture.pauseSync)await new Promise(resolve=>bridgeFixture.resumeSync=resolve);r.quotePublicToken='quote-token-'+r.id;r.jobId='job-'+r.id;r.quoteId='quote-'+r.id;savedRecords.set(r.id,structuredClone(r));}
       async function ensureRecordSynced(r){return syncRecordToSupabase(r)}
       async function preloadMapSnapshot(r){r._mapSnapshotDataUrl=null}
       function triggerPush(){throw Error('Unexpected notification')}
@@ -84,7 +85,7 @@ const fs = require('node:fs'), path = require('node:path'), assert = require('no
     assert.equal(await page.locator('[name=bodyText]').inputValue(), 'Stay inside TurnKey');
     await page.evaluate(() => generateAndSendDoc('quote', records[0]));
     assert.equal(await page.locator('.cv-files li').count(), 1, JSON.stringify(await page.evaluate(() => bridgeFixture.notices)));
-    assert.match(await page.locator('.cv-files').textContent(), /Quote-Q-1001.pdf/);
+    assert.match(await page.locator('.cv-files').textContent(), /Quote-Q-1001-[a-f0-9]{32}\.pdf/);
     let state = await page.evaluate(() => ({
       stage: records[0].stage, quoteSentAt: records[0].quoteSentAt,
       last: [...bridgeFixture.drafts.values()].at(-1), pdf: bridgeFixture.pdfInputs.at(-1), sends: bridgeFixture.sends,
@@ -117,8 +118,9 @@ const fs = require('node:fs'), path = require('node:path'), assert = require('no
     assert.ok(await page.evaluate(() => records[0].quoteSentAt));
     assert.equal(await page.evaluate(() => bridgeFixture.activities.length), 1);
     // Invoice entry points only prepare; they never mark invoices as sent.
+    await page.evaluate(() => { records[1].stage='completed'; });
     await page.evaluate(() => openSendDocModal('invoice', records[1]));
-    assert.match(await page.locator('.cv-files').textContent(), /Invoice-INV-1002.pdf/);
+    assert.match(await page.locator('.cv-files').textContent(), /Invoice-INV-1002-[a-f0-9]{32}\.pdf/);
     assert.equal(await page.evaluate(() => records[1].invoiceSent), undefined);
     await page.evaluate(() => { docPreview.recordId = 2; return sendInvoiceDoc(); });
     assert.equal(await page.evaluate(() => records[1].invoiceSent), undefined);
@@ -131,7 +133,7 @@ const fs = require('node:fs'), path = require('node:path'), assert = require('no
     });
     assert.equal(await page.locator('[name=subject]').inputValue(), 'Edited quote subject');
     assert.equal(await page.locator('[name=bodyText]').inputValue(), 'Edited quote message');
-    assert.match(await page.locator('.cv-files').textContent(), /Quote-Q-1002.pdf/);
+    assert.match(await page.locator('.cv-files').textContent(), /Quote-Q-1002-[a-f0-9]{32}\.pdf/);
     assert.equal(await page.evaluate(() => bridgeFixture.sends), 2);
     const countBefore = await page.evaluate(() => bridgeFixture.drafts.size);
     await page.evaluate(() => { bridgeFixture.pdfFails = true; return generateAndSendDoc('quote', records[1]); });
@@ -154,6 +156,27 @@ const fs = require('node:fs'), path = require('node:path'), assert = require('no
     assert.equal(await page.evaluate(()=>records[1].stage),'contacted');
     await page.getByRole('button',{name:'Send email',exact:true}).click();
     await page.waitForFunction(()=>records[1].stage==='quoted');
+    // Fingerprint survives saved drafts; local or remote changes cannot send an old PDF.
+    await page.evaluate(()=>generateAndSendDoc('quote',records[1]));
+    await page.getByRole('button',{name:'Save & close',exact:true}).click();
+    await page.getByRole('button',{name:/^Drafts/}).click();
+    await page.locator('[data-cv-action=draft]').filter({hasText:'Your quote from Fixture Wash — Q-1002'}).last().click();
+    const sendsBeforeChanges=await page.evaluate(()=>bridgeFixture.sends);
+    await page.evaluate(()=>{records[1].total=350;});
+    await page.getByRole('button',{name:'Send email',exact:true}).click();
+    await page.getByText(/This document has changed since/).waitFor();
+    assert.equal(await page.evaluate(()=>bridgeFixture.sends),sendsBeforeChanges);
+    await page.evaluate(()=>{records[1].total=300;savedRecords.get(2).total=400;});
+    await page.getByRole('button',{name:'Send email',exact:true}).click();
+    await page.getByText(/This document has changed since/).waitFor();
+    assert.equal(await page.evaluate(()=>bridgeFixture.sends),sendsBeforeChanges);
+    assert.equal(await page.evaluate(()=>savedRecords.get(2).total),400,'Preflight must never overwrite a newer remote price');
+    // Template and line changes are part of the public document fingerprint too.
+    await page.evaluate(()=>{savedRecords.get(2).total=300;docTemplate.quoteTerms='Changed terms';});
+    await page.getByRole('button',{name:'Send email',exact:true}).click();
+    await page.getByText(/This document has changed since/).waitFor();
+    assert.equal(await page.evaluate(()=>bridgeFixture.sends),sendsBeforeChanges);
+    assert.equal(await page.locator('.cv-files [data-cv-action=remove-file]').first().isDisabled(),true);
     // In-flight PDF work must not create a draft in the next business.
     const beforeSwitch = await page.evaluate(() => bridgeFixture.drafts.size);
     await page.evaluate(() => { bridgeFixture.pauseSync = true; bridgeFixture.preparing = generateAndSendDoc('quote', records[0]); });
