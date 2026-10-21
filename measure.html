@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TurnKey — Measure</title>
 <script src="config.js"></script>
-<link rel="stylesheet" href="measure.css?v=0.2.2">
+<link rel="stylesheet" href="measure.css?v=20261022a">
 </head>
 <body>
   <div id="app" class="tkm-app">
@@ -20,6 +20,10 @@
         <button type="button" data-view="2d" class="active">2D top-down</button>
         <button type="button" data-view="3d">3D inspect</button>
       </div>
+    </div>
+    <div class="tkm-property-controls" aria-label="Property location">
+      <span id="tkm-property-address"></span>
+      <button type="button" class="tkm-btn" id="tkm-return-property" disabled>Return to property</button>
     </div>
     <div id="tkm-camera-controls" class="tkm-camera-controls" hidden aria-label="3D camera controls">
       <span>View from</span>
@@ -60,6 +64,6 @@
       </div>
     </div>
   </div>
-  <script type="module" src="measure.js?v=20261018c"></script>
+  <script type="module" src="measure.js?v=20261022a"></script>
 </body>
 </html>

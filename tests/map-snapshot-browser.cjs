@@ -18,16 +18,23 @@ const {chromium}=require('playwright'),assert=require('node:assert/strict'),path
    let requested;
    const aerial=await M.buildSnapshot(areas,'fixture-only-key',{scale:1,fetchImpl:async url=>{requested=url;return {ok:true,blob:async()=>blob};}});
    const aerialCanvas=await pixels(aerial),attribution=[...aerialCanvas.getContext('2d').getImageData(5,395,1,1).data];
+   const mixed=await M.buildSnapshot([...areas,{service:'driveway',size:10,points:[{x:10,y:10},{x:50,y:10},{x:30,y:50}]}],'fixture-only-key',{fetchImpl:async()=>({ok:true,blob:async()=>blob})});
+   // A photo-like, high-entropy image catches accidental raw RGB embedding.
+   const noise=g.createImageData(640,400);let seed=42;
+   for(let i=0;i<noise.data.length;i++){seed=(1664525*seed+1013904223)>>>0;noise.data[i]=i%4===3?255:seed>>>24;}g.putImageData(noise,0,0);
+   const noiseBlob=await new Promise(resolve=>fake.toBlob(resolve,'image/png'));
+   const compressed=await M.buildSnapshot(areas,'fixture-only-key',{fetchImpl:async()=>({ok:true,blob:async()=>noiseBlob})});
    const failed=await M.buildSnapshot(areas,'fixture-only-key',{scale:1,fetchImpl:async()=>({ok:false})});
    const started=Date.now();const timedOut=await M.buildSnapshot(areas,'fixture-only-key',{scale:1,timeoutMs:100,fetchImpl:async(url,opts)=>new Promise((resolve,reject)=>opts.signal.addEventListener('abort',()=>reject(Error('Aborted'))))});
    const pixelSketch=await M.buildSnapshot([{service:'driveway',size:10,points:[{x:10,y:10},{x:50,y:10},{x:30,y:50}]}],'fixture-only-key',{scale:1,fetchImpl:async()=>{throw Error('Unanchored pixels must not request a georeferenced map');}});
-   return {offline:{...offline,dataUrl:offline.dataUrl.slice(0,22)},colored,darkLegend,aerial:{hasImagery:aerial.hasImagery,areaCount:aerial.areaCount},requested,attribution,failed:failed.hasImagery,timedOut:timedOut.hasImagery,elapsed:Date.now()-started,pixelSketch:pixelSketch.hasImagery,svg:M.buildSvg(areas)};
+   return {mixed:{hasImagery:mixed.hasImagery,height:mixed.height,areaCount:mixed.areaCount},compressedBytes:atob(compressed.dataUrl.split(',')[1]).length,compressedType:compressed.dataUrl.slice(0,23),offline:{...offline,dataUrl:offline.dataUrl.slice(0,22)},colored,darkLegend,aerial:{hasImagery:aerial.hasImagery,areaCount:aerial.areaCount},requested,attribution,failed:failed.hasImagery,timedOut:timedOut.hasImagery,elapsed:Date.now()-started,pixelSketch:pixelSketch.hasImagery,svg:M.buildSvg(areas)};
   });
+  assert.equal(result.mixed.hasImagery,true);assert.equal(result.mixed.areaCount,3);assert.ok(result.mixed.height>800);assert.match(result.compressedType,/image\/jpeg/);assert.ok(result.compressedBytes<600000,'Snapshot should stay below 600 KB: '+result.compressedBytes);
   assert.match(result.offline.dataUrl,/^data:image\/png;base64,/);assert.equal(result.offline.hasImagery,false);assert.equal(result.offline.areaCount,2);assert.ok(result.offline.height>400);
   assert.ok(result.colored>100,'Fallback polygon/line pixels must render: '+result.colored);assert.ok(result.darkLegend>100,'Measurement legend must render');
   assert.match(result.svg,/65.25 m²/);assert.match(result.svg,/12 m/);assert.doesNotMatch(result.svg,/PRIVATE_NOTES|estimatedCost|999/);
   const url=new URL(result.requested);assert.equal(url.searchParams.getAll('path').length,2);assert.equal(url.searchParams.getAll('markers').length,2);
-  assert.equal(result.aerial.hasImagery,true);assert.deepEqual(result.attribution,[255,0,255,255]);assert.equal(result.failed,false);assert.equal(result.timedOut,false);assert.ok(result.elapsed<3000);assert.equal(result.pixelSketch,false);
+  assert.equal(result.aerial.hasImagery,true);assert.ok(result.attribution[0]>220&&result.attribution[1]<30&&result.attribution[2]>220,'JPEG retains attribution pixels');assert.equal(result.failed,false);assert.equal(result.timedOut,false);assert.ok(result.elapsed<3000);assert.equal(result.pixelSketch,false);
   console.log('Map snapshot browser passed: real measured PNG fallback, polygon/line rendering, legend, mocked aerial request, preserved attribution, error/timeout fallback, and unanchored sketch safety.');
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

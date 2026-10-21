@@ -1,3 +1,4 @@
+import { TurnKeyApi } from '../../api/client-bridge.js';
 import { instantPricing } from './quote-pricing.js';
 import { measurementQuantity, measurementForService } from './measurements.js';
 import { renderCustomerContext, requestedServices } from './customer-context.js';
@@ -315,7 +316,10 @@ export function renderQuoteCreated(container, { address, total, lines, SERVICES,
         <button type="button" class="tk-link-btn" data-done>Done</button>
       </div>
     </div>`;
-  container.querySelector('[data-open]').addEventListener('click', () => window.open(openUrl, '_blank', 'noopener'));
+  container.querySelector('[data-open]').addEventListener('click', async () => {
+    try { await TurnKeyApi.openTurnKey(openUrl); }
+    catch(error) { container.querySelector('[data-transfer-status]').textContent=error.message; }
+  });
   container.querySelector('[data-copy]').addEventListener('click', async (e) => {
     await navigator.clipboard.writeText(publicUrl);
     e.target.textContent = 'Copied!';

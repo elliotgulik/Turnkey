@@ -33,6 +33,13 @@ export function displayAltitude(points,mode,altitudeModes){
   };
 }
 
+// Render picked corners at their actual surface even when measuring the horizontal
+// ground footprint. Rendering must never change the canonical points or math mode.
+export function displayPickedPoint(point,altitudeModes){
+  return {position:{...point},altitudeMode:Number.isFinite(point.altitude)
+    ?altitudeModes.ABSOLUTE:altitudeModes.CLAMP_TO_GROUND};
+}
+
 // Camera pose and scene readiness are independent: steadychange describes
 // rendering, not motion. Compare to an anchor (not the previous frame) so
 // slow cumulative motion is caught while render ticks and numeric noise aren't.
@@ -42,7 +49,7 @@ export function createCameraPickGuard({now=()=>performance.now(),settleMs=500}={
   function pose(map){
     const c=map.center;
     const p=c&&{lat:c.lat,lng:c.lng,altitude:c.altitude??0,range:map.range,
-      heading:map.heading,tilt:map.tilt,roll:map.roll??0,fov:map.fov??35};
+      heading:map.heading??0,tilt:map.tilt??0,roll:map.roll??0,fov:map.fov??35};
     return p&&Object.values(p).every(Number.isFinite)?p:null;
   }
   function sample(map){

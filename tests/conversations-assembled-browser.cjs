@@ -81,6 +81,17 @@ const fs = require('node:fs'), path = require('node:path'), assert = require('no
     await page.locator('#doc-preview-overlay.open').waitFor();
     assert.match(await page.locator('#doc-preview-body').innerText(), /Driveway/);
     assert.match(await page.locator('#doc-preview-foot').innerText(), /Compose/i);
+    await page.evaluate(()=>openTemplateEditor());
+    await page.locator('#tpl-quote-body').fill('Hello {{customer_name}} at {{address}}: {{quote_total}} for {{services}}.');
+    assert.match(await page.locator('#tpl-quote-preview').innerText(),/Hello Assembled at 1 Test Road: \$200/);
+    assert.match(await page.locator('#tpl-quote-preview').innerText(),/Driveway/);
+    await page.locator('#tpl-invoice-body').fill('Invoice for {{customer_name}}: {{invoice_total}}.');
+    assert.match(await page.locator('#tpl-invoice-preview').innerText(),/Invoice for Assembled: \$200/);
+    await page.locator('#tpl-quote-body').fill('<img src=x onerror="window.templateUnsafe=true"> {{customer_name}}');
+    assert.equal(await page.locator('#tpl-quote-preview img').count(),0);
+    assert.equal(await page.evaluate(()=>window.templateUnsafe),undefined);
+    assert.equal(await page.evaluate(()=>records[0].total),200);
+    await page.evaluate(()=>closeModal('tpl-overlay'));
     await page.screenshot({path:'/private/tmp/turnkey-quote-workflow-desktop.png',fullPage:false});
     await page.setViewportSize({width:390,height:844});
     await page.waitForTimeout(350);

@@ -47,9 +47,12 @@ test('unknown measurements stay unavailable instead of becoming fabricated zeroe
  assert.match(M.buildSvg([area({size:null})]),/Measurement unavailable/);
  assert.match(M.buildSvg([area({size:0})]),/0 m²/);
 });
-test('long paths fail to a local full outline, never silently drop vertices',()=>{
+test('long paths use encoded geometry before falling back, without dropping vertices',()=>{
  const pts=Array.from({length:2000},(_,i)=>({lat:-36.8+Math.sin(i/2000*Math.PI*2)*.001,lng:174.7+Math.cos(i/2000*Math.PI*2)*.001}));
- assert.equal(M.buildUrl([area({geoPts:pts,points:undefined})],'fixture-key'),null);
+ const url=M.buildUrl([area({geoPts:pts,points:undefined})],'fixture-key');
+ assert.ok(url.length<=16384);assert.match(new URL(url).searchParams.get('path'),/enc:/);
+ const huge=Array.from({length:20000},(_,i)=>({lat:-36+i%2,lng:174+i%3}));
+ assert.equal(M.buildUrl([area({geoPts:huge,points:undefined})],'fixture-key'),null);
  assert.match(M.buildSvg([area({geoPts:pts,points:undefined})]),/<polygon/);
 });
 test('fallback address and options are encoded; keys and arbitrary fields never enter SVG',()=>{

@@ -1,6 +1,6 @@
 // Customer-facing property geometry only. No rates, costs, margins or notes.
 // buildUrl remains compatible with existing callers. buildSnapshot produces a
-// PNG for jsPDF, with a measured-outline fallback when Maps is unavailable.
+// Compressed imagery for jsPDF, with an honest measured-outline fallback.
 (function (global) {
   'use strict';
   const esc = v => String(v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -51,6 +51,11 @@
     const x = pts.reduce((n,p) => n + (((p.lng - lng + 540) % 360) - 180 + lng),0) / pts.length;
     return { lat: pts.reduce((n,p) => n + p.lat,0) / pts.length, lng: ((x + 540) % 360) - 180 };
   }
+  function encodePath(pts) {
+    let lat=0,lng=0;
+    const encode=n=>{let value=n<0?~(n<<1):n<<1,out='';while(value>=32){out+=String.fromCharCode((32|(value&31))+63);value>>>=5;}return out+String.fromCharCode(value+63);};
+    return pts.map(p=>{const a=Math.round(p.lat*1e5),b=Math.round(p.lng*1e5),out=encode(a-lat)+encode(b-lng);lat=a;lng=b;return out;}).join('');
+  }
   function buildUrl(input, mapsKey, opts = {}) {
     if (typeof mapsKey !== 'string' || !mapsKey.trim()) return null;
     const {width, height, scale} = dimensions(opts), areas = getAreas(input).filter(a => a.geoPts);
@@ -58,7 +63,7 @@
     for (const [i,a] of areas.entries()) {
       const pts = a.closed ? [...a.geoPts, a.geoPts[0]] : a.geoPts;
       const color = a.color.replace('#','0x');
-      params.append('path', 'color:' + color + '|weight:3' + (a.closed ? '|fillcolor:' + color + '33' : '') + '|' + pts.map(p => p.lat.toFixed(6) + ',' + p.lng.toFixed(6)).join('|'));
+      params.append('path', 'color:' + color + '|weight:3' + (a.closed ? '|fillcolor:' + color + '33' : '') + '|' + (opts.encoded ? 'enc:'+encodePath(pts) : pts.map(p => p.lat.toFixed(6) + ',' + p.lng.toFixed(6)).join('|')));
       if (opts.labels && i < 35) {
         const c = centroid(a.geoPts);
         params.append('markers', 'color:' + color + '|label:' + (i + 1).toString(36).toUpperCase() + '|' + c.lat.toFixed(6) + ',' + c.lng.toFixed(6));
@@ -78,7 +83,7 @@
     const url = 'https://maps.googleapis.com/maps/api/staticmap?' + params;
     // Google rejects URLs longer than 16,384 characters. Fall back to the
     // complete local diagram rather than dropping vertices or whole shapes.
-    return url.length <= 16384 ? url : null;
+    return url.length <= 16384 ? url : !opts.encoded ? buildUrl(input,mapsKey,{...opts,encoded:true}) : null;
   }
   function layout(input, opts = {}) {
     const all = getAreas(input);
@@ -133,6 +138,18 @@
   async function buildSnapshot(input, mapsKey, opts = {}) {
     const plan = layout(input,opts);
     if (!plan) return null;
+    // Keep unanchored sketches separate; they must not suppress real imagery
+    // for the measured shapes that do have geographic coordinates.
+    if (!plan.geo && plan.shapes.some(a=>a.geoPts)) {
+      const valid=getAreas(input), normalized=a=>({service:a.service,size:number(a.measurement.split(' ')[0]),geoPts:a.geoPts,points:a.pixelPts});
+      const parts=await Promise.all([true,false].map(geo=>buildSnapshot(valid.filter(a=>!!a.geoPts===geo).map(normalized),mapsKey,opts)));
+      const canvas=document.createElement('canvas');canvas.width=plan.width*plan.scale;canvas.height=parts.reduce((h,p)=>h+p.height,0)*plan.scale;
+      const ctx=canvas.getContext('2d');ctx.scale(plan.scale,plan.scale);
+      let y=0;
+      for(const part of parts){const image=new Image();image.src=part.dataUrl;await image.decode();ctx.drawImage(image,0,y,part.width,part.height);y+=part.height;}
+      const hasImagery=parts.some(p=>p.hasImagery);
+      return {dataUrl:canvas.toDataURL(hasImagery?'image/jpeg':'image/png',.82),width:plan.width,height:y,hasImagery,areaCount:valid.length};
+    }
     const canvas = document.createElement('canvas'); canvas.width=plan.width*plan.scale; canvas.height=plan.height*plan.scale;
     const ctx = canvas.getContext('2d'); if (!ctx) throw Error('Snapshot canvas unavailable');
     ctx.scale(plan.scale,plan.scale); ctx.fillStyle='#fff'; ctx.fillRect(0,0,plan.width,plan.height);
@@ -157,10 +174,10 @@
       const image=await loadImage(new Blob([svgFor(plan)],{type:'image/svg+xml'}),timeoutMs);
       ctx.drawImage(image,0,0,plan.width,plan.height);
     } else {
-      ctx.font='13px Arial'; ctx.fillStyle='#52616c'; ctx.fillText('Measured property areas',18,plan.mapHeight+20);
+      ctx.font='13px Arial'; ctx.fillStyle='#52616c'; ctx.fillText('Satellite imagery — measured property areas',18,plan.mapHeight+20);
       plan.shapes.forEach((a,i)=>{ctx.fillStyle=a.color;ctx.fillText(a.tag+' · '+a.label+' · '+a.measurement,18,plan.mapHeight+47+i*22);});
     }
-    return { dataUrl:canvas.toDataURL('image/png'), width:plan.width, height:plan.height, hasImagery, areaCount:plan.shapes.length };
+    return { dataUrl:canvas.toDataURL(hasImagery?'image/jpeg':'image/png',.82), width:plan.width, height:plan.height, hasImagery, areaCount:plan.shapes.length };
   }
   global.TK_MAP_SNAPSHOT = {buildUrl, getAreas, buildSvg, buildSvgUrl, buildSnapshot};
 })(typeof window !== 'undefined' ? window : globalThis);

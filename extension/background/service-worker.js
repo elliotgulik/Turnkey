@@ -21,6 +21,7 @@
 import { fetchSiteConfig, TurnKeyClient, TURNKEY_CRM_ORIGINS, TURNKEY_SUPABASE_ORIGIN } from '../api/turnkey-api.js';
 import { Storage, connectionChanged } from '../api/storage.js';
 import { dataUrlToBlob } from '../content/panel/screenshot.js';
+import { openTurnKeyTab } from './open-turnkey.js';
 import { registerCustomerHandoff } from './customer-handoff.js';
 
 // Customer → Google Earth handoff (TK_CUSTOMER_LAUNCH / TK_GET_CUSTOMER_CONTEXT) — see customer-handoff.js.
@@ -117,7 +118,7 @@ function bridgeOriginAllowed(siteUrl) {
   }
 }
 
-async function openWorkspace({ category, categoryLabel, kind, lat, lng }, earthTabId) {
+async function openWorkspace({ category, categoryLabel, kind, lat, lng, address }, earthTabId) {
   await sweepExpired();
   const config = await Storage.getConfig();
   if (!config || !config.siteUrl) throw new Error('Connect the extension to your TurnKey site first.');
@@ -134,6 +135,7 @@ async function openWorkspace({ category, categoryLabel, kind, lat, lng }, earthT
   url.searchParams.set('kind', kind);
   url.searchParams.set('lat', String(lat));
   url.searchParams.set('lng', String(lng));
+  if (typeof address === 'string' && address.trim()) url.searchParams.set('address', address.trim().slice(0, 500));
   const tab = await chrome.tabs.create({ url: url.toString(), active: true });
   pendingRequests.set(requestId, {
     earthTabId,
@@ -348,5 +350,21 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   handleApiAction(msg.action, msg.args || [])
     .then((data) => sendResponse({ ok: true, data }))
     .catch((err) => sendResponse({ ok: false, error: err.message }));
+  return true;
+});
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg?.type !== 'TK_OPEN_TURNKEY') return false;
+  let allowed = sender.id === chrome.runtime.id;
+  try {
+    const source = new URL(sender.url || sender.tab?.url || '');
+    allowed = allowed && (source.origin === 'https://earth.google.com' || source.protocol === 'chrome-extension:');
+  } catch { allowed = false; }
+  if (!allowed) { sendResponse({ok:false,error:'Open TurnKey from the extension.'}); return false; }
+  (async () => {
+    const config = await Storage.getConfig();
+    if (!config?.siteUrl || !BRIDGE_ALLOWED_ORIGINS.has(new URL(config.siteUrl).origin)) throw new Error('Connect the extension to TurnKey first.');
+    return openTurnKeyTab(chrome, config.siteUrl, msg.url);
+  })().then(data => sendResponse({ok:true,data}), error => sendResponse({ok:false,error:error.message}));
   return true;
 });

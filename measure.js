@@ -14,7 +14,7 @@
 // loading it here is just this website importing its own same-origin JS,
 // not the extension loading remote code.
 import { measureGeometry, distanceMeters } from './geometry.js';
-import { editOutline, createOutlineHistory, displayAltitude, createCameraPickGuard } from './measurement-editor.js?v=20261018c';
+import { editOutline, createOutlineHistory, displayAltitude, displayPickedPoint, createCameraPickGuard } from './measurement-editor.js?v=20261022a';
 
 const params = new URLSearchParams(location.search);
 const requestId = params.get('requestId') || '';
@@ -24,6 +24,13 @@ const kind = ['area', 'perimeter', 'line'].includes(params.get('kind')) ? params
 const interaction = kind === 'line' ? 'open' : 'closed';
 const startLat = parseFloat(params.get('lat'));
 const startLng = parseFloat(params.get('lng'));
+// Camera coordinates are only a fallback until the address is resolved.
+let propertyPosition = Object.freeze({lat:startLat,lng:startLng});
+const propertyAddress = (params.get('address') || params.get('propertyAddress') || '').trim();
+let propertyResolved = false;
+let propertyLabel = propertyAddress
+  ? `${propertyAddress} — locating address; pin marks original Earth camera location`
+  : 'Original Earth camera location — no property address supplied';
 
 const els = {
   category: document.getElementById('tkm-category'),
@@ -59,7 +66,7 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-if (!requestId || Number.isNaN(startLat) || Number.isNaN(startLng)) {
+if (!requestId || !Number.isFinite(startLat) || !Number.isFinite(startLng) || Math.abs(startLat)>85 || Math.abs(startLng)>180) {
   setErrorState('This page was opened without a valid property location. Go back to Google Earth and use the TurnKey toolbar’s Measure button again.');
   throw new Error('measure.html: missing/invalid requestId or lat/lng');
 }
@@ -85,6 +92,7 @@ let overlay2d = null; // google.maps.Polygon | Polyline
 let markers2d = [];
 let map3d = null;
 let markers3d = [];
+let propertyMarker2d = null, propertyMarker3d = null;
 let overlay3d = null; // gmp-polygon-3d | gmp-polyline-3d
 let maps3dAvailable = false;
 const cameraGuard = createCameraPickGuard();
@@ -189,6 +197,52 @@ els.modeToggle.addEventListener('click', (e) => {
   if (m) setMode(m);
 });
 
+// Updating an address anchor never edits history, points, or the current camera.
+function updatePropertyAnchor(){
+  const shortLabel = propertyResolved ? 'Property' : 'Camera fallback';
+  document.getElementById('tkm-property-address').textContent = propertyLabel;
+  document.getElementById('tkm-return-property').textContent = propertyResolved
+    ? 'Return to property' : 'Return to original camera';
+  propertyMarker2d?.setOptions({position:propertyPosition,title:propertyLabel,
+    label:{text:shortLabel,color:'#9b341e',fontWeight:'bold'}});
+  if(propertyMarker3d){
+    propertyMarker3d.position = propertyPosition;
+    if(maps3dLib.Marker3DElement) propertyMarker3d.label = propertyLabel;
+    else {
+      propertyMarker3d.title = propertyLabel;
+      const label = propertyMarker3d.querySelector('.tkm-property-pin');
+      if(label) label.textContent = shortLabel;
+    }
+  }
+}
+async function resolvePropertyAnchor(){
+  if(!propertyAddress)return;
+  let timer;
+  try {
+    const response = await Promise.race([
+      (async()=>{
+        const {Geocoder} = await google.maps.importLibrary('geocoding');
+        return new Geocoder().geocode({address:propertyAddress});
+      })(),
+      new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('Address lookup timed out')),8000);})
+    ]);
+    const result = response.results?.[0];
+    const location = result?.geometry?.location;
+    const lat = location?.lat(), lng = location?.lng();
+    if(response.results.length!==1 || result.partial_match ||
+      !Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat)>85 || Math.abs(lng)>180)
+      throw new Error('No unambiguous property location');
+    propertyPosition = Object.freeze({lat,lng});
+    propertyResolved = true;
+    propertyLabel = result.formatted_address || propertyAddress;
+  } catch {
+    propertyLabel = `${propertyAddress} — address lookup unavailable or inconclusive; pin marks original Earth camera location`;
+  } finally {
+    clearTimeout(timer);
+    updatePropertyAnchor();
+  }
+}
+
 // ── 2D satellite view ────────────────────────────────────────────────────
 function initMap2d() {
   map2d = new google.maps.Map(els.map2d, {
@@ -200,6 +254,11 @@ function initMap2d() {
     fullscreenControl: false,
     mapTypeControl: false
   });
+  propertyMarker2d = new google.maps.Marker({map:map2d,position:propertyPosition,
+    title:propertyLabel,label:{text:'Property',color:'#9b341e',fontWeight:'bold'},
+    clickable:false,draggable:false,zIndex:0});
+  updatePropertyAnchor();
+  document.getElementById('tkm-return-property').disabled = false;
   map2d.addListener('click', (e) => {
     addPoint({ lat: e.latLng.lat(), lng: e.latLng.lng() });
   });
@@ -255,6 +314,9 @@ async function tryInit3d() {
       });
     }
     map3d.addEventListener('gmp-click', (e) => {
+      // Marker clicks bubble too, but are not geographic surface picks.
+      if (e.target !== map3d || activeView !== '3d' || finishing) return;
+      e.preventDefault();
       const pick = cameraGuard.pick(map3d, e.position);
       pickHint = ['zoom', 'surface'].includes(pick.reason) ? pick.reason : '';
       updateCameraHint();
@@ -263,6 +325,27 @@ async function tryInit3d() {
     });
     cameraGuard.sample(map3d);
     els.map3d.appendChild(map3d);
+    // The constructor's center altitude is absolute. Resolve the initial target
+    // against terrain so elevated properties are not viewed below the ground.
+    focusProperty3d();
+    // Separate from editable overlays: Clear/Undo and mode changes retain it.
+    const PropertyMarker = maps3d.Marker3DElement || maps3d.MarkerElement;
+    if (PropertyMarker) {
+      propertyMarker3d = new PropertyMarker({position:propertyPosition,
+        altitudeMode:maps3d.AltitudeMode.CLAMP_TO_GROUND});
+      if (maps3d.Marker3DElement) {
+        propertyMarker3d.label = propertyLabel;
+        propertyMarker3d.drawsWhenOccluded = true;
+        propertyMarker3d.extruded = false;
+      } else {
+        propertyMarker3d.title = propertyLabel;
+        const label = document.createElement('span');
+        label.className = 'tkm-property-pin'; label.textContent = '⌂ Property';
+        propertyMarker3d.appendChild(label);
+      }
+      map3d.appendChild(propertyMarker3d);
+      updatePropertyAnchor();
+    }
     // Page timers pause/resume with the browser's back-forward cache.
     setInterval(updateCameraHint, 100);
     maps3dAvailable = true;
@@ -285,15 +368,17 @@ function renderOverlay3d() {
   if(!map3d||activeView!=='3d'||!maps3dLib)return;
   markers3d.forEach(m=>m.remove());markers3d=[];
   if(overlay3d){overlay3d.remove();overlay3d=null;}
-  const display=displayAltitude(points,mode,maps3dLib.AltitudeMode);
+  // Pick elevations affect display only; livePreview/Finish retain the chosen
+  // ground vs surface math. Roof clicks must not disappear below the roof.
+  const display=displayAltitude(points,'surface',maps3dLib.AltitudeMode);
   const Marker=maps3dLib.MarkerInteractiveElement||maps3dLib.Marker3DInteractiveElement;
-  if(Marker)display.coordinates.forEach((position,i)=>{
-    const marker=new Marker({position,altitudeMode:display.altitudeMode,title:'Corner '+(i+1)});
+  if(Marker)points.forEach((point,i)=>{
+    const marker=new Marker({...displayPickedPoint(point,maps3dLib.AltitudeMode),title:'Corner '+(i+1)});
     if(maps3dLib.MarkerInteractiveElement){
       const dot=document.createElement('span');dot.textContent=String(i+1);
       dot.style.cssText='display:block;width:22px;height:22px;border:2px solid white;border-radius:50%;background:#138a72;color:white;text-align:center;font:bold 12px/18px sans-serif;box-shadow:0 1px 4px #0005';
       marker.anchorLeft='-50%';marker.anchorTop='-50%';marker.appendChild(dot);
-    }else{marker.label=String(i+1);marker.extruded=false;marker.drawsWhenOccluded=false;}
+    }else{marker.label=String(i+1);marker.extruded=false;marker.drawsWhenOccluded=true;}
     marker.addEventListener('gmp-click',e=>{e.stopPropagation();if(!finishing){selectedCorner=i;editAction='move';render();}});
     map3d.appendChild(marker);markers3d.push(marker);
   });
@@ -329,6 +414,22 @@ function switchView(view) {
 els.viewToggle.addEventListener('click', (e) => {
   const v = e.target.getAttribute('data-view');
   if (v) switchView(v);
+});
+function focusProperty3d(){
+    map3d.stopCameraAnimation?.();
+    cameraGuard.reset(); pickHint='';
+    // CameraOptions supports ground-relative centers; do not aim below elevated terrain.
+    map3d.flyCameraTo({endCamera:{center:propertyPosition,
+      altitudeMode:maps3dLib.AltitudeMode.CLAMP_TO_GROUND,range:300,heading:0,tilt:60,roll:0},durationMillis:0});
+    document.getElementById('tkm-camera-tilt').value='60';
+    updateCameraHint();
+}
+document.getElementById('tkm-return-property').addEventListener('click',()=>{
+  if(activeView==='3d' && map3d){
+    focusProperty3d();
+  }else if(map2d){
+    map2d.setCenter(propertyPosition); map2d.setZoom(20); map2d.setTilt(0); map2d.setHeading(0);
+  }
 });
 document.getElementById('tkm-camera-controls').addEventListener('click',e=>{
   const button=e.target.closest('button');
@@ -463,6 +564,7 @@ function loadMapsSdk() {
     if(mapsAuthFailed)return;
     clearState();
     render();
+    void resolvePropertyAnchor();
     await tryInit3d();
   } catch (err) {
     setErrorState(err.message || 'Could not load the satellite map.', { retry: () => boot() });

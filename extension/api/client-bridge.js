@@ -18,6 +18,13 @@ function call(action, ...args) {
 }
 
 export const TurnKeyApi = {
+  openTurnKey: (url) => new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage({type:'TK_OPEN_TURNKEY',url}, res => {
+      if(chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
+      if(!res?.ok) return reject(new Error(res?.error || 'Could not open TurnKey. Your quote is saved.'));
+      resolve(res.data);
+    });
+  }),
   sendQuoteToServiceM8: (businessId,jobId) => call('sendQuoteToServiceM8',businessId,jobId),
   serviceM8TransferStatus: (businessId,jobId) => call('serviceM8TransferStatus',businessId,jobId),
   connectFromActiveCRM: () => new Promise((resolve, reject) => {

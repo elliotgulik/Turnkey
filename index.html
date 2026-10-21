@@ -12,7 +12,7 @@
 <script src="pricing-engine.js?v=20261021a"></script>
 <script src="cost-engine.js?v=20261018f"></script>
 <script src="sales-engine.js?v=20261017a"></script>
-<script src="map-snapshot.js?v=20261017a"></script>
+<script src="map-snapshot.js?v=20261022a"></script>
 <script src="format-utils.js?v=20261017a"></script>
 <!-- OneSignal Web Push SDK — harmless to load even when onesignalAppId is
      unset (initOneSignal() below just never calls OneSignal.init() in that
@@ -4632,8 +4632,7 @@ async function generateAndSendDoc(mode,r){
 // user actually edits in the composer. The pricing/line-item breakdown lives
 // in the attached PDF now, not duplicated inline in the email, so this reads
 // like a normal short email (matches the template examples in Settings).
-function buildEmailPlainBody(mode,r){
-  const tpl=emailTemplates[mode]||EMAIL_TEMPLATE_DEFAULTS[mode];
+function buildEmailPlainBody(mode,r,tpl=emailTemplates[mode]||EMAIL_TEMPLATE_DEFAULTS[mode]){
   const vars=emailTemplateVars(r,mode);
   const greeting=fillTemplate(tpl.greeting,vars);
   const body=fillTemplate(tpl.body,vars);
@@ -4721,7 +4720,7 @@ function docFinancials(r){
 }
 function buildDocPDF(mode,r,outputType){
   const jsPDF=window.jspdf.jsPDF;
-  const doc=new jsPDF({unit:'mm',format:'a4'});
+  const doc=new jsPDF({unit:'mm',format:'a4',compress:true});
   const t=docTemplate;
   const W=210,ML=16,MR=194,TW=MR-ML;
   const ac=hexToRgb(t.accent||'#138a72');
@@ -4834,7 +4833,7 @@ function buildDocPDF(mode,r,outputType){
   doc.text(docMoney(mode==='invoice'?financials.balance:r.total),MR,y,{align:'right'});
   y+=12;
 
-  // PNG includes measured outlines and their quantity legend. A labelled
+  // Compressed image includes measured outlines and their quantity legend. A labelled
   // diagram remains available without aerial imagery; use the returned
   // dimensions so the legend is neither cropped nor stretched in the PDF.
   if(r._mapSnapshotDataUrl){
@@ -4965,17 +4964,26 @@ function previewInvoice(id){openDocPreview('invoice',id);}
 
 /* ===== Template editor ===== */
 function tplEmailSection(type){
-  const t=emailTemplates[type]||EMAIL_TEMPLATE_DEFAULTS[type];
+  const t=emailTemplates[type]||EMAIL_TEMPLATE_DEFAULTS[type],esc=escapeHtmlSafe;
   const isQuote=type==='quote';
-  return `<div class="panel" style="margin-top:16px">
+  return `<div class="panel" oninput="renderTemplateEmailPreview('${type}')" style="margin-top:16px">
     <div style="display:flex;justify-content:space-between;align-items:center"><h4>${isQuote?'Quote':'Invoice'} email</h4><button class="btn ghost sm" onclick="restoreEmailTemplateDefaults('${type}')">Restore defaults</button></div>
-    <div class="field"><label>Subject</label><input id="tpl-${type}-subject" value="${(t.subject||'').replace(/"/g,'&quot;')}"></div>
-    <div class="field"><label>Greeting</label><input id="tpl-${type}-greeting" value="${(t.greeting||'').replace(/"/g,'&quot;')}"></div>
-    <div class="field"><label>Body</label><textarea id="tpl-${type}-body" rows="3">${t.body||''}</textarea></div>
-    ${isQuote?`<div class="field"><label>Call to action</label><textarea id="tpl-quote-cta" rows="2">${t.cta||''}</textarea></div>`
-      :`<div class="field"><label>Payment instructions</label><textarea id="tpl-invoice-payment" rows="2">${t.payment_instructions||''}</textarea></div>`}
-    <div class="field"><label>Signature</label><textarea id="tpl-${type}-signature" rows="2">${t.signature||''}</textarea></div>
+    <div class="field"><label>Subject</label><input id="tpl-${type}-subject" value="${esc(t.subject||'')}"></div>
+    <div class="field"><label>Greeting</label><input id="tpl-${type}-greeting" value="${esc(t.greeting||'')}"></div>
+    <div class="field"><label>Body</label><textarea id="tpl-${type}-body" rows="3">${esc(t.body||'')}</textarea></div>
+    ${isQuote?`<div class="field"><label>Call to action</label><textarea id="tpl-quote-cta" rows="2">${esc(t.cta||'')}</textarea></div>`
+      :`<div class="field"><label>Payment instructions</label><textarea id="tpl-invoice-payment" rows="2">${esc(t.payment_instructions||'')}</textarea></div>`}
+    <div class="field"><label>Signature</label><textarea id="tpl-${type}-signature" rows="2">${esc(t.signature||'')}</textarea></div>
+    <details open><summary>Customer-filled preview</summary><p id="tpl-${type}-preview-label" style="font-size:12px"></p><pre id="tpl-${type}-preview" style="white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;font-size:13px"></pre></details>
   </div>`;
+}
+function renderTemplateEmailPreview(type){
+  const record=records.find(r=>r.id===docPreview.recordId);
+  const r=record||{id:0,name:'Alex Customer',address:'12 Example Street',total:230,services:[{svc:'driveway',qty:50}]};
+  const value=field=>document.getElementById(`tpl-${type}-${field}`)?.value||'';
+  const tpl={greeting:value('greeting'),body:value('body'),signature:value('signature'),cta:value('cta'),payment_instructions:value('payment')};
+  document.getElementById(`tpl-${type}-preview-label`).textContent=record?'For '+r.name+' · edits apply to future emails for every customer':'Example customer · automatically filled for each quote or invoice';
+  document.getElementById(`tpl-${type}-preview`).textContent=fillTemplate(value('subject'),emailTemplateVars(r,type))+'\n\n'+buildEmailPlainBody(type,r,tpl);
 }
 // Resets the on-screen fields to the built-in defaults — not saved until
 // "Save Templates" is clicked, same as any other edit in this form.
@@ -4987,6 +4995,7 @@ function restoreEmailTemplateDefaults(type){
   document.getElementById(`tpl-${type}-signature`).value=d.signature;
   if(type==='quote')document.getElementById('tpl-quote-cta').value=d.cta;
   else document.getElementById('tpl-invoice-payment').value=d.payment_instructions;
+  renderTemplateEmailPreview(type);
   toast('Restored — click Save to keep it');
 }
 /* ===== Policies & Terms — customer-facing (booking.html's quote-request
@@ -5074,12 +5083,13 @@ function openTemplateEditor(){
     <div class="field"><label>Quote terms</label><textarea id="tpl-qterms" rows="3">${t.quoteTerms||''}</textarea></div>
     <div class="field"><label>Invoice / payment terms</label><textarea id="tpl-iterms" rows="3">${t.invoiceTerms||''}</textarea></div>
     <div class="field"><label>Footer line</label><input id="tpl-footer" value="${(t.footer||'').replace(/"/g,'&quot;')}"></div>
-    <p style="font-size:12px;color:var(--ink-faint);margin:18px 0 -4px">Below is the actual <b>email</b> sent when you click Send Quote / Send Invoice (separate from the PDF style above — the PDF itself is attached automatically, nothing to download). Use <code>{{customer_name}}</code>, <code>{{business_name}}</code>, <code>{{address}}</code>, <code>{{quote_total}}</code>, <code>{{invoice_total}}</code>, <code>{{job_date}}</code>, <code>{{services}}</code>, <code>{{payment_link}}</code> anywhere in these fields.</p>
+    <p style="font-size:12px;color:var(--ink-faint);margin:18px 0 -4px">Below is the actual <b>email</b> sent when you click Send Quote / Send Invoice (separate from the PDF style above — the PDF itself is attached automatically, nothing to download). Use <code>{{customer_name}}</code>, <code>{{business_name}}</code>, <code>{{address}}</code>, <code>{{quote_total}}</code>, <code>{{invoice_total}}</code>, <code>{{job_date}}</code>, <code>{{services}}</code>, <code>{{payment_link}}</code> and <code>{{quote_link}}</code> anywhere in these reusable fields. Customer details fill automatically; edits in the email composer affect only that message.</p>
     ${tplEmailSection('quote')}
     ${tplEmailSection('invoice')}
     ${tplChecklistSection()}
     ${tplLifecycleSection()}`;
   renderChecklistEditorFor('');
+  renderTemplateEmailPreview('quote');renderTemplateEmailPreview('invoice');
   openModal('tpl-overlay');
 }
 function tplLifecycleSection(){
@@ -9256,17 +9266,19 @@ async function loadBusinessProfile(){
 let cachedLogoDataUrl=null;
 async function preloadLogoDataUrl(){
   cachedLogoDataUrl=null;
-  const url=currentBusinessProfile&&currentBusinessProfile.logo_url;
+  const profile=currentBusinessProfile;
+  const url=profile&&profile.logo_url;
   if(!url)return;
   try{
     const res=await fetch(url);
     const blob=await res.blob();
-    cachedLogoDataUrl=await new Promise((resolve,reject)=>{
-      const reader=new FileReader();
-      reader.onload=()=>resolve(reader.result);
-      reader.onerror=reject;
-      reader.readAsDataURL(blob);
-    });
+    const bitmap=await createImageBitmap(blob);
+    try{
+      const ratio=Math.min(1,384/Math.max(bitmap.width,bitmap.height));
+      const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(bitmap.width*ratio));canvas.height=Math.max(1,Math.round(bitmap.height*ratio));
+      canvas.getContext('2d').drawImage(bitmap,0,0,canvas.width,canvas.height);
+      if(currentBusinessProfile===profile)cachedLogoDataUrl=canvas.toDataURL('image/png');
+    }finally{bitmap.close();}
   }catch(e){console.warn('Logo preload failed',e);}
 }
 // Snapshot promises and fingerprints live outside records so persistence,
@@ -9296,7 +9308,7 @@ async function preloadMapSnapshot(r){
       const snapshot=await TK_MAP_SNAPSHOT.buildSnapshot(areas,mapsKey);
       if(!current())return null;
       entry.result=snapshot;
-      entry.reusable=!!snapshot&&(snapshot.hasImagery||!mapsKey||!TK_MAP_SNAPSHOT.getAreas(areas).every(a=>a.geoPts));
+      entry.reusable=!!snapshot&&(snapshot.hasImagery||!mapsKey||!TK_MAP_SNAPSHOT.getAreas(areas).some(a=>a.geoPts));
       r._mapSnapshotDataUrl=snapshot?.dataUrl||null;
       if(snapshot){r._mapSnapshotWidth=snapshot.width;r._mapSnapshotHeight=snapshot.height;}
       return snapshot;
@@ -10879,8 +10891,8 @@ async function retryPendingPhotos(){
 <script src="conversations-bridge.js?v=20261020a"></script>
 <script src="servicem8-import.js?v=20261017a"></script>
 <script src="marketing-analytics.js?v=20261017a"></script>
-<footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a> · <span id="tk-app-version">v20261021a</span></footer>
-<script src="extension-quote-link.js?v=20261019c"></script>
+<footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a> · <span id="tk-app-version">v20261022a</span></footer>
+<script src="extension-quote-link.js?v=20261022a"></script>
 <script src="job-workspace.js?v=20261018"></script>
 <script src="job-calendar.js?v=20261018d"></script>
 <script src="operations-workspace.js?v=20261018c"></script>

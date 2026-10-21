@@ -275,7 +275,7 @@ export async function init(shadowRoot) {
     chrome.runtime.sendMessage(
       {
         type: 'TK_OPEN_WORKSPACE',
-        payload: { category: category.key, categoryLabel: category.label, kind: category.kind, lat: state.lat, lng: state.lng }
+        payload: { category: category.key, categoryLabel: category.label, kind: category.kind, lat: state.lat, lng: state.lng, address: state.address }
       },
       (res) => {
         if (chrome.runtime.lastError || !res || !res.ok) {

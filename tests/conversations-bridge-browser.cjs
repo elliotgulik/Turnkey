@@ -110,12 +110,15 @@ const fs = require('node:fs'), path = require('node:path'), assert = require('no
     await page.getByRole('button', { name: 'Send email', exact: true }).click();
     await page.getByText('Gmail rejected the message (403)', { exact: true }).waitFor();
     assert.equal(await page.evaluate(() => records[0].quoteSentAt), undefined);
+    assert.equal(await page.evaluate(() => savedRecords.get(1)?.quoteSentAt),undefined);
     assert.equal(await page.locator('.cv-files li').count(), 2);
     await page.evaluate(() => { bridgeFixture.sendMode = 'success'; });
     await page.getByRole('button', { name: 'Send email', exact: true }).click();
     await page.getByText('Email sent.', { exact: true }).waitFor();
     assert.equal(await page.evaluate(() => records[0].stage), 'quoted');
     assert.ok(await page.evaluate(() => records[0].quoteSentAt));
+    assert.equal(await page.evaluate(() => savedRecords.get(1).stage),'quoted');
+    assert.ok(await page.evaluate(() => savedRecords.get(1).quoteSentAt));
     assert.equal(await page.evaluate(() => bridgeFixture.activities.length), 1);
     // Invoice entry points only prepare; they never mark invoices as sent.
     await page.evaluate(() => { records[1].stage='completed'; });

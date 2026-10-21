@@ -1,3 +1,9 @@
+## Version 0.2.7: quote handoff and property location
+
+“Open in TurnKey” reuses an existing CRM tab, focuses its window and loads the saved quote. If no CRM tab is open, it opens one. Public quotes and measurement tabs are never replaced. Opening a saved quote reloads the CRM to fetch its latest saved data; save other edits first.
+
+The measurement workspace receives the customer's address for the property pin. The hosted workspace also includes the 3D marker fix and Return to property control. Install this version, then refresh Earth and TurnKey.
+
 # TurnKey — Google Earth Instant Quote (Chrome extension)
 
 ## Version 0.2.6: per-service chemical costs

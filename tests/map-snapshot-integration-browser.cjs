@@ -51,6 +51,24 @@ const {chromium}=require('playwright'),fs=require('node:fs'),path=require('node:
   });
   assert.match(result.data,/^data:image\/png;base64,/);const [format,x,y,w,h]=result.image;assert.equal(format,'PNG');assert.ok(Math.abs(h/w-result.height/result.width)<1e-8);assert.ok(y+h<=269);
   assert.match(result.preview,/Property outline and measurements/);assert.doesNotMatch(JSON.stringify(result.text),/estimatedCost|999|PRIVATE_NOTE/);assert.deepEqual(errors,[]);
+  // Optional real SDK regression: JSPDF_TEST_PATH points to the same public
+  // jsPDF 2.5.1 UMD bundle used by index.html. No network access in the test.
+  if(process.env.JSPDF_TEST_PATH){
+   await page.addScriptTag({path:path.resolve(process.env.JSPDF_TEST_PATH)});
+   const sizes=await page.evaluate(async()=>{
+    const canvas=document.createElement('canvas');canvas.width=2560;canvas.height=1600;
+    const ctx=canvas.getContext('2d'),pixels=ctx.createImageData(canvas.width,canvas.height);let seed=42;
+    for(let i=0;i<pixels.data.length;i++){seed=(1664525*seed+1013904223)>>>0;pixels.data[i]=i%4===3?255:seed>>>24;}ctx.putImageData(pixels,0,0);
+    const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));
+    const geo=[{service:'driveway',size:65.25,geoPts:[{lat:-36.8,lng:174.7},{lat:-36.8001,lng:174.7002},{lat:-36.8002,lng:174.7}]}];
+    const snapshot=await TK_MAP_SNAPSHOT.buildSnapshot(geo,'fixture-only',{fetchImpl:async()=>({ok:true,blob:async()=>blob})});
+    const r={id:7,name:'Customer',total:261,services:[{svc:'driveway',qty:65.25,priceSnapshot:261}],_mapSnapshotDataUrl:snapshot.dataUrl,_mapSnapshotWidth:snapshot.width,_mapSnapshotHeight:snapshot.height};
+    return {source:blob.size,quote:buildDocPDF('quote',r).size,invoice:buildDocPDF('invoice',r).size};
+   });
+   assert.ok(sizes.source>12000000,'Fixture must reproduce a 12 MB image');
+   assert.ok(sizes.quote<1000000&&sizes.invoice<1000000,'Generated documents must stay below 1 MB: '+JSON.stringify(sizes));
+   console.log('Actual PDF bytes: '+JSON.stringify(sizes));
+  }
   console.log('Snapshot integration browser passed: actual public geographic/pixel/mixed outlines and measurements, no crop/private fields, real preload PNG and PDF aspect ratio.');
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

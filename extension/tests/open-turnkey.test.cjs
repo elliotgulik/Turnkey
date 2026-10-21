@@ -1,0 +1,9 @@
+const {test}=require('node:test');
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const modulePromise=import('data:text/javascript;base64,'+fs.readFileSync(require('node:path').join(__dirname,'../background/open-turnkey.js')).toString('base64'));
+function mock(tabs){const calls=[];return {calls,tabs:{query:async()=>tabs,update:async(...args)=>calls.push(['update',...args]),create:async(...args)=>calls.push(['create',...args])},windows:{update:async(...args)=>calls.push(['focus',...args])}};}
+test('saved quote reuses CRM tab and focuses its window',async()=>{const {openTurnKeyTab}=await modulePromise;const c=mock([{id:3,windowId:8,url:'https://turnkeycrm.net/index.html'}]);await openTurnKeyTab(c,'https://turnkeycrm.net','https://turnkeycrm.net/?job=123');assert.deepEqual(c.calls,[['update',3,{active:true,url:'https://turnkeycrm.net/?job=123'}],['focus',8,{focused:true}]]);});
+test('plain open preserves current CRM page state',async()=>{const {openTurnKeyTab}=await modulePromise;const c=mock([{id:3,url:'https://turnkeycrm.net/'}]);await openTurnKeyTab(c,'https://turnkeycrm.net');assert.deepEqual(c.calls,[['update',3,{active:true}]]);});
+test('measurement and public quote tabs are not replaced',async()=>{const {openTurnKeyTab}=await modulePromise;const c=mock([{id:3,url:'https://turnkeycrm.net/measure.html'},{id:4,url:'https://turnkeycrm.net/quote.html'}]);await openTurnKeyTab(c,'https://turnkeycrm.net');assert.equal(c.calls[0][0],'create');});
+test('rejects foreign origins and public paths',async()=>{const {openTurnKeyTab}=await modulePromise;for(const url of ['https://evil.test/','https://turnkeycrm.net/quote.html','https://user:pass@turnkeycrm.net/']){const c=mock([]);await assert.rejects(openTurnKeyTab(c,'https://turnkeycrm.net',url));assert.equal(c.calls.length,0);}});

@@ -90,8 +90,8 @@ function renderConnected() {
     data.settings = { ...data.settings, defaultUnit: e.target.value };
     await Storage.setSettings(data.settings);
   });
-  document.getElementById('open').addEventListener('click', () => {
-    chrome.tabs.create({ url: data.config.siteUrl + '/index.html' });
+  document.getElementById('open').addEventListener('click', async () => {
+    try { await TurnKeyApi.openTurnKey(); } catch(e) { error=e.message; render(); }
   });
   document.getElementById('enable-transfers')?.addEventListener('click', async () => {
     const status = document.getElementById('transfer-permission-status');

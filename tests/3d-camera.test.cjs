@@ -39,3 +39,27 @@ test('requires valid SDK geographic/elevation pick and property zoom; never deri
  map.range=1600;guard.sample(map);at(1000);assert.equal(guard.pick(map,point).reason,'zoom');
  map.center=null;assert.equal(guard.pick(map,point).reason,'moving');
 });
+
+test('documented optional camera angles do not permanently reject a settled camera',async()=>{
+ const {guard,map,at}=await setup();
+ delete map.heading;delete map.tilt;
+ guard.sample(map);at(500);
+ assert.deepEqual(guard.pick(map,point),{point});
+ map.heading=NaN;assert.equal(guard.pick(map,point).reason,'moving');
+});
+test('SDK prototype coordinate accessors are accepted without fabricated elevations',async()=>{
+ const {guard,map,at}=await setup();
+ const sdkPoint=Object.create({get lat(){return point.lat;},get lng(){return point.lng;},get altitude(){return point.altitude;}});
+ at(500);assert.deepEqual(guard.pick(map,sdkPoint),{point});
+});
+test('roof corner display is independent of ground calculation and preserves mixed 2D/3D elevations',async()=>{
+ const {displayPickedPoint,displayAltitude,editOutline}=await moduleReady;
+ const modes={ABSOLUTE:'absolute',CLAMP_TO_GROUND:'ground'};
+ assert.deepEqual(displayPickedPoint(point,modes),{position:point,altitudeMode:'absolute'});
+ const ground=displayAltitude([point],'ground',modes);
+ assert.deepEqual(ground.coordinates,[{lat:point.lat,lng:point.lng}]);
+ const moved=editOutline([point],{action:'move',index:0,point,view:'2d'})[0];
+ assert.equal(displayPickedPoint(moved,modes).altitudeMode,'ground');
+ assert.equal(moved.altitude,undefined);
+ assert.equal(point.altitude,22.75);
+});

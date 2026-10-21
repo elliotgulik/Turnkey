@@ -41,7 +41,7 @@
   'use strict';
   const PAGE_SOURCE='turnkey-crm-page', EXT_SOURCE='turnkey-customer-launch';
   const LAUNCH_TIMEOUT_MS=8000;
-  const ZIP_URL='/assets/turnkey-earth-extension-0.2.6.zip';
+  const ZIP_URL='/assets/turnkey-earth-extension-0.2.7.zip';
   let extensionReady=false;
   const pendingLaunches=new Map(); // nonce -> {resolve,reject,timer}
 
@@ -204,7 +204,7 @@
         const zip=document.createElement('a');
         zip.setAttribute('href',ZIP_URL);
         zip.setAttribute('data-eh-zip-link','');
-        zip.textContent='Download turnkey-earth-extension-0.2.6.zip';
+        zip.textContent='Download turnkey-earth-extension-0.2.7.zip';
         install.appendChild(zip);
         const steps=document.createElement('ol');
         steps.className='tk-eh-steps';
