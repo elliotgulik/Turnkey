@@ -85,7 +85,7 @@ const assert = require('node:assert/strict');
         await page.evaluate(() => switchView('leads'));
       }
       // Stage labels, plain controls and shared custom-select roles stay in Leads.
-      await card(1).locator('.sale-card-stage label > span').click();
+      await card(1).locator('.sale-card-stage label > span:not(.ux-select)').click();
       assert.equal(await leads.evaluate(el => el.classList.contains('active')), true);
       await card(1).evaluate(el => {
         const host = document.createElement('div');
