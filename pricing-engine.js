@@ -71,7 +71,8 @@ window.TK_PRICING = (function(){
   const STOREY_TYPES = {
     1:{label:'Single storey', mult:1.0},
     2:{label:'Two storey',    mult:1.2},
-    3:{label:'Three storey',  mult:1.44}
+    3:{label:'Three storey',  mult:1.44},
+    4:{label:'Four storey',   mult:1.73}
   };
   // Fence pricing default assumes one face washed. "2 sides" (both faces of
   // a boundary fence — common when a customer owns/can access both) simply

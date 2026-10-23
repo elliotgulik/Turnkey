@@ -142,9 +142,11 @@ export function installConversations(app, { db, requireBusiness, getValidAccessT
     try {
       await unwrap(scope(db.from('conversation_drafts').update({ status: 'sent', sent_message_id: sent.id, updated_at: new Date().toISOString() }).eq('id', row.id), req))
     } catch { warnings.push('Gmail accepted the message, but the draft status could not be saved. Do not resend.') }
-    try {
-      await unwrap(db.from('emails').upsert({ business_id: req.businessId, account_id: auth.account.id, provider_message_id: sent.id, thread_id: sent.threadId || reply.threadId || null, direction: 'sent', from_address: auth.account.email_address, to_addresses: payload.to, subject: payload.subject, body_text: payload.bodyText, snippet: payload.bodyText.slice(0, 140), sent_at: new Date().toISOString() }, { onConflict: 'account_id,provider_message_id' }))
-    } catch { warnings.push('Sent successfully. Sync to update your conversation history.') }
+    // Gmail has accepted delivery and the idempotency guard is now `sent`.
+    // Indexing the message is recoverable through mailbox sync, so keep it
+    // off the critical response path that the composer is waiting on.
+    void unwrap(db.from('emails').upsert({ business_id: req.businessId, account_id: auth.account.id, provider_message_id: sent.id, thread_id: sent.threadId || reply.threadId || null, direction: 'sent', from_address: auth.account.email_address, to_addresses: payload.to, subject: payload.subject, body_text: payload.bodyText, snippet: payload.bodyText.slice(0, 140), sent_at: new Date().toISOString() }, { onConflict: 'account_id,provider_message_id' }))
+      .catch(() => console.error('[Conversations] Sent message indexing failed; mailbox sync can repair it.'))
     res.json({ ok: true, id: sent.id, threadId: sent.threadId, warning: warnings.join(' ') || undefined })
   })
 }

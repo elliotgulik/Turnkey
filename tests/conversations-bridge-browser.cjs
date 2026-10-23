@@ -24,7 +24,7 @@ const fs = require('node:fs'), path = require('node:path'), assert = require('no
       let docTemplate={business:'Fixture Wash',phone:'021456',email:'owner@example.com',accent:'#138a72',quoteTerms:'Customer quote terms',invoiceTerms:'Payment due in 7 days',footer:'Thank you'};
       let cachedLogoDataUrl=null, SERVICES=TK_PRICING.SERVICES, ROOF_TYPES=TK_PRICING.ROOF_TYPES, STOREY_TYPES=TK_PRICING.STOREY_TYPES,FENCE_SIDES=TK_PRICING.FENCE_SIDES;
       let docPreview={recordId:1}, sendDocCtx={mode:'quote',recordId:1}, inboxThreads=[],inboxOpenThread=null;
-      window.bridgeFixture={drafts:new Map(),calls:[],pdfInputs:[],notices:[],opens:0,downloads:0,sends:0,activities:[],syncs:[],sendMode:'reject'};
+      window.bridgeFixture={drafts:new Map(),calls:[],pdfInputs:[],notices:[],opens:0,downloads:0,sends:0,activities:[],syncs:[],pushes:[],sendMode:'reject'};
       function backendUrl(){return 'https://backend.test'}
       function docBizName(){return docTemplate.business}
       function money(n){return '$'+Number(n).toFixed(2)}
@@ -38,7 +38,7 @@ const fs = require('node:fs'), path = require('node:path'), assert = require('no
       async function syncRecordToSupabase(r){bridgeFixture.syncs.push(r.id); if(bridgeFixture.pauseSync)await new Promise(resolve=>bridgeFixture.resumeSync=resolve);r.quotePublicToken='quote-token-'+r.id;r.jobId='job-'+r.id;r.quoteId='quote-'+r.id;savedRecords.set(r.id,structuredClone(r));}
       async function ensureRecordSynced(r){return syncRecordToSupabase(r)}
       async function preloadMapSnapshot(r){r._mapSnapshotDataUrl=null}
-      function triggerPush(){throw Error('Unexpected notification')}
+      function triggerPush(payload){bridgeFixture.pushes.push(payload)}
       function downloadBlob(){bridgeFixture.downloads++;throw Error('Unexpected download')}
       window.open=()=>{bridgeFixture.opens++;throw Error('Unexpected popup')};
       window.TK_SALES_PLATFORM={reset(){bridgeFixture.salesReset=true}};
@@ -84,13 +84,16 @@ const fs = require('node:fs'), path = require('node:path'), assert = require('no
     await page.evaluate(() => openGmailCompose({ to: 'client@example.com', subject: 'Hello', body: 'Stay inside TurnKey' }));
     assert.equal(await page.locator('[name=bodyText]').inputValue(), 'Stay inside TurnKey');
     await page.evaluate(() => generateAndSendDoc('quote', records[0]));
-    assert.equal(await page.locator('.cv-files li').count(), 1, JSON.stringify(await page.evaluate(() => bridgeFixture.notices)));
+    await page.locator('.cv-files li').first().waitFor();
+    assert.equal(await page.locator('[name=to]').isEnabled(), true, 'recipient remains editable while the PDF is prepared');
+    await page.locator('.cv-files li').first().waitFor({state:'visible'});
     assert.match(await page.locator('.cv-files').textContent(), /Quote-Q-1001-[a-f0-9]{32}\.pdf/);
+    await page.waitForFunction(() => [...bridgeFixture.drafts.values()].some(d => d.payload.document?.recordId==='1' && d.payload.attachments?.length===1));
     let state = await page.evaluate(() => ({
       stage: records[0].stage, quoteSentAt: records[0].quoteSentAt,
       last: [...bridgeFixture.drafts.values()].at(-1), pdf: bridgeFixture.pdfInputs.at(-1), sends: bridgeFixture.sends,
     }));
-    assert.equal(state.stage, 'new'); assert.equal(state.quoteSentAt, undefined); assert.equal(state.sends, 0);
+    assert.equal(state.stage, 'new'); assert.equal(state.quoteSentAt, undefined); assert.equal(state.sends, 0); assert.equal(await page.evaluate(()=>bridgeFixture.pushes.length),0);
     assert.deepEqual(state.last.payload.document, { mode: 'quote', recordId: '1' });
     assert.equal(state.pdf.output, 'base64'); assert.equal(state.pdf.record.estimatedCost, undefined); assert.equal(state.pdf.record.services[0].internalCost, undefined);
     const pdf = Buffer.from(state.last.payload.attachments[0].contentBase64, 'base64').toString();
@@ -120,6 +123,19 @@ const fs = require('node:fs'), path = require('node:path'), assert = require('no
     assert.equal(await page.evaluate(() => savedRecords.get(1).stage),'quoted');
     assert.ok(await page.evaluate(() => savedRecords.get(1).quoteSentAt));
     assert.equal(await page.evaluate(() => bridgeFixture.activities.length), 1);
+    // CRM persistence may be slow after Gmail has already accepted delivery.
+    // The composer must report success and unlock without waiting for it.
+    await page.getByRole('button', { name: 'Save & close', exact: true }).click();
+    await page.evaluate(() => { bridgeFixture.pauseSync = true; return generateAndSendDoc('quote', records[0]); });
+    await page.locator('.cv-files li').first().waitFor();
+    await page.evaluate(() => { bridgeFixture.sendMode = 'success'; });
+    await page.getByRole('button', { name: 'Send email', exact: true }).click();
+    await page.getByText('Email sent.', { exact: true }).waitFor();
+    await page.waitForFunction(() => typeof bridgeFixture.resumeSync === 'function');
+    assert.equal(await page.locator('.cv-composer').count(), 0, 'confirmed delivery closes/unlocks the composer during CRM sync');
+    await page.evaluate(() => { bridgeFixture.resumeSync(); bridgeFixture.pauseSync = false; });
+    await page.waitForFunction(() => bridgeFixture.syncs.length >= 2);
+    assert.equal(await page.evaluate(() => bridgeFixture.pushes.length), 1, 'notification only follows Gmail-confirmed send');
     // Invoice entry points only prepare; they never mark invoices as sent.
     await page.evaluate(() => { records[1].stage='completed'; });
     await page.evaluate(() => openSendDocModal('invoice', records[1]));
@@ -140,7 +156,8 @@ const fs = require('node:fs'), path = require('node:path'), assert = require('no
     assert.equal(await page.evaluate(() => bridgeFixture.sends), 2);
     const countBefore = await page.evaluate(() => bridgeFixture.drafts.size);
     await page.evaluate(() => { bridgeFixture.pdfFails = true; return generateAndSendDoc('quote', records[1]); });
-    assert.equal(await page.evaluate(() => bridgeFixture.drafts.size), countBefore);
+    await page.getByRole('button', {name:'Retry PDF'}).waitFor();
+    assert.ok(await page.evaluate(() => bridgeFixture.drafts.size) >= countBefore, 'preparation failure keeps a usable draft open');
     assert.match(await page.evaluate(() => bridgeFixture.notices.at(-1)), /PDF generation failed/);
     await page.evaluate(() => { bridgeFixture.pdfFails = false; return openComposeModal({ to: 'alice@example.com', subject: 'Follow up', body: 'Checking in' }); });
     assert.equal(await page.locator('[name=bodyText]').inputValue(), 'Checking in');

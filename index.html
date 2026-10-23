@@ -100,6 +100,7 @@
   html{-webkit-text-size-adjust:100%}
   body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','SF Pro Text','Helvetica Neue',Helvetica,Arial,sans-serif;background:var(--paper);color:var(--ink);line-height:1.47;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
   button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit;letter-spacing:-.01em}
+  button:focus-visible{outline:3px solid var(--teal);outline-offset:3px}
   input,select,textarea{font-family:inherit;font-size:15px;color:var(--ink)}
   /* ===== Shell: fixed-width left sidebar + fluid content column. The
      sidebar keeps the historical `nav.tabs`/`#tabs` selector (see
@@ -126,7 +127,7 @@
   .sidebar-label{font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-faint);padding:16px 12px 6px}
   nav.tabs button{
     display:flex;align-items:center;gap:10px;width:100%;text-align:left;
-    padding:9px 12px;font-size:13.5px;font-weight:500;color:var(--ink-soft);
+    min-height:42px;padding:9px 12px;font-size:13.5px;font-weight:500;color:var(--ink-soft);
     border-radius:9px;transition:background .15s,color .15s;letter-spacing:-.01em;
   }
   nav.tabs button .nav-ico{width:19px;height:19px;flex-shrink:0;opacity:.85;display:inline-flex;align-items:center;justify-content:center}
@@ -244,7 +245,7 @@
   .pill.partial{background:var(--amber-wash);color:var(--amber)}
 
   /* buttons — pill, restrained */
-  .btn{display:inline-flex;align-items:center;gap:7px;justify-content:center;font-size:14px;font-weight:500;padding:11px 20px;border-radius:980px;transition:background .15s,border-color .15s,opacity .15s,transform .1s;letter-spacing:-.01em}
+  .btn{display:inline-flex;align-items:center;gap:7px;justify-content:center;min-height:42px;font-size:14px;font-weight:500;padding:11px 20px;border-radius:980px;transition:background .15s,border-color .15s,opacity .15s,transform .1s;letter-spacing:-.01em}
   .btn:active{transform:scale(.98)}
   .btn.primary{background:var(--ink);color:#fff}
   .btn.primary:hover{background:#16344b}
@@ -253,7 +254,7 @@
   .btn.ai{background:var(--teal);color:#fff}
   .btn.ai:hover{background:var(--teal-bright)}
   .btn.block{width:100%}
-  .btn.sm{padding:8px 15px;font-size:13px}
+  .btn.sm{min-height:38px;padding:8px 15px;font-size:13px}
   .btn:disabled{opacity:.4;cursor:not-allowed}
   .add-lead-bar{display:flex;justify-content:flex-end;margin-bottom:18px;gap:10px}
 
@@ -1333,7 +1334,7 @@
   .dp-name{font-size:14px;font-weight:600}
   .dp-line{font-size:12px;color:#5b6b78;margin-top:2px}
   .doc-map{padding-bottom:22px}
-  .doc-map img{width:100%;height:auto;object-fit:contain;border-radius:9px;border:1px solid #e9edf1;display:block}
+  .doc-map img{width:min(100%,360px);height:auto;object-fit:contain;border-radius:9px;border:1px solid #e9edf1;display:block}
   .doc-table{width:100%;border-collapse:collapse;margin:6px 0}
   .doc-table th{text-align:left;font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#9aa7b1;padding:8px 0;border-bottom:1px solid #e9edf1}
   .doc-table th.r{text-align:right}
@@ -2043,7 +2044,7 @@ const SVC_COST=TK_COST.SVC_COST, CHEMICALS=TK_COST.CHEMICALS, COST_INPUTS=TK_COS
 // Thin compatibility wrapper — existing callers (renderEstimate,
 // confirmQuoteSend's duration estimate) get the same shape as before;
 // TK_COST.costBreakdown() is the one real implementation.
-function estimateJob(services,travel){return TK_COST.costBreakdown((services||[]).map(s=>({svc:s.svc,qty:s.qty})),travel);}
+function estimateJob(services,travel,access){return TK_COST.costBreakdown((services||[]).map(s=>({ ...s })),travel,access?{access}:undefined);}
 function fmtDur(min){const h=Math.floor(min/60),m=Math.round(min%60);return h?`${h}h ${m?m+'m':''}`.trim():`${m}m`}
 const DAY_START_MIN = 8*60; // crews start at 8:00am
 function fmtTime(mins){let h=Math.floor(mins/60),m=Math.round(mins%60);const ap=h>=12?'pm':'am';let h12=h%12;if(h12===0)h12=12;return `${h12}:${String(m).padStart(2,'0')}${ap}`;}
@@ -4128,7 +4129,7 @@ function reviewQuote(){
   const lines=draftLines.filter(l=>(parseFloat(l.qty)||0)>0);
   if(!lines.length){toast('Add at least one service with a quantity');return}
   const r=records.find(x=>x.id===activeLeadId);
-  const e=estimateJob(lines.map(l=>({svc:l.svc,qty:parseFloat(l.qty)||0})));
+  const e=estimateJob(lines.map(l=>({...l,qty:parseFloat(l.qty)||0})),quoteTravelInfo,quoteAssumptions.access);
   const total=quoteTotal();
   const margin=Math.round(TK_COST.marginPct(total,e.cost));
   const a=quoteAssumptions;
@@ -4181,7 +4182,7 @@ function priceCompareHtml(sub,rec,i){
 }
 function renderSvcLines(){
   const wrap=document.getElementById('svc-builder');wrap.innerHTML='';
-  const costBd=TK_COST.costBreakdown(draftLines);
+  const costBd=TK_COST.costBreakdown(draftLines,undefined,{access:quoteAssumptions.access});
   draftLines.forEach((line,i)=>{
     const svc=SERVICES[line.svc];const sub=lineSubtotal(line);
     const rec=costBd.lines.find(b=>b.line===line);
@@ -4305,7 +4306,7 @@ function renderAssumptions(){
     <div class="assume-box">
       <div class="assume-h">Adjust assumptions <span class="assume-hint">these move the price before you send</span></div>
       <div class="assume-row">
-        <div class="assume-label">Access difficulty</div>
+        <div class="assume-label">Access difficulty<div class="assume-sub">Adjusts quote price and crew-time estimate</div></div>
         <div class="seg">${Object.entries(ACCESS_OPTS).map(([k,v])=>`<button class="seg-btn ${quoteAssumptions.access===k?'sel':''}" onclick="setAssumeAccess('${k}')">${v.label}</button>`).join('')}</div>
       </div>
       <div class="assume-row">
@@ -4316,13 +4317,19 @@ function renderAssumptions(){
     </div>`;
 }
 function setAssumeAccess(k){quoteAssumptions.access=k;updateQuoteTotal();}
+function setQuoteTravelMinutes(value){
+  const mins=Number(value);
+  if(!Number.isFinite(mins)||mins<0||mins>1440){renderEstimate();return;}
+  quoteTravelInfo={...(quoteTravelInfo||{}),mins,source:'manual'};
+  renderEstimate();
+}
 function setAssumePremium(){quoteAssumptions.premium=!quoteAssumptions.premium;updateQuoteTotal();}
 // One-click pricing actions (Section 5) \u2014 every one of these sets a
 // per-line fixedPrice (clearing customRate) so the result is pinned to an
 // exact dollar figure regardless of qty/rate math, then re-renders through
 // the normal line-editor path so price-compare/profit-summary stay in sync.
 function applyRecommendedPricing(){
-  const bd=TK_COST.costBreakdown(draftLines);
+  const bd=TK_COST.costBreakdown(draftLines,undefined,{access:quoteAssumptions.access});
   let n=0;
   draftLines.forEach(line=>{
     const rec=bd.lines.find(b=>b.line===line);
@@ -4334,7 +4341,7 @@ function applyRecommendedPricing(){
 }
 function resetLineToRecommended(i){
   const line=draftLines[i]; if(!line)return;
-  const bd=TK_COST.costBreakdown(draftLines);
+  const bd=TK_COST.costBreakdown(draftLines,undefined,{access:quoteAssumptions.access});
   const rec=bd.lines.find(b=>b.line===line);
   if(!rec)return;
   line.fixedPrice=rec.recommendedPrice;line.customRate=null;
@@ -4368,7 +4375,7 @@ function renderEstimate(){
   const zone=document.getElementById('estimate-zone'); if(!zone) return;
   const lines=draftLines.filter(l=>(parseFloat(l.qty)||0)>0);
   if(!lines.length){zone.innerHTML='';return;}
-  const e=estimateJob(lines.map(l=>({svc:l.svc,qty:parseFloat(l.qty)||0})),quoteTravelInfo);
+  const e=estimateJob(lines.map(l=>({ ...l, qty:parseFloat(l.qty)||0 })),quoteTravelInfo,quoteAssumptions.access);
   const finalTotal=quoteTotal();
   const profit=TK_COST.profit(finalTotal,e.cost);
   const marginPct=TK_COST.marginPct(finalTotal,e.cost);
@@ -4385,12 +4392,13 @@ function renderEstimate(){
   }
   zone.innerHTML=`
     <div class="est-box">
-      <div class="est-head"><span class="est-h">Cost &amp; time estimate</span><span class="est-time">\u23f1 ${fmtDur(e.labourMin)} on site</span></div>
+      <div class="est-head"><span class="est-h">Cost &amp; time estimate</span><span class="est-time">\u23f1 ${fmtDur(e.labourMin)} on site${e.travelMins!=null?' · '+fmtDur(Math.round(e.travelMins))+' round-trip drive · '+fmtDur(e.totalTimeMin)+' total':''}</span></div>
       <div class="est-rows">
         <div class="est-r"><span>Wages (${COST_INPUTS.crew} crew \u00d7 ${e.labourHrs.toFixed(1)}h \u00d7 $${COST_INPUTS.wage})</span><span>${money(e.wageCost)}</span></div>
         <div class="est-r"><span>Chemicals (${e.litres.toFixed(1)} L)</span><span>${e.unsetChemicals?.length?'Incomplete':money(e.chem)}</span></div>
         ${e.unsetChemicals?.length?`<div class="profit-warn" role="status">Supplier cost not set: ${e.unsetChemicals.map(id=>CHEMICALS[id].label).join(', ')}. Costs, recommended price and margin are incomplete. Enter actual supplier costs in Pricing.</div>`:''}
-        <div class="est-r"><span>${quoteTravelInfo?`Travel — ${e.travelKm.toFixed(1)}km round trip${e.travelMins?' · ~'+fmtDur(Math.round(e.travelMins))+' drive':''}${quoteTravelInfo.source==='estimate'?' (estimated)':''}`:`Fuel (${e.travelKm}km round trip — add a home address in Settings for an accurate estimate)`}</span><span>${money(e.fuelCost)}</span></div>
+        <div class="est-r"><span>${quoteTravelInfo?`Travel — ${e.travelKm.toFixed(1)}km round trip${e.travelMins!=null?' · '+fmtDur(Math.round(e.travelMins))+' drive':''}${e.travelIsEstimate?' (estimated)':''}${quoteTravelInfo.source==='manual'?' (manual time)':''}`:`Fuel (${e.travelKm}km estimated round trip — add a home address in Settings for a route estimate)`}</span><span>${money(e.fuelCost)}</span></div>
+        <div class="est-r"><label for="quote-drive-mins">Round-trip drive time (min)</label><input id="quote-drive-mins" type="number" min="0" max="1440" step="5" placeholder="Enter minutes" value="${e.travelMins==null?'':Math.round(e.travelMins)}" onchange="setQuoteTravelMinutes(this.value)"></div>
         <div class="est-r"><span>Equipment wear</span><span>${money(e.equipmentCost)}</span></div>
         <div class="est-r"><span>Consumables</span><span>${money(e.consumablesCost)}</span></div>
         <div class="est-r"><span>${e.overheadCost>0?`Overheads (${money(TK_COST.overheadsMonthly())}/mo ÷ ${COST_INPUTS.jobsPerMonth} jobs)`:`Overheads <a href="#" onclick="switchView('pricing');return false" style="color:var(--accent)">not set</a>`}</span><span>${money(e.overheadCost)}</span></div>
@@ -4449,7 +4457,7 @@ function confirmQuoteSend(){
   // margin actually was at the time, not get silently recalculated against
   // today's rates every time someone reopens it (Reporting needs this to
   // stay historically accurate, not just the live Quote Builder).
-  const costBd=TK_COST.costBreakdown(lines,quoteTravelInfo);
+  const costBd=TK_COST.costBreakdown(lines,quoteTravelInfo,{access:quoteAssumptions.access});
   r.travelKm=costBd.travelKm;
   r.travelMins=costBd.travelMins;
   r.travelSource=quoteTravelInfo?quoteTravelInfo.source:'default';
@@ -4460,6 +4468,7 @@ function confirmQuoteSend(){
     if(l.sides)o.sides=l.sides;
     if(l.customRate!=null)o.customRate=l.customRate;
     if(l.fixedPrice!=null)o.fixedPrice=l.fixedPrice;
+    o.access=quoteAssumptions.access;
     const rec=costBd.lines.find(b=>b.line===l);
     if(rec){o.recommendedPrice=rec.recommendedPrice;o.estCost=rec.cost;}
     return o;
@@ -4472,7 +4481,7 @@ function confirmQuoteSend(){
   // Rounded on-site time only — never the $ cost/wage/margin behind it —
   // so the customer-facing "Estimated duration" on the public quote page
   // has something real to show without exposing internal cost-model data.
-  r.estimatedDurationMin=estimateJob(r.services).labourMin;
+  r.estimatedDurationMin=estimateJob(r.services,quoteTravelInfo).labourMin;
   // Fire-and-forget — starts fetching the map snapshot now so it's likely
   // already cached by the time the operator actually hits Send, without
   // making quote-confirmation wait on a network round trip.
@@ -4488,23 +4497,13 @@ function confirmQuoteSend(){
 // Actually send the quote after the operator has previewed it.
 function sendQuoteDoc(){
   const r=records.find(x=>x.id===docPreview.recordId);if(!r)return;
-  if(r.stage==='new')r.stage='quoted';
-  if(!r.follows||!r.follows.length)r.follows=defaultFollows();
-  r.follows.forEach(f=>{if(f.dayOffset===0)f.state='sent';});
-  r.quoteSentAt=Date.now();r.clientResponded=false;r.selfPriced=false;
-  closeDocPreview();render();renderAll();
+  closeDocPreview();
   generateAndSendDoc('quote',r);
-  triggerPush({type:'quote_sent',title:'Quote sent to customer',message:'Quote for '+money(r.total||0)+' sent to '+r.name,url:'/index.html?open=pipeline'});
 }
 function sendInvoiceDoc(){
   const r=records.find(x=>x.id===docPreview.recordId);if(!r)return;
-  const isNewInvoice=!r.invoiceSent; // first time this invoice is actually sent, not a resend
-  r.invoiceSent=true;
-  r.paymentStatus='sent';
-  if(!r.dueDate)r.dueDate=addDaysISO(todayISO(),7); // matches the default invoice terms ("due within 7 days")
   closeDocPreview();
   generateAndSendDoc('invoice',r);
-  if(isNewInvoice)triggerPush({type:'invoice_created',title:'New invoice created',message:'Invoice for '+money(r.total||0)+' sent to '+r.name,url:'/index.html?open=pipeline'});
 }
 
 /* ===== Communication timeline: fire-and-forget log of customer-facing events.
@@ -4838,7 +4837,7 @@ function buildDocPDF(mode,r,outputType){
   // dimensions so the legend is neither cropped nor stretched in the PDF.
   if(r._mapSnapshotDataUrl){
     const snapshotRatio=(r._mapSnapshotHeight>0&&r._mapSnapshotWidth>0)?r._mapSnapshotHeight/r._mapSnapshotWidth:400/640;
-    const imgW=Math.min(TW,235/snapshotRatio),imgH=imgW*snapshotRatio;
+    const imgW=Math.min(TW,120,78/snapshotRatio),imgH=imgW*snapshotRatio;
     if(y+imgH+4>265){doc.addPage();y=20;}
     try{
       doc.setFont('helvetica','bold');doc.setFontSize(7);doc.setTextColor(120,130,140);
@@ -8547,7 +8546,7 @@ function renderMetaConnectionCard(){
     <div class="conn-top"><span class="conn-name">Meta — Facebook &amp; Instagram lead ads</span><span class="conn-badge ${ready?'on':'off'}">${ready?'● LEAD NOTIFICATIONS ENABLED':m.connected?'CHECK DELIVERY':'not connected'}</span></div>
     ${m.connected?`<p>Page ${escapeHtmlSafe(m.pageId)}${m.pageName?' · '+escapeHtmlSafe(m.pageName):''}</p><p>${escapeHtmlSafe(m.message||'A credential is saved. Check it with Meta to verify access and lead notifications.')}</p><p>${leadReceiptLabel(m)}</p><div class="quote-action-row"><button class="btn ghost sm" onclick="checkMetaDelivery(false,this)">Check connection</button><button class="btn accent sm" onclick="checkMetaDelivery(true,this)">Enable lead delivery</button><button class="btn accent sm" onclick="TK_META_IMPORT.start()">Import existing leads</button><button class="btn ghost sm" onclick="disconnectMeta()">Disconnect</button></div><p id="meta-import-progress" role="status"></p>`:''}
     <details ${!m.connected||m.health==='reconnect'||m.health==='permissions'?'open':''}><summary>${m.connected?'Reconnect Page':'Connect your Page'}</summary>
-      <p>Use a Page Access Token for this Page with leads_retrieval and pages_manage_metadata. In Meta, enable the app’s Page leadgen webhook and grant it Leads Access for this Page. App review or access restrictions may still limit real ad leads.</p>
+      <p>For fewer interruptions, use a Business System User token with expiry set to <b>Never</b>—not a short-lived Graph API Explorer token. Assign the TurnKey app and Nova Exterior Page to that system user, and grant <code>leads_retrieval</code> and <code>pages_manage_metadata</code>. Generate it in <a href="https://business.facebook.com/settings/" target="_blank" rel="noopener">Meta Business Settings → Users → System Users</a>, then paste it here. A token with no scheduled expiry can still be revoked by Meta or a business admin; use Check connection to verify it.</p>
       <div class="conn-keyrow"><input id="conn-meta-pageid" aria-label="Meta Page ID" placeholder="Page ID" value="${escapeHtmlSafe(m.pageId||'')}"></div>
       <div class="conn-keyrow" style="margin-top:6px"><input id="conn-meta-token" aria-label="Meta Page Access Token" placeholder="Page Access Token" type="password" autocomplete="off"><button class="btn accent sm" onclick="connectMeta()">${m.connected?'Reconnect':'Connect'}</button></div>
     </details></div>`;

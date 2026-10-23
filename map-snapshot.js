@@ -69,6 +69,21 @@
         params.append('markers', 'color:' + color + '|label:' + (i + 1).toString(36).toUpperCase() + '|' + c.lat.toFixed(6) + ',' + c.lng.toFixed(6));
       }
     }
+    if (areas.length) {
+      // A path-only Static Maps request can auto-fit to a very broad viewport.
+      // Set an explicit, bounds-derived camera so a typical house/driveway
+      // fills the image while retaining comfortable space around the outline.
+      const pts = areas.flatMap(a => a.geoPts);
+      const projected = pts.map(p => world(p, pts[0].lng));
+      const bounds = projected.reduce((b,p) => ({minX:Math.min(b.minX,p.x),maxX:Math.max(b.maxX,p.x),minY:Math.min(b.minY,p.y),maxY:Math.max(b.maxY,p.y)}), {minX:Infinity,maxX:-Infinity,minY:Infinity,maxY:-Infinity});
+      const spanX = Math.max(bounds.maxX-bounds.minX, 1e-7), spanY = Math.max(bounds.maxY-bounds.minY, 1e-7);
+      const zoom = Math.max(3, Math.min(21, Math.floor(Math.log2(Math.min(width/(256*spanX), height/(256*spanY)) * .82))));
+      const centerY = (bounds.minY+bounds.maxY)/2;
+      const centerLat = Math.atan(Math.sinh(Math.PI*(1-2*centerY))) * 180/Math.PI;
+      const centerLng = (((bounds.minX+bounds.maxX)/2)*360)-180;
+      params.set('center', centerLat.toFixed(7)+','+centerLng.toFixed(7));
+      params.set('zoom', String(zoom));
+    }
     if (!areas.length) {
       // Pixel sketches have no geographic anchor. Address-only imagery must
       // never be mistaken for a measured outline; buildSnapshot uses a diagram.

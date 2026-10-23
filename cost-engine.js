@@ -71,6 +71,11 @@ window.TK_COST = (function(){
     other:     { label:'Other (accounting, storage, bank fees)',         perMonth:0 }
   };
   const GST_RATE=0.15;
+  // Planning multipliers for additional access/height effort. These affect
+  // estimated crew time (and therefore wage cost) as well as the resulting
+  // recommended price. They are estimates; actual site conditions vary.
+  const HOUSEWASH_STOREY_TIME_MULT={1:1,2:1.2,3:1.44,4:1.73};
+  const ACCESS_TIME_MULT={easy:0.95,standard:1,hard:1.15};
   function overheadsMonthly(){
     return Object.values(OVERHEADS).reduce((s,o)=>s+(parseFloat(o.perMonth)||0),0);
   }
@@ -88,9 +93,12 @@ window.TK_COST = (function(){
     return COST_INPUTS.gstRegistered?a*(1+GST_RATE):a;
   }
 
-  function lineCleanMin(line){
+  function lineCleanMin(line, defaultAccess){
     const c=SVC_COST[line.svc]; if(!c)return 0;
-    return ((parseFloat(line.qty)||0)/c.m2ph)*60;
+    let multiplier=1;
+    if(line.svc==='housewash')multiplier*=HOUSEWASH_STOREY_TIME_MULT[Number(line.storeys)]||1;
+    multiplier*=ACCESS_TIME_MULT[defaultAccess||line.access]||1;
+    return ((parseFloat(line.qty)||0)/c.m2ph)*60*multiplier;
   }
   // Concentrate litres per service unit, keyed by chemical ID. Missing
   // chemicals retains legacy single-product settings; {} means no chemicals.
@@ -158,7 +166,8 @@ window.TK_COST = (function(){
   function costBreakdown(lines,travel,options){
     const margin=targetMargin(options&&options.targetMargin,targetMargin(COST_INPUTS.targetMargin));
     const active=(lines||[]).filter(l=>SVC_COST[l.svc]&&(parseFloat(l.qty)||0)>0);
-    const totalCleanMin=active.reduce((s,l)=>s+lineCleanMin(l),0);
+    const access=options&&options.access;
+    const totalCleanMin=active.reduce((s,l)=>s+lineCleanMin(l,access),0);
     // travel is optional {km, mins} for the actual business->job distance
     // (see calcTravelDistance() in index.html); falls back to the fixed
     // avgKm guess when no real distance has been calculated yet (e.g. no
@@ -179,7 +188,7 @@ window.TK_COST = (function(){
     // Direct cost per line (wage share by clean-time + its own chemical
     // cost) — this is what each line's share of the total is based on.
     const lineDirect=active.map(l=>{
-      const cleanMin=lineCleanMin(l);
+      const cleanMin=lineCleanMin(l,access);
       const wageShare=totalCleanMin>0?totalWageCost*(cleanMin/totalCleanMin):0;
       const chemCost=lineChemCost(l);
       return {line:l, cleanMin, wageShare, chemCost, directCost:wageShare+chemCost};
@@ -218,6 +227,7 @@ window.TK_COST = (function(){
       wageCost:totalWageCost, chem:totalChemCost, litres:totalLitres,
       fuelCost, equipmentCost, consumablesCost, overheadCost,
       travelKm, travelMins, travelIsEstimate:!(travel&&isFinite(travel.km)),
+      totalTimeMin:Math.round(totalLabourMin+(travelMins||0)),
       cost:Math.round(totalCost), // retained for existing display/snapshot consumers
       costUnrounded:totalCost, // internal audit basis for target-margin guarantees
       recommended:recommendedTotal,
@@ -238,5 +248,5 @@ window.TK_COST = (function(){
   function profit(revenueIncl,cost){
     return exGst(revenueIncl)-(cost||0);
   }
-  return {serviceChemicals,unsetChemicals,chemicalConfig,applyChemicalConfig,targetMargin,SVC_COST,CHEMICALS,COST_INPUTS,OVERHEADS,GST_RATE,lineCleanMin,lineLitres,lineChemCost,costBreakdown,marginPct,profit,exGst,inclGst,overheadsMonthly,overheadPerJob};
+  return {serviceChemicals,unsetChemicals,chemicalConfig,applyChemicalConfig,targetMargin,SVC_COST,CHEMICALS,COST_INPUTS,OVERHEADS,GST_RATE,HOUSEWASH_STOREY_TIME_MULT,ACCESS_TIME_MULT,lineCleanMin,lineLitres,lineChemCost,costBreakdown,marginPct,profit,exGst,inclGst,overheadsMonthly,overheadPerJob};
 })();

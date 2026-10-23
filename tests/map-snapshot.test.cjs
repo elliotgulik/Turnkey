@@ -29,6 +29,11 @@ test('numeric strings normalize before centroid math, without concatenation',()=
  const url=new URL(M.buildUrl([area({geoPts:geo.map(p=>({lat:String(p.lat),lng:String(p.lng)}))})],'fixture-key'));
  assert.match(url.searchParams.get('markers'),/color:red\|-36\.800100,174\.700067/);
 });
+test('satellite snapshots set a bounds-fitted camera for close property framing',()=>{
+ const url=new URL(M.buildUrl([area()],'fixture-key'));
+ assert.ok(Number(url.searchParams.get('zoom'))>=18,'house-scale outline should not be shown at neighborhood zoom');
+ assert.match(url.searchParams.get('center'),/^-36\.8001\d*?,174\.7001\d*$/);
+});
 test('SVG carries saved customer measurements and safely escapes labels; no internal data',()=>{
  const input=[area({notes:'PRIVATE_NOTE',cost:999,margin:42,photoPaths:['SECRET_PATH']})];
  const before=JSON.stringify(input),svg=M.buildSvg(input);

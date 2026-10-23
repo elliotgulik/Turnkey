@@ -165,7 +165,10 @@ export async function sendMessage(accessToken, { from, to, subject, bodyText, bo
   const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
     method: 'POST',
     headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    // A stuck provider request must not leave a draft in "Sending" forever.
+    // The route records this as delivery-unknown, so retries remain blocked.
+    signal: AbortSignal.timeout(25000)
   })
   if (!res.ok) {
     const err = new Error(res.status === 401 ? 'Gmail connection expired; reconnect in Connections' : 'Gmail rejected the message (' + res.status + ')')

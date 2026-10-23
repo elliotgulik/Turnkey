@@ -16,6 +16,19 @@ test('higher target and real travel change recommendations; non-GST businesses d
  const noGst=e.costBreakdown(lines,{km:80},{targetMargin:0.7});
  assert(noGst.recommended<high.recommended);assert(Math.abs(e.marginPct(noGst.recommended,noGst.cost)-70)<0.5);
 });
+test('house levels, access difficulty and round-trip drive time change time and wage estimates',()=>{
+ const e=engine(), baseLines=[{svc:'housewash',qty:350,storeys:1}];
+ const base=e.costBreakdown(baseLines,{km:0,mins:30});
+ const twoStorey=e.costBreakdown([{...baseLines[0],storeys:2}],{km:0,mins:30});
+ const difficult=e.costBreakdown([{...baseLines[0],storeys:2}],{km:0,mins:45},{access:'hard'});
+ assert.equal(base.labourMin,Math.round(e.COST_INPUTS.setupMin+e.lineCleanMin(baseLines[0])));
+ assert(twoStorey.labourMin>base.labourMin);
+ assert(difficult.labourMin>twoStorey.labourMin);
+ assert(difficult.wageCost>twoStorey.wageCost);
+ assert.equal(difficult.travelMins,45);
+ assert.equal(difficult.totalTimeMin,difficult.labourMin+45);
+ assert.equal(e.lineCleanMin({svc:'housewash',qty:350,storeys:4})/e.lineCleanMin(baseLines[0]),1.73);
+});
 test('invalid margins are bounded, while a zero margin is supported and call-out minimum stays intact',()=>{
  const e=engine(),lines=[{svc:'driveway',qty:1}];
  for(const targetMargin of [1,-1,Infinity,'invalid',null,'']){

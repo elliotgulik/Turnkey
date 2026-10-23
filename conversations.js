@@ -34,7 +34,7 @@
     template.content.querySelectorAll('p,div,tr,li,h1,h2,h3').forEach(n => n.append('\n'));
     return template.content.textContent.trim() || message.snippet || '';
   }
-  function mount({ root, request, onConnect = () => {}, onCount = () => {}, listQuotes = () => [], buildQuoteAttachment, beforeSend = () => {}, onDocument = () => {}, onSent = () => {} }) {
+  function mount({ root, request, onConnect = () => {}, onCount = () => {}, listQuotes = () => [], buildQuoteAttachment, buildDocumentAttachment, beforeSend = () => {}, onDocument = () => {}, onSent = () => {} }) {
     if (!root || typeof request !== 'function') throw Error('Conversations requires a root and authenticated request function');
     let messages = [], stars = [], drafts = [], account = null, folder = 'inbox', selected = null;
     let quoteFiles = null, quoteChoices = [], query = '', loaded = false;
@@ -46,7 +46,7 @@
     };
     const dateLabel = value => Number.isNaN(new Date(value).getTime()) ? 'Date unavailable' : new Date(value).toLocaleString();
     let lastDocument = null;
-    let composer = null, notice = '', pending = false, destroyed = false, timer, hasMore = false, loading = false;
+    let composer = null, notice = '', pending = false, sending = false, destroyed = false, timer, hasMore = false, loading = false;
     let saveQueue = Promise.resolve();
     const api = (path, method = 'GET', body) => request('/api/conversations' + path, { method, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
     const button = (label, action, extra = '') => `<button type="button" data-cv-action="${action}" ${extra}>${label}</button>`;
@@ -102,15 +102,17 @@
       onCount(category(groups, 'inbox').length);
     }
     function composeHtml() {
-      const locked = pending || composer.status !== 'draft';
+      const locked = sending || composer.status !== 'draft';
+      const preparing = !!composer.documentPending;
+      const documentMessage = preparing ? 'Preparing the quote PDF… Edit the recipient or message while it finishes.' : composer.documentError ? `PDF preparation failed: ${esc(composer.documentError)}` : 'Quote PDF attached · Your email is ready to edit.';
       const fileNames = composer.payload.attachments.map((f, i) => `<li><span><b>${esc(f.filename)}</b><small>${f.savedAttachmentId ? 'Saved quote PDF' : f.mimeType === 'application/pdf' ? 'PDF document' : 'File attachment'}</small></span>${button('Remove', 'remove-file', `data-index="${i}" aria-label="Remove ${esc(f.filename)}" ${locked || (composer.payload.document && i === 0) ? 'disabled' : ''}`)}</li>`).join('');
-      return `<section class="cv-composer" aria-label="Email composer"><header><div><h3>${composer.payload.document ? (composer.payload.document.mode === 'quote' ? 'Quote email' : 'Invoice email') : composer.payload.replyToId ? 'Reply' : 'New email'}</h3><p>Your draft saves as you type. Send when you are ready.</p></div>${button(composer.status === 'draft' ? 'Save & close' : 'Close', 'close', pending ? 'disabled' : '')}</header>${composer.payload.document ? `<div class="cv-document-context"><span>PDF attached · Your saved email template is ready to edit. Sending updates this opportunity.</span>${button('Open opportunity', 'document', pending ? 'disabled' : '')}</div>` : ''}<form data-cv-form>
+      return `<section class="cv-composer" aria-label="Email composer"><header><div><h3>${composer.payload.document ? (composer.payload.document.mode === 'quote' ? 'Quote email' : 'Invoice email') : composer.payload.replyToId ? 'Reply' : 'New email'}</h3><p>Your draft saves as you type. Send when you are ready.</p></div>${button(composer.status === 'draft' ? 'Save & close' : 'Close', 'close', pending || preparing ? 'disabled' : '')}</header>${composer.payload.document ? `<div class="cv-document-context"><span>${documentMessage}</span>${composer.documentError ? button('Retry PDF', 'retry-document', pending ? 'disabled' : '') : ''}${button('Open opportunity', 'document', pending ? 'disabled' : '')}</div>` : ''}<form data-cv-form>
         <label>To<input name="to" type="email" autocomplete="email" placeholder="customer@example.com" required maxlength="2000" value="${esc(composer.payload.to)}" ${locked ? 'disabled' : ''}></label>
         <label>Subject<input name="subject" placeholder="What is this email about?" required maxlength="998" value="${esc(composer.payload.subject)}" ${locked ? 'disabled' : ''}></label>
         <label>Message<textarea name="bodyText" rows="9" placeholder="Write your message…" required maxlength="100000" ${locked ? 'disabled' : ''}>${esc(composer.payload.bodyText)}</textarea></label>
         <div class="cv-attachments"><h4>Attachments <span>${composer.payload.attachments.length}/10</span></h4><p>Up to 10 files, 12 MB total. Review attached files before sending.</p><ul class="cv-files">${fileNames}</ul><label class="cv-file-input">Attach images or files<input type="file" name="files" multiple ${locked ? 'disabled' : ''}></label>${button('Saved quote PDF', 'quotes', `aria-expanded="${!!quoteFiles}" ${locked ? 'disabled' : ''}`)}</div>
         <div class="cv-quote-picker" ${quoteFiles ? '' : 'hidden'}>${quoteFiles ? '<header><h4>Choose a quote to attach</h4>' + button('Close quote picker', 'quotes') + '</header><h4>Opportunity quotes</h4>' + (quoteChoices.map(q => button(esc(q.label), 'opportunity-quote', `data-id="${esc(q.id)}" ${locked ? 'disabled' : ''}`)).join('') || '<p>No opportunity quotes available.</p>') + '<h4>Uploaded quote PDFs</h4>' + (quoteFiles.map(f => button(esc(f.filename), 'quote', `data-id="${esc(f.id)}" data-filename="${esc(f.filename)}" ${locked ? 'disabled' : ''}`)).join('') || '<p>No uploaded quote PDFs. You can attach a file above.</p>') : ''}</div>
-        <footer class="cv-compose-footer"><p class="cv-save-state" role="status" aria-live="polite">${esc(composer.status !== 'draft' ? 'Delivery is ' + composer.status + '. Check Sent or sync before creating another email.' : composer.dirty ? 'Unsaved changes' : 'Draft saved')}</p>${!account ? '<p>Connect Gmail in Connections to send this draft.</p>' : ''}<div class="cv-compose-actions">${button('Save draft', 'save', locked ? 'disabled' : '')}${button('Discard', 'discard', pending || composer.status === 'sending' ? 'disabled' : '')}<button type="submit" class="cv-primary" ${locked || !account ? 'disabled' : ''}>${pending ? 'Working…' : 'Send email'}</button></div></footer></form></section>`;
+        <footer class="cv-compose-footer"><p class="cv-save-state" role="status" aria-live="polite">${esc(composer.status !== 'draft' ? 'Delivery is ' + composer.status + '. Check Sent or sync before creating another email.' : composer.dirty ? 'Unsaved changes' : 'Draft saved')}</p>${!account ? '<p>Connect Gmail in Connections to send this draft.</p>' : ''}<div class="cv-compose-actions">${button('Save draft', 'save', locked ? 'disabled' : '')}${button('Discard', 'discard', pending || composer.status === 'sending' ? 'disabled' : '')}<button type="submit" class="cv-primary" ${locked || pending || preparing || !!composer.documentError || !account ? 'disabled' : ''}>${sending ? 'Sending…' : preparing ? 'Preparing PDF…' : 'Send email'}</button></div></footer></form></section>`;
     }
     async function refresh() {
       loading = true; draw();
@@ -136,42 +138,83 @@
       return operation;
     }
     async function startCompose(payload) {
-      await persist();
+      payload ||= {};
+      // Keep the composer responsive: saving a previous draft must not block a
+      // new one from opening, and the new draft can be persisted after render.
+      void persist().catch(error => { notice = error.message || 'A previous draft could not be saved.'; draw(); });
       quoteFiles = null; quoteChoices = [];
-      composer = { id: global.crypto.randomUUID(), status: 'draft', dirty: true, payload: { to: '', subject: '', bodyText: '', replyToId: '', attachments: [], ...payload } };
-      await persist(); draw(); root.querySelector('[name="to"]')?.focus();
+      const { documentPending = false, ...draftPayload } = payload;
+      composer = { id: global.crypto.randomUUID(), status: 'draft', dirty: true, documentPending, documentError: '', documentAttachment: null, payload: { to: '', subject: '', bodyText: '', replyToId: '', attachments: [], ...draftPayload } };
+      const target = composer;
+      draw(); root.querySelector('[name="to"]')?.focus();
+      void persist().catch(error => {
+        if (composer !== target) return;
+        notice = error.message || 'Draft save failed. It will retry when you send.';
+        draw();
+      });
     }
     async function send() {
-      if (pending || !account || !composer || composer.status !== 'draft') return;
-      clearTimeout(timer); pending = true; notice = ''; draw();
+      if (pending || !account || !composer || composer.status !== 'draft' || composer.documentPending || composer.documentError) return;
+      clearTimeout(timer); pending = true; sending = true; notice = 'Checking the saved quote…'; draw();
+      let confirmed = false;
       try {
         await beforeSend(composer.payload);
+        notice = 'Saving your email…'; draw();
         await persist();
+        notice = 'Sending with Gmail…'; draw();
         const result = await api('/send', 'POST', { draftId: composer.id });
         if (!result.ok || !result.id) throw Error('Gmail did not confirm this send. Your draft is preserved; check Sent before trying again.');
         const sentPayload = composer.payload;
         lastDocument = sentPayload.document || null;
         composer = null;
-        notice = result.warning || 'Email sent.';
-        try { await onSent(sentPayload, result); } catch { notice += ' Email was sent, but the opportunity could not be updated. Do not resend.'; }
-        try { await refresh(); } catch { notice += ' Conversation history could not refresh; use Sync to update it.'; }
+        // Gmail has confirmed delivery. Unlock the interface immediately;
+        // CRM syncing and mailbox refresh must never leave the send button
+        // spinning after the customer already received the email.
+        confirmed = true; pending = false; sending = false;
+        notice = result.warning || 'Email sent.'; draw();
+        void (async () => {
+          let followUp = '';
+          try { await onSent(sentPayload, result); }
+          catch { followUp = 'Email was sent, but the opportunity could not be updated. Do not resend.'; }
+          try { await refresh(); }
+          catch { followUp += (followUp ? ' ' : '') + 'Conversation history could not refresh; use Sync to update it.'; }
+          if (!destroyed && followUp) { notice = followUp; draw(); }
+        })();
       } catch (e) {
         notice = e.message;
-        // Read authoritative state after failure, including unknown delivery.
-        try {
-          const saved = await api('/drafts'); drafts = saved.drafts;
-          const row = drafts.find(d => d.id === composer?.id); if (row && composer) composer.status = row.status;
-        } catch { if (composer) composer.status = 'unknown'; notice += ' Could not verify draft status. Refresh before sending again.'; }
-      } finally { pending = false; draw(); }
+        // A slow recovery lookup is not part of sending. Unlock the page now,
+        // but keep an uncertain draft locked against duplicate delivery until
+        // the server reports whether Gmail accepted it.
+        const draftId = composer?.id;
+        if (composer) composer.status = 'unknown';
+        pending = false; sending = false; draw();
+        void api('/drafts').then(saved => {
+          drafts = saved.drafts;
+          const row = drafts.find(d => d.id === draftId);
+          if (row && composer?.id === draftId) composer.status = row.status;
+          if (!destroyed) draw();
+        }).catch(() => {
+          if (draftId && composer?.id === draftId) notice += ' Could not verify draft status. Refresh before trying again.';
+          if (!destroyed) draw();
+        });
+      } finally { if (!confirmed) { pending = false; sending = false; draw(); } }
     }
     async function action(e) {
       const b = e.target.closest('[data-cv-action]'); if (!b || !root.contains(b) || b.disabled) return;
       const name = b.dataset.cvAction;
-      if (pending && name !== 'connect') return;
+      if (pending && name !== 'connect') { notice = 'Please wait for the current action to finish.'; draw(); return; }
       try {
         if (name === 'connect') return onConnect();
         if (name === 'compose') return await startCompose();
         if (name === 'document') { const doc = composer?.payload.document || lastDocument; await persist(); if(doc)await onDocument(doc); return; }
+        if (name === 'retry-document') {
+          if (!composer?.payload.document || !buildDocumentAttachment) throw Error('Quote PDF preparation is unavailable.');
+          pending = true; composer.documentPending = true; composer.documentError = ''; draw();
+          const target = composer;
+          try { completeDocumentPreparation(target.payload.document.recordId, await buildDocumentAttachment(target.payload.document.mode, target.payload.document.recordId)); }
+          catch (err) { completeDocumentPreparation(target.payload.document.recordId, null, err); }
+          return;
+        }
         if (name === 'clear-search') { query = ''; const search = root.querySelector('[name=cvQuery]'); search.value = ''; search.focus(); }
         if (name === 'back') selected = null;
         if (name === 'inbox' || name === 'folder') { folder = name === 'inbox' ? 'inbox' : b.dataset.folder; selected = null; await persist(); draw(); }
@@ -263,24 +306,39 @@
       } catch (err) { notice = err.message; } finally { pending = false; draw(); }
     }
     function submit(e) { if (e.target.matches('[data-cv-form]')) { e.preventDefault(); void send(); } }
+    function completeDocumentPreparation(recordId, attachment, error) {
+      if (!composer || String(composer.payload.document?.recordId) !== String(recordId)) return;
+      composer.documentPending = false; composer.documentError = error ? (error.message || String(error)) : '';
+      if (attachment) {
+        if (composer.documentAttachment) {
+          const i = composer.payload.attachments.indexOf(composer.documentAttachment);
+          if (i >= 0) composer.payload.attachments.splice(i, 1);
+        }
+        composer.documentAttachment = attachment;
+        composer.payload.attachments.unshift(attachment); composer.dirty = true;
+      }
+      if (error) notice = composer.documentError;
+      draw();
+      if (attachment) void persist().catch(err => { notice = err.message || 'Quote PDF is ready, but the draft could not be saved yet.'; draw(); });
+    }
     function unload(e) { if (composer?.dirty || pending) { e.preventDefault(); e.returnValue = ''; } }
     root.addEventListener('click', action); root.addEventListener('input', input); root.addEventListener('change', files); root.addEventListener('submit', submit); global.addEventListener('beforeunload', unload);
     draw();
     return {
-      refresh, compose: startCompose, reply,
+      refresh, compose: startCompose, reply, completeDocumentPreparation,
       destroy() { destroyed = true; clearTimeout(timer); root.removeEventListener('click', action); root.removeEventListener('input', input); root.removeEventListener('change', files); root.removeEventListener('submit', submit); global.removeEventListener('beforeunload', unload); root.innerHTML = ''; },
     };
   }
   // Host adapter: capture the business/user at mount time and reject late
   // requests after a login or business switch. Call render.reset() from the
   // host's existing business/auth cleanup before replacing session state.
-  function createRenderer({ root, getContext, onConnect, onCount, listQuotes, buildQuoteAttachment, beforeSend, onDocument, onSent, fetchImpl = global.fetch.bind(global) }) {
+  function createRenderer({ root, getContext, onConnect, onCount, listQuotes, buildQuoteAttachment, buildDocumentAttachment, beforeSend, onDocument, onSent, fetchImpl = global.fetch.bind(global) }) {
     let view = null, activeKey = '', epoch = 0;
     function reset() { epoch++; view?.destroy(); view = null; activeKey = ''; }
-    async function render() {
+    async function ensureView() {
       const context = getContext();
       if (!context.client || !context.businessId || !context.userId) {
-        reset(); root.textContent = 'Sign in to view your conversations.'; return;
+        reset(); root.textContent = 'Sign in to view your conversations.'; return false;
       }
       const key = context.businessId + ':' + context.userId;
       if (activeKey !== key) {
@@ -289,7 +347,7 @@
           const now = getContext();
           return now.client === context.client && now.businessId === context.businessId && now.userId === context.userId && activeKey === key && epoch === generation;
         };
-        view = mount({ root, onConnect, onCount, listQuotes, buildQuoteAttachment, beforeSend, onDocument, onSent, request: async (path, options = {}) => {
+        view = mount({ root, onConnect, onCount, listQuotes, buildQuoteAttachment, buildDocumentAttachment, beforeSend, onDocument, onSent, request: async (path, options = {}) => {
           if (!sameContext()) throw Error('Your session changed. Reopen Conversations.');
           if (!context.backendUrl) throw Error('Connect your TurnKey backend first.');
           const { data, error } = await context.client.auth.getSession();
@@ -302,13 +360,30 @@
           if (!response.ok) throw Error(result.error || 'Conversations request failed.');
           return result;
         } });
+        return true;
       }
+      return false;
+    }
+    async function render() {
+      await ensureView();
+      if (!view) return;
       try { await view.refresh(); } catch (e) {
-        const notice = root.querySelector('.cv-notice'); if (notice && activeKey === key) { notice.textContent = e.message; notice.hidden = false; }
+        const notice = root.querySelector('.cv-notice'); if (notice && view) { notice.textContent = e.message; notice.hidden = false; }
       }
     }
     render.reset = reset;
-    render.compose = async payload => { await render(); if (!view) throw Error('Sign in to compose an email.'); await view.compose(payload); };
+    render.completeDocumentPreparation = (...args) => view?.completeDocumentPreparation(...args);
+    render.compose = async payload => {
+      // Opening a quote composer should not wait for a mailbox/drafts refresh.
+      // If Conversations has not been mounted yet, create it; load messages in
+      // the background while the composer appears immediately.
+      const created = await ensureView();
+      if (!view) throw Error('Sign in to compose an email.');
+      const activeView = view;
+      const result = activeView.compose(payload);
+      if (created) void activeView.refresh().catch(() => {});
+      await result;
+    };
     render.reply = async bodyText => { await render(); if (!view) throw Error('Sign in to reply.'); await view.reply(bodyText); };
     return render;
   }

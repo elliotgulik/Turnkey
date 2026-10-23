@@ -87,9 +87,10 @@ test('provider rejection preserves editable draft; uncertain delivery prevents r
     if (!rejected) { assert.equal((await h.run('post', '/send', { body: { draftId } })).statusCode, 409); assert.equal(h.calls.length, 1) }
   }
 })
-test('confirmed delivery remains successful when local history fails', async () => {
+test('confirmed delivery does not wait for mailbox-history indexing', async () => {
   const h = setup({ failMirror: true }); const result = await h.run('post', '/send', { body: { draftId } })
-  assert.equal(result.body.ok, true); assert.match(result.body.warning, /Sync/)
+  assert.equal(result.body.ok, true); assert.equal(result.body.warning, undefined)
+  assert.equal(h.tables.conversation_drafts[0].status, 'sent')
 })
 test('draft save cannot overwrite sent draft or another user draft', async () => {
   for (const opts of [{ status: 'sent' }, { draftUser: other }]) {

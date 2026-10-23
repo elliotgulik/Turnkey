@@ -77,10 +77,14 @@
     if (!Array.isArray(r.services) || !r.services.length || !Number.isFinite(Number(r.total)) || Number(r.total) <= 0) throw Error('Build and save the quote lines before attaching a PDF.');
     if (typeof buildDocPDF !== 'function') throw Error('The PDF renderer is unavailable. Please reload TurnKey.');
     if (mode === 'invoice' && !['completed', 'paid'].includes(r.stage)) throw Error('Complete the work before issuing an invoice. You can preview an invoice draft from the accepted quote.');
-    // Both documents must use the server's accepted commercial snapshot.
-    // A saved customer/job alone does not guarantee a current invoice/quote.
-    await syncRecordToSupabase(r);
-    assertScope(start);
+    // Quote creation already persists the commercial snapshot. Avoid a second
+    // full-record write on the compose path; beforeSend below verifies the
+    // stored job and quote immediately before Gmail accepts the message.
+    // Older/incomplete records still get the save they need here.
+    if (!r.jobId || !r.quoteId || (mode === 'quote' && !r.quotePublicToken)) {
+      await syncRecordToSupabase(r);
+      assertScope(start);
+    }
     if (recordFor(r.id) !== r) throw Error('The opportunity changed. Select it again.');
     if (mode === 'quote' && !r.quotePublicToken) throw Error('The quote approval link is not ready. Save the quote and retry. Nothing was sent.');
     if (mode === 'invoice' && !['completed', 'paid'].includes(r.stage)) throw Error('The job status changed. Reopen the opportunity before issuing an invoice.');
@@ -151,6 +155,9 @@
     if (typeof render === 'function') render();
     if (typeof renderAll === 'function') renderAll();
     if (typeof logActivity === 'function') logActivity(r.customerId, r.jobId, mode + '_sent', (mode === 'quote' ? 'Quote' : 'Invoice') + ' sent to ' + payload.to);
+    if (typeof triggerPush === 'function') triggerPush(mode === 'quote'
+      ? {type:'quote_sent',title:'Quote sent to customer',message:'Quote for '+money(r.total||0)+' sent to '+r.name,url:'/index.html?open=pipeline'}
+      : {type:'invoice_created',title:'Invoice sent to customer',message:'Invoice for '+money(r.total||0)+' sent to '+r.name,url:'/index.html?open=pipeline'});
   }
   const renderer = global.TK_CONVERSATIONS.createRenderer({
     root, getContext: context,
@@ -158,6 +165,7 @@
     onCount: count => { const el = document.getElementById('cnt-inbox'); if (el) el.textContent = count; },
     listQuotes,
     buildQuoteAttachment: async id => (await prepareDocument('quote', id)).attachment,
+    buildDocumentAttachment: async (mode, id) => (await prepareDocument(mode, id)).attachment,
     beforeSend: async payload => {
       if (!payload.document) return;
       const start=scope(), r = recordFor(payload.document.recordId), mode = payload.document.mode;
@@ -209,18 +217,30 @@
     await renderer.compose(payload); assertScope(start); return true;
   }
   async function composeDocument(mode, value, overrides = {}) {
-    const { record: r, start, attachment } = await prepareDocument(mode, value);
+    if (!['quote', 'invoice'].includes(mode)) throw Error('Choose a quote or invoice.');
+    const start = scope(), r = recordFor(value);
+    if (!Array.isArray(r.services) || !r.services.length || !Number.isFinite(Number(r.total)) || Number(r.total) <= 0) throw Error('Build and save the quote lines before attaching a PDF.');
+    if (mode === 'invoice' && !['completed', 'paid'].includes(r.stage)) throw Error('Complete the work before issuing an invoice.');
+    if (mode === 'quote' && !r.quotePublicToken) {
+      await syncRecordToSupabase(r); assertScope(start);
+      if (!r.quotePublicToken) throw Error('The quote approval link is not ready. Save the quote and retry.');
+    }
     const number = docNumber(mode, r), business = docBizName();
     const savedSubject = typeof emailTemplates !== 'undefined' && typeof fillTemplate === 'function' && typeof emailTemplateVars === 'function'
       ? fillTemplate((emailTemplates[mode] || EMAIL_TEMPLATE_DEFAULTS[mode]).subject, emailTemplateVars(r, mode)) : '';
     const payload = {
       to: r.email || '', subject: savedSubject || (mode === 'quote' ? 'Your quote from ' + business + ' — ' + number : 'Invoice ' + number + ' from ' + business),
       bodyText: bodyFor(mode, r), ...overrides,
-      attachments: [attachment], document: { mode, recordId: String(r.id) },
+      attachments: [], document: { mode, recordId: String(r.id) }, documentPending: true,
     };
     assertScope(start);
     const opened = await compose(payload);
     if (typeof closeModal === 'function') { closeModal('send-doc-overlay'); closeModal('compose-overlay'); }
+    void prepareDocument(mode, r.id).then(({ attachment }) => {
+      assertScope(start); renderer.completeDocumentPreparation(r.id, attachment);
+    }).catch(error => {
+      try { assertScope(start); renderer.completeDocumentPreparation(r.id, null, error); } catch { /* session changed while preparing */ }
+    });
     return opened;
   }
   renderer.reset = reset;
