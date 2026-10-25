@@ -185,12 +185,12 @@ export function installLeadConnections(
     requireBusiness,
     wrap("Could not connect this Meta Page.", async (req, res) => {
       const pageId = String(req.body?.pageId || "").trim(),
-        pageToken = String(req.body?.pageToken || "").trim(),
-        retrievalToken = String(req.body?.retrievalToken || pageToken).trim();
-      if (!/^\d{1,40}$/.test(pageId) || !pageToken || pageToken.length > 10000 || !retrievalToken || retrievalToken.length > 10000)
+        suppliedPageToken = String(req.body?.pageToken || "").trim(),
+        retrievalToken = String(req.body?.retrievalToken || req.body?.token || suppliedPageToken).trim();
+      if (!/^\d{1,40}$/.test(pageId) || (suppliedPageToken.length > 10000) || !retrievalToken || retrievalToken.length > 10000)
         return res
           .status(400)
-          .json({ error: "Page ID, Page Access Token and lead retrieval token are required" });
+          .json({ error: "Page ID and Meta access token are required" });
       const mapped = await unwrap(
         db
           .from("lead_sources")
@@ -204,8 +204,8 @@ export function installLeadConnections(
           "This Meta Page is already connected to another business.",
         );
       const check = await fetchPage(pageId, {
-          token: pageToken,
-          fields: "id,name",
+          token: suppliedPageToken || retrievalToken,
+          fields: "id,name,access_token",
         }),
         page = await check.json();
       if (!check.ok || page.id !== pageId)
@@ -213,8 +213,12 @@ export function installLeadConnections(
           .status(400)
           .json({
             error:
-              "That Page ID / token combination could not be verified with Meta",
+              "That Page ID / Meta access token combination could not be verified. Check the Page assignment and permissions, then retry.",
           });
+      // Meta can return the Page-scoped token when an authorized user/System
+      // User token reads the Page node. Store both encrypted, but ask the user
+      // for just the one durable credential.
+      const pageToken = suppliedPageToken || page.access_token || retrievalToken;
       await saveLeadConnection(db, req.businessId, "meta", {
         external_id: pageId,
         token_enc: encrypt(encodeMetaCredentials({ retrievalToken, pageToken })),

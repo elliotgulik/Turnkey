@@ -189,6 +189,30 @@ test('Meta setup uses the Page token for lead notifications and the permanent Sy
   assert.match(encryptedPlaintext, /page-token/);
   assert.doesNotMatch(JSON.stringify(res.body), /system-user-token|page-token|encrypted-envelope/);
 });
+test("Meta connect accepts one access token and stores the Page token returned by Meta", async () => {
+  const db = fakeDb(), calls = [];
+  let encryptedPlaintext;
+  const res = await setup(db, {
+    encrypt: value => { encryptedPlaintext = value; return "encrypted"; },
+    fetchPage: async (id, options) => {
+      calls.push({ id, options });
+      return { ok: true, json: async () => ({ id, name: "Nova Exterior", access_token: "derived-page-token" }) };
+    },
+    fetchEdge: async (_id, edge, options) => {
+      calls.push({ edge, options });
+      return { ok: true, json: async () => edge === "leadgen_forms" ? { data: [] } : { success: true } };
+    },
+  })("POST /api/connections/meta/connect", {
+    body: { pageId: "973487265846279", retrievalToken: "single-system-user-token" },
+  });
+  assert.equal(res.statusCode, 200);
+  assert.equal(calls[0].options.token, "single-system-user-token");
+  assert.equal(calls.find((x) => x.edge === "leadgen_forms").options.token, "single-system-user-token");
+  assert.equal(calls.find((x) => x.edge === "subscribed_apps").options.token, "derived-page-token");
+  assert.match(encryptedPlaintext, /single-system-user-token/);
+  assert.match(encryptedPlaintext, /derived-page-token/);
+  assert.doesNotMatch(JSON.stringify(res.body), /single-system-user-token|derived-page-token/);
+});
 test("failed Wix regeneration preserves the working hash and never reveals a new URL", async () => {
   const db = fakeDb([wix]);
   db.fail = "update";

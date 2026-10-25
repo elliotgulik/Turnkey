@@ -226,6 +226,8 @@
 .tkm-inline-grid strong { display: block; margin-top: 3px; color: #172534; font-size: 18px; font-weight: 650; overflow-wrap: anywhere; }
 .tkm-inline .tkm-inline-foot { margin-top: 7px; line-height: 1.5; }
 .tkm-inline-empty { margin: 12px 0 !important; }
+.tkm-inline-select { display: block; margin: 12px 0; font: 600 12px system-ui, sans-serif; }
+.tkm-inline-select select { display: block; margin-top: 5px; min-width: min(360px, 100%); padding: 9px; border: 1px solid #c6d2dd; border-radius: 7px; background: white; color: #172534; font: 14px system-ui, sans-serif; }
 @media (max-width: 700px) {
   .tkm-overlay {
     padding: 0;

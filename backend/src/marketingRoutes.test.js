@@ -751,6 +751,46 @@ test("reporting can reuse the authenticated business's saved Meta retrieval toke
   assert.equal(unseal(h.db.tables.marketing_ad_connections[0].token_enc, "business-a", "123", key), seenToken);
   assert.ok(!JSON.stringify(r.body).includes(seenToken));
 });
+test("a saved Meta token with one accessible ad account connects without asking for its ID", async () => {
+  const calls = [];
+  let n = 0;
+  const h = harness({
+    getMetaRetrievalToken: async () => "saved-system-user-token-with-ads-read",
+    fetchImpl: async (url, options = {}) => {
+      calls.push({ url: String(url), token: options.headers?.Authorization?.replace("Bearer ", "") });
+      const index = n++;
+      return { ok: true, json: async () => index === 0
+        ? { data: [{ permission: "ads_read", status: "granted" }] }
+        : index === 1
+          ? { data: [{ account_id: "123", name: "Nova Ads", currency: "NZD", timezone_name: "Pacific/Auckland" }] }
+          : { data: [{ id: "act_123", account_id: "123", name: "Nova Ads", currency: "NZD", timezone_name: "Pacific/Auckland" }] } };
+    },
+  });
+  const r = await h.call("post", "/api/marketing/connection", { useConnectedLeadToken: true });
+  assert.equal(r.code, 200);
+  assert.equal(r.body.accountId, "123");
+  assert.equal(r.body.name, "Nova Ads");
+  assert.ok(calls.some((x) => x.url.includes("me/adaccounts")));
+  assert.ok(calls.every((x) => x.token === "saved-system-user-token-with-ads-read"));
+});
+test("saved Meta token with multiple ad accounts returns safe choices without storing a connection", async () => {
+  let n = 0;
+  const h = harness({
+    getMetaRetrievalToken: async () => "saved-system-user-token-with-ads-read",
+    fetchImpl: async () => ({ ok: true, json: async () => ++n === 1
+      ? { data: [{ permission: "ads_read", status: "granted" }] }
+      : { data: [
+          { account_id: "123", name: "Nova Ads", currency: "NZD", timezone_name: "Pacific/Auckland" },
+          { account_id: "456", name: "Other Ads", currency: "AUD", timezone_name: "Australia/Sydney" },
+        ] } }),
+  });
+  const r = await h.call("post", "/api/marketing/connection", { useConnectedLeadToken: true });
+  assert.equal(r.code, 200);
+  assert.equal(r.body.requiresSelection, true);
+  assert.deepEqual(r.body.accounts.map((a) => a.accountId), ["123", "456"]);
+  assert.equal(h.db.tables.marketing_ad_connections, undefined);
+  assert.ok(!JSON.stringify(r.body).includes("saved-system-user-token"));
+});
 test("permission lookup failure exposes no database details and performs no reporting writes", async () => {
   const h = harness();
   h.db.from = () => {

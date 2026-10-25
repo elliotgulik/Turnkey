@@ -1379,7 +1379,7 @@
 <link rel="stylesheet" href="sales-platform.css?v=20261018c">
 <link rel="stylesheet" href="quote-workspace.css?v=20261017a">
 <link rel="stylesheet" href="conversations.css?v=20261020a">
-<link rel="stylesheet" href="marketing-analytics.css?v=20261025a">
+<link rel="stylesheet" href="marketing-analytics.css?v=20261025b">
 <link rel="stylesheet" href="sales-experience.css?v=20261019a">
 <link rel="stylesheet" href="settings-experience.css?v=20261019a">
 <link rel="stylesheet" href="job-workspace.css?v=20261018.1">
@@ -6763,6 +6763,7 @@ function renderDashboard(){
         ${notificationCentre.unread>0?`<span class="bell-badge">${notificationCentre.unread>9?'9+':notificationCentre.unread}</span>`:''}
       </button>
     </div>
+    <div id="dashboard-meta-insights"></div>
     ${(records.length===0&&!localStorage.getItem('turnkey-import-banner-dismissed'))?`
     <div class="panel" style="margin-bottom:18px;background:var(--teal-wash);border-color:#cfe9e1">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap">
@@ -6816,7 +6817,6 @@ function renderDashboard(){
       ${sourceRows.length?sourceRows.map(([src,n])=>`<div class="kv"><span class="k">${src}</span><span class="v" style="display:flex;align-items:center;gap:8px"><span style="display:inline-block;height:6px;width:${Math.max(6,n/maxSource*80)}px;background:var(--teal);border-radius:3px"></span>${n}</span></div>`).join(''):'<div class="empty-state" style="padding:16px"><div class="sm">No leads yet.</div></div>'}
       <p style="font-size:12px;color:var(--ink-faint);margin-top:12px">Meta spend, lead costs and campaign results are shown below when reporting is connected.</p><button class="btn ghost sm" onclick="openMetaAdsAnalytics()">Open detailed Meta report</button>
     </div>
-    <div id="dashboard-meta-insights"></div>
 `;
   window.TK_MARKETING?.renderInline('dashboard-meta-insights','30d');
 }
@@ -8551,10 +8551,9 @@ function renderMetaConnectionCard(){
     ${m.connected?`<p>Page ${escapeHtmlSafe(m.pageId)}${m.pageName?' · '+escapeHtmlSafe(m.pageName):''}</p><p>${escapeHtmlSafe(m.message||'Meta connection saved. Check lead delivery status.')}</p><p>${leadReceiptLabel(m)}</p><div class="quote-action-row"><button class="btn ghost sm" onclick="checkMetaDelivery(false,this)">Check connection</button><button class="btn accent sm" onclick="checkMetaDelivery(true,this)">Enable lead delivery</button><button class="btn accent sm" onclick="TK_META_IMPORT.start()">Import existing leads</button><button class="btn ghost sm" onclick="disconnectMeta()">Disconnect</button></div><p id="meta-import-progress" role="status"></p>`:''}
     <div class="quote-action-row"><button class="btn ghost sm" onclick="openMetaAdsAnalytics()">Ad spend &amp; campaign insights</button></div>
     <details ${!m.connected||m.health==='reconnect'||m.health==='permissions'||m.health==='retrieval_permissions'?'open':''}><summary>${m.connected?'Reconnect Page':'Connect your Page'}</summary>
-      <p>Use two tokens because Meta separates the tasks: a <b>Page Access Token</b> enables lead notifications; a <b>System User token</b> with expiry set to <b>Never</b> reads leads and can also power ad reporting. Assign the TurnKey CRM app and NZ Nova Exterior Page to the system user, grant <code>leads_retrieval</code> and <code>pages_manage_metadata</code>, and allow TurnKey in Meta Leads Access. Meta can still revoke a token.</p>
+      <p><b>One token only.</b> Paste your Meta user or System User token. TurnKey securely requests the matching Page token itself, then uses your saved token for lead retrieval and ad reporting. For the longest life, use a System User token set to <b>Never</b> and assigned the TurnKey app, NZ Nova Exterior Page and ad account. Grant <code>leads_retrieval</code>, <code>pages_manage_metadata</code> and <code>ads_read</code>, and allow TurnKey in Meta Leads Access. Meta can still revoke tokens.</p>
       <div class="conn-keyrow"><input id="conn-meta-pageid" aria-label="Meta Page ID" placeholder="Page ID" value="${escapeHtmlSafe(m.pageId||'')}"></div>
-      <div class="conn-keyrow" style="margin-top:6px"><input id="conn-meta-token" aria-label="Meta Page Access Token" placeholder="Page Access Token — notifications" type="password" autocomplete="off"></div>
-      <div class="conn-keyrow" style="margin-top:6px"><input id="conn-meta-retrieval-token" aria-label="Permanent Meta lead retrieval token" placeholder="System User token — lead retrieval" type="password" autocomplete="off"><button class="btn accent sm" onclick="connectMeta()">${m.connected?'Reconnect':'Connect'}</button></div>
+      <div class="conn-keyrow" style="margin-top:6px"><input id="conn-meta-retrieval-token" aria-label="Meta user or System User access token" placeholder="Meta access token — leads and ads" type="password" autocomplete="off"><button class="btn accent sm" onclick="connectMeta()">${m.connected?'Reconnect':'Connect'}</button></div>
     </details></div>`;
 }
 function openMetaAdsAnalytics(){
@@ -8624,14 +8623,13 @@ async function disconnectWix(){
 }
 async function connectMeta(){
   const pageId=(document.getElementById('conn-meta-pageid')?.value||'').trim();
-  const pageToken=(document.getElementById('conn-meta-token')?.value||'').trim();
   const retrievalToken=(document.getElementById('conn-meta-retrieval-token')?.value||'').trim();
-  if(!pageId||!pageToken||!retrievalToken){toast('Enter the Page ID and both Meta tokens');return;}
+  if(!pageId||!retrievalToken){toast('Enter the Page ID and one Meta access token');return;}
   const url=backendUrl();
   const {data:{session}}=await sb.auth.getSession();
   if(!url||!session){toast('Please sign in again');return;}
   try{
-    const res=await fetch(`${url}/api/connections/meta/connect`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.access_token},body:JSON.stringify({pageId,pageToken,retrievalToken})});
+    const res=await fetch(`${url}/api/connections/meta/connect`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.access_token},body:JSON.stringify({pageId,retrievalToken})});
     const j=await res.json();
     if(!res.ok){toast(j.error||'Could not connect this Meta Page');return;}
     metaStatus={...j,connected:true,pageId};
@@ -10906,8 +10904,8 @@ async function retryPendingPhotos(){
 <script src="conversations.js?v=20261020a"></script>
 <script src="conversations-bridge.js?v=20261020a"></script>
 <script src="servicem8-import.js?v=20261017a"></script>
-<script src="marketing-analytics.js?v=20261025a"></script>
-<footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a> · <span id="tk-app-version">v20261025a</span></footer>
+<script src="marketing-analytics.js?v=20261025b"></script>
+<footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a> · <span id="tk-app-version">v20261025b</span></footer>
 <script src="extension-quote-link.js?v=20261022a"></script>
 <script src="job-workspace.js?v=20261018"></script>
 <script src="job-calendar.js?v=20261018d"></script>

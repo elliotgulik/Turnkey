@@ -116,7 +116,7 @@
     try {
       const connection = await request("/connection");
       if (!connection.configured) {
-        update(`<p class="tkm-inline-empty">Connect a Meta reporting account to show actual campaign spend and results here. Your saved System User token stays on TurnKey’s backend.</p><button type="button" onclick="openConnections()">Connect Meta</button>`, "Meta reporting isn’t connected yet.");
+        update(`<p class="tkm-inline-empty">Use your saved Meta token to connect the ad account. TurnKey keeps the token on its backend and can find your account automatically.</p><button type="button" onclick="TK_MARKETING.connectSavedToken('${id}')">Connect using my Meta token</button>`, "Meta ads aren’t connected yet.");
         return;
       }
       const range = inlineRange(period);
@@ -137,6 +137,32 @@
       update(summary, `Meta ad account ${connection.accountId} · ${period} · saved report`);
     } catch (e) {
       update(`<p class="tkm-inline-empty" role="alert">${esc(e.message || "Meta metrics couldn’t be loaded.")}</p><button type="button" onclick="openMetaAdsAnalytics()">Open Meta reporting setup</button>`, "Meta data could not be loaded.");
+    }
+  }
+  async function connectSavedToken(id, accountId = "") {
+    if (!/^[-a-z0-9_]{1,80}$/i.test(id)) return;
+    const target = document.getElementById(id);
+    if (!target) return;
+    const content = target.querySelector("[data-inline-content]");
+    if (content) content.innerHTML = "<p>Connecting your saved Meta token…</p>";
+    try {
+      const result = await request("/connection", {
+        method: "POST",
+        body: JSON.stringify({ useConnectedLeadToken: true, ...(accountId ? { accountId } : {}) }),
+      });
+      if (result.requiresSelection) {
+        const selectId = `${id}-meta-account`;
+        target.querySelector("[data-inline-content]").innerHTML = `<p>Your token can access more than one ad account. Pick the one for this TurnKey business:</p><label class="tkm-inline-select">Ad account<select id="${selectId}">${result.accounts.map((a) => `<option value="${esc(a.accountId)}">${esc(a.name)} · ${esc(a.accountId)} · ${esc(a.currency)}</option>`).join("")}</select></label><button type="button" onclick="TK_MARKETING.connectSavedToken('${id}',document.getElementById('${selectId}').value)">Connect selected account</button>`;
+        target.querySelector("[data-inline-status]").textContent = "Choose the correct Meta ad account.";
+        return;
+      }
+      await renderInline(id, "30d", true);
+    } catch (e) {
+      const current = document.getElementById(id);
+      if (current) {
+        current.querySelector("[data-inline-content]").innerHTML = `<p class="tkm-inline-empty" role="alert">${esc(e.message || "Meta couldn’t connect.")}</p><button type="button" onclick="TK_MARKETING.open()">Open Meta reporting setup</button>`;
+        current.querySelector("[data-inline-status]").textContent = "Meta connection needs attention.";
+      }
     }
   }
   async function refreshInline(id, period = "30d") { return renderInline(id, period, true); }
@@ -381,6 +407,7 @@
     close,
     renderInline,
     refreshInline,
+    connectSavedToken,
     configure: (options) => {
       close();
       config = { ...options };

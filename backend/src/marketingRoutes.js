@@ -508,8 +508,8 @@ export function installMarketingRoutes(
   );
   route("post", "/connection", async (req, res) =>
     locked(req.businessId, async () => {
-      const account = id(req.body.accountId),
-        token = req.body.useConnectedLeadToken === true
+      let account = req.body.accountId ? id(req.body.accountId) : null;
+      const token = req.body.useConnectedLeadToken === true
           ? await getMetaRetrievalToken?.(req.businessId)
           : req.body.token;
       if (req.body.useConnectedLeadToken === true && !token)
@@ -533,6 +533,28 @@ export function installMarketingRoutes(
           )
         )
           throw fail("The reporting token must have ads_read permission.", 403);
+        if (!account) {
+          const accounts = await graphPages("me/adaccounts", {
+            fields: "account_id,name,currency,timezone_name",
+            limit: 100,
+          }, opts(token));
+          const available = accounts.filter((a) => /^\d{1,30}$/.test(String(a.account_id || "")));
+          if (!available.length)
+            throw fail("This Meta token has ads_read but no accessible ad accounts. Assign the ad account to the same System User in Meta Business Settings.", 403);
+          if (available.length > 1) {
+            res.json({
+              requiresSelection: true,
+              accounts: available.map((a) => ({
+                accountId: String(a.account_id),
+                name: String(a.name || "Meta ad account").slice(0, 200),
+                currency: String(a.currency || "").slice(0, 3),
+                timezone: String(a.timezone_name || "").slice(0, 100),
+              })),
+            });
+            return;
+          }
+          account = id(String(available[0].account_id));
+        }
         const [a] = await graphPages(
           "act_" + account,
           { fields: "id,account_id,name,currency,timezone_name" },
@@ -544,6 +566,7 @@ export function installMarketingRoutes(
         currency = a.currency;
         timezone = a.timezone_name;
       }
+      if (!account) throw fail("Enter the Meta ad account ID or connect using a saved Meta token.");
       dimensions({
         level: "campaign",
         account_id: account,
