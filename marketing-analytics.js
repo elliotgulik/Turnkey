@@ -7,7 +7,8 @@
     report = null,
     busy = false,
     returnFocus = null,
-    tenantTimer = null;
+    tenantTimer = null,
+    inlineSerial = 0;
   const today = () => new Date().toISOString().slice(0, 10);
   const state = {
     since: new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10),
@@ -94,6 +95,51 @@
     report = null;
     if (host) host.querySelector("[data-results]").replaceChildren();
   }
+  function inlineRange(period) {
+    const days = ({ "7d": 7, "30d": 30, "90d": 90 })[period] || 30;
+    const until = new Date(), since = new Date(until);
+    since.setDate(since.getDate() - days + 1);
+    return { since: since.toISOString().slice(0, 10), until: until.toISOString().slice(0, 10) };
+  }
+  async function renderInline(id, period = "30d", sync = false) {
+    const target = document.getElementById(id);
+    if (!target || !/^[-a-z0-9_]{1,80}$/i.test(id)) return;
+    const business = tenant(), generation = ++inlineSerial;
+    const periodButtons = ["7d", "30d", "90d"].map((p) =>
+      `<button type="button" class="tkm-inline-period ${p === period ? "selected" : ""}" onclick="TK_MARKETING.renderInline('${id}','${p}')">${p}</button>`).join("");
+    target.innerHTML = `<section class="tkm-inline"><header><div><h4>Meta ads · ${period} days</h4><p data-inline-status role="status">${sync ? "Refreshing from Meta…" : "Loading saved Meta data…"}</p></div><div class="tkm-inline-actions">${periodButtons}<button type="button" onclick="TK_MARKETING.refreshInline('${id}','${period}')">Refresh from Meta</button><button type="button" onclick="TK_MARKETING.open()">Campaign report</button></div></header><div data-inline-content></div></section>`;
+    const update = (html, status) => {
+      if (generation !== inlineSerial || !target.isConnected || business !== tenant()) return;
+      target.querySelector("[data-inline-content]").innerHTML = html;
+      target.querySelector("[data-inline-status]").textContent = status;
+    };
+    try {
+      const connection = await request("/connection");
+      if (!connection.configured) {
+        update(`<p class="tkm-inline-empty">Connect a Meta reporting account to show actual campaign spend and results here. Your saved System User token stays on TurnKey’s backend.</p><button type="button" onclick="openConnections()">Connect Meta</button>`, "Meta reporting isn’t connected yet.");
+        return;
+      }
+      const range = inlineRange(period);
+      if (sync) await request("/sync", { method: "POST", body: JSON.stringify(range) });
+      const data = await request("/report?" + new URLSearchParams({ ...range, level: "campaign", limit: "500", view: "entities" }));
+      if (generation !== inlineSerial || !target.isConnected || business !== tenant()) return;
+      const value = (v, decimals = 2) => v == null ? "—" : Number(v).toLocaleString(undefined, { maximumFractionDigits: decimals });
+      const currency = data.account.currency, cash = (v) => v == null ? "—" : `${currency} ${value(v)}`;
+      const metrics = [
+        ["Spend", cash(data.totals?.spend)], ["Impressions", value(data.totals?.impressions, 0)],
+        ["Reach¹", value(data.totals?.reach, 0)], ["All clicks", value(data.totals?.clicks, 0)],
+        ["Link clicks", value(data.totals?.link_clicks, 0)], ["Meta leads²", value(data.totals?.leads, 0)],
+        ["CTR", data.totals?.ctr == null ? "—" : `${value(data.totals.ctr)}%`],
+        ["CPC", cash(data.totals?.cpc)], ["CPM", cash(data.totals?.cpm)],
+        ["Frequency¹", value(data.totals?.frequency)], ["Cost per lead²", cash(data.totals?.cpl)],
+      ];
+      const summary = `<div class="tkm-inline-grid">${metrics.map(([label, v]) => `<article><span>${label}</span><strong>${v}</strong></article>`).join("")}</div><p class="tkm-inline-foot">${data.coverage.complete ? `Complete daily coverage · ${data.coverage.days} days` : `Incomplete coverage · ${data.coverage.days}/${data.coverage.expectedDays} days; totals are withheld until coverage is complete`} · ${currency} · ${esc(data.account.timezone)} · Oldest daily refresh ${esc(data.coverage.oldestRefresh || "not yet synced")}</p><p class="tkm-inline-foot">¹ Reach and frequency are not additive across days. ² Meta lead actions can differ from TurnKey CRM lead matches. Won quote value and ad-level breakdown are in the campaign report.</p>`;
+      update(summary, `Meta ad account ${connection.accountId} · ${period} · saved report`);
+    } catch (e) {
+      update(`<p class="tkm-inline-empty" role="alert">${esc(e.message || "Meta metrics couldn’t be loaded.")}</p><button type="button" onclick="openMetaAdsAnalytics()">Open Meta reporting setup</button>`, "Meta data could not be loaded.");
+    }
+  }
+  async function refreshInline(id, period = "30d") { return renderInline(id, period, true); }
   function close() {
     ++serial;
     clearInterval(tenantTimer);
@@ -333,6 +379,8 @@
   root.TK_MARKETING = {
     open,
     close,
+    renderInline,
+    refreshInline,
     configure: (options) => {
       close();
       config = { ...options };

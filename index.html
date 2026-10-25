@@ -1379,7 +1379,7 @@
 <link rel="stylesheet" href="sales-platform.css?v=20261018c">
 <link rel="stylesheet" href="quote-workspace.css?v=20261017a">
 <link rel="stylesheet" href="conversations.css?v=20261020a">
-<link rel="stylesheet" href="marketing-analytics.css?v=20261017a">
+<link rel="stylesheet" href="marketing-analytics.css?v=20261025a">
 <link rel="stylesheet" href="sales-experience.css?v=20261019a">
 <link rel="stylesheet" href="settings-experience.css?v=20261019a">
 <link rel="stylesheet" href="job-workspace.css?v=20261018.1">
@@ -6641,6 +6641,7 @@ function renderSales(){
     <div class="view-head"><div><h2>Sales Manager</h2><p>Where your leads come from, how many turn into jobs, and why the rest don't.</p></div>
       <button class="btn ghost sm" onclick="openMetaAdsAnalytics()">Meta ads &amp; spend</button>
       <div class="seg sales-periods">${SALES_PERIODS.map(p=>`<button class="seg-btn ${p.k===salesPeriod?'sel':''}" onclick="setSalesPeriod('${p.k}')">${p.l}</button>`).join('')}</div></div>
+    <div id="sales-meta-insights"></div>
     <div class="dash-grid">
       ${metric('Leads in',t.leads,periodLabel)}
       ${metric('Conversion rate',salesPct(t.conversionPct),`${t.won} of ${t.leads} leads became jobs`)}
@@ -6660,6 +6661,7 @@ function renderSales(){
       <div class="panel"><h4>Speed to quote</h4>${speedHtml}</div>
     </div>
     ${rep.excludedImported?`<p style="font-size:12px;color:var(--ink-faint)">${rep.excludedImported} imported ServiceM8 record${rep.excludedImported!==1?'s are':' is'} left out — they don't carry reliable lead dates.</p>`:''}`;
+  window.TK_MARKETING?.renderInline('sales-meta-insights','30d');
 }
 
 /* ---------- D. DASHBOARD ---------- */
@@ -6778,7 +6780,6 @@ function renderDashboard(){
         </div></button>`).join(''):'<div class="empty-state" style="padding:20px"><div class="sm">Nothing needs your attention right now — nice.</div></div>'}
     </div>
     <div class="dash-grid">
-      ${metric('Customer acquisition cost (CAC)','Open Meta Ads','Connect ad reporting to calculate cost per lead and campaign performance',null)}
       ${metric('Close rate',closeRate+'%','Leads that became approved jobs',closeRate,'#0f7d6b')}
       ${metric('Revenue per crew / day','$'+revPerCrewDay.toLocaleString('en-NZ'),'Won revenue ÷ crews ÷ working days',null)}
       ${metric('Callback rate',callbackRate+'%','Jobs needing a return visit — lower is better',callbackRate,callbackRate>15?'#b5573e':'#0f7d6b')}
@@ -6813,9 +6814,11 @@ function renderDashboard(){
     </div>
     <div class="panel" style="margin-top:16px"><h4>Lead source</h4>
       ${sourceRows.length?sourceRows.map(([src,n])=>`<div class="kv"><span class="k">${src}</span><span class="v" style="display:flex;align-items:center;gap:8px"><span style="display:inline-block;height:6px;width:${Math.max(6,n/maxSource*80)}px;background:var(--teal);border-radius:3px"></span>${n}</span></div>`).join(''):'<div class="empty-state" style="padding:16px"><div class="sm">No leads yet.</div></div>'}
-      <p style="font-size:12px;color:var(--ink-faint);margin-top:12px">Connect Meta Ads to see actual spend, cost per lead and campaign performance.</p><button class="btn ghost sm" onclick="openMetaAdsAnalytics()">Open Meta Ads analytics</button>
+      <p style="font-size:12px;color:var(--ink-faint);margin-top:12px">Meta spend, lead costs and campaign results are shown below when reporting is connected.</p><button class="btn ghost sm" onclick="openMetaAdsAnalytics()">Open detailed Meta report</button>
     </div>
+    <div id="dashboard-meta-insights"></div>
 `;
+  window.TK_MARKETING?.renderInline('dashboard-meta-insights','30d');
 }
 
 /* ===== Marketing: AI-generated ad copy/captions/campaigns \u2014 text only, no
@@ -10903,8 +10906,8 @@ async function retryPendingPhotos(){
 <script src="conversations.js?v=20261020a"></script>
 <script src="conversations-bridge.js?v=20261020a"></script>
 <script src="servicem8-import.js?v=20261017a"></script>
-<script src="marketing-analytics.js?v=20261017a"></script>
-<footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a> · <span id="tk-app-version">v20261022a</span></footer>
+<script src="marketing-analytics.js?v=20261025a"></script>
+<footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a> · <span id="tk-app-version">v20261025a</span></footer>
 <script src="extension-quote-link.js?v=20261022a"></script>
 <script src="job-workspace.js?v=20261018"></script>
 <script src="job-calendar.js?v=20261018d"></script>
