@@ -168,6 +168,27 @@ test("a racing Meta page claim returns 409 and preserves the prior connection", 
   assert.equal(db.rows.find((r) => r.id === meta.id).external_id, "111");
   assert.equal(db.rows.find((r) => r.id === "racer").business_id, "B");
 });
+test('Meta setup uses the Page token for lead notifications and the permanent System User token for lead access', async () => {
+  const db = fakeDb();
+  const calls = [];
+  let encryptedPlaintext;
+  const res = await setup(db, {
+    encrypt: value => { encryptedPlaintext = value; return 'encrypted-envelope'; },
+    fetchEdge: async (id, edge, options) => {
+      calls.push({ id, edge, options });
+      return { ok: true, json: async () => edge === 'leadgen_forms' ? { data: [] } : { success: true } };
+    },
+  })('POST /api/connections/meta/connect', {
+    body: { pageId: '973487265846279', pageToken: 'page-token', retrievalToken: 'system-user-token' },
+  });
+  assert.equal(res.statusCode, 200);
+  assert.equal(calls.find(x => x.edge === 'leadgen_forms').options.token, 'system-user-token');
+  assert.equal(calls.find(x => x.edge === 'subscribed_apps').options.token, 'page-token');
+  assert.equal(res.body.health, 'ready');
+  assert.match(encryptedPlaintext, /system-user-token/);
+  assert.match(encryptedPlaintext, /page-token/);
+  assert.doesNotMatch(JSON.stringify(res.body), /system-user-token|page-token|encrypted-envelope/);
+});
 test("failed Wix regeneration preserves the working hash and never reveals a new URL", async () => {
   const db = fakeDb([wix]);
   db.fail = "update";

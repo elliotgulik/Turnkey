@@ -1,4 +1,5 @@
-/* Read-only Meta reporting. No dependency on, or writes to, lead_sources/Page tokens. */
+/* Read-only Meta reporting. Reporting credentials are stored separately from
+   lead-notification credentials; owners may opt to reuse their saved retrieval token. */
 import crypto from "node:crypto";
 import { DEFAULT_META_GRAPH_VERSION } from "./metaGraph.js";
 const DAY = 86400000,
@@ -390,21 +391,30 @@ export function attribution(jobs, links, since, until, timezone) {
     groups = new Map();
   let unknown = 0;
   for (const j of cohort) {
-    const l = mapped.get(j.id);
-    if (!l) {
+    const l = mapped.get(j.id),
+      rawAdId = l?.ad_id || j.details?.metaAdId,
+      adId = typeof rawAdId === 'string' && /^\d{1,30}$/.test(rawAdId) ? rawAdId : null,
+      fromMeta = !l && !!adId;
+    if (!adId) {
       unknown++;
       continue;
     }
-    const key = l.ad_id;
+    const key = adId;
     const g = groups.get(key) || {
       adId: key,
       leads: 0,
       won: 0,
+      wonQuotedValue: 0,
       manualLinks: 0,
+      metaLeadMatches: 0,
     };
     g.leads++;
-    g.manualLinks++;
-    if (["won", "scheduled", "completed", "paid"].includes(j.status)) g.won++;
+    if (l) g.manualLinks++;
+    if (fromMeta) g.metaLeadMatches++;
+    if (["won", "scheduled", "completed", "paid"].includes(j.status)) {
+      g.won++;
+      if (Number.isFinite(Number(j.details?.total))) g.wonQuotedValue += Number(j.details.total);
+    }
     groups.set(key, g);
   }
   return {
@@ -413,12 +423,12 @@ export function attribution(jobs, links, since, until, timezone) {
     unknownLeads: unknown,
     byAd: [...groups.values()],
     basis:
-      "CRM opportunities arriving in selected account-local dates; current won stages; explicit owner/manager-reviewed links only. No name/source guessing. Meta lead totals are separate.",
+      "Meta-supplied ad IDs on incoming Meta leads and manually reviewed exact-ID links; current won stages. Won value is the saved quote value, not collected cash or verified Meta conversion value.",
   };
 }
 export function installMarketingRoutes(
   app,
-  { db, requireBusiness, env = process.env, fetchImpl = fetch },
+  { db, requireBusiness, env = process.env, fetchImpl = fetch, getMetaRetrievalToken },
 ) {
   const wrap = (fn) => async (req, res) => {
     res.set("Cache-Control", "no-store");
@@ -499,7 +509,11 @@ export function installMarketingRoutes(
   route("post", "/connection", async (req, res) =>
     locked(req.businessId, async () => {
       const account = id(req.body.accountId),
-        token = req.body.token;
+        token = req.body.useConnectedLeadToken === true
+          ? await getMetaRetrievalToken?.(req.businessId)
+          : req.body.token;
+      if (req.body.useConnectedLeadToken === true && !token)
+        throw fail("Connect Meta lead retrieval first, or enter a reporting token.", 409);
       if (
         token != null &&
         (typeof token !== "string" ||

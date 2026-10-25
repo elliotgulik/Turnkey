@@ -8,11 +8,20 @@ export function metaConnectionIssue(error) {
   if (code === 10 || code === 200) return { health: 'permissions', message: 'Meta denied access. Authorize this Page with leads_retrieval and pages_manage_metadata, and allow TurnKey in Meta Leads Access settings.' };
   return { health: 'error', message: 'Meta could not verify this connection. Check the Page ID, Page token and app permissions, then retry.' };
 }
-export async function checkMetaConnection({ pageId, token, repair = false, appId, fetchPage = fetchMetaObject, fetchEdge = fetchMetaEdge }) {
-  const response = await fetchPage(pageId, { token, fields: 'id,name' });
+export async function checkMetaConnection({ pageId, token, pageToken = token, retrievalToken = token, repair = false, appId, fetchPage = fetchMetaObject, fetchEdge = fetchMetaEdge }) {
+  const response = await fetchPage(pageId, { token: pageToken, fields: 'id,name' });
   const page = await response.json();
   if (!response.ok || String(page.id) !== pageId) return metaConnectionIssue(page.error);
-  const edgeResponse = await fetchEdge(pageId, 'subscribed_apps', { token, method: repair ? 'POST' : 'GET', ...(repair ? { body: { subscribed_fields: 'leadgen' } } : { fields: 'id,subscribed_fields' }) });
+  const formsResponse = await fetchEdge(pageId, 'leadgen_forms', { token: retrievalToken, fields: 'id', limit: 1 });
+  const forms = await formsResponse.json();
+  if (!formsResponse.ok) return {
+    ...metaConnectionIssue(forms.error),
+    health: 'retrieval_permissions',
+    pageName: page.name || null,
+    tokenValid: true,
+    message: 'Page matched. Meta rejected the lead-reading token. Use the System User token with leads_retrieval and grant it access to this Page in Leads Access settings.',
+  };
+  const edgeResponse = await fetchEdge(pageId, 'subscribed_apps', { token: pageToken, method: repair ? 'POST' : 'GET', ...(repair ? { body: { subscribed_fields: 'leadgen' } } : { fields: 'id,subscribed_fields' }) });
   const subscriptions = await edgeResponse.json();
   if (!edgeResponse.ok) return { ...metaConnectionIssue(subscriptions.error), pageName: page.name || null, tokenValid: true };
   // A successful POST subscribes the token's own app. With GET, only claim

@@ -19,6 +19,7 @@ import { validateLeadPayload } from './leadValidation.js'
 import { handleWixLead } from './wixLeads.js'
 import { fetchMetaObject } from './metaGraph.js'
 import { ingestMetaWebhook } from './metaLeads.js'
+import { decodeMetaCredentials } from './metaCredentials.js'
 import { installLeadConnections, installWixBodyParser } from './leadConnections.js'
 import * as gmail from './providers/gmail.js'
 import * as googleCalendar from './providers/googleCalendar.js'
@@ -513,7 +514,7 @@ app.post('/api/leads/meta', async (req, res) => {
           .from('lead_sources').select('business_id, token_enc').eq('provider', 'meta').eq('external_id', pageId).maybeSingle()
         if (error) throw error
         if (!data) return null
-        return { business_id: data.business_id, pageToken: decryptToken(data.token_enc) }
+        return { business_id: data.business_id, pageToken: decodeMetaCredentials(decryptToken(data.token_enc)).retrievalToken }
       },
       fetchLead: async (leadgenId, pageToken) => {
         const graphRes = await fetchMetaObject(leadgenId, { token: pageToken, fields: 'id,created_time,field_data,form_id,ad_id' })
@@ -1346,7 +1347,12 @@ app.post('/api/ai/marketing', requireBusiness, async (req, res) => {
 
 installSalesPlatform(app,{db:authClient,requireBusiness,sendNotification})
 installConversations(app,{db:authClient,requireBusiness,getValidAccessToken})
-installMarketingRoutes(app,{db:authClient,requireBusiness})
+installMarketingRoutes(app,{db:authClient,requireBusiness,getMetaRetrievalToken:async(businessId)=>{
+  const {data,error}=await authClient.from('lead_sources').select('token_enc').eq('business_id',businessId).eq('provider','meta').maybeSingle()
+  if(error)throw error
+  if(!data?.token_enc)return null
+  return decodeMetaCredentials(decryptToken(data.token_enc)).retrievalToken
+}})
 installJobWork(app,{db:authClient,requireBusiness})
 installJobCalendar(app,{db:authClient,requireBusiness,getGoogleCalendarToken,googleConfigured:googleCalendar.isConfigured})
 installExtensionTransfers(app,{db:authClient,requireBusiness})

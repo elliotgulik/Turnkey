@@ -270,6 +270,18 @@ test("CRM cohort uses account timezone; unknown remains unknown; cancelled is no
   assert.equal(r.unknownLeads, 1);
   assert.equal(r.byAd[0].won, 1);
 });
+test('Meta-supplied ad IDs automatically connect CRM leads to won opportunities without guessing', () => {
+  const r = attribution([
+    { id: 'meta-lead', created_at: '2026-10-01T00:00:00Z', status: 'won', details: { metaAdId: '77', total: 1250 } },
+    { id: 'unattributed', created_at: '2026-10-01T00:00:00Z', status: 'won', details: { total: 800, source: 'Meta' } },
+  ], [], '2026-10-01', '2026-10-01', 'Pacific/Auckland');
+  assert.equal(r.linkedLeads, 1);
+  assert.equal(r.unknownLeads, 1);
+  assert.equal(r.byAd[0].adId, '77');
+  assert.equal(r.byAd[0].metaLeadMatches, 1);
+  assert.equal(r.byAd[0].wonQuotedValue, 1250);
+  assert.match(r.basis, /not collected cash/);
+});
 function database(tables = {}) {
   const calls = [],
     rpc = [];
@@ -367,6 +379,7 @@ function harness({
   fetchImpl = async () => {
     throw Error("Unexpected network");
   },
+  getMetaRetrievalToken = async () => null,
   authenticated = true,
 } = {}) {
   const db = database({
@@ -383,6 +396,7 @@ function harness({
     db,
     env: { MARKETING_TOKEN_KEY: key },
     fetchImpl,
+    getMetaRetrievalToken,
     requireBusiness: (req, res, next) => {
       if (!authenticated)
         return res.status(401).json({ error: "Unauthenticated" });
@@ -711,6 +725,31 @@ test("successful connection stores ciphertext and returns only safe account fiel
   assert.ok(!JSON.stringify(r.body).includes(token));
   assert.equal(r.body.token_enc, undefined);
   assert.equal(r.body.connected, true);
+});
+test("reporting can reuse the authenticated business's saved Meta retrieval token", async () => {
+  let n = 0, seenToken;
+  const h = harness({
+    getMetaRetrievalToken: async (businessId) => {
+      assert.equal(businessId, "business-a");
+      return "saved-system-user-token-with-ads-read";
+    },
+    fetchImpl: async (_url, options = {}) => {
+      seenToken = options.headers?.Authorization?.replace("Bearer ", "");
+      return {
+        ok: true,
+        json: async () => ++n === 1
+          ? { data: [{ permission: "ads_read", status: "granted" }] }
+          : { id: "act_123", account_id: "123", name: "Account", currency: "NZD", timezone_name: "Pacific/Auckland" },
+      };
+    },
+  });
+  const r = await h.call("post", "/api/marketing/connection", {
+    accountId: "123", useConnectedLeadToken: true,
+  });
+  assert.equal(r.code, 200);
+  assert.equal(seenToken, "saved-system-user-token-with-ads-read");
+  assert.equal(unseal(h.db.tables.marketing_ad_connections[0].token_enc, "business-a", "123", key), seenToken);
+  assert.ok(!JSON.stringify(r.body).includes(seenToken));
 });
 test("permission lookup failure exposes no database details and performs no reporting writes", async () => {
   const h = harness();

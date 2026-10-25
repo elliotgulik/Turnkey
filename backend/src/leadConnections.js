@@ -5,6 +5,7 @@ import { generateWixToken, hashWixToken } from "./wixLeads.js";
 import { encryptToken, decryptToken } from "./crypto.js";
 import { fetchMetaObject, fetchMetaEdge } from "./metaGraph.js";
 import { checkMetaConnection } from "./metaConnectionHealth.js";
+import { decodeMetaCredentials, encodeMetaCredentials } from "./metaCredentials.js";
 
 export function installWixBodyParser(app) {
   app.use("/api/leads/wix", express.json({ limit: "64kb" }));
@@ -141,7 +142,8 @@ export function installLeadConnections(
       const row = await unwrap(db.from('lead_sources').select('external_id,token_enc')
         .eq('business_id', businessId).eq('provider', 'meta').maybeSingle());
       if (!row) return res.status(404).json({ error: 'Connect a Meta Page first.' });
-      const result = await importMetaBatch({ businessId, pageId: row.external_id, token: decrypt(row.token_enc),
+      const credentials = decodeMetaCredentials(decrypt(row.token_enc));
+      const result = await importMetaBatch({ businessId, pageId: row.external_id, token: credentials.retrievalToken,
         cursor: req.body?.cursor, encrypt, decrypt, fetchEdge, addLead });
       res.json(result);
     } catch (error) {
@@ -156,11 +158,11 @@ export function installLeadConnections(
         const row = await unwrap(db.from("lead_sources").select("external_id,token_enc")
           .eq("business_id", req.businessId).eq("provider", "meta").maybeSingle());
         if (!row) return res.status(404).json({ error: "Connect a Meta Page first." });
-        let token;
-        try { token = decrypt(row.token_enc); } catch {
+        let credentials;
+        try { credentials = decodeMetaCredentials(decrypt(row.token_enc)); } catch {
           return res.status(503).json({ error: "The saved Meta credential cannot be read. Reconnect the Page; if this continues, check the backend encryption key." });
         }
-        const health = await checkMetaConnection({ pageId: row.external_id, token, repair: action === "repair", appId: env.META_APP_ID, fetchPage, fetchEdge });
+        const health = await checkMetaConnection({ pageId: row.external_id, ...credentials, repair: action === "repair", appId: env.META_APP_ID, fetchPage, fetchEdge });
         res.json({ connected: true, pageId: row.external_id, ...health });
       }));
   }
@@ -183,11 +185,12 @@ export function installLeadConnections(
     requireBusiness,
     wrap("Could not connect this Meta Page.", async (req, res) => {
       const pageId = String(req.body?.pageId || "").trim(),
-        pageToken = String(req.body?.pageToken || "").trim();
-      if (!/^\d{1,40}$/.test(pageId) || !pageToken || pageToken.length > 10000)
+        pageToken = String(req.body?.pageToken || "").trim(),
+        retrievalToken = String(req.body?.retrievalToken || pageToken).trim();
+      if (!/^\d{1,40}$/.test(pageId) || !pageToken || pageToken.length > 10000 || !retrievalToken || retrievalToken.length > 10000)
         return res
           .status(400)
-          .json({ error: "Page ID and Page Access Token are required" });
+          .json({ error: "Page ID, Page Access Token and lead retrieval token are required" });
       const mapped = await unwrap(
         db
           .from("lead_sources")
@@ -214,10 +217,10 @@ export function installLeadConnections(
           });
       await saveLeadConnection(db, req.businessId, "meta", {
         external_id: pageId,
-        token_enc: encrypt(pageToken),
+        token_enc: encrypt(encodeMetaCredentials({ retrievalToken, pageToken })),
       });
       let health;
-      try { health = await checkMetaConnection({ pageId, token: pageToken, repair: true, fetchPage, fetchEdge }); }
+      try { health = await checkMetaConnection({ pageId, pageToken, retrievalToken, repair: true, appId: env.META_APP_ID, fetchPage, fetchEdge }); }
       catch { health = { health: 'error', message: 'Page saved, but lead delivery could not be enabled. Retry Enable lead delivery.' }; }
       res.json({ ok: true, connected: true, pageId, pageName: page.name || null, ...health });
     }),

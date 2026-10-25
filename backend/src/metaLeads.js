@@ -102,6 +102,7 @@ export function normalizeMetaLead(leadData, businessId, { historical = false, no
     ...(historical ? { historicalImport: true } : {}),
     ...(leadData.form_id ? { form_id: String(leadData.form_id) } : {}),
     ...(leadData.ad_id ? { ad_id: String(leadData.ad_id) } : {}),
+    ...(leadData.campaign_id ? { campaign_id: String(leadData.campaign_id) } : {}),
     external_id: leadgenId,
     submittedAt: Number.isFinite(Date.parse(leadData.created_time)) ? Date.parse(leadData.created_time) : now(),
   };
