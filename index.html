@@ -1385,14 +1385,14 @@
 
 </style>
 <link rel="stylesheet" href="sales-platform.css?v=20261018c">
-<link rel="stylesheet" href="nova-lead-manager.css?v=20261031a">
+<link rel="stylesheet" href="nova-lead-manager.css?v=20261031c">
 <link rel="stylesheet" href="quote-workspace.css?v=20261017a">
 <link rel="stylesheet" href="conversations.css?v=20261020a">
 <link rel="stylesheet" href="marketing-analytics.css?v=20261025b">
 <link rel="stylesheet" href="sales-experience.css?v=20261019a">
 <link rel="stylesheet" href="settings-experience.css?v=20261019a">
 <link rel="stylesheet" href="job-workspace.css?v=20261031.1">
-<link rel="stylesheet" href="job-calendar.css?v=20261031a">
+<link rel="stylesheet" href="job-calendar.css?v=20261031c">
 <link rel="stylesheet" href="operations-workspace.css?v=20261018c">
 <link rel="stylesheet" href="workspace-experience.css?v=20261022a">
 </head>
@@ -9122,6 +9122,9 @@ async function handleLogout(){
 
 let currentUserId=null;
 let currentUserRole='owner';
+// Auth events already supply the current session. API clients can use this
+// in-memory snapshot instead of competing for Supabase's session lock.
+window.TK_CURRENT_SESSION=null;
 async function resolveProfile(userId){
   const {data,error}=await sb.from('users').select('business_id,role').eq('id',userId).maybeSingle();
   if(error)throw new Error('Could not load your business profile. Please try signing in again.');
@@ -9135,6 +9138,7 @@ function showWorkspaceLoading(){
   document.getElementById('workspace-retry').hidden=true;
 }
 async function handleAuthedSession(session){
+  window.TK_CURRENT_SESSION=session;
   const version=++businessSessionVersion;
   businessStateReady=false;
   clearTimeout(supabaseSyncTimer);
@@ -10794,6 +10798,7 @@ if(sb){
     if(!appSessionGate.isPending()&&!businessStateReady)showAuth();
   }).catch(()=>{if(!businessStateReady){showAuth();setAuthMsg('Could not restore your session. Check your connection and try again.');}});
   sb.auth.onAuthStateChange((event,session)=>{
+    window.TK_CURRENT_SESSION=event==='SIGNED_OUT'?null:session;
     if(event==='PASSWORD_RECOVERY'){authRecoveryActive=true;appSessionGate.reset();++businessSessionVersion;businessStateReady=false;showPasswordRecovery();return;}
     if(!authRecoveryActive&&(event==='SIGNED_IN'||event==='INITIAL_SESSION')&&session)void appSessionGate.start(session).catch(()=>{if(!businessStateReady){showAuth();setAuthMsg('Could not load your workspace. Please try again.');}});
     if(event==='SIGNED_OUT'){appSessionGate.reset();++businessSessionVersion;businessStateReady=false;clearTimeout(supabaseSyncTimer);goals=[];goalSeq=1;seq=1;followSeq=1;window.TK_SALES_PLATFORM?.reset();unsubscribeRealtime();stopLastSeenHeartbeat();records=[];currentBusinessId=null;currentUserId=null;currentUserRole='owner';staff=[];pendingInvites=[];render();renderAll();showAuth();}
@@ -11024,22 +11029,22 @@ async function retryPendingPhotos(){
 <script src="pipeline-model.js?v=20261018e"></script>
 <script src="lead-priority.js?v=20261017a"></script>
 <script src="meta-import.js?v=20261020a"></script>
-<script src="sales-platform.js?v=20261031b"></script>
+<script src="sales-platform.js?v=20261031c"></script>
 <script type="module" src="measurement-import.js?v=20261017a"></script>
 <script src="quote-workspace.js?v=20261017a"></script>
 <script src="conversations.js?v=20261020a"></script>
 <script src="conversations-bridge.js?v=20261020a"></script>
 <script src="servicem8-import.js?v=20261017a"></script>
 <script src="marketing-analytics.js?v=20261025b"></script>
-<footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a> · <span id="tk-app-version">v20261031b</span></footer>
+<footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a> · <span id="tk-app-version">v20261031c</span></footer>
 <script src="extension-quote-link.js?v=20261022a"></script>
 <script src="job-workspace.js?v=20261031a"></script>
-<script src="job-calendar.js?v=20261031a"></script>
+<script src="job-calendar.js?v=20261031c"></script>
 <script src="operations-workspace.js?v=20261031b"></script>
 <script src="operations-bridge.js?v=20261018c"></script>
 <script src="workspace-controls.js?v=20261019a"></script>
 <script src="settings-experience.js?v=20261019d"></script>
 <script src="workspace-experience.js?v=20261019b"></script>
-<script src="nova-lead-manager.js?v=20261031a"></script>
+<script src="nova-lead-manager.js?v=20261031c"></script>
 </body>
 </html>

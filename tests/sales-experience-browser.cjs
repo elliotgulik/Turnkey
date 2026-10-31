@@ -35,6 +35,9 @@ const assert = require('node:assert/strict');
       page.on('pageerror', e => errors.push(e.message));
       await page.route('**/*', route => {
         const url = route.request().url();
+        // Keep this focused on sales-platform rather than the later Nova Leads replacement.
+        if (url.startsWith(base) && new URL(url).pathname === '/nova-lead-manager.js')
+          return route.fulfill({ contentType: 'text/javascript', body: '' });
         if (url.startsWith(base)) return new URL(url).pathname === '/config.js' ? route.fulfill({ contentType: 'text/javascript', body: 'window.TURNKEY_CONFIG={};' }) : route.continue();
         return route.fulfill({ status: 200, contentType: 'text/javascript', body: '' });
       });
@@ -51,7 +54,9 @@ const assert = require('node:assert/strict');
           {id:6,name:'Lost enquiry',stage:'cancelled',lostAt:now,lostReason:'Timing'},
           {id:7,name:'Cancelled job',stage:'cancelled',cancelReason:'Weather',nextFollowUpAt:new Date(now-86400000).toISOString()},
           {id:8,name:'Missing contact',stage:'new',source:'Manual'},
-          {id:9,name:'Phone enquiry',stage:'new',phone:'+6421555022'}
+          {id:9,name:'Phone enquiry',stage:'new',phone:'+6421555022'},
+          {id:10,name:'ServiceM8 completed',stage:'completed',source:'ServiceM8',total:300},
+          {id:11,name:'ServiceM8 paid',stage:'paid',source:'ServiceM8',total:400}
         ].map(r => newRecord({address:'18 Kowhai Road, Auckland',createdAt:now-172800000,customerId:'customer-'+r.id,jobId:'job-'+r.id,...r}));
         currentBusinessId = 'sales-ux-test'; currentUserId = 'sales-ux-owner'; businessStateReady = true;
         records.forEach(r => recordBusinesses.set(r, currentBusinessId));
@@ -68,7 +73,7 @@ const assert = require('node:assert/strict');
       });
       const leads = page.locator('#view-leads');
       const card = id => leads.locator(`[data-record="${id}"]`);
-      assert.match(await leads.locator('.sale-results').innerText(), /Showing 5 of 9 opportunities/);
+      assert.match(await leads.locator('.sale-results').innerText(), /Showing 5 of 11 opportunities/);
       assert.equal(await leads.locator('[data-record][role="button"]').count(), 0, 'Cards must not contain interactive children inside a button role');
       assert.match(await card(1).locator('.sale-state').innerText(), /New lead/);
       assert.match(await card(2).locator('.sale-state').innerText(), /Contacted/);
@@ -107,11 +112,24 @@ const assert = require('node:assert/strict');
       await leads.locator('[data-sale-filter="stage"]').selectOption('won');
       assert.deepEqual(await leads.locator('[data-record]').evaluateAll(els => els.map(el => Number(el.dataset.record))), [4, 5]);
       assert.match(await leads.innerText(), /Scheduled/);
+      await leads.locator('[data-sale-action="leads-scope"][data-id="completed"]').click();
+      assert.deepEqual(await leads.locator('[data-record]').evaluateAll(els => els.map(el => Number(el.dataset.record))), [10,11]);
+      assert.equal(await leads.locator('[data-sale-filter="stage"]').inputValue(), 'completed');
+      assert.match(await leads.locator('.sale-results').innerText(), /Completed/);
+      for (const layout of ['table', 'cards']) {
+        await leads.locator(`[data-sale-action="leads-layout"][data-id="${layout}"]`).click();
+        assert.equal(await leads.locator('[data-sale-state="completed"]').count(), 2);
+        assert.equal(await leads.locator('[data-sale-state="won"]').count(), 0);
+      }
+      await leads.locator('[data-sale-filter="stage"]').selectOption('completed');
+      assert.equal(await leads.locator('[data-record]').count(), 2);
+      await leads.locator('[data-sale-action="leads-scope"][data-id="won"]').click();
+      assert.deepEqual(await leads.locator('[data-record]').evaluateAll(els => els.map(el => Number(el.dataset.record))), [4,5]);
       await leads.locator('[data-sale-filter="stage"]').selectOption('lost');
       assert.equal(await leads.locator('[data-record]').count(), 2);
       await leads.locator('[data-sale-action="leads-reset"]').click();
       await leads.locator('#sale-search').fill('no matches');
-      assert.match(await leads.locator('.sale-results').innerText(), /Showing 0 of 9/);
+      assert.match(await leads.locator('.sale-results').innerText(), /Showing 0 of 11/);
       await leads.locator('.sale-no-results [data-sale-action="leads-reset"]').click();
       assert.equal(await leads.locator('#sale-search').inputValue(), '');
       await leads.locator('#sale-leads-due').check();
@@ -159,7 +177,7 @@ const assert = require('node:assert/strict');
       await page.evaluate(() => switchView('pipeline'));
       const pipeline = page.locator('#view-pipeline');
       assert.deepEqual(await pipeline.locator('[data-drop-stage]').evaluateAll(els => els.map(el => el.dataset.dropStage)), ['new','contacted','quoted','won','lost']);
-      assert.equal(await pipeline.locator('[data-record]').count(), 9);
+      assert.equal(await pipeline.locator('[data-record]').count(), 11);
       await pipeline.locator('[data-sale-action="pipeline-scope"][data-id="won"]').click();
       assert.equal(await pipeline.locator('[data-record]').count(), 2);
       await pipeline.locator('[data-sale-stage="5"]').selectOption('contacted');
@@ -168,9 +186,9 @@ const assert = require('node:assert/strict');
       await pipeline.locator('#pipeline-due').check();
       assert.equal(await pipeline.locator('[data-record]').count(), 0);
       await pipeline.locator('.sale-no-results [data-sale-action="pipeline-reset"]').click();
-      assert.equal(await pipeline.locator('[data-record]').count(), 9);
+      assert.equal(await pipeline.locator('[data-record]').count(), 11);
       await pipeline.locator('#pipeline-search').fill('Moana');
-      assert.match(await pipeline.locator('.sale-results').innerText(), /Showing 1 of 9/);
+      assert.match(await pipeline.locator('.sale-results').innerText(), /Showing 1 of 11/);
       await pipeline.locator('[data-sale-action="pipeline-reset"]').click();
       await pipeline.locator('[data-sale-stage="1"]').selectOption('won');
       assert.equal(await page.evaluate(() => records.find(r => r.id === 1).stage), 'new', 'Unquoted leads cannot bypass acceptance safeguards');

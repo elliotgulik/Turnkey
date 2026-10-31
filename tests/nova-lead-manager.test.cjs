@@ -41,3 +41,48 @@ test('service area preferences are isolated by TurnKey business ID', () => {
   context.window.TK_NOVA_LEAD_MANAGER.render();
   assert.equal(context.window.TK_NOVA_LEAD_MANAGER.grade({ address: '2 Test Road, Whangaparaoa, Auckland', suburb:'Whangaparaoa', services: ['House wash'] }).grade, 'C');
 });
+
+function statusFixture() {
+  const host = { innerHTML: '', classList: { contains() { return true; } } };
+  const handlers = {};
+  const records = ['new', 'scheduled', 'won', 'completed', 'paid', 'cancelled', 'lost'].map((stage, id) => ({
+    id, stage, name: `Customer ${id}`, source: 'ServiceM8', total: 100,
+    nextFollowUpAt: new Date(Date.now() - 86400000).toISOString(),
+  }));
+  const context = {
+    records, money: n => '$' + n, currentBusinessId: 'test',
+    render() {}, switchView() {}, handleAuthedSession() {}, openMoreSheet() {},
+    document: { activeElement: null, addEventListener(k, fn) { handlers[k] = fn; }, querySelector() { return null; }, getElementById() { return host; } },
+    localStorage: { getItem() { return null; }, setItem() {} },
+    window: { TK_PIPELINE: require('../pipeline-model.js') },
+  };
+  vm.runInNewContext(fs.readFileSync('nova-lead-manager.js', 'utf8'), context);
+  const manager = context.window.TK_NOVA_LEAD_MANAGER;
+  return { host, records, manager,
+    scope(key) { handlers.click({ target: { closest(selector) { return selector === '[data-nlm-scope]' ? { dataset: { nlmScope: key } } : null; } } }); },
+  };
+}
+
+test('production lead manager separates completed and paid from confirmed and open', () => {
+  const f = statusFixture();
+  const ids = () => [...f.host.innerHTML.matchAll(/data-nlm-record="(\d+)"/g)].map(m => Number(m[1]));
+  f.manager.render();
+  assert.deepEqual(ids(), [0]);
+  f.scope('won');
+  assert.deepEqual(ids(), [1,2]);
+  assert.match(f.host.innerHTML, /class="nlm-tag stage">Confirmed</);
+  f.scope('completed');
+  assert.deepEqual(ids(), [3,4]);
+  assert.equal((f.host.innerHTML.match(/class="nlm-tag stage">Completed</g) || []).length, 2);
+  assert.doesNotMatch(f.host.innerHTML, /class="nlm-tag stage">Confirmed</);
+  assert.match(f.host.innerHTML, /data-nlm-stage="3" disabled/);
+  assert.doesNotMatch(f.host.innerHTML, /nlm-follow overdue/);
+  f.scope('lost');
+  assert.deepEqual(ids(), [5,6]);
+  f.scope('all');
+  assert.deepEqual(ids(), [0,1,2,3,4,5,6]);
+  assert.deepEqual(f.records.map(r => r.stage), ['new','scheduled','won','completed','paid','cancelled','lost']);
+  assert.deepEqual(f.records.slice(3,5).map(r => require('../sales-metrics.js').won(r)), [true,true]);
+  f.manager.reset(); f.manager.render();
+  assert.deepEqual(ids(), [0]);
+});

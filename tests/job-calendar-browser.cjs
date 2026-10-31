@@ -1,7 +1,8 @@
 /* Offline UI checks for job-calendar.js: only fixture responses via
    TK_JOB_CALENDAR.configure(), all real network requests blocked. No
-   FullCalendar CDN available here (network blocked), so this exercises the
-   built-in fallback agenda renderer end-to-end — same data flow and
+   FullCalendar CDN requests are made: this exercises the built-in fallback
+   agenda plus a strict lifecycle double (set TURNKEY_CALENDAR_SDK to a local
+   FullCalendar script to also exercise the real renderer end-to-end) — same data flow and
    payload-building code the FullCalendar drag/resize handlers call into.
    Covers: nav patch (desktop + mobile More sheet), the floating launcher's
    "Staff calendar" button being redirected here instead of opening the old
@@ -9,7 +10,10 @@
    block date-exclusivity, multi-staff serialization, a failed reschedule
    reverting instead of optimistically persisting, a stale tenant-switch
    mid-request being dropped silently, and a failed Google sync staying
-   visible with a working retry. */
+   visible with a working retry. Also covers coalesced range loads, saved
+   data during errors and navigation, stale reads after writes/session changes,
+   completed deduplication, remote staff filters, bounded auth/body reads,
+   cached session validation and DB-only disconnect/focus polling. */
 const { chromium } = require('playwright'),
   fs = require('node:fs'),
   http = require('node:http'),
@@ -77,7 +81,8 @@ const { chromium } = require('playwright'),
         business: 'biz-a', userId: 'owner-1', version: 0, canManage: true,
         staff: [
           { id: 'owner-1', name: 'Owner One', email: 'owner@test.example', role: 'owner' },
-          { id: 'tech-1', name: 'Tech One', email: 'tech@test.example', role: 'technician' }
+          { id: 'tech-1', name: 'Tech One', email: 'tech@test.example', role: 'technician' },
+          { id:'servicem8:remote-1',name:'Jordan Lee',email:'remote@example.test',role:'servicem8',source:'servicem8',readOnly:true }
         ],
         jobs: [
           { id: 'job-1', status: 'scheduled', assigned_to: null, scheduled_date: '2026-07-10', updated_at: '2026-07-01T00:00:00.000Z',
@@ -125,7 +130,7 @@ const { chromium } = require('playwright'),
             fixture.events = fixture.events.filter(e => e.source !== 'servicem8').concat({ id: 'sm8-booking', user_id: null,
               title: 'Nova Exterior · House wash', source: 'servicem8', connection_id: null, external_id: 'activity-1', busy_status: 'busy',
               start_time: '2026-07-20T01:00:00.000Z', end_time: '2026-07-20T02:00:00.000Z', notes: 'ServiceM8 job',
-              details: { personName:'Alex Smith', companyName:'Nova Exterior', email:'alex@example.test', phone:'021 555 0100', address:'29 Selwyn Cres', services:['House wash'], lineItems:[{name:'House wash',quantity:'1'}], assignedStaff:['Jordan Lee'], status:'Work Order' } });
+              details: { personName:'Alex Smith', companyName:'Nova Exterior', email:'alex@example.test', phone:'021 555 0100', address:'29 Selwyn Cres', services:['House wash'], lineItems:[{name:'House wash',quantity:'1'}], assignedStaff:['Jordan Lee'], assignedStaffIds:['servicem8:remote-1'], status:'Work Order' } });
             return { synced: 1, reconciledCompleted: 1 };
           }
           if (options && options.method === 'PUT' && p.startsWith('/jobs/')) {
@@ -173,28 +178,36 @@ const { chromium } = require('playwright'),
     const sidebarText = await page.locator('#tkjc-sidebar-list').innerText();
     assert.match(sidebarText, /Bob/); // unscheduled
     assert.match(sidebarText, /Alice/); // scheduled, in range
-    const rangeCount = await page.evaluate(() => fixture.calls.filter(c => c.path.startsWith('/range')).length);
+    const rangeCount = await page.evaluate(() => fixture.calls.filter(c => c.path?.startsWith('/range')).length);
     await page.waitForFunction(() => fixture.calls.some(c => c.dispatchSync));
     assert.equal(await page.locator('[data-tkjc="sync-servicem8"]').count(), 0);
     assert.equal(await page.locator('#tkjc-load-status').isHidden(), true);
-    const seededRangeCount = await page.evaluate(() => fixture.calls.filter(c => c.path.startsWith('/range')).length);
-    await page.evaluate(() => window.renderAll());
+    await page.waitForFunction(before => fixture.calls.filter(c => c.path?.startsWith('/range')).length > before, rangeCount);
+    await page.waitForFunction(() => document.getElementById('tkjc-load-status').hidden);
+    const seededRangeCount = await page.evaluate(() => fixture.calls.filter(c => c.path?.startsWith('/range')).length);
+    await page.evaluate(() => { window.renderAll(); for (let i = 0; i < 10; i++) window.renderCalendar(); });
     await page.waitForTimeout(450);
-    assert.equal(await page.evaluate(() => fixture.calls.filter(c => c.path.startsWith('/range')).length), seededRangeCount, 'app renders do not restart calendar fetches');
+    assert.equal(await page.evaluate(() => fixture.calls.filter(c => c.path?.startsWith('/range')).length), seededRangeCount, 'app renders do not restart calendar fetches');
     await page.evaluate(() => fixture.realtimeHandlers[0]?.());
-    await page.waitForFunction((before) => fixture.calls.filter(c => c.path.startsWith('/range')).length > before, seededRangeCount);
+    await page.waitForFunction((before) => fixture.calls.filter(c => c.path?.startsWith('/range')).length > before, seededRangeCount);
     assert.equal(await page.evaluate(() => fixture.calls.some(c => c.dispatchSync && !('from' in c.dispatchSync))), true);
     assert.match(await page.locator('#tkjc-main').innerText(), /Nova Exterior · House wash/);
     await page.click('[data-tkjc-section="completed"]');
     assert.match(await page.locator('#tkjc-main').innerText(), /Done Customer/);
     await page.click('[data-tkjc-section="schedule"]');
-    await page.locator('[data-tkjc-agenda-event="sm8-booking"]').click();
+    if (process.env.TURNKEY_CALENDAR_SDK) await page.locator('.fc-event-title').filter({hasText:'Nova Exterior'}).first().click();
+    else await page.locator('[data-tkjc-agenda-event="sm8-booking"]').click();
     const dispatchDetail = await page.locator('#tkjc-event-overlay').innerText();
     assert.match(dispatchDetail, /Alex Smith/);
     assert.match(dispatchDetail, /29 Selwyn Cres/);
     assert.match(dispatchDetail, /Jordan Lee/);
     assert.match(dispatchDetail, /Forecast/);
     await page.locator('#tkjc-event-overlay [data-tkjc="close"]').click();
+
+    await page.click('[data-tkjc-chip="servicem8:remote-1"]');
+    assert.match(await page.locator('#tkjc-main').innerText(), /Nova Exterior/);
+    assert.doesNotMatch(await page.locator('#tkjc-sidebar-list').innerText(), /Alice/);
+    await page.click('[data-tkjc="clear-filters"]');
 
     /* ===== 2. mobile More sheet gets a Calendar row ===== */
     await page.evaluate(() => { document.getElementById('view-dashboard').classList.add('active'); document.getElementById('view-calendar').classList.remove('active'); window.openMoreSheet(); });
@@ -218,6 +231,7 @@ const { chromium } = require('playwright'),
     /* ===== 4. multi-staff serialization (crew booking) ===== */
     await page.click('[data-tkjc="book"]');
     await page.locator('#tkjc-booking-overlay').waitFor();
+    assert.equal(await page.locator('#tkjc-booking-overlay input[value^="servicem8:"]').count(), 0);
     await page.selectOption('#tkjc-booking-overlay [data-tkjc-field="jobId"]', 'job-2');
     await page.fill('#tkjc-booking-overlay [data-tkjc-field="date"]', '2026-07-15');
     await page.fill('#tkjc-booking-overlay [data-tkjc-field="startTime"]', '08:30');
@@ -290,6 +304,7 @@ const { chromium } = require('playwright'),
     await page.locator('#tkjc-block-overlay').waitFor();
     const staffSelect = page.locator('#tkjc-block-overlay [data-tkjc-field="staffId"]');
     assert.equal(await staffSelect.isDisabled(), true);
+    assert.equal(await staffSelect.locator('option[value^="servicem8:"]').count(), 0);
     assert.equal(await staffSelect.inputValue(), 'tech-1'); // forced to self, can't block someone else's time
 
     /* ===== 9. native block all-day is exclusive on the end date (DST-safe setDate, not +86400000) ===== */
@@ -311,6 +326,7 @@ const { chromium } = require('playwright'),
     // Native appointment create/edit/delete through visible UI, including retry.
     await page.click('[data-tkjc="event"]');
     assert.equal(await page.locator('[data-event="staff"]').isDisabled(), true);
+    assert.equal(await page.locator('[data-event="staff"] option[value^="servicem8:"]').count(), 0);
     await page.fill('[data-event="title"]', 'Site visit <safe>');
     await page.fill('[data-event="start"]', '2026-07-20T10:00');
     await page.fill('[data-event="end"]', '2026-07-20T11:00');
@@ -421,6 +437,257 @@ const { chromium } = require('playwright'),
     const unscheduled = await page.evaluate(() => fixture.jobs.find(j => j.id === 'job-1'));
     assert.equal(unscheduled.status,'scheduled'); assert.equal(unscheduled.customer.name,'Alice');
     assert.equal(unscheduled.scheduled_date,null);
+
+    // Controlled reads exercise races without backend timing or a CDN dependency.
+    await page.evaluate(() => {
+      window.reads = [];
+      window.rangeData = (name = 'Saved booking') => ({
+        canManage: true, staff: [{id:'owner-1',name:'Owner'}, {id:'tech-1',name:'Tech'}],
+        jobs: [{id:'saved',status:'scheduled',scheduled_date:'2026-07-15',customer:{name},details:{assignedStaffIds:['owner-1']}}],
+        events: [], blocks: []
+      });
+      TK_JOB_CALENDAR.configure({
+        getBusinessId: () => fixture.business, getUserId: () => fixture.userId, getVersion: () => fixture.version,
+        request: (path, options) => {
+          if (path.startsWith('/range')) return new Promise((resolve, reject) => reads.push({path,resolve,reject}));
+          if (path.startsWith('/jobs/') && options.method === 'PUT') {
+            const b = JSON.parse(options.body);
+            return Promise.resolve({job:{...rangeData().jobs[0], details:{calendarStartAt:b.startAt,calendarEndAt:b.endAt,assignedStaffIds:b.staffIds}}});
+          }
+          return Promise.resolve({});
+        }
+      });
+      window.renderCalendar();
+      for (let i = 0; i < 15; i++) window.renderCalendar();
+    });
+    assert.equal(await page.evaluate(() => reads.length), 1, 'render storms share one read');
+    await page.evaluate(() => reads[0].resolve(rangeData()));
+    await page.waitForFunction(() => document.getElementById('tkjc-load-status').hidden);
+    await page.evaluate(() => {
+      TK_JOB_CALENDAR.refresh();
+      for (let i = 0; i < 15; i++) TK_JOB_CALENDAR.refresh();
+    });
+    assert.equal(await page.evaluate(() => reads.length), 2, 'refresh storm shares an in-flight read');
+    assert.match(await page.locator('#tkjc-sidebar-list').innerText(), /Saved booking/);
+    assert.equal(await page.locator('[data-tkjc="book"]').isDisabled(), false);
+    await page.evaluate(() => reads[1].resolve(rangeData()));
+    await page.waitForFunction(() => reads.length === 3);
+    await page.evaluate(() => reads[2].reject(Error('Temporary outage')));
+    await page.waitForFunction(() => document.getElementById('tkjc-load-status').textContent.includes('Temporary outage'));
+    assert.match(await page.locator('#tkjc-sidebar-list').innerText(), /Saved booking/);
+    await page.getByRole('button', {name:'Retry loading calendar'}).click();
+    await page.evaluate(() => reads[3].resolve(rangeData()));
+    await page.waitForFunction(() => document.getElementById('tkjc-load-status').hidden);
+
+    // A save while an older read is pending survives both that response and
+    // a failed follow-up refresh.
+    await page.evaluate(() => { TK_JOB_CALENDAR.refresh(); });
+    await page.locator('[data-tkjc-job="saved"]').click();
+    await page.fill('#tkjc-booking-overlay [data-tkjc-field="startTime"]', '10:30');
+    await page.click('#tkjc-booking-overlay [data-tkjc="save"]');
+    await page.locator('#tkjc-booking-overlay').waitFor({state:'detached'});
+    await page.evaluate(() => reads[4].resolve(rangeData('Stale response')));
+    await page.waitForFunction(() => reads.length === 6);
+    await page.evaluate(() => reads[5].reject(Error('Refresh after save failed')));
+    await page.waitForFunction(() => document.getElementById('tkjc-load-status').textContent.includes('Refresh after save failed'));
+    assert.match(await page.locator('#tkjc-sidebar-list').innerText(), /Saved booking/);
+    assert.doesNotMatch(await page.locator('#tkjc-sidebar-list').innerText(), /Stale response/);
+    await page.locator('[data-tkjc-job="saved"]').click();
+    assert.equal(await page.locator('#tkjc-booking-overlay [data-tkjc-field="startTime"]').inputValue(), '10:30');
+    await page.click('#tkjc-booking-overlay [data-tkjc="cancel"]');
+
+    // Navigation paints immediately; an older range cannot overwrite it.
+    await page.click('[data-tkjc="next"]');
+    assert.match(await page.locator('#tkjc-title').innerText(), /Aug 2026/);
+    await page.click('[data-tkjc="next"]');
+    assert.match(await page.locator('#tkjc-title').innerText(), /Sep 2026/);
+    await page.evaluate(() => reads[7].resolve({...rangeData('September booking'),jobs:[{...rangeData('September booking').jobs[0],scheduled_date:'2026-09-15'}]}));
+    await page.waitForFunction(() => document.getElementById('tkjc-load-status').hidden);
+    await page.evaluate(() => reads[6].resolve(rangeData('Old August response')));
+    assert.match(await page.locator('#tkjc-sidebar-list').innerText(), /September booking/);
+    await page.click('[data-tkjc="today"]');
+    await page.evaluate(() => reads[8].reject(Error('July temporarily unavailable')));
+    await page.waitForFunction(() => document.getElementById('tkjc-load-status').textContent.includes('July temporarily unavailable'));
+    assert.match(await page.locator('#tkjc-sidebar-list').innerText(), /Saved booking/);
+    assert.doesNotMatch(await page.locator('#tkjc-sidebar-list').innerText(), /September booking/);
+
+    // Always run a strict FullCalendar lifecycle double, even offline. The
+    // optional SDK run above additionally checks real layout and pointer drags.
+    await page.click('[data-tkjc-section="completed"]');
+    await page.evaluate(() => {
+      window.fcCreated = 0; window.fcDestroyed = 0;
+      window.FullCalendar = { Calendar: class {
+        constructor(el, options) { this.el = el; this.view = {type:options.initialView}; this.options = options; this.events = options.events; window.latestFc = this; fcCreated++; }
+        check() { if (this.dead || !this.el.isConnected) throw Error('Detached FullCalendar used'); }
+        render() { this.check(); this.el.textContent = 'Calendar mounted'; }
+        destroy() { this.check(); this.dead = true; this.el.textContent = ''; fcDestroyed++; }
+        updateSize() { this.check(); }
+        changeView(type) { this.check(); this.view.type = type; }
+        gotoDate(date) { this.check(); this.date = date; }
+        removeAllEventSources() { this.check(); this.events = []; }
+        addEventSource(events) { this.check(); this.events = events; }
+      }};
+      window.renderCalendar();
+    });
+    await page.click('[data-tkjc-section="schedule"]');
+    for (let i = 0; i < 3; i++) {
+      await page.click('[data-tkjc-section="completed"]');
+      await page.click('[data-tkjc-section="schedule"]');
+      assert.equal(await page.locator('#tkjc-fc').innerText(), 'Calendar mounted');
+    }
+    assert.deepEqual(await page.evaluate(() => [fcCreated,fcDestroyed]), [4,3]);
+    await page.evaluate(() => {
+      TK_JOB_CALENDAR.refresh();
+      const completed = {id:'done',status:'paid',scheduled_date:'2026-07-18',customer:{name:'Done <safe>',address:'A street'},details:{serviceM8JobUuid:'remote-job',assignedStaffIds:['owner-1']}};
+      const ev = {source:'servicem8',user_id:'owner-1',start_time:'2026-07-18T01:00Z',end_time:'2026-07-18T02:00Z',details:{jobUuid:'remote-job',status:'Completed',personName:'Duplicate'}};
+      reads[9].resolve({...rangeData(),jobs:[completed,completed],events:[{...ev,id:'crew-1'},{...ev,id:'crew-2'},
+        {...ev,id:'only-1',details:{...ev.details,jobUuid:'event-only',personName:'Event only'}},
+        {...ev,id:'only-2',user_id:'tech-1',details:{...ev.details,jobUuid:'event-only',personName:'Event only'}},
+        {...ev,id:'old',end_time:'2025-01-01T02:00Z',details:{...ev.details,jobUuid:'old',personName:'Outside range'}}]});
+    });
+    await page.waitForFunction(() => document.getElementById('tkjc-load-status').hidden);
+    await page.click('[data-tkjc-section="completed"]');
+    assert.equal(await page.locator('.tkjc-completed-row').count(), 3, 'deduplicate CRM and imported crew activities by job identity');
+    assert.match(await page.locator('#tkjc-sidebar-list').innerText(), /Completed jobs \(3\)/i);
+    assert.doesNotMatch(await page.locator('#tkjc-main').innerText(), /Duplicate/);
+    await page.fill('#tkjc-search', 'Done <safe>');
+    assert.equal(await page.locator('.tkjc-completed-row').count(), 1);
+    assert.equal(await page.locator('#tkjc-main strong').innerText(), 'Done <safe>');
+    await page.click('[data-tkjc-chip="tech-1"]');
+    assert.equal(await page.locator('.tkjc-completed-row').count(), 0);
+    assert.match(await page.locator('#tkjc-main').innerText(), /Clear the filters/);
+    await page.click('[data-tkjc="clear-filters"]');
+    assert.equal(await page.locator('.tkjc-completed-row').count(), 3);
+    assert.equal(await page.locator('#tkjc-search').inputValue(), '');
+    assert.equal(await page.locator('[data-tkjc="clear-filters"]').isHidden(), true);
+    await page.click('[data-tkjc-chip="tech-1"]');
+    assert.equal(await page.locator('.tkjc-completed-row').count(), 1, 'deduplicated rows retain every crew member');
+    await page.click('[data-tkjc="clear-filters"]');
+    await page.click('[data-tkjc-section="schedule"]');
+    await page.click('[data-tkjc-view="week"]');
+    await page.evaluate(() => reads[10].resolve(rangeData()));
+    await page.waitForFunction(() => document.getElementById('tkjc-load-status').hidden);
+    assert.equal(await page.evaluate(() => latestFc.view.type), 'timeGridWeek');
+
+    // A session version change invalidates both cached permissions and reads.
+    await page.evaluate(() => { TK_JOB_CALENDAR.refresh(); fixture.version++; window.renderCalendar(); });
+    await page.evaluate(() => reads[12].resolve({...rangeData('New session'),canManage:false}));
+    await page.waitForFunction(() => document.getElementById('tkjc-load-status').hidden);
+    await page.evaluate(() => reads[11].resolve(rangeData('Old session')));
+    assert.match(await page.locator('#tkjc-sidebar-list').innerText(), /New session/);
+    assert.doesNotMatch(await page.locator('#tkjc-sidebar-list').innerText(), /Old session/);
+
+    // Production regression: getSession can stall before fetch even starts.
+    // Use only lexical sb here, with no TK_SUPABASE_CLIENT alias.
+    await page.clock.install({time:new Date('2026-07-15T00:00:00Z')});
+    await page.evaluate(() => {
+      window.sessionReads = 0; window.channelSubscriptions = 0;
+      window.TURNKEY_CONFIG = {backendUrl:location.origin};
+      window.testSupabase = {
+        auth:{getSession(){ sessionReads++; return new Promise(resolve => { window.releaseSession = resolve; }); }},
+        channel(){ const channel = {on(){return channel;},subscribe(){channelSubscriptions++;return channel;}}; return channel; },
+        removeChannel(){}
+      };
+      delete window.TK_SUPABASE_CLIENT;
+    });
+    await page.addScriptTag({content:'const sb = window.testSupabase;'});
+    await page.evaluate(() => {
+      TK_JOB_CALENDAR.configure({getBusinessId:()=>fixture.business,getUserId:()=>fixture.userId,getVersion:()=>fixture.version});
+      window.renderCalendar();
+    });
+    assert.equal(await page.evaluate(() => channelSubscriptions), 1, 'Realtime uses lexical sb fallback');
+    assert.equal(await page.evaluate(() => sessionReads), 1);
+    await page.clock.fastForward(30001);
+    await page.waitForFunction(() => document.getElementById('tkjc-load-status').textContent.includes('timed out'));
+    assert.equal(await page.getByRole('button',{name:'Retry loading calendar'}).isVisible(), true);
+    assert.doesNotMatch(await page.locator('#tkjc-load-status').innerText(), /Loading calendar/);
+    await page.click('[data-tkjc="next"]');
+    assert.match(await page.locator('#tkjc-title').innerText(), /Aug 2026/);
+    await page.clock.fastForward(30001);
+    await page.waitForFunction(() => document.getElementById('tkjc-load-status').textContent.includes('timed out'));
+
+    // Body decoding is also within the same deadline, and successful retry
+    // clears the loading/error message.
+    await page.evaluate(() => {
+      testSupabase.auth.getSession = async () => ({data:{session:{access_token:'fixture-token'}}});
+      window.nativeFetch = window.fetch;
+      window.fetch = async () => ({ok:true,status:200,json:()=>new Promise(()=>{})});
+    });
+    await page.getByRole('button',{name:'Retry loading calendar'}).click();
+    await page.clock.fastForward(30001);
+    await page.waitForFunction(() => document.getElementById('tkjc-load-status').textContent.includes('timed out'));
+    await page.evaluate(() => { window.fetch = async () => ({ok:true,status:200,json:async()=>({...rangeData(),canManage:false})}); });
+    await page.getByRole('button',{name:'Retry loading calendar'}).click();
+    await page.waitForFunction(() => document.getElementById('tkjc-load-status').hidden);
+    await page.evaluate(() => { window.fetch = window.nativeFetch; });
+
+    // A valid same-user memory session bypasses the stalled Supabase auth
+    // lock. Wrong-user and expired tokens must use the bounded fallback.
+    await page.evaluate(() => {
+      window.beforeSessionReads = sessionReads;
+      testSupabase.auth.getSession = () => { sessionReads++; return new Promise(()=>{}); };
+      window.TK_CURRENT_SESSION = {user:{id:fixture.userId},expires_at:Math.floor(Date.now()/1000)+3600,access_token:'cached-fixture'};
+      window.fetch = async (_url, options) => { window.lastAuthorization = options.headers.Authorization; return {ok:true,status:200,json:async()=>({...rangeData(),canManage:false})}; };
+      TK_JOB_CALENDAR.refresh();
+    });
+    await page.waitForFunction(() => document.getElementById('tkjc-load-status').hidden);
+    assert.equal(await page.evaluate(() => sessionReads), await page.evaluate(() => beforeSessionReads));
+    assert.equal(await page.evaluate(() => lastAuthorization), 'Bearer cached-fixture');
+    for (const invalid of ['wrong-user','expired']) {
+      await page.evaluate(invalid => {
+        TK_CURRENT_SESSION = {user:{id:invalid === 'wrong-user' ? 'another-user' : fixture.userId},expires_at:Math.floor(Date.now()/1000)+(invalid === 'expired' ? -1 : 3600),access_token:'must-not-use'};
+        TK_JOB_CALENDAR.refresh();
+      }, invalid);
+      await page.clock.fastForward(30001);
+      await page.waitForFunction(() => document.getElementById('tkjc-load-status').textContent.includes('timed out'));
+    }
+    assert.equal(await page.evaluate(() => sessionReads), await page.evaluate(() => beforeSessionReads + 2));
+
+    // Queued ServiceM8 imports complete through saved DB reads only. Polling
+    // is quiet with Realtime connected and resumes on disconnect/focus.
+    await page.evaluate(() => {
+      window.pollReads = 0; window.importCalls = 0;
+      const remoteStaff = {id:'servicem8:poll-staff',name:'Remote Person',source:'servicem8',role:'servicem8',readOnly:true};
+      TK_JOB_CALENDAR.configure({
+        getBusinessId:()=> 'poll-biz',getUserId:()=>fixture.userId,
+        supabase:{channel(){const c={on(){return c;},subscribe(fn){window.pollStatus=fn;return c;}};return c;},removeChannel(){}},
+        request:async path => {
+          if (path === '/servicem8/sync') { importCalls++; return {queued:true}; }
+          if (path.startsWith('/range')) {
+            pollReads++;
+            return {...rangeData(),staff:[...rangeData().staff,remoteStaff],
+              completedEvents:[{id:'archived',source:'servicem8',end_time:'2025-01-01T02:00Z',details:{jobUuid:'archive-job',status:'Completed',personName:'Archived remote job',assignedStaffIds:[remoteStaff.id]}}],
+              servicem8:{state:'queued',webhookSubscribed:false,lastSyncedAt:'2026-07-14T00:00Z',lastError:'sensitive internal error <script>'}};
+          }
+          throw Error('Unexpected polling write ' + path);
+        }
+      });
+      window.renderCalendar();
+    });
+    await page.waitForFunction(() => document.getElementById('tkjc-load-status').hidden && importCalls === 1);
+    assert.match(await page.locator('#tkjc-servicem8').innerText(), /queued.*Last synced.*Sync delayed/);
+    assert.doesNotMatch(await page.locator('#tkjc-servicem8').innerText(), /sensitive|script/);
+    await page.click('[data-tkjc-section="completed"]');
+    await page.click('[data-tkjc-chip="servicem8:poll-staff"]');
+    assert.equal(await page.locator('.tkjc-completed-row').count(), 1);
+    assert.match(await page.locator('#tkjc-main').innerText(), /Archived remote job/);
+    await page.fill('#tkjc-search', 'Remote Person');
+    assert.equal(await page.locator('.tkjc-completed-row').count(), 1, 'completed search includes assigned remote staff');
+    await page.click('[data-tkjc="clear-filters"]');
+    await page.clock.fastForward(60001);
+    await page.waitForFunction(() => pollReads === 2);
+    assert.equal(await page.evaluate(() => importCalls), 1, 'polling never repeats queued import');
+    await page.evaluate(() => pollStatus('SUBSCRIBED'));
+    await page.clock.fastForward(120001);
+    assert.equal(await page.evaluate(() => pollReads), 2, 'Realtime-connected calendar does not poll');
+    await page.evaluate(() => {pollStatus('CHANNEL_ERROR');window.dispatchEvent(new Event('focus'));});
+    await page.waitForFunction(() => pollReads === 3);
+    await page.evaluate(() => window.switchView('dashboard'));
+    await page.clock.fastForward(120001);
+    assert.equal(await page.evaluate(() => pollReads), 3, 'hidden calendar does not poll');
+    await page.evaluate(() => {window.switchView('calendar');window.dispatchEvent(new Event('focus'));});
+    await page.waitForFunction(() => pollReads === 4);
+    assert.equal(await page.evaluate(() => importCalls), 1);
 
     assert.deepEqual(errors, []);
     await page.close();

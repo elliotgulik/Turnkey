@@ -37,7 +37,7 @@ const CALENDAR_DETAIL_KEYS = [
   'calendarGoogleSyncState', 'calendarGoogleSyncError', 'calendarGoogleSyncedAt',
   'serviceM8Booking', 'serviceM8Status'
 ]
-const SERVICE_M8_EVENT_KEYS = ['personName', 'companyName', 'email', 'phone', 'address', 'services', 'lineItems', 'assignedStaff', 'staffAssigned', 'status']
+const SERVICE_M8_EVENT_KEYS = ['jobUuid','personName', 'companyName', 'email', 'phone', 'address', 'services', 'lineItems', 'assignedStaff','assignedStaffIds', 'staffAssigned', 'status']
 function filterServiceM8CalendarDetails(value) {
   const input = value && typeof value === 'object' && !Array.isArray(value) ? value : {}
   const output = Object.fromEntries(SERVICE_M8_EVENT_KEYS.filter(key => input[key] != null).map(key => [key, input[key]]))
@@ -46,8 +46,9 @@ function filterServiceM8CalendarDetails(value) {
     name: String(item?.name || '').slice(0, 200), quantity: String(item?.quantity || '').slice(0, 40),
   })).filter(item => item.name) : []
   output.assignedStaff = Array.isArray(output.assignedStaff) ? output.assignedStaff.slice(0, 20).map(x => String(x).slice(0, 120)) : []
+  output.assignedStaffIds = Array.isArray(output.assignedStaffIds) ? output.assignedStaffIds.filter(x => /^servicem8:[0-9a-f-]{36}$/i.test(String(x))).slice(0,20) : []
   output.staffAssigned = output.staffAssigned === true
-  for (const key of ['personName', 'companyName', 'email', 'phone', 'address', 'status']) {
+  for (const key of ['jobUuid','personName', 'companyName', 'email', 'phone', 'address', 'status']) {
     if (output[key] != null) output[key] = String(output[key]).slice(0, key === 'address' ? 500 : 254)
   }
   return output
@@ -110,10 +111,10 @@ function sniffJobInterval(job) {
 
 // Always ordered by id — offset-based .range() pagination without a stable
 // sort can skip or repeat rows if the table is written to between pages.
-async function fetchAllPaged(queryFactory, pageSize = 1000) {
+async function fetchAllPaged(queryFactory, pageSize = 1000, orderBy = 'id') {
   const rows = []
   for (let offset = 0; ; offset += pageSize) {
-    const page = await unwrap(queryFactory().order('id').range(offset, offset + pageSize - 1))
+    const page = await unwrap(queryFactory().order(orderBy).range(offset, offset + pageSize - 1))
     rows.push(...page)
     if (page.length < pageSize) return rows
   }
@@ -203,7 +204,20 @@ export function installJobCalendar(app, { db, requireBusiness, getGoogleCalendar
     if (to <= from) throw fail('to must be after from')
     if (to.getTime() - from.getTime() > MAX_RANGE_MS) throw fail('Range cannot exceed 93 days')
 
-    const allJobs = await fetchAllPaged(() => db.from('jobs').select('*').eq('business_id', req.businessId))
+    const eventColumns='id,user_id,title,start_time,end_time,busy_status,source,notes,connection_id,external_id,details'
+    const [allJobs,staffRows,eventRows,completedEvents,blockRows,connection,sm8,remoteStaffRows,seedTasks,remoteSummaries,jobMappings] = await Promise.all([
+      fetchAllPaged(() => db.from('jobs').select('*').eq('business_id',req.businessId)),
+      fetchAllPaged(() => db.from('users').select('id,name,email,role').eq('business_id',req.businessId)),
+      fetchAllPaged(() => db.from('calendar_events').select(eventColumns).eq('business_id',req.businessId).lt('start_time',to.toISOString()).gt('end_time',from.toISOString())),
+      fetchAllPaged(() => db.from('calendar_events').select(eventColumns).eq('business_id',req.businessId).eq('source','servicem8').eq('details->>status','Completed')),
+      fetchAllPaged(() => db.from('availability_blocks').select('id,user_id,block_type,start_at,end_at,all_day,reason').eq('business_id',req.businessId).lt('start_at',to.toISOString()).gt('end_at',from.toISOString())),
+      unwrap(db.from('calendar_connections').select('sync_status,last_synced_at').eq('business_id',req.businessId).eq('user_id',req.userId).eq('provider','google').maybeSingle()),
+      unwrap(db.from('servicem8_connections').select('generation,dispatch_seeded_at,last_sync_at,webhook_subscribed_at,last_error').eq('business_id',req.businessId).maybeSingle()),
+      privileged ? fetchAllPaged(() => db.from('external_object_mappings').select('local_id,external_uuid,snapshot,connection_generation').eq('business_id',req.businessId).eq('object_type','staff'),1000,'local_id') : [],
+      privileged ? unwrap(db.from('integration_tasks').select('state,last_error,created_at').eq('business_id',req.businessId).eq('kind','dispatch_seed').order('created_at',{ascending:false}).limit(1)) : [],
+      privileged ? fetchAllPaged(() => db.from('external_object_mappings').select('local_id,external_uuid,snapshot,connection_generation').eq('business_id',req.businessId).eq('object_type','completed_job'),1000,'local_id') : [],
+      fetchAllPaged(() => db.from('external_object_mappings').select('local_id,external_uuid,connection_generation').eq('business_id',req.businessId).eq('object_type','job'),1000,'local_id'),
+    ])
     const visibleJobs = allJobs.filter((j) => j.status !== 'cancelled' && (privileged || isAssignedToStaff(j, req.userId)))
     const jobs = visibleJobs.filter((j) => {
       if (j.status === 'completed' || j.status === 'paid') return true // archive lives in the Completed section, independent of date view
@@ -217,6 +231,7 @@ export function installJobCalendar(app, { db, requireBusiness, getGoogleCalendar
       ? await fetchChunkedIn('id', customerIds, () => db.from('customers').select('id, name, address, suburb').eq('business_id', req.businessId))
       : []
     const customerById = new Map(customers.map((c) => [c.id, c]))
+    const remoteJobByLocal = new Map(jobMappings.filter(map=>map.connection_generation===sm8?.generation).map(map=>[map.local_id,map.external_uuid]))
 
     const jobsOut = jobs.map((j) => ({
       id: j.id,
@@ -227,36 +242,34 @@ export function installJobCalendar(app, { db, requireBusiness, getGoogleCalendar
       customer: customerById.has(j.customer_id)
         ? { name: customerById.get(j.customer_id).name, address: customerById.get(j.customer_id).address, suburb: customerById.get(j.customer_id).suburb }
         : null,
-      details: filterCalendarDetails(j.details)
+      details: {...filterCalendarDetails(j.details),...(remoteJobByLocal.has(j.id)?{serviceM8JobUuid:remoteJobByLocal.get(j.id)}:{})}
     }))
 
-    const staffRows = await fetchAllPaged(() => db.from('users').select('id, name, email, role').eq('business_id', req.businessId))
-    const staff = privileged ? staffRows : staffRows.filter((u) => u.id === req.userId)
+    const staff = privileged ? staffRows.concat(remoteStaffRows.filter(row => row.connection_generation===sm8?.generation).map(row=>({
+      id:'servicem8:'+row.external_uuid,name:String(row.snapshot?.name||'ServiceM8 staff').slice(0,160),email:String(row.snapshot?.email||'').slice(0,254),role:'servicem8',source:'servicem8',readOnly:true,
+    }))) : staffRows.filter((u) => u.id === req.userId)
 
     // Overlap, not "starts inside the range" — a multi-day block/event that
     // started before `from` but is still ongoing into the requested window
     // must still show up, or a holiday/busy span spanning the view's edge
     // would silently vanish from one of the two weeks it touches.
-    const eventRows = await fetchAllPaged(() => db.from('calendar_events')
-      .select('id, user_id, title, start_time, end_time, busy_status, source, notes, connection_id, external_id, details').eq('business_id', req.businessId)
-      .lt('start_time', to.toISOString()).gt('end_time', from.toISOString()))
-    const eventsOut = eventRows.map(event => ({
+    const eventsOut = [...new Map(eventRows.concat(completedEvents).map(event=>[event.id,event])).values()].map(event => ({
       ...event,
       details: event.source === 'servicem8' ? filterServiceM8CalendarDetails(event.details) : undefined,
     }))
-    const blockRows = await fetchAllPaged(() => db.from('availability_blocks')
-      .select('id, user_id, block_type, start_at, end_at, all_day, reason').eq('business_id', req.businessId)
-      .lt('start_at', to.toISOString()).gt('end_at', from.toISOString()))
     const scoped = (rows) => privileged ? rows : rows.filter((x) => x.user_id === req.userId || x.user_id == null)
-
-    const connection = await unwrap(db.from('calendar_connections').select('sync_status, last_synced_at')
-      .eq('business_id', req.businessId).eq('user_id', req.userId).eq('provider', 'google').maybeSingle())
 
     res.json({
       jobs: jobsOut,
       staff,
       events: scoped(eventsOut),
+      completedEvents:remoteSummaries.filter(row=>row.connection_generation===sm8?.generation).map(row=>({
+        id:'servicem8-summary:'+row.external_uuid,external_id:'completed:'+row.external_uuid,source:'servicem8',
+        title:String(row.snapshot?.personName||row.snapshot?.companyName||'Completed ServiceM8 job').slice(0,200),
+        end_time:row.snapshot?.completedAt||null,details:filterServiceM8CalendarDetails({...row.snapshot,jobUuid:row.external_uuid,status:'Completed'}),
+      })),
       blocks: scoped(blockRows),
+      servicem8:{connected:!!sm8,seededAt:sm8?.dispatch_seeded_at||null,lastSyncedAt:sm8?.last_sync_at||null,webhookSubscribed:!!sm8?.webhook_subscribed_at,state:seedTasks?.[0]?.state||null,lastError:seedTasks?.[0]?.last_error||sm8?.last_error||null},
       google: {
         connected: !!connection,
         email: null, // not persisted anywhere today — see report

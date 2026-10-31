@@ -28,7 +28,7 @@ function makeDb(tables, { rpcImpl } = {}) {
         order(k) { orderKey = k; return q },
         limit(n) { limitN = n; return q },
         range(start, end) { bounds = [start, end]; return q },
-        eq(k, v) { filters.push((r) => r[k] === v); return q },
+        eq(k, v) { filters.push((r) => k.includes('->>') ? r[k.split('->>')[0]]?.[k.split('->>')[1]] === v : r[k] === v); return q },
         gte(k, v) { filters.push((r) => r[k] >= v); return q },
         lte(k, v) { filters.push((r) => r[k] <= v); return q },
         lt(k, v) { filters.push((r) => r[k] < v); return q },
@@ -180,6 +180,20 @@ test('GET /range: completed jobs stay available to the Completed section outside
   const res = await h.run('get', '/api/job-calendar/range', { query: { from: '2030-01-01T00:00:00Z', to: '2030-01-08T00:00:00Z' } })
   assert.ok(res.body.jobs.some((j) => j.id === completedJob))
 })
+
+test('GET /range: saved ServiceM8 staff and completed events remain available across date views without exposing credentials',async()=>{
+ const h=setup(),remote=id(80);
+ h.tables.servicem8_connections=[{business_id:BIZ,generation:id(81),dispatch_seeded_at:'2026-10-01T00:00:00Z',api_key_enc:'must-never-leak',last_error:null}];
+ h.tables.external_object_mappings=[{business_id:BIZ,connection_generation:id(81),object_type:'staff',local_id:'servicem8:'+remote,external_uuid:remote,snapshot:{name:'Jordan',email:'staff@example.test'}}];
+ h.tables.calendar_events=[{id:id(82),business_id:BIZ,user_id:null,source:'servicem8',external_id:'completed:'+id(83),start_time:'2024-05-10T01:00:00Z',end_time:'2024-05-10T02:00:00Z',details:{jobUuid:id(83),status:'Completed',assignedStaff:['Jordan'],assignedStaffIds:['servicem8:'+remote],secret:'no'}}];
+ const res=await h.run('get','/api/job-calendar/range',{query:{from:'2030-01-01T00:00:00Z',to:'2030-01-08T00:00:00Z'}});
+ assert.equal(res.statusCode,200);assert.ok(res.body.staff.some(x=>x.id==='servicem8:'+remote&&x.readOnly));
+ assert.equal(res.body.events.length,1);assert.equal(res.body.events[0].details.status,'Completed');
+ assert.equal(res.body.events[0].details.jobUuid,id(83));assert.deepEqual(res.body.events[0].details.assignedStaffIds,['servicem8:'+remote]);
+ assert.doesNotMatch(JSON.stringify(res.body),/must-never-leak|secret/);
+ const techRes=await h.run('get','/api/job-calendar/range',{userId:tech,query:{from:'2030-01-01T00:00:00Z',to:'2030-01-08T00:00:00Z'}});
+ assert.equal(techRes.body.staff.length,1);
+});
 
 test('GET /range: cancelled jobs are excluded', async () => {
   const h = setup()

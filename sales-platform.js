@@ -121,23 +121,60 @@
   async function api(path, opts = {}) {
     const base = backendUrl();
     if (!base) throw Error("Connect your TurnKey backend to use this feature.");
-    const {
-      data: { session },
-    } = await sb.auth.getSession();
-    if (!session) throw Error("Please sign in again.");
-    const response = await fetch(base + path, {
-      credentials: path.startsWith("/api/sales/servicem8") ? "include" : "omit",
-      ...opts,
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: "Bearer " + session.access_token,
-        ...opts.headers,
-      },
-    });
-    const data = await response.json();
-    if (!response.ok) throw Object.assign(Error(data.error || "Request failed"), {code:data.code,status:response.status,missingFields:data.missingFields});
-    return data;
+    const userId = typeof currentUserId !== 'undefined' ? currentUserId : null;
+    const validSession = (session) => userId && session?.user?.id === userId &&
+      typeof session.access_token === 'string' && session.access_token.trim() &&
+      Number.isFinite(session.expires_at) && session.expires_at * 1000 > Date.now() + 60000;
+    const checkUser = () => {
+      if (!userId || currentUserId !== userId) throw Error("Please sign in again.");
+    };
+    async function bounded(run, ms, message, controller) {
+      let timer;
+      try {
+        return await Promise.race([
+          Promise.resolve().then(run),
+          new Promise((_, reject) => { timer = setTimeout(() => {
+            const error = Error(message);
+            controller?.abort(error);
+            reject(error);
+          }, ms); }),
+        ]);
+      } finally { clearTimeout(timer); }
+    }
+    checkUser();
+    let session = window.TK_CURRENT_SESSION;
+    if (!validSession(session)) {
+      const result = await bounded(() => sb.auth.getSession(), 8000,
+        "Session check timed out. Please retry or sign in again.");
+      if (result?.error) throw result.error;
+      session = result?.data?.session;
+    }
+    checkUser();
+    if (!validSession(session)) throw Error("Please sign in again.");
+    const controller = new AbortController();
+    const abort = () => controller.abort(opts.signal.reason);
+    if (opts.signal?.aborted) abort();
+    else opts.signal?.addEventListener('abort', abort, { once: true });
+    try {
+      return await bounded(async () => {
+        const response = await fetch(base + path, {
+          credentials: path.startsWith("/api/sales/servicem8") ? "include" : "omit",
+          ...opts,
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: "Bearer " + session.access_token,
+            ...opts.headers,
+          },
+          signal: controller.signal,
+        });
+        const data = await response.json();
+        checkUser();
+        if (!response.ok) throw Object.assign(Error(data.error || "Request failed"), {code:data.code,status:response.status,missingFields:data.missingFields});
+        return data;
+      }, 30000, "Request timed out. Please retry.", controller);
+    } finally { opts.signal?.removeEventListener('abort', abort); }
   }
+
   async function syncServiceM8Dispatch() {
     return api("/api/job-calendar/servicem8/sync", {
       method: "POST",
@@ -322,16 +359,20 @@
         ]),
       )}<p class="sale-muted">Revenue allocation requires frozen line prices. Direct cost excludes unallocated job overhead. Actual profit is unavailable without real job-cost data.</p></section><section class="sale-panel"><h3>Forecast · current open pipeline</h3><strong class="sale-number">${money(r.forecast)}</strong><p>Probability-weighted potential sales, separate from confirmed booked sales. Uses configured stage probabilities, falling back to the selected cohort's historical conversion rate. Without history or configured probabilities, forecast is zero.</p>${button("Configure stages & probabilities", "stages")}</section>${r.financialCoverage ? `<p class="sale-muted">Financial coverage: ${esc(r.financialCoverage)}. Invoice/payment totals describe linked ServiceM8 jobs whose sales were won in this period, not invoice/payment-date accounting.</p>` : ""}`;
   };
+  // Delivery status is a UI grouping only; P.key and sales metrics still count these as won.
+  const uiStage = (r) => ['completed', 'paid'].includes(r.stage) ? 'completed' : P.key(r);
+  const uiStages = () => [...stages, { key: 'completed', label: 'Completed', description: 'Completed work, including paid jobs.' }];
+  const inScope = (r, scope) => scope === 'all' || (scope === 'open' ? isOpen(r) : uiStage(r) === scope);
   const isOpen = (r) => !["won", "lost"].includes(P.key(r));
   const followupTime = (r) => {
     const t = r.nextFollowUpAt ? new Date(r.nextFollowUpAt).getTime() : NaN;
     return Number.isFinite(t) ? t : null;
   };
   const isOverdue = (r) => isOpen(r) && followupTime(r) != null && followupTime(r) < Date.now();
-  const stageLabel = (r) => stages.find((s) => s.key === P.key(r))?.label || P.key(r) || "Unassigned stage";
+  const stageLabel = (r) => uiStages().find((s) => s.key === uiStage(r))?.label || uiStage(r) || "Unassigned stage";
   function stageBadge(r) {
-    const operational = { scheduled: "Scheduled", completed: "Completed", paid: "Paid" }[r.stage];
-    return `<span class="sale-state" data-sale-state="${esc(P.key(r))}">${esc(stageLabel(r))}</span>${operational ? `<span class="sale-state sale-state-operation">${operational}</span>` : ""}`;
+    const operational = { scheduled: "Scheduled", paid: "Paid" }[r.stage];
+    return `<span class="sale-state" data-sale-state="${esc(uiStage(r))}">${esc(stageLabel(r))}</span>${operational ? `<span class="sale-state sale-state-operation">${operational}</span>` : ""}`;
   }
   function servicesLabel(r) {
     return (r.requestedServices || []).map((x) => x.name || x).join(", ") ||
@@ -368,6 +409,7 @@
     return `<div class="sale-record-actions" aria-label="Actions for ${esc(r.name || 'customer')}">${contactActions(r)}${step.action !== 'contact' ? button('Contact', 'contact', r.id) : ''}${step.action !== 'quote' && P.key(r) !== 'lost' ? button(M.won(r) ? 'New quote' : 'Build quote', 'quote', r.id) : ''}${button('History', 'history', r.id)}${button('Edit customer', 'customer-edit', r.id)}</div>`;
   }
   function stageControl(r) {
+    if (uiStage(r) === 'completed') return field('Sales stage', '<span>Completed</span>');
     return field("Sales stage", `<select data-sale-stage="${esc(r.id)}" aria-label="Sales stage">${options(stages.map((s) => [s.key, s.label]), P.key(r))}</select>`);
   }
   function recordHeading(r) {
@@ -394,7 +436,7 @@
   }
   function card(r) {
     const age = M.leadTime(r), value = window.TK_LEADS.value(r), grade = window.TK_LEADS.grade(r);
-    return `<article class="sale-card sale-opportunity" draggable="true" data-record="${esc(r.id)}" aria-label="${esc(r.name || 'Unnamed enquiry')}">
+    return `<article class="sale-card sale-opportunity" draggable="${uiStage(r) !== 'completed'}" data-record="${esc(r.id)}" aria-label="${esc(r.name || 'Unnamed enquiry')}">
       <div class="sale-state-row">${stageBadge(r)}</div>
       <div class="sale-card-top">${recordHeading(r)}<div class="sale-card-value"><strong>${value == null ? 'Not estimated' : esc(money(value))}</strong><small>${r.total > 0 ? 'Quote incl. GST' : 'Estimated value'}</small></div></div>
       <p class="sale-card-address">${esc(r.address || "Property address needed")}</p><p class="sale-card-services">${esc(servicesLabel(r))}</p>
@@ -411,19 +453,19 @@
   render = function () {
     if (typeof saveState === "function") saveState();
     document.getElementById("cnt-leads").textContent = records.filter(r => r.stage === 'new').length;
-    const scopeStages = stages.filter(s => pipelineScope === 'all' || (pipelineScope === 'open' ? !['won', 'lost'].includes(s.key) : s.key === pipelineScope));
-    let list = records.filter(r => P.visible(r, pipelineScope));
+    const scopeStages = uiStages().filter(s => pipelineScope === 'all' || (pipelineScope === 'open' ? !['won', 'lost', 'completed'].includes(s.key) : s.key === pipelineScope));
+    let list = records.filter(r => inScope(r, pipelineScope));
     if (pipelineSearch.trim()) list = list.filter(r => [r.name, r.address, r.email, r.phone, r.source].join(' ').toLowerCase().includes(pipelineSearch.trim().toLowerCase()));
     if (pipelineDueOnly) list = list.filter(isOverdue);
     document.getElementById('view-pipeline').innerHTML = header('Sales pipeline', 'See where every opportunity stands and give each customer a clear next step.', button('+ New lead', 'new') + button('Build a quote', 'quote-home') + button('Pipeline settings', 'stages')) +
-      `<div class="sale-pipeline-toolbar">${scopeButtons('pipeline-scope', pipelineScope, [['all', 'All', records.length], ['open', 'Open opportunities', records.filter(isOpen).length], ['won', 'Quote confirmed', records.filter(r => P.key(r) === 'won').length], ['lost', 'Cancelled', records.filter(r => P.key(r) === 'lost').length]])}
+      `<div class="sale-pipeline-toolbar">${scopeButtons('pipeline-scope', pipelineScope, [['all', 'All', records.length], ['open', 'Open opportunities', records.filter(isOpen).length], ['won', 'Quote confirmed', records.filter(r => uiStage(r) === 'won').length], ['completed', 'Completed', records.filter(r => uiStage(r) === 'completed').length], ['lost', 'Cancelled', records.filter(r => P.key(r) === 'lost').length]])}
       ${field('Search pipeline', `<input id="pipeline-search" type="search" value="${esc(pipelineSearch)}" placeholder="Customer, address or source">`)}<label class="sale-check"><input type="checkbox" id="pipeline-due" ${pipelineDueOnly ? 'checked' : ''}> Follow-ups overdue</label></div>` +
-      resultBar(list.length, records.length, pipelineScope !== 'all' || pipelineSearch || pipelineDueOnly, 'pipeline-reset', pipelineDueOnly ? 'Overdue follow-ups' : pipelineScope === 'all' ? 'All stages' : pipelineScope === 'open' ? 'Open opportunities' : pipelineScope === 'won' ? 'Quote confirmed' : 'Cancelled') +
-      `<nav class="sale-stage-jump" aria-label="Jump to stage">${scopeStages.map(s => `<button class="btn ghost sm" data-sale-action="pipeline-jump" data-id="${s.key}">${esc(s.label)} · ${list.filter(r => P.key(r) === s.key).length}</button>`).join('')}</nav><p class="sale-board-hint">Open a customer name for details. Move an opportunity with its Sales stage menu or drag it to a stage.</p>` +
+      resultBar(list.length, records.length, pipelineScope !== 'all' || pipelineSearch || pipelineDueOnly, 'pipeline-reset', pipelineDueOnly ? 'Overdue follow-ups' : pipelineScope === 'all' ? 'All stages' : pipelineScope === 'open' ? 'Open opportunities' : uiStages().find(s => s.key === pipelineScope)?.label || pipelineScope) +
+      `<nav class="sale-stage-jump" aria-label="Jump to stage">${scopeStages.map(s => `<button class="btn ghost sm" data-sale-action="pipeline-jump" data-id="${s.key}">${esc(s.label)} · ${list.filter(r => uiStage(r) === s.key).length}</button>`).join('')}</nav><p class="sale-board-hint">Open a customer name for details. Move an opportunity with its Sales stage menu or drag it to a stage.</p>` +
       (!list.length ? `<div class="sale-no-results">${empty('No matching opportunities. Reset filters to see your pipeline.')}${button('Reset filters', 'pipeline-reset')}</div>` : '') +
       `<div class="sale-kanban" style="--pipeline-columns:${scopeStages.length}">${scopeStages.map(s => {
-        const rs = list.filter(r => P.key(r) === s.key);
-        return `<section class="sale-column" id="pipeline-${s.key}" data-drop-stage="${s.key}"><header><h3>${esc(s.label)} <span>${rs.length}</span></h3><small>${esc(money(rs.reduce((n, r) => n + (window.TK_LEADS.value(r) || 0), 0)))}</small><p>${esc(defaults.find(d => d.key === s.key)?.description || '')}</p></header>${rs.map(card).join('') || empty('No opportunities in this stage')}</section>`;
+        const rs = list.filter(r => uiStage(r) === s.key);
+        return `<section class="sale-column" id="pipeline-${s.key}" ${s.key === 'completed' ? '' : `data-drop-stage="${s.key}"`}><header><h3>${esc(s.label)} <span>${rs.length}</span></h3><small>${esc(money(rs.reduce((n, r) => n + (window.TK_LEADS.value(r) || 0), 0)))}</small><p>${esc(s.description || defaults.find(d => d.key === s.key)?.description || '')}</p></header>${rs.map(card).join('') || empty('No opportunities in this stage')}</section>`;
       }).join('')}</div>`;
     refreshCustomerSummary();
     renderLeads();
@@ -432,18 +474,17 @@
     return `<div class="sale-table-wrap sale-leads-table-wrap"><table class="sale-table sale-leads-table"><caption class="sale-sr-only">Sales opportunities and next actions</caption><thead><tr>${['Customer / property', 'Stage / source', 'Value incl. GST', 'Next step', 'Actions'].map(t => `<th scope="col">${t}</th>`).join('')}</tr></thead><tbody>${rs.map(r => `<tr data-record="${esc(r.id)}"><td data-label="Customer / property">${recordHeading(r)}<p>${esc(r.address || 'Property address needed')}</p><small>${esc(servicesLabel(r))}</small></td><td data-label="Stage / source"><div class="sale-state-row">${stageBadge(r)}</div><p>${esc(r.source || 'Manual')} · ${esc(r.salespersonName || 'Unassigned')}</p>${stageControl(r)}</td><td data-label="Value incl. GST"><strong>${window.TK_LEADS.value(r) == null ? 'Not estimated' : esc(money(window.TK_LEADS.value(r)))}</strong><p>${r.total > 0 ? 'Saved quote' : 'Estimate'}</p></td><td data-label="Next step">${followupLabel(r)}${nextButton(r)}</td><td data-label="Actions">${recordActions(r)}</td></tr>`).join('')}</tbody></table></div>`;
   }
   function renderLeads() {
-    let rs = records.filter(r => stageFilter === 'all' || P.visible(r, stageFilter ? 'all' : 'open'));
+    let rs = records.filter(r => inScope(r, stageFilter || 'open'));
     if (search.trim()) rs = rs.filter(r => [r.name, r.email, r.phone, r.address, r.source].join(' ').toLowerCase().includes(search.trim().toLowerCase()));
     if (sourceFilter) rs = rs.filter(r => (r.source || 'Manual') === sourceFilter);
-    if (stageFilter && stageFilter !== 'all') rs = rs.filter(r => P.key(r) === stageFilter);
     if (leadsDueOnly) rs = rs.filter(isOverdue);
     rs = window.TK_LEADS.sort(rs, leadSort);
     const sources = [...new Set(records.map(r => r.source || 'Manual'))].sort();
     const filtered = search || sourceFilter || stageFilter || leadsDueOnly || leadSort !== 'newest';
     document.getElementById('view-leads').innerHTML = header('Leads', 'Know who needs a response, what to do next, and which enquiries are ready to quote.', button('+ New lead', 'new') + button('Build a quote', 'quote-home') + button('Import', 'import')) +
-      `<div class="sale-leads-overview">${scopeButtons('leads-scope', stageFilter, [['', 'Open leads', records.filter(isOpen).length], ['all', 'All opportunities', records.length], ['won', 'Quote confirmed', records.filter(r => P.key(r) === 'won').length], ['lost', 'Cancelled', records.filter(r => P.key(r) === 'lost').length]])}</div>` +
-      `<div class="sale-filters">${field('Search leads', `<input id="sale-search" type="search" value="${esc(search)}" placeholder="Name, email, phone or address">`)}${field('Source', `<select data-sale-filter="source">${options([['', 'All sources'], ...sources.map(s => [s, s])], sourceFilter)}</select>`)}${field('Sales stage', `<select data-sale-filter="stage">${options([['', 'All open stages'], ['all', 'All opportunities'], ...stages.map(s => [s.key, s.label])], stageFilter)}</select>`)}${field('Sort by', `<select data-sale-filter="sort">${options([['newest','Newest first'],['oldest','Oldest first'],['value-high','Highest estimated value'],['value-low','Lowest estimated value'],['followup','Follow-up due first'],['name','Customer name']],leadSort)}</select>`)}<label class="sale-check"><input type="checkbox" id="sale-leads-due" ${leadsDueOnly ? 'checked' : ''}> Follow-ups overdue</label></div>` +
-      `<div class="sale-leads-results">${resultBar(rs.length, records.length, filtered, 'leads-reset', leadsDueOnly ? 'Overdue follow-ups' : stageFilter === 'all' ? 'All stages' : stageFilter ? stages.find(s => s.key === stageFilter)?.label || stageFilter : 'Open leads')}<div class="sale-layout-switch" role="group" aria-label="Lead layout">${['cards', 'table'].map(layout => `<button class="btn ghost sm" data-sale-action="leads-layout" data-id="${layout}" aria-pressed="${leadLayout === layout}">${layout === 'cards' ? 'Cards' : 'Table'}</button>`).join('')}</div></div>` +
+      `<div class="sale-leads-overview">${scopeButtons('leads-scope', stageFilter, [['', 'Open leads', records.filter(isOpen).length], ['all', 'All opportunities', records.length], ['won', 'Quote confirmed', records.filter(r => uiStage(r) === 'won').length], ['completed', 'Completed', records.filter(r => uiStage(r) === 'completed').length], ['lost', 'Cancelled', records.filter(r => P.key(r) === 'lost').length]])}</div>` +
+      `<div class="sale-filters">${field('Search leads', `<input id="sale-search" type="search" value="${esc(search)}" placeholder="Name, email, phone or address">`)}${field('Source', `<select data-sale-filter="source">${options([['', 'All sources'], ...sources.map(s => [s, s])], sourceFilter)}</select>`)}${field('Sales stage', `<select data-sale-filter="stage">${options([['', 'All open stages'], ['all', 'All opportunities'], ...uiStages().map(s => [s.key, s.label])], stageFilter)}</select>`)}${field('Sort by', `<select data-sale-filter="sort">${options([['newest','Newest first'],['oldest','Oldest first'],['value-high','Highest estimated value'],['value-low','Lowest estimated value'],['followup','Follow-up due first'],['name','Customer name']],leadSort)}</select>`)}<label class="sale-check"><input type="checkbox" id="sale-leads-due" ${leadsDueOnly ? 'checked' : ''}> Follow-ups overdue</label></div>` +
+      `<div class="sale-leads-results">${resultBar(rs.length, records.length, filtered, 'leads-reset', leadsDueOnly ? 'Overdue follow-ups' : stageFilter === 'all' ? 'All stages' : stageFilter ? uiStages().find(s => s.key === stageFilter)?.label || stageFilter : 'Open leads')}<div class="sale-layout-switch" role="group" aria-label="Lead layout">${['cards', 'table'].map(layout => `<button class="btn ghost sm" data-sale-action="leads-layout" data-id="${layout}" aria-pressed="${leadLayout === layout}">${layout === 'cards' ? 'Cards' : 'Table'}</button>`).join('')}</div></div>` +
       (rs.length ? leadLayout === 'table' ? leadsTable(rs) : `<div class="sale-lead-grid">${rs.map(card).join('')}</div>` : `<div class="sale-no-results">${empty('No matching enquiries. Add a lead, import contacts or reset your filters.')}${button('Reset filters', 'leads-reset')}${button('+ New lead', 'new')}</div>`);
   }
   async function move(r, key) {

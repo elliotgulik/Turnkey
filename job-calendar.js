@@ -3,8 +3,8 @@
    connected Google busy times. Owns #view-calendar
    end-to-end once mounted — overrides window.renderCalendar (the old
    FullCalendar wiring in index.html stays in the file, just unused; nothing
-   is deleted) and wraps renderAll()/openMoreSheet() so this page refreshes
-   and is reachable from the mobile "More" sheet without editing index.html.
+   is deleted) and patches openMoreSheet() so this page
+   is reachable from the mobile "More" sheet without editing index.html.
 
    Mount after index.html's own script and after job-workspace.js (order
    doesn't actually matter — every hook below retries until its target
@@ -30,24 +30,58 @@
     return { biz, user, version, isStale() { return tenant() !== biz || tenantUser() !== user || tenantVersion() !== version; } };
   }
 
-  async function request(path, options = {}, scope) {
+  // index.html exposes both a lexical `sb` and (on newer pages) a window alias.
+  const calendarClient = () => config.supabase || (typeof sb !== 'undefined' ? sb : null) || root.TK_SUPABASE_CLIENT;
+
+  async function calendarSession(client, scope, signal) {
+    const cached = root.TK_CURRENT_SESSION;
+    const userId = scope ? scope.user : tenantUser();
+    if (userId && cached?.user?.id === userId && typeof cached.access_token === 'string' && cached.access_token &&
+        Number.isFinite(cached.expires_at) && cached.expires_at * 1000 > Date.now()) {
+      return { data: { session: cached }, error: null };
+    }
+    const result = await client.auth.getSession();
+    signal.throwIfAborted();
+    return result;
+  }
+
+  async function withRequestTimeout(run) {
+    const controller = new AbortController();
+    let timer;
+    try {
+      return await Promise.race([
+        run(controller.signal),
+        new Promise((_, reject) => { timer = setTimeout(() => {
+          const error = Error('Calendar request timed out. Please retry.');
+          controller.abort(error); reject(error);
+        }, 30000); })
+      ]);
+    } finally { clearTimeout(timer); }
+  }
+
+  function request(path, options = {}, scope) {
+    return withRequestTimeout((signal) => requestData(path, options, scope, signal));
+  }
+
+  async function requestData(path, options, scope, signal) {
     if (scope && scope.isStale()) throw staleError();
     if (config.request) {
       const result = await config.request(path, options);
       if (scope && scope.isStale()) throw staleError();
       return result;
     }
-    const client = typeof sb !== 'undefined' ? sb : null;
+    const client = calendarClient();
     const base = (typeof backendUrl === 'function' ? backendUrl() : (root.TURNKEY_CONFIG && root.TURNKEY_CONFIG.backendUrl)) || '';
     if (!client || !base) throw Error('Connect the TurnKey backend and sign in to use the calendar.');
-    const { data, error } = await client.auth.getSession();
+    const { data, error } = await calendarSession(client, scope, signal);
     if (scope && scope.isStale()) throw staleError();
+    signal.throwIfAborted();
     if (error || !data.session) throw Error('Please sign in again.');
     const res = await fetch(base.replace(/\/$/, '') + '/api/job-calendar' + path, {
       ...options,
       credentials: 'omit',
       headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + data.session.access_token },
-      signal: AbortSignal.timeout(30000)
+      signal
     });
     if (scope && scope.isStale()) throw staleError();
     const body = await res.json().catch(() => ({}));
@@ -57,15 +91,20 @@
     return body;
   }
 
-  async function syncGoogleNow(scope) {
+  function syncGoogleNow(scope) {
+    return withRequestTimeout((signal) => syncGoogleData(scope, signal));
+  }
+
+  async function syncGoogleData(scope, signal) {
     if (config.syncGoogleNow) return config.syncGoogleNow();
-    const client = typeof sb !== 'undefined' ? sb : null;
+    const client = calendarClient();
     const base = (typeof backendUrl === 'function' ? backendUrl() : (root.TURNKEY_CONFIG && root.TURNKEY_CONFIG.backendUrl)) || '';
     if (!client || !base) throw Error('Connect the TurnKey backend and sign in to use the calendar.');
-    const { data, error } = await client.auth.getSession();
+    const { data, error } = await calendarSession(client, scope, signal);
     if (scope && scope.isStale()) throw staleError();
     if (error || !data.session) throw Error('Please sign in again.');
-    const res = await fetch(base.replace(/\/$/, '') + '/api/calendar/sync', { method: 'POST', headers: { Authorization: 'Bearer ' + data.session.access_token } });
+    signal.throwIfAborted();
+    const res = await fetch(base.replace(/\/$/, '') + '/api/calendar/sync', { method: 'POST', signal, headers: { Authorization: 'Bearer ' + data.session.access_token } });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) throw Error(body.error || 'Sync failed');
     return body;
@@ -96,7 +135,6 @@
     }
     // month
     const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
-    const next = new Date(anchor.getFullYear(), anchor.getMonth() + 1, 1);
     return { fromISO: localDateStr(weekStartOf(first)), toISO: addDaysISO(localDateStr(weekStartOf(first)),42), label: `${MON[anchor.getMonth()]} ${anchor.getFullYear()}` };
   }
 
@@ -108,13 +146,15 @@
   const STATUS_COLOR = { scheduled: '#2b6cb0', in_progress: '#b7791f', completed: '#2f855a', invoiced: '#6b46c1', paid: '#1a7f5a', cancelled: '#94a3b8' };
 
   let state = null;
-  let realtimeChannel = null, realtimeKey = '', realtimeTimer = null;
+  let realtimeChannel = null, realtimeKey = '', realtimeTimer = null, fallbackTimer = null;
+  let realtimeConnected = false, lastReadAt = 0;
   const servicem8SeedAttempts = new Set();
   const servicem8SeedRunning = new Set();
   function freshState() {
     return {
-      bizKey: null, loaded: false, loading: false, loadError: '', loadSeq: 0,
-      jobs: [], staff: [], events: [], blocks: [], google: { connected: false }, canManage: false, myRole: null, myUserId: null,
+      bizKey: null, version: null, loaded: false, loading: false, loadError: '',
+      pending: new Map(), snapshots: new Map(), dataRange: '', attemptedRange: '', revision: 0,
+      jobs: [], staff: [], events: [], completedEvents: [], blocks: [], google: { connected: false }, servicem8: {}, canManage: false, myRole: null, myUserId: null,
       view: 'month', section: 'schedule', anchor: new Date(), range: { fromISO: null, toISO: null },
       staffFilter: new Set(), search: ''
     };
@@ -129,51 +169,93 @@
   function findStaff(id) { return state.staff.find((s) => String(s.id) === String(id)) || null; }
 
   /* ===================== load ===================== */
-  async function load() {
-    if (!state) state = freshState();
+  const rangeDataKeys = ['jobs', 'events', 'completedEvents', 'blocks'];
+  function rememberRange(owner) {
+    if (!owner.dataRange) return;
+    owner.snapshots.delete(owner.dataRange);
+    owner.snapshots.set(owner.dataRange, Object.fromEntries(rangeDataKeys.map(key => [key, owner[key]])));
+    // Keep navigation memory bounded in long-running desktop sessions.
+    if (owner.snapshots.size > 8) owner.snapshots.delete(owner.snapshots.keys().next().value);
+  }
+
+  function load({ refresh = false, cached = false } = {}) {
     const scope = makeScope();
     const bizKey = scope.biz + ':' + scope.user;
-    if (state.bizKey !== bizKey) {
-      state = freshState(); state.bizKey = bizKey; destroyFc();
+    if (!state || state.bizKey !== bizKey || state.version !== scope.version) {
+      state = freshState(); state.bizKey = bizKey; state.version = scope.version; destroyFc();
       clearTimeout(realtimeTimer);
-      if (realtimeChannel) { try { root.TK_SUPABASE_CLIENT?.removeChannel?.(realtimeChannel); } catch (_) {} }
-      realtimeChannel = null; realtimeKey = '';
+      if (realtimeChannel) { try { calendarClient()?.removeChannel?.(realtimeChannel); } catch (_) {} }
+      realtimeChannel = null; realtimeKey = ''; realtimeConnected = false;
     }
-    ensureCalendarRealtime(scope);
-    const seq = ++state.loadSeq;
-    const { fromISO, toISO } = rangeForView(state.view, state.anchor);
-    if (state.range.fromISO !== fromISO || state.range.toISO !== toISO) {
-      // Never show the previous date range's appointments as current data.
-      state.jobs = []; state.events = []; state.blocks = []; state.loaded = false;
+    try { ensureCalendarRealtime(scope); } catch (_) { realtimeConnected = false; }
+    ensureRefreshFallback();
+    const owner = state;
+    const { fromISO, toISO } = rangeForView(owner.view, owner.anchor);
+    const key = fromISO + ':' + toISO;
+    if (key !== owner.dataRange) {
+      rememberRange(owner);
+      const saved = owner.snapshots.get(key);
+      if (saved) { Object.assign(owner, saved); owner.dataRange = key; }
     }
-    state.range = { fromISO, toISO };
-    // Keep an already-rendered calendar visible during realtime refreshes. Only
-    // show the blocking loading state before this range has its first response.
-    state.loading = !state.loaded;
-    state.loadError = '';
-    state.canManage = false;
-    // Date/view changes are local UI actions, independent of backend latency.
+    owner.range = { fromISO, toISO };
+    const pending = owner.pending.get(key);
+    if (pending) {
+      // Notifications during a request need at most one follow-up request.
+      if (refresh) pending.dirty = true;
+      owner.attemptedRange = key;
+      owner.loading = true;
+      renderBody();
+      return pending.promise;
+    }
+    if (cached && owner.attemptedRange === key) {
+      renderBody();
+      fcInstance?.updateSize();
+      return Promise.resolve();
+    }
+    owner.attemptedRange = key;
+    lastReadAt = Date.now();
+    owner.loading = true;
+    owner.loadError = '';
     renderBody();
-    try {
-      const data = await request(`/range?from=${encodeURIComponent(parseLocalDate(fromISO).toISOString())}&to=${encodeURIComponent(parseLocalDate(toISO).toISOString())}`, {}, scope);
-      if (scope.isStale() || seq !== state.loadSeq) return;
-      state.jobs = data.jobs || [];
-      state.staff = data.staff || [];
-      state.events = data.events || [];
-      state.blocks = data.blocks || [];
-      state.google = data.google || { connected: false };
-      state.canManage = !!data.canManage;
-      state.myUserId = scope.user;
-      state.loaded = true;
-    } catch (e) {
-      if (e && e.stale) return;
-      if (scope.isStale() || seq !== state.loadSeq) return;
-      state.loadError = e.message || 'Could not load the calendar';
-    }
-    if (scope.isStale() || seq !== state.loadSeq) return;
-    state.loading = false;
-    renderBody();
-    if (state.canManage) ensureServiceM8Seed(scope, bizKey);
+    const entry = { dirty: false, promise: null };
+    const current = () => state === owner && !scope.isStale() &&
+      owner.range.fromISO === fromISO && owner.range.toISO === toISO;
+    owner.pending.set(key, entry);
+    entry.promise = (async () => {
+      try {
+        do {
+          entry.dirty = false;
+          const revision = owner.revision;
+          try {
+            const data = await request(`/range?from=${encodeURIComponent(parseLocalDate(fromISO).toISOString())}&to=${encodeURIComponent(parseLocalDate(toISO).toISOString())}`, {}, scope);
+            if (current() && revision !== owner.revision) entry.dirty = true;
+            if (current() && revision === owner.revision) {
+              owner.jobs = data.jobs || [];
+              owner.staff = data.staff || [];
+              owner.events = data.events || [];
+              owner.completedEvents = data.completedEvents || [];
+              owner.servicem8 = data.servicem8 || {};
+              owner.blocks = data.blocks || [];
+              owner.google = data.google || { connected: false };
+              owner.canManage = !!data.canManage;
+              owner.myUserId = scope.user;
+              owner.loaded = true;
+              owner.dataRange = key;
+              owner.loadError = '';
+            }
+          } catch (e) {
+            if (current() && !e?.stale) owner.loadError = e.message || 'Could not load the calendar';
+          }
+          // Paint successful data even when a coalesced refresh is still due.
+          if (current()) { owner.loading = false; renderBody(); }
+        } while (entry.dirty && current());
+        if (current() && owner.canManage) ensureServiceM8Seed(scope, bizKey);
+      } finally {
+        owner.pending.delete(key);
+        if (current()) { owner.loading = false; renderBody(); }
+      }
+    })();
+    return entry.promise;
   }
 
   function ensureServiceM8Seed(scope, bizKey) {
@@ -182,23 +264,26 @@
     servicem8SeedRunning.add(bizKey);
     request('/servicem8/sync', { method: 'POST', body: JSON.stringify({}) }, scope)
       .then((result) => {
+        if (!scope.isStale() && result?.queued && state?.bizKey === bizKey) {
+          state.servicem8 = {...state.servicem8, state: 'queued'}; renderServiceM8Info();
+        }
         if (!scope.isStale() && result && (result.synced > 0 || result.reconciledCompleted > 0)) {
           // Import may produce many Realtime notifications; one range reload is enough.
           clearTimeout(realtimeTimer);
-          realtimeTimer = setTimeout(() => { if (!scope.isStale()) load(); }, 400);
+          realtimeTimer = setTimeout(() => { if (!scope.isStale()) load({ refresh: true }); }, 400);
         }
       })
       .catch((error) => {
-        // Keep the calendar usable; retry on a later app session if the one-time
-        // initial seed failed. Ordinary date/view changes never trigger imports.
-        servicem8SeedAttempts.delete(bizKey);
+        // Keep the calendar usable. A new app session may retry the initial
+        // seed; date changes, polling and focus never restart a failed import.
+        // Do not turn DB-only refreshes into repeated upstream imports.
         if (!error?.stale && !scope.isStale()) notify(error.message || 'Could not load ServiceM8 bookings');
       })
       .finally(() => servicem8SeedRunning.delete(bizKey));
   }
 
   function ensureCalendarRealtime(scope) {
-    const client = config.supabase || root.TK_SUPABASE_CLIENT;
+    const client = calendarClient();
     if ((config.request && !config.supabase) || !client?.channel) return;
     const key = scope.biz + ':' + scope.user;
     if (realtimeKey === key && realtimeChannel) return;
@@ -208,13 +293,28 @@
       if (servicem8SeedRunning.has(key)) return;
       clearTimeout(realtimeTimer);
       realtimeTimer = setTimeout(() => {
-        if (!scope.isStale() && document.getElementById('view-calendar')?.classList.contains('active')) load();
+        if (!scope.isStale() && document.getElementById('view-calendar')?.classList.contains('active')) load({ refresh: true });
       }, 350);
     };
     realtimeChannel = client.channel('tk-calendar-live-' + key)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'jobs', filter: 'business_id=eq.' + scope.biz }, refresh)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'calendar_events', filter: 'business_id=eq.' + scope.biz }, refresh)
-      .subscribe();
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'availability_blocks', filter: 'business_id=eq.' + scope.biz }, refresh)
+      .subscribe((status) => { if (!scope.isStale()) realtimeConnected = status === 'SUBSCRIBED'; });
+  }
+
+  function refreshIfDisconnected() {
+    const seedPending = state && !state.servicem8?.seededAt && ['queued','pending','running','failed'].includes(state.servicem8?.state);
+    if (!state || (realtimeConnected && !seedPending) || document.visibilityState === 'hidden' ||
+        !document.getElementById('view-calendar')?.classList.contains('active') || Date.now() - lastReadAt < (seedPending ? 15000 : 60000)) return;
+    // Only /range: polling saved DB rows must never restart ServiceM8 imports.
+    load({ refresh: true });
+  }
+  function ensureRefreshFallback() {
+    if (fallbackTimer) return;
+    fallbackTimer = setInterval(refreshIfDisconnected, 15000);
+    root.addEventListener('focus', refreshIfDisconnected);
+    document.addEventListener('visibilitychange', refreshIfDisconnected);
   }
 
   function refreshFromHydratedApp() {
@@ -231,8 +331,8 @@
   }
 
   /* ===================== skeleton ===================== */
-  let fcInstance = null;
-  function destroyFc() { if (fcInstance) { try { fcInstance.destroy(); } catch (e) {} fcInstance = null; } }
+  let fcInstance = null, fcElement = null;
+  function destroyFc() { if (fcInstance) { try { fcInstance.destroy(); } catch (e) {} fcInstance = null; } fcElement = null; }
 
   function ensureSkeleton() {
     const host = document.getElementById('view-calendar');
@@ -279,7 +379,9 @@
         <span><i style="background:transparent;border:1px dashed #9aa5af"></i>Free (external)</span>
       </div>
       <div class="tkjc-google" id="tkjc-google"></div>
+      <div class="tkjc-sync-info" id="tkjc-servicem8" role="status" hidden></div>
       <div class="tkjc-filters" id="tkjc-staff-filter"></div>
+      <button type="button" class="btn ghost sm" data-tkjc="clear-filters" hidden>Clear search and staff filters</button>
       <div class="tkjc-layout">
         <aside class="tkjc-sidebar">
           <input type="search" id="tkjc-search" placeholder="Search jobs…" aria-label="Search jobs">
@@ -308,10 +410,14 @@
       host.querySelectorAll('[data-tkjc-section]').forEach((item) => {
         const active = item === btn; item.classList.toggle('active', active); item.setAttribute('aria-pressed', String(active));
       });
-      renderSidebar(); renderMain();
+      renderBody();
     }));
+    host.querySelector('[data-tkjc="clear-filters"]').addEventListener('click', () => {
+      state.search = ''; state.staffFilter.clear();
+      host.querySelector('#tkjc-search').value = ''; renderBody();
+    });
     const search = host.querySelector('#tkjc-search');
-    search.addEventListener('input', () => { state.search = search.value; renderSidebar(); renderMain(); });
+    search.addEventListener('input', () => { state.search = search.value; renderBody(); });
   }
 
   function shiftAnchor(dir) {
@@ -326,19 +432,25 @@
     const host = document.getElementById('view-calendar');
     if (!host || host.dataset.tkjc !== '1') return;
     const { label } = rangeForView(state.view, state.anchor);
+    host.classList.toggle('tkjc-show-completed', state.section === 'completed');
     const titleEl = document.getElementById('tkjc-title'); if (titleEl) titleEl.textContent = label;
     document.querySelectorAll('[data-tkjc-view]').forEach((btn) => {
       const active = btn.dataset.tkjcView === state.view;
       btn.classList.toggle('active', active);
       btn.setAttribute('aria-pressed', String(active));
     });
+    const search = host.querySelector('#tkjc-search');
+    if (search && search.value !== state.search) search.value = state.search;
+    const clear = host.querySelector('[data-tkjc="clear-filters"]');
+    if (clear) clear.hidden = !state.search.trim() && !state.staffFilter.size;
     const statusEl = document.getElementById('tkjc-load-status');
     if (statusEl) {
       statusEl.hidden = !state.loading && !state.loadError;
-      statusEl.innerHTML = state.loading ? 'Loading calendar bookings…' : state.loadError ? `${esc(state.loadError)} <button type="button" class="btn ghost sm" aria-label="Retry loading calendar">Retry</button>` : '';
+      statusEl.innerHTML = state.loading ? (state.loaded ? 'Refreshing bookings… Saved bookings remain visible.' : 'Loading calendar bookings…') : state.loadError ? `${esc(state.loadError)}${state.loaded ? ' Showing saved bookings; this range may be incomplete.' : ''} <button type="button" class="btn ghost sm" aria-label="Retry loading calendar">Retry</button>` : '';
       statusEl.querySelector('button')?.addEventListener('click', () => load());
     }
     renderGooglePanel();
+    renderServiceM8Info();
     document.querySelectorAll('[data-tkjc-section]').forEach((btn) => {
       const active = btn.dataset.tkjcSection === state.section;
       btn.classList.toggle('active', active); btn.setAttribute('aria-pressed', String(active));
@@ -346,6 +458,20 @@
     renderStaffChips();
     renderSidebar();
     renderMain();
+  }
+
+  function renderServiceM8Info() {
+    const zone = document.getElementById('tkjc-servicem8'); if (!zone) return;
+    const info = state.servicem8;
+    zone.hidden = !Object.keys(info).length;
+    const dateLabel = (date) => Number.isFinite(+new Date(date)) ? new Date(date).toLocaleString('en-NZ') : '';
+    const parts = ['ServiceM8'];
+    if (info.state) parts.push(String(info.state));
+    if (info.lastSyncedAt) parts.push('Last synced ' + dateLabel(info.lastSyncedAt));
+    else if (info.seededAt) parts.push('Saved bookings loaded ' + dateLabel(info.seededAt));
+    if (info.webhookSubscribed === false) parts.push('Automatic updates are not connected');
+    if (info.lastError) parts.push('Sync delayed. Saved bookings remain available.');
+    zone.textContent = parts.join(' · ');
   }
 
   function renderGooglePanel() {
@@ -378,9 +504,13 @@
       if (!id) state.staffFilter.clear();
       else if (state.staffFilter.has(id)) state.staffFilter.delete(id);
       else state.staffFilter.add(id);
-      renderStaffChips(); renderMain();
+      renderBody();
     }));
   }
+
+  const writableStaff = () => state.staff.filter((u) => !u.readOnly && u.source !== 'servicem8' && u.role !== 'servicem8' && !String(u.id).startsWith('servicem8:'));
+  const eventStaffIds = (event) => Array.isArray(event.details?.assignedStaffIds) && event.details.assignedStaffIds.length
+    ? event.details.assignedStaffIds : event.user_id ? [event.user_id] : [];
 
   function jobStaffIds(job) {
     const d = job.details || {};
@@ -425,6 +555,38 @@
     return fmtTimeOfDate(w.start) + '–' + fmtTimeOfDate(w.end) + (w.source === 'servicem8' ? ' · ServiceM8' : '');
   }
 
+  function inRange(start, end = start) {
+    const from = parseLocalDate(state.range.fromISO), to = parseLocalDate(state.range.toISO);
+    return +start === +end ? start >= from && start < to : start < to && end > from;
+  }
+
+  function completedRows() {
+    const rows = new Map();
+    const remoteKey = (job) => job.details?.serviceM8JobUuid || job.details?.serviceM8Booking?.jobUuid || job.details?.jobUuid || job.external_uuid;
+    state.jobs.filter((job) => ['completed', 'paid'].includes(job.status)).forEach((job) => {
+      const date = job.completed_at || job.details?.completedAt || job.scheduled_date || jobWindow(job)?.end;
+      const remote = remoteKey(job);
+      rows.set(remote ? 'sm8:' + remote : 'job:' + job.id, {
+        name: jobTitle(job), address: [job.customer?.address, job.customer?.suburb].filter(Boolean).join(', ') || 'Address unavailable',
+        date, staffIds: jobStaffIds(job), search: [jobTitle(job), job.customer?.address, job.customer?.suburb].filter(Boolean).join(' '), label: job.status === 'paid' ? 'Paid' : 'Completed', native: true
+      });
+    });
+    [...state.events, ...state.completedEvents].filter((event) => event.source === 'servicem8' && String(event.details?.status).toLowerCase() === 'completed').forEach((event) => {
+      const key = event.details?.jobUuid ? 'sm8:' + event.details.jobUuid : 'event:' + (event.external_id || event.id);
+      const row = { name: event.details?.personName || event.title || 'ServiceM8 job', address: event.details?.address || 'Address unavailable',
+        date: event.end_time || event.start_time, staffIds: eventStaffIds(event), search: [event.title, event.details?.personName, event.details?.companyName, event.details?.address, ...(event.details?.assignedStaff || [])].filter(Boolean).join(' '), label: 'Completed in ServiceM8' };
+      const previous = rows.get(key);
+      if (!previous) rows.set(key, row);
+      else {
+        const chosen = !previous.native && new Date(row.date) > new Date(previous.date) ? row : previous;
+        rows.set(key, {...chosen, staffIds: [...new Set([...previous.staffIds, ...row.staffIds])]});
+      }
+    });
+    const q = state.search.trim().toLowerCase();
+    return [...rows.values()].filter((row) => matchesStaffFilter(row.staffIds) &&
+      (!q || [row.name, row.address, row.search, ...row.staffIds.map(id => findStaff(id)?.name || '')].join(' ').toLowerCase().includes(q))).sort((a, b) => new Date(b.date) - new Date(a.date));
+  }
+
   function renderSidebar() {
     const zone = document.getElementById('tkjc-sidebar-list'); if (!zone) return;
     const q = state.search.trim().toLowerCase();
@@ -433,10 +595,10 @@
       const c = job.customer || {};
       return [c.name, c.address, c.suburb].filter(Boolean).join(' ').toLowerCase().includes(q);
     };
-    const completed = state.jobs.filter((j) => ['completed','paid'].includes(j.status) && matches(j));
-    const activeJobs = state.jobs.filter((j) => !['completed','paid'].includes(j.status));
-    const unscheduled = activeJobs.filter((j) => !jobWindow(j) && matches(j));
-    const scheduled = activeJobs.filter((j) => jobWindow(j) && matches(j)).sort((a, b) => {
+    const completed = completedRows();
+    const activeJobs = state.jobs.filter((j) => !['completed','paid','cancelled'].includes(j.status) && matchesStaffFilter(jobStaffIds(j)));
+    const unscheduled = activeJobs.filter((j) => ['won','scheduled','in_progress'].includes(j.status) && !jobWindow(j) && matches(j));
+    const scheduled = activeJobs.filter((j) => jobWindow(j) && inRange(jobWindow(j).start, jobWindow(j).end) && matches(j)).sort((a, b) => {
       const wa = jobWindow(a), wb = jobWindow(b);
       return wa.start - wb.start;
     });
@@ -451,9 +613,8 @@
     };
     zone.innerHTML = state.section === 'completed' ? `
       <div class="tkjc-sidebar-group">Completed jobs (${completed.length})</div>
-      ${completed.length ? completed.map((job) => `<div class="tkjc-sidebar-row completed"><span class="tkjc-sidebar-name">${esc(jobTitle(job))}</span><span class="tkjc-sidebar-sub">${esc([job.customer?.address, job.customer?.suburb].filter(Boolean).join(', ') || 'No address on file')}</span><span class="tkjc-sidebar-time">Completed${job.scheduled_date ? ' · ' + esc(fmtDateLabel(parseLocalDate(job.scheduled_date))) : ''}</span></div>`).join('') : '<p class="tkjc-empty">No completed jobs have synced yet.</p>'}
-      ${state.events.filter((event) => event.source === 'servicem8' && event.details?.status === 'Completed' && matches({ customer: { name: event.details?.personName, address: event.details?.address } })).map((event) => `<div class="tkjc-sidebar-row completed"><span class="tkjc-sidebar-name">${esc(event.details?.personName || event.title || 'ServiceM8 job')}</span><span class="tkjc-sidebar-sub">${esc(event.details?.address || '')}</span><span class="tkjc-sidebar-time">Completed in ServiceM8</span></div>`).join('')}` : `
-      <div class="tkjc-sidebar-group">Unscheduled (${unscheduled.length})</div>
+      ${completed.length ? completed.map((row) => `<div class="tkjc-sidebar-row completed"><span class="tkjc-sidebar-name">${esc(row.name)}</span><span class="tkjc-sidebar-sub">${esc(row.address)}</span><span class="tkjc-sidebar-time">${esc(row.label)}</span></div>`).join('') : '<p class="tkjc-empty">No completed jobs match these filters.</p>'}` : `
+      <div class="tkjc-sidebar-group">Ready to book (${unscheduled.length})</div>
       ${unscheduled.length ? unscheduled.map(row).join('') : '<p class="tkjc-empty">Nothing waiting to be booked.</p>'}
       <div class="tkjc-sidebar-group">In this range (${scheduled.length})</div>
       ${scheduled.length ? scheduled.map(row).join('') : '<p class="tkjc-empty">No booked jobs in this range.</p>'}`;
@@ -469,20 +630,20 @@
   function renderMain() {
     const zone = document.getElementById('tkjc-main'); if (!zone) return;
     if (state.section === 'completed') {
-      const q = state.search.trim().toLowerCase();
-      const jobs = state.jobs.filter((job) => ['completed','paid'].includes(job.status) && (!q || [job.customer?.name,job.customer?.address,job.customer?.suburb].filter(Boolean).join(' ').toLowerCase().includes(q)));
-      const events = state.events.filter((event) => event.source === 'servicem8' && event.details?.status === 'Completed' && (!q || [event.title,event.details?.personName,event.details?.address].filter(Boolean).join(' ').toLowerCase().includes(q)));
-      zone.innerHTML = `<div class="tkjc-completed-list"><h3>Completed jobs</h3>${jobs.map((job) => `<article class="tkjc-completed-row"><strong>${esc(jobTitle(job))}</strong><span>${esc([job.customer?.address,job.customer?.suburb].filter(Boolean).join(', ') || 'Address unavailable')}</span><small>${esc(job.scheduled_date ? fmtDateLabel(parseLocalDate(job.scheduled_date)) : 'Completed job')}</small><b>${esc(job.status === 'paid' ? 'Paid' : 'Completed')}</b></article>`).join('')}${events.map((event) => `<article class="tkjc-completed-row"><strong>${esc(event.details?.personName || event.title || 'ServiceM8 job')}</strong><span>${esc(event.details?.address || 'Address unavailable')}</span><small>${esc(fmtDateLabel(new Date(event.end_time)))}</small><b>Completed in ServiceM8</b></article>`).join('')}${!jobs.length&&!events.length?'<p class="tkjc-empty">No completed jobs found.</p>':''}</div>`;
+      destroyFc();
+      const rows = completedRows();
+      zone.innerHTML = `<div class="tkjc-completed-list"><h3>Completed jobs (${rows.length})</h3><p class="tkjc-empty">All saved completed and paid jobs, across all dates. Search and staff filters apply.</p>${rows.map((row) => `<article class="tkjc-completed-row"><strong>${esc(row.name)}</strong><span>${esc(row.address)}</span><small>${esc(Number.isFinite(+new Date(row.date)) && row.date ? fmtDateLabel(new Date(row.date)) : 'Date unavailable')}</small><b>${esc(row.label)}</b></article>`).join('')}${!rows.length ? '<p class="tkjc-empty">No completed jobs match these filters. Clear the filters to see all completed jobs.</p>' : ''}</div>`;
       return;
     }
     if (typeof FullCalendar !== 'undefined') { renderWithFullCalendar(zone); return; }
+    destroyFc();
     renderFallbackAgenda(zone);
   }
 
   function buildFcEvents() {
     const out = [];
     state.jobs.forEach((job) => {
-      if (['completed','paid'].includes(job.status)) return;
+      if (['completed','paid','cancelled'].includes(job.status)) return;
       const w = jobWindow(job); if (!w) return;
       const q=state.search.trim().toLowerCase();
       if(q&&![job.customer?.name,job.customer?.address,job.customer?.suburb].filter(Boolean).join(' ').toLowerCase().includes(q))return;
@@ -497,8 +658,8 @@
       });
     });
     state.events.forEach((ev) => {
-      if (ev.source === 'servicem8' && ev.details?.status === 'Completed') return;
-      if (ev.user_id && !matchesStaffFilter([ev.user_id])) return;
+      if (ev.source === 'servicem8' && String(ev.details?.status).toLowerCase() === 'completed') return;
+      if (!matchesStaffFilter(eventStaffIds(ev))) return;
       const free = ev.busy_status === 'free';
       out.push({
         id: 'event:' + ev.id, title: ev.title || (free ? 'Free' : 'Busy'), start: ev.start_time, end: ev.end_time,
@@ -518,10 +679,12 @@
   }
 
   function renderWithFullCalendar(zone) {
-    if (!document.getElementById('tkjc-fc')) zone.innerHTML = '<div id="tkjc-fc"></div>';
+    if (fcInstance && (fcElement !== zone.querySelector('#tkjc-fc') || !fcElement?.isConnected)) destroyFc();
+    if (!zone.querySelector('#tkjc-fc')) zone.innerHTML = '<div id="tkjc-fc"></div>';
     const fcViewName = { month: 'dayGridMonth', week: 'timeGridWeek', day: 'timeGridDay', list: 'listMonth' }[state.view] || 'dayGridMonth';
     if (!fcInstance) {
-      fcInstance = new FullCalendar.Calendar(document.getElementById('tkjc-fc'), {
+      fcElement = zone.querySelector('#tkjc-fc');
+      fcInstance = new FullCalendar.Calendar(fcElement, {
         initialView: fcViewName, initialDate: state.anchor, firstDay: 1, fixedWeekCount: true, height: 'auto', editable: true, selectable: true, dayMaxEvents: true,
         headerToolbar: false,
         dayCellDidMount: (arg) => {
@@ -589,8 +752,10 @@
     const byDay = {};
     days.forEach((d) => { byDay[d] = []; });
     state.jobs.forEach((job) => {
-      if (['completed','paid'].includes(job.status)) return;
+      if (['completed','paid','cancelled'].includes(job.status)) return;
       const w = jobWindow(job); if (!w) return;
+      const q = state.search.trim().toLowerCase();
+      if (q && ![job.customer?.name, job.customer?.address, job.customer?.suburb].filter(Boolean).join(' ').toLowerCase().includes(q)) return;
       if (!matchesStaffFilter(jobStaffIds(job))) return;
       const dISO = localDateStr(w.start);
       if (byDay[dISO]) byDay[dISO].push({ kind: 'job', job, w });
@@ -599,13 +764,13 @@
       if (b.user_id && !matchesStaffFilter([b.user_id])) return;
       const bStart = new Date(b.start_at), bEnd = new Date(b.end_at);
       days.forEach((dISO) => {
-        const dayStart = parseLocalDate(dISO), dayEnd = new Date(dayStart.getTime() + 86400000);
+        const dayStart = parseLocalDate(dISO), dayEnd = parseLocalDate(addDaysISO(dISO, 1));
         if (bStart < dayEnd && bEnd > dayStart) byDay[dISO].push({ kind: 'block', block: b });
       });
     });
     state.events.forEach((ev) => {
-      if (ev.source === 'servicem8' && ev.details?.status === 'Completed') return;
-      if (ev.user_id && !matchesStaffFilter([ev.user_id])) return;
+      if (ev.source === 'servicem8' && String(ev.details?.status).toLowerCase() === 'completed') return;
+      if (!matchesStaffFilter(eventStaffIds(ev))) return;
       days.forEach((dISO) => {
         if (new Date(ev.start_time) < parseLocalDate(addDaysISO(dISO, 1)) && new Date(ev.end_time) > parseLocalDate(dISO)) byDay[dISO].push({ kind: 'event', event: ev });
       });
@@ -668,7 +833,7 @@
       ${existing && !nativeEvent(ev) ? `<p>${ev.source === 'servicem8' ? 'ServiceM8 dispatch booking — read-only. Change its time or crew in ServiceM8, then sync the dispatch board here.' : 'External calendar event — read-only. Edit it in its source calendar.'}</p>` : ''}
       <fieldset class="tkjc-event-fields" ${readOnly ? 'disabled' : ''}>
         <label>Title<input data-event="title" maxlength="200" value="${esc(ev.title)}"></label>
-        <label>Staff<select data-event="staff" ${state.canManage ? '' : 'disabled'}>${state.staff.map(u => `<option value="${esc(u.id)}" ${u.id === ev.user_id ? 'selected' : ''}>${esc(u.name || u.email)}</option>`).join('')}</select></label>
+        <label>Staff<select data-event="staff" ${state.canManage ? '' : 'disabled'}>${writableStaff().map(u => `<option value="${esc(u.id)}" ${u.id === ev.user_id ? 'selected' : ''}>${esc(u.name || u.email)}</option>`).join('')}</select></label>
         <div class="tkjc-row"><label>Start<input type="datetime-local" data-event="start" value="${localInput(new Date(ev.start_time))}"></label>
         <label>End<input type="datetime-local" data-event="end" value="${localInput(new Date(ev.end_time))}"></label></div>
         <label>Availability<select data-event="busy"><option value="busy" ${ev.busy_status === 'busy' ? 'selected' : ''}>Busy</option><option value="free" ${ev.busy_status === 'free' ? 'selected' : ''}>Free</option></select></label>
@@ -695,6 +860,7 @@
       field('delete').disabled = true;
       try {
         await request('/events/' + encodeURIComponent(ev.id), { method: 'DELETE' }, overlay._scope);
+        state.revision++;
         state.events = state.events.filter(e => e.id !== ev.id); closeOverlay(overlay.id); renderBody(); notify('Appointment deleted');
       } catch (e) { if (!e.stale) field('message').textContent = e.message; }
       finally { field('delete').disabled = false; }
@@ -737,6 +903,7 @@
     try {
       const body = await request('/events', { method: 'POST', body: JSON.stringify(payload) }, overlay?._scope || makeScope());
       const idx = state.events.findIndex(e => e.id === payload.id);
+      state.revision++;
       if (idx >= 0) state.events[idx] = body.event; else state.events.push(body.event);
       if (overlay) closeOverlay(overlay.id);
       renderBody(); notify('Appointment saved ✓');
@@ -799,7 +966,7 @@
         </div>
         <fieldset class="tkjc-staff-fieldset" ${readOnly ? 'disabled' : ''}>
           <legend>Assign staff (select more than one for a crew)</legend>
-          ${state.staff.map((u) => `<label class="tkjc-check"><input type="checkbox" value="${esc(u.id)}" data-tkjc-staff ${existingStaff.includes(u.id) ? 'checked' : ''} ${readOnly ? 'disabled' : ''}> ${esc(u.name || u.email || 'Unnamed')}</label>`).join('') || '<p class="tkjc-empty">No staff on this business yet.</p>'}
+          ${writableStaff().map((u) => `<label class="tkjc-check"><input type="checkbox" value="${esc(u.id)}" data-tkjc-staff ${existingStaff.includes(u.id) ? 'checked' : ''} ${readOnly ? 'disabled' : ''}> ${esc(u.name || u.email || 'Unnamed')}</label>`).join('') || '<p class="tkjc-empty">No staff on this business yet.</p>'}
         </fieldset>
         <label>Crew name (optional)<input type="text" data-tkjc-field="teamLabel" value="${esc(teamLabel)}" placeholder="e.g. Deck crew" ${readOnly ? 'disabled' : ''}></label>
         <label>Notes<textarea data-tkjc-field="notes" ${readOnly ? 'disabled' : ''}>${esc(notes)}</textarea></label>
@@ -908,6 +1075,7 @@
 
   function applyJobPatch(job) {
     if (!job) return;
+    state.revision++;
     const idx = state.jobs.findIndex((j) => String(j.id) === String(job.id));
     if (idx >= 0) state.jobs[idx] = {...state.jobs[idx],...job,customer:job.customer||state.jobs[idx].customer}; else state.jobs.push(job);
   }
@@ -935,7 +1103,7 @@
         </div>
         <label>Who<select data-tkjc-field="staffId" ${canPickStaff ? '' : 'disabled'}>
           ${canPickStaff ? '<option value="">Whole business</option>' : ''}
-          ${state.staff.map((u) => `<option value="${esc(u.id)}" ${((staffId || state.myUserId) === u.id) || !canPickStaff ? 'selected' : ''}>${esc(u.name || u.email || 'Unnamed')}</option>`).join('')}
+          ${writableStaff().map((u) => `<option value="${esc(u.id)}" ${((staffId || state.myUserId) === u.id) || !canPickStaff ? 'selected' : ''}>${esc(u.name || u.email || 'Unnamed')}</option>`).join('')}
         </select></label>
         <label>Type<select data-tkjc-field="blockType">${BLOCK_TYPES.map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join('')}</select></label>
         <label>Reason (optional)<textarea data-tkjc-field="reason"></textarea></label>
@@ -995,6 +1163,7 @@
       if (scope.isStale()) return;
       const idx = state.blocks.findIndex((b) => String(b.id) === String(payload.id));
       const saved = body.block || payload;
+      state.revision++;
       if (idx >= 0) state.blocks[idx] = saved; else state.blocks.push(saved);
       notify('Time blocked ✓' + (body.conflictingJobs ? ' — ' + body.conflictingJobs + ' existing booking(s) overlap. Review them.' : ''));
       if (overlay) closeOverlay(overlay.id);
@@ -1043,6 +1212,7 @@
     try {
       await request('/blocks/' + encodeURIComponent(id), { method: 'DELETE' }, scope);
       if (scope.isStale()) return;
+      state.revision++;
       state.blocks = state.blocks.filter((b) => String(b.id) !== String(id));
       notify('Block removed');
       if (overlay) closeOverlay(overlay.id);
@@ -1058,7 +1228,7 @@
   function tkRenderCalendar() {
     const host = ensureSkeleton();
     if (!host) return;
-    load();
+    return load({ cached: true });
   }
 
   function patchDesktopNav() {
@@ -1096,17 +1266,6 @@
     return true;
   }
 
-  function wrapRenderAll() {
-    if (typeof root.renderAll !== 'function' || root.renderAll.__tkjc) return false;
-    const original = root.renderAll;
-    const wrapped = function () {
-      original.apply(this, arguments);
-    };
-    wrapped.__tkjc = true;
-    root.renderAll = wrapped;
-    return true;
-  }
-
   function installLauncherCapture() {
     if (root.__tkjcLauncherCapture) return;
     root.__tkjcLauncherCapture = true;
@@ -1123,19 +1282,25 @@
   function init() {
     root.renderCalendar = tkRenderCalendar;
     installLauncherCapture();
-    const ready = wrapRenderAll() && wrapOpenMoreSheet() && patchDesktopNav();
+    const ready = wrapOpenMoreSheet() && patchDesktopNav();
     if (!ready) setTimeout(init, 200);
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();
 
   root.TK_JOB_CALENDAR = {
-    configure(options) { config = { ...options }; state = null; destroyFc(); },
+    configure(options) {
+      clearTimeout(realtimeTimer);
+      if (realtimeChannel) { try { calendarClient()?.removeChannel?.(realtimeChannel); } catch (_) {} }
+      realtimeChannel = null; realtimeKey = ''; realtimeConnected = false;
+      realtimeConnected = false; lastReadAt = 0;
+      config = { ...options }; state = null; destroyFc();
+    },
     open() { if (typeof root.switchView === 'function') root.switchView('calendar'); else tkRenderCalendar(); },
     async book(jobId, dateISO) {
       const scope=makeScope();
       const bizKey=scope.biz+':'+scope.user;
-      if(!state||state.bizKey!==bizKey){state=freshState();state.bizKey=bizKey;destroyFc();}
+      if(!state||state.bizKey!==bizKey){state=freshState();state.bizKey=bizKey;state.version=scope.version;destroyFc();}
       if(/^\d{4}-\d{2}-\d{2}$/.test(dateISO||''))state.anchor=parseLocalDate(dateISO);
       if(typeof root.switchView==='function')root.switchView('calendar');
       await load();
@@ -1147,7 +1312,7 @@
     async scheduleEvent({ title, notes = '', dateISO, staffId } = {}) {
       const scope = makeScope();
       const bizKey = scope.biz + ':' + scope.user;
-      if (!state || state.bizKey !== bizKey) { state = freshState(); state.bizKey = bizKey; destroyFc(); }
+      if (!state || state.bizKey !== bizKey) { state = freshState(); state.bizKey = bizKey; state.version = scope.version; destroyFc(); }
       const day = /^\d{4}-\d{2}-\d{2}$/.test(dateISO || '') ? dateISO : localDateStr(new Date());
       state.anchor = parseLocalDate(day);
       if (typeof root.switchView === 'function') root.switchView('calendar'); else tkRenderCalendar();
@@ -1155,14 +1320,14 @@
       if (scope.isStale()) return;
       if (!state.canManage) { notify('Only an owner or manager can schedule calendar items.'); return; }
       const start = new Date(day + 'T09:00:00'), end = new Date(start.getTime() + 60 * 60000);
-      openEventModal({ id: crypto.randomUUID(), user_id: staffId || state.myUserId,
+      openEventModal({ id: crypto.randomUUID(), user_id: writableStaff().some(u => u.id === staffId) ? staffId : state.myUserId,
         title: String(title || '').slice(0, 200), notes: String(notes || '').slice(0, 2000), busy_status: 'busy',
         start_time: start.toISOString(), end_time: end.toISOString() }, true);
     },
     async blockTime({ dateISO, staffId, reason = 'Unavailable' } = {}) {
       const scope = makeScope();
       const bizKey = scope.biz + ':' + scope.user;
-      if (!state || state.bizKey !== bizKey) { state = freshState(); state.bizKey = bizKey; destroyFc(); }
+      if (!state || state.bizKey !== bizKey) { state = freshState(); state.bizKey = bizKey; state.version = scope.version; destroyFc(); }
       const day = /^\d{4}-\d{2}-\d{2}$/.test(dateISO || '') ? dateISO : localDateStr(new Date());
       state.anchor = parseLocalDate(day);
       if (typeof root.switchView === 'function') root.switchView('calendar'); else tkRenderCalendar();
@@ -1171,6 +1336,6 @@
       if (!state.canManage) { notify('Only an owner or manager can block calendar time.'); return; }
       openBlockModal({ dateISO: day, staffId: staffId || '', reason, blockType: 'unavailable' });
     },
-    refresh() { load(); }
+    refresh() { return load({ refresh: true }); }
   };
 })(window);

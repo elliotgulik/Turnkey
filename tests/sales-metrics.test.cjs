@@ -71,3 +71,14 @@ test("partially missing line snapshots remain unavailable regardless of record o
  const r=M.report([{...lead,stage:'won',wonAt:at,services:[{svc:'house'}]},{...lead,stage:'won',wonAt:at,services:[{svc:'house',priceSnapshot:115}]}],{range,now});
  assert.equal(r.services[0].revenue,null);
 });
+
+// The Completed UI group must continue contributing to won sales and revenue.
+test("completed and paid jobs remain revenue wins", () => {
+  const jobs = ['completed', 'paid'].map((stage, i) => ({
+    ...lead, id: i + 1, stage, wonAt: at,
+  }));
+  assert.deepEqual(jobs.map(job => M.won(job)), [true, true]);
+  const report = M.report(jobs, { range, now });
+  assert.equal(report.bookedSales, 230);
+  assert.equal(report.conversion, 1);
+});
