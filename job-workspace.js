@@ -354,11 +354,13 @@
       <section class="tkj-panel-modal" role="dialog" aria-modal="true" aria-labelledby="tkj-cal-title">
         <header><div><span>JOB RECORDS</span><h2 id="tkj-cal-title">Staff calendar — actual logged hours</h2><p class="tkj-sub">This shows hours workers have logged, not a schedule or payroll total.</p></div><button data-tkj="close" aria-label="Close staff calendar">Close</button></header>
         <div class="tkj-filters">
-          <button data-tkj="prev-week">← Previous week</button>
+          <button type="button" data-tkj="prev-week" aria-label="Previous week">←</button>
           <span class="tkj-week-label"></span>
-          <button data-tkj="next-week">Next week →</button>
+          <button type="button" data-tkj="next-week" aria-label="Next week">→</button>
           ${isPrivileged(role) ? `<select data-tkj="staff-filter"><option value="">All staff</option>${staff.map((u) => `<option value="${esc(u.id)}">${esc(u.email || u.id)}</option>`).join('')}</select>` : ''}
         </div>
+        <div class="tkj-calendar-actions"><button type="button" class="btn primary" data-tkj="open-booking">Open team booking calendar</button><button type="button" class="btn ghost" data-tkj="block-staff">Block leave / unavailable time</button></div>
+        <div class="tkj-calendar-summary" aria-live="polite"></div>
         <p class="tkj-message" role="status" aria-live="polite">Loading…</p>
         <div class="tkj-week-grid"></div>
       </section>`, scope);
@@ -366,6 +368,16 @@
     host.querySelector('[data-tkj="close"]').addEventListener('click', close);
     host.querySelector('[data-tkj="prev-week"]').addEventListener('click', () => { weekStart = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() - 7); load(); });
     host.querySelector('[data-tkj="next-week"]').addEventListener('click', () => { weekStart = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + 7); load(); });
+    host.querySelector('[data-tkj="open-booking"]').addEventListener('click', () => {
+      close();
+      if (root.TK_JOB_CALENDAR) root.TK_JOB_CALENDAR.open(); else notify('Calendar is not available yet.');
+    });
+    host.querySelector('[data-tkj="block-staff"]').addEventListener('click', () => {
+      const staffId = filterEl?.value || (isPrivileged(role) ? '' : scope.user);
+      close();
+      if (root.TK_JOB_CALENDAR) root.TK_JOB_CALENDAR.blockTime({ dateISO: localDateStr(new Date()), staffId, reason: 'Staff unavailable' });
+      else notify('Calendar is not available yet.');
+    });
     const filterEl = host.querySelector('[data-tkj="staff-filter"]');
     if (filterEl) filterEl.addEventListener('change', () => { selectedUserId = filterEl.value; load(); });
 
@@ -404,7 +416,10 @@
     const dayStrs = days.map(localDateStr);
     const nameFor = (uid) => (staff.find((u) => u.id === uid) || {}).email || uid;
     const grid = host.querySelector('.tkj-week-grid');
-    if (!byUser.size) { grid.innerHTML = ''; return; }
+    const total = logs.reduce((sum, l) => sum + Number(l.minutes || 0), 0);
+    const summary = host.querySelector('.tkj-calendar-summary');
+    if (summary) summary.innerHTML = `<span><b>${new Set(logs.map((l) => l.user_id)).size}</b> team members</span><span><b>${fmtDuration(total)}</b> recorded</span><span><b>${logs.length}</b> work entries</span>`;
+    if (!byUser.size) { grid.innerHTML = '<div class="tkj-empty-state"><strong>No hours logged this week</strong><span>Plan a crew booking or record a shift from the calendar.</span></div>'; return; }
     grid.innerHTML = [...byUser.entries()].map(([uid, entries]) => {
       const perDay = dayStrs.map((ds) => entries.filter((l) => localDateStr(new Date(l.start_at)) === ds));
       const totalMinutes = entries.reduce((s, l) => s + l.minutes, 0);
@@ -424,7 +439,8 @@
     if (scope.isStale()) return;
     const { host, close } = overlay(`
       <section class="tkj-panel-modal" role="dialog" aria-modal="true" aria-labelledby="tkj-eq-title">
-        <header><div><span>JOB RECORDS</span><h2 id="tkj-eq-title">Equipment &amp; service</h2></div><button data-tkj="close" aria-label="Close equipment">Close</button></header>
+        <header><div><span>FLEET &amp; MAINTENANCE</span><h2 id="tkj-eq-title">Equipment &amp; service</h2><p class="tkj-sub">Runtime is calculated from submitted work logs. Book maintenance on the TurnKey calendar when service is due.</p></div><button data-tkj="close" aria-label="Close equipment">Close</button></header>
+        <div class="tkj-calendar-actions"><button type="button" class="btn ghost" data-tkj="open-calendar">Open service calendar</button></div>
         <p class="tkj-message" role="status" aria-live="polite">Loading…</p>
         <div class="tkj-equipment-list"></div>
         ${isPrivileged(role) ? `<details><summary>Add equipment</summary>
@@ -437,6 +453,7 @@
           </form></details>` : ''}
       </section>`, scope);
     host.querySelector('[data-tkj="close"]').addEventListener('click', close);
+    host.querySelector('[data-tkj="open-calendar"]').addEventListener('click', () => { close(); root.TK_JOB_CALENDAR?.open(); });
     let loadSeq = 0;
 
     async function load() {
@@ -478,6 +495,14 @@
 
     host.addEventListener('click', async (e) => {
       const btn = e.target.closest('[data-tkj="mark-serviced"]');
+      const schedule = e.target.closest('[data-tkj="schedule-service"]');
+      if (schedule) {
+        const asset = JSON.parse(schedule.dataset.asset || '{}');
+        close();
+        root.TK_JOB_CALENDAR?.scheduleEvent({ title: 'Equipment service · ' + asset.name,
+          notes: `Scheduled maintenance for ${asset.name}. Runtime ${Number(asset.runtimeHours || 0).toFixed(1)}h; ${asset.due ? 'service is due' : Number(asset.remainingHours || 0).toFixed(1) + 'h remaining before service is due'}.` });
+        return;
+      }
       if (!btn) return;
       if (scope.isStale()) { close(); return; }
       if (!confirm('Mark "' + btn.dataset.name + '" as serviced now?')) return;
@@ -495,20 +520,20 @@
 
   function renderEquipmentList(host, equipment, role) {
     const el = host.querySelector('.tkj-equipment-list');
-    el.innerHTML = equipment.map((a) => `<div class="tkj-asset ${a.due ? 'tkj-asset-due' : ''}">
+    el.innerHTML = equipment.map((a) => `<article class="tkj-asset ${a.due ? 'tkj-asset-due' : ''}">
       <div class="tkj-asset-head">
-        <strong>${esc(a.name)}</strong>
-        ${a.due ? '<span class="tkj-due-badge">Service due</span>' : ''}
-        ${isPrivileged(role) ? `<button data-tkj="mark-serviced" data-id="${esc(a.id)}" data-name="${esc(a.name)}">Mark serviced</button>` : ''}
+        <div><strong>${esc(a.name)}</strong><small>${a.due ? 'Needs attention now' : a.hasServiceHistory ? 'Service tracking active' : 'Service history not recorded yet'}</small></div>
+        ${a.due ? '<span class="tkj-due-badge">Service due</span>' : `<span class="tkj-service-ok">${Number(a.remainingHours).toFixed(1)}h to service</span>`}
       </div>
       <div class="tkj-asset-stats">
-        <span>Runtime: ${a.runtimeHours.toFixed(1)}h</span>
-        <span>Since last service: ${a.sinceServiceHours.toFixed(1)}h${a.hasServiceHistory ? '' : ' (no service on record — full runtime counts)'}</span>
-        <span>${a.remainingHours > 0 ? a.remainingHours.toFixed(1) + 'h remaining' : (-a.remainingHours).toFixed(1) + 'h overdue'}</span>
-        <span>Interval: ${a.service_interval_hours}h</span>
+        <span><b>${Number(a.runtimeHours).toFixed(1)}h</b><small>Total runtime</small></span>
+        <span><b>${Number(a.sinceServiceHours).toFixed(1)}h</b><small>Since service${a.hasServiceHistory ? '' : ' · history unknown'}</small></span>
+        <span><b>${Number(a.service_interval_hours).toFixed(1)}h</b><small>Service interval</small></span>
       </div>
-      ${a.recentServiceEvents.length ? `<details><summary>Service history (${a.recentServiceEvents.length})</summary><ul class="tkj-service-history">${a.recentServiceEvents.map((ev) => `<li>${esc(fmtDateTime(ev.serviced_at))} — meter ${Number(ev.meter_hours).toFixed(1)}h${ev.notes ? ': ' + esc(ev.notes) : ''}</li>`).join('')}</ul></details>` : '<p class="tkj-sub">No service recorded yet.</p>'}
-    </div>`).join('') || '';
+      <div class="tkj-progress"><span style="width:${Math.max(0, Math.min(100, (a.sinceServiceHours / a.service_interval_hours) * 100))}%"></span></div>
+      <div class="tkj-asset-actions">${isPrivileged(role) ? `<button type="button" class="btn primary sm" data-tkj="schedule-service" data-asset="${esc(JSON.stringify({ name: a.name, runtimeHours: a.runtimeHours, remainingHours: a.remainingHours, due: a.due }))}">Schedule service</button><button type="button" class="btn ghost sm" data-tkj="mark-serviced" data-id="${esc(a.id)}" data-name="${esc(a.name)}">Record completed service</button>` : ''}</div>
+      ${a.recentServiceEvents.length ? `<details><summary>Service history (${a.recentServiceEvents.length})</summary><ul class="tkj-service-history">${a.recentServiceEvents.map((ev) => `<li>${esc(fmtDateTime(ev.serviced_at))} — meter ${Number(ev.meter_hours).toFixed(1)}h${ev.notes ? ': ' + esc(ev.notes) : ''}</li>`).join('')}</ul></details>` : '<p class="tkj-sub">No service recorded yet. Confirm the service meter baseline when creating the asset.</p>'}
+    </article>`).join('') || '';
   }
 
   /* ===================== mount ===================== */

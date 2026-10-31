@@ -330,6 +330,10 @@
   // "unconfirmed time" block — never a fabricated exact time.
   function jobWindow(job) {
     const d = job.details || {};
+    if (d.serviceM8Booking?.startAt && d.serviceM8Booking?.endAt) {
+      const start = new Date(d.serviceM8Booking.startAt), end = new Date(d.serviceM8Booking.endAt);
+      if (Number.isFinite(+start) && Number.isFinite(+end) && end > start) return { start, end, allDay: false, confirmed: true, source: 'servicem8' };
+    }
     if (d.calendarStartAt) return { start: new Date(d.calendarStartAt), end: d.calendarEndAt ? new Date(d.calendarEndAt) : new Date(new Date(d.calendarStartAt).getTime() + 3600000), allDay: false, confirmed: true };
     const dateISO = job.scheduled_date;
     if (!dateISO) return null;
@@ -350,7 +354,7 @@
     const w = jobWindow(job);
     if (!w) return 'Unscheduled';
     if (!w.confirmed) return 'Unconfirmed time — ' + w.start.toLocaleDateString('en-NZ');
-    return fmtTimeOfDate(w.start) + '–' + fmtTimeOfDate(w.end);
+    return fmtTimeOfDate(w.start) + '–' + fmtTimeOfDate(w.end) + (w.source === 'servicem8' ? ' · ServiceM8' : '');
   }
 
   function renderSidebar() {
@@ -405,10 +409,10 @@
       if (!matchesStaffFilter(staffIds)) return;
       const crewLabel=job.details?.calendarTeamLabel || staffIds.map(id=>{const u=findStaff(id);return u?.name||u?.email?.split('@')[0]||'';}).filter(Boolean).join(' + ');
       out.push({
-        id: 'job:' + job.id, title: jobTitle(job) + (crewLabel?' · '+crewLabel:'') + (w.confirmed ? '' : ' (unconfirmed time'),
+        id: 'job:' + job.id, title: jobTitle(job) + (crewLabel?' · '+crewLabel:'') + (w.source === 'servicem8' ? ' · ServiceM8' : '') + (w.confirmed ? '' : ' (unconfirmed time'),
         start: w.start.toISOString(), end: w.end.toISOString(), allDay: w.allDay,
         backgroundColor: STATUS_COLOR[job.status] || STATUS_COLOR.scheduled, borderColor: STATUS_COLOR[job.status] || STATUS_COLOR.scheduled,
-        editable: w.confirmed && state.canManage && !['completed','paid'].includes(job.status), extendedProps: { kind: 'job', jobId: job.id }
+        editable: w.confirmed && state.canManage && !['completed','paid'].includes(job.status) && w.source !== 'servicem8', extendedProps: { kind: 'job', jobId: job.id }
       });
     });
     state.events.forEach((ev) => {
@@ -558,8 +562,8 @@
     return { id: ev.id, staffId: ev.user_id, title: ev.title, notes: ev.notes || null,
       busyStatus: ev.busy_status, startAt: start.toISOString(), endAt: end.toISOString(), timeZone: timeZoneName() };
   }
-  function openEventModal(ev) {
-    const existing = !!ev;
+  function openEventModal(ev, isNewSeed = false) {
+    const existing = !!ev && !isNewSeed;
     ev = ev || { id: crypto.randomUUID(), user_id: state.myUserId, title: '', busy_status: 'busy', start_time: new Date().toISOString(), end_time: new Date(Date.now() + 3600000).toISOString() };
     const readOnly = existing && (!nativeEvent(ev) || !canEditItem(ev));
     const overlay = document.createElement('div'); overlay.id = 'tkjc-event-overlay'; overlay.className = 'tkjc-overlay';
@@ -635,7 +639,7 @@
 
   function openBookingModal({ jobId, dateISO }) {
     const job = jobId ? findJob(jobId) : null;
-    const readOnly = !state.canManage || (job && ['completed','paid'].includes(job.status));
+    const readOnly = !state.canManage || (job && (['completed','paid'].includes(job.status) || !!job.details?.serviceM8Booking));
     const w = job ? jobWindow(job) : null;
     const presetDate = dateISO || (w ? localDateStr(w.start) : localDateStr(new Date()));
     // normalize to 24h HH:MM for <input type=time>
@@ -654,6 +658,7 @@
     overlay.innerHTML = `
       <div class="tkjc-dialog" role="dialog" aria-modal="true" aria-labelledby="tkjc-booking-title">
         <h3 id="tkjc-booking-title">${job ? esc(jobTitle(job)) : 'Book a job'}</h3>
+        ${job?.details?.serviceM8Booking ? '<p>This booking is managed in ServiceM8 and synced to TurnKey. Change its date or crew in ServiceM8.</p>' : ''}
         ${!job ? `<label>Job<select data-tkjc-field="jobId" ${readOnly ? 'disabled' : ''}>
             <option value="">— choose a job —</option>
             ${unscheduledOptions.map((j) => `<option value="${esc(j.id)}">${esc(jobTitle(j))}${(j.customer || {}).address ? ' — ' + esc(j.customer.address) : ''}</option>`).join('')}
@@ -780,7 +785,7 @@
 
   /* ===================== block modal ===================== */
   let blockDialogId = null;
-  function openBlockModal({ dateISO, staffId }) {
+  function openBlockModal({ dateISO, staffId, reason = '', blockType = 'unavailable' } = {}) {
     blockDialogId = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()) + Math.random();
     const start = dateISO || localDateStr(new Date());
     const canPickStaff = state.canManage;
@@ -813,6 +818,8 @@
       </div>`;
     document.body.appendChild(overlay);
     bindOverlay(overlay);
+    overlay.querySelector('[data-tkjc-field="reason"]').value = reason;
+    overlay.querySelector('[data-tkjc-field="blockType"]').value = blockType;
     overlay.querySelector('[data-tkjc="cancel"]').addEventListener('click', () => closeOverlay('tkjc-block-overlay'));
     overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeOverlay('tkjc-block-overlay'); });
     overlay.querySelector('[data-tkjc-field="allDay"]').addEventListener('change', (e) => { overlay.querySelector('[data-tkjc="time-row"]').style.display = e.target.checked ? 'none' : ''; });
@@ -1013,6 +1020,33 @@
       if(!state.canManage){notify('Only an owner or manager can manage bookings.');return;}
       if(!findJob(jobId)){notify('This job could not be loaded. Refresh the calendar and try again.');return;}
       openBookingModal({jobId,dateISO:dateISO||localDateStr(new Date())});
+    },
+    async scheduleEvent({ title, notes = '', dateISO, staffId } = {}) {
+      const scope = makeScope();
+      const bizKey = scope.biz + ':' + scope.user;
+      if (!state || state.bizKey !== bizKey) { state = freshState(); state.bizKey = bizKey; destroyFc(); }
+      const day = /^\d{4}-\d{2}-\d{2}$/.test(dateISO || '') ? dateISO : localDateStr(new Date());
+      state.anchor = parseLocalDate(day);
+      if (typeof root.switchView === 'function') root.switchView('calendar'); else tkRenderCalendar();
+      await load();
+      if (scope.isStale()) return;
+      if (!state.canManage) { notify('Only an owner or manager can schedule calendar items.'); return; }
+      const start = new Date(day + 'T09:00:00'), end = new Date(start.getTime() + 60 * 60000);
+      openEventModal({ id: crypto.randomUUID(), user_id: staffId || state.myUserId,
+        title: String(title || '').slice(0, 200), notes: String(notes || '').slice(0, 2000), busy_status: 'busy',
+        start_time: start.toISOString(), end_time: end.toISOString() }, true);
+    },
+    async blockTime({ dateISO, staffId, reason = 'Unavailable' } = {}) {
+      const scope = makeScope();
+      const bizKey = scope.biz + ':' + scope.user;
+      if (!state || state.bizKey !== bizKey) { state = freshState(); state.bizKey = bizKey; destroyFc(); }
+      const day = /^\d{4}-\d{2}-\d{2}$/.test(dateISO || '') ? dateISO : localDateStr(new Date());
+      state.anchor = parseLocalDate(day);
+      if (typeof root.switchView === 'function') root.switchView('calendar'); else tkRenderCalendar();
+      await load();
+      if (scope.isStale()) return;
+      if (!state.canManage) { notify('Only an owner or manager can block calendar time.'); return; }
+      openBlockModal({ dateISO: day, staffId: staffId || '', reason, blockType: 'unavailable' });
     },
     refresh() { load(); }
   };

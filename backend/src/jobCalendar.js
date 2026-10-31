@@ -34,7 +34,8 @@ const GOOGLE_TIMEOUT_MS = 10000
 const CALENDAR_DETAIL_KEYS = [
   'calendarStartAt', 'calendarEndAt', 'scheduledStartMin', 'scheduledDurationMin',
   'assignedStaffIds', 'calendarTeamLabel', 'calendarNotes', 'calendarGoogleSync', 'googleEventId',
-  'calendarGoogleSyncState', 'calendarGoogleSyncError', 'calendarGoogleSyncedAt'
+  'calendarGoogleSyncState', 'calendarGoogleSyncError', 'calendarGoogleSyncedAt',
+  'serviceM8Booking', 'serviceM8Status'
 ]
 function filterCalendarDetails(details) {
   const out = {}

@@ -1,4 +1,8 @@
 .nlm-shell{max-width:1440px;margin:0 auto;padding:28px clamp(16px,3vw,34px) 56px;color:var(--ink)}
+.sidebar-nav button.lead-manager-nav{background:var(--accent-wash,var(--teal-wash));color:var(--accent,var(--teal));font-weight:700;box-shadow:inset 3px 0 var(--accent,var(--teal))}
+.sidebar-nav button.lead-manager-nav .nav-ico{opacity:1}
+.sidebar-nav button.lead-manager-nav.active{background:var(--accent-wash,var(--teal-wash));color:var(--accent,var(--teal))}
+.bottom-nav .nlm-mobile-label{max-width:72px;line-height:1.05;text-align:center}
 .nlm-header{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;margin:0 0 22px}
 .nlm-header h2{font-size:clamp(25px,3vw,34px);line-height:1.12;margin:5px 0 7px;letter-spacing:-.03em}
 .nlm-header p{margin:0;color:var(--ink-soft);font-size:14px;max-width:620px}

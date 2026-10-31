@@ -842,6 +842,17 @@ app.get('/api/calendar/connections', requireBusiness, async (req, res) => {
   res.json({ connections: data || [], googleConfigured: googleCalendar.isConfigured() })
 })
 
+function googleCalendarRedirectUri(req) {
+  // Pin both OAuth legs to the canonical Render origin. Deriving the URI
+  // independently from the proxy Host header is a common source of Google's
+  // "Access blocked / invalid request" redirect_uri errors.
+  const configured = (process.env.PUBLIC_BACKEND_URL || `https://${req.get('host')}`).replace(/\/+$/, '')
+  let origin
+  try { origin = new URL(configured).origin } catch { throw new Error('PUBLIC_BACKEND_URL must be a valid HTTPS origin') }
+  if (!origin.startsWith('https://')) throw new Error('PUBLIC_BACKEND_URL must use HTTPS')
+  return origin + '/api/calendar/oauth/callback/google'
+}
+
 app.get('/api/calendar/oauth/start', requireBusiness, (req, res) => {
   // See the matching comment on /api/email/oauth/start — every path here
   // must return JSON, never let a throw fall through to Express's default

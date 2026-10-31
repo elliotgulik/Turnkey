@@ -104,6 +104,12 @@
 .tkj-panel-modal {
   max-width: 980px;
 }
+.tkj-calendar-actions { display:flex; flex-wrap:wrap; gap:8px; margin:16px 0; }
+.tkj-calendar-summary { display:flex; flex-wrap:wrap; gap:10px; margin:12px 0; }
+.tkj-calendar-summary span { padding:10px 14px; background:var(--surface-2,#f3f6f8); border:1px solid var(--line,#e0e6eb); border-radius:10px; color:var(--ink-soft,#526171); }
+.tkj-calendar-summary b { color:var(--ink,#172534); margin-right:4px; }
+.tkj-empty-state { display:grid; gap:5px; padding:26px; text-align:center; border:1px dashed var(--line,#d9e0e5); border-radius:12px; color:var(--ink-faint,#667788); }
+.tkj-empty-state strong { color:var(--ink,#172534); }
 .tkj-dialog h3,
 .tkj-panel-modal h2 {
   margin: 0 0 6px;
@@ -237,9 +243,13 @@
   margin: 10px 0;
 }
 .tkj-asset {
+  display:grid;
+  gap:12px;
   border: 1px solid #dce5ec;
-  border-radius: 10px;
-  padding: 12px;
+  border-radius: 14px;
+  padding: 18px;
+  background:var(--surface,#fff);
+  box-shadow:0 4px 16px #1423330a;
 }
 .tkj-asset-due {
   border-color: #e0a13a;
@@ -247,10 +257,14 @@
 }
 .tkj-asset-head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
+  justify-content: space-between;
   gap: 10px;
   flex-wrap: wrap;
 }
+.tkj-asset-head > div { display:grid; gap:3px; }
+.tkj-asset-head small,.tkj-asset-stats small { display:block; color:var(--ink-faint,#667788); font-size:12px; font-weight:500; }
+.tkj-service-ok { color:#22745e; background:#e9f6f0; border-radius:999px; padding:5px 9px; font-size:12px; font-weight:700; white-space:nowrap; }
 .tkj-due-badge {
   background: #e0a13a;
   color: #fff;
@@ -262,11 +276,17 @@
 .tkj-asset-stats {
   display: flex;
   flex-wrap: wrap;
-  gap: 14px;
+  gap: 10px;
   font-size: 12.5px;
   color: #536579;
-  margin-top: 6px;
+  margin-top: 0;
 }
+.tkj-asset-stats span { flex:1 1 130px; min-width:0; padding:10px; border-radius:9px; background:var(--surface-2,#f3f6f8); }
+.tkj-asset-stats b { font-size:15px; color:var(--ink,#172534); }
+.tkj-progress { height:7px; overflow:hidden; background:#e8edf0; border-radius:99px; }
+.tkj-progress span { display:block; height:100%; background:#4a9a7f; border-radius:inherit; }
+.tkj-asset-due .tkj-progress span { background:#d48a2e; }
+.tkj-asset-actions { display:flex; flex-wrap:wrap; gap:8px; }
 .tkj-service-history {
   font-size: 12px;
   color: #536579;

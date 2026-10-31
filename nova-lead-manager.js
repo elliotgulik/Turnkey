@@ -53,12 +53,12 @@
   document.addEventListener('click',handleClick);
   document.addEventListener('change',handleChange);
   document.addEventListener('input',handleInput);
-  const nav=document.querySelector('#tabs [data-view="leads"]');if(nav){const label=[...nav.childNodes].find(n=>n.nodeType===3);if(label)label.nodeValue='Lead Manager ';}
-  const mobileLeadNav=document.querySelector('#bottom-nav [data-view="dashboard"]');if(mobileLeadNav){mobileLeadNav.dataset.view='leads';mobileLeadNav.innerHTML=`<span class="bn-ico" data-icon="leads">${typeof NAV_ICONS!=='undefined'?NAV_ICONS.leads||'':''}</span>Lead Manager`;}
+  const nav=document.querySelector('#tabs [data-view="leads"]');if(nav){nav.classList.add('lead-manager-nav');nav.setAttribute('aria-label','Leads Manager');}
+  const mobileLeadNav=document.querySelector('#bottom-nav [data-view="leads"]');if(mobileLeadNav){mobileLeadNav.setAttribute('aria-label','Leads Manager');mobileLeadNav.innerHTML=`<span class="bn-ico" data-icon="leads">${typeof NAV_ICONS!=='undefined'?NAV_ICONS.leads||'':''}</span><span class="nlm-mobile-label">Leads Manager</span>`;}
   window.TK_NOVA_LEAD_MANAGER={render:drawManager,reset(){query=source=stage=gradeFilter=zone='';sort='newest';detailId=null;overdueOnly=false;},grade:automaticGrade,getConfig(){return JSON.parse(JSON.stringify(config));},setConfig(value){if(Array.isArray(value?.suburbs)){config={suburbs:value.suburbs.slice(),postcodes:(value.postcodes||[]).slice()};try{const all=JSON.parse(localStorage.getItem(STORE)||'{}');all[String(currentBusinessId||'default')]=config;localStorage.setItem(STORE,JSON.stringify(all));}catch{}}}};
   const baseAuth=handleAuthedSession;handleAuthedSession=async function(...args){const out=await baseAuth.apply(this,args);if(document.getElementById('view-leads')?.classList.contains('active'))drawManager();return out;};
   function expose(){const count=document.getElementById('cnt-leads');if(count)count.textContent=records.filter(r=>keyStage(r)==='new').length;}
   const LeadManager={render(){drawManager();expose();}};
   // Keep the workspace available from the mobile secondary-navigation sheet.
-  const oldMore=openMoreSheet;openMoreSheet=function(){oldMore();const item=document.querySelector('#more-body [data-sale-action="nav"][data-id="leads"]');if(item)item.textContent='Lead Manager';};
+  const oldMore=openMoreSheet;openMoreSheet=function(){oldMore();const item=document.querySelector('#more-body [data-sale-action="nav"][data-id="leads"]');if(item)item.textContent='Leads Manager';};
 })();

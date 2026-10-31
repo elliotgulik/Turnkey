@@ -299,6 +299,7 @@ export function installSalesPlatform(
                     Date.now() + Number(creds.expires_in || 3600) * 1000,
                   ).toISOString()
                 : null,
+            scope: mode === "oauth" ? (creds.scope || null) : null,
             webhook_token_hash: SM.hash(token),
             webhook_enc: encryptToken(token),
             generation,
@@ -320,17 +321,15 @@ export function installSalesPlatform(
       throw fail("PUBLIC_BACKEND_URL must be the backend HTTPS origin.");
     const token = decryptToken(c.webhook_enc),
       callback = backend + "/api/servicem8/webhook/" + token;
-    for (const object of ["job", "jobpayment"]) {
+    for (const object of ["job", "jobpayment", "jobactivity"]) {
       await call(businessId, "/webhook_subscriptions/object", {
         base: "https://api.servicem8.com",
         generation,
         method: "POST",
         body: new URLSearchParams({
           object,
-          fields:
-            object === "job"
-              ? "status,total_invoice_amount,invoice_sent,payment_received"
-              : "amount,active",
+          fields: object === "job" ? "status,total_invoice_amount,invoice_sent,payment_received"
+            : object === "jobpayment" ? "amount,active" : "job_uuid,staff_uuid,start_date,end_date,activity_was_scheduled,active",
           callback_url: callback,
           unique_id: "turnkey-" + c.generation + "-" + object,
         }),
@@ -391,6 +390,7 @@ export function installSalesPlatform(
         ...health,
         webhookSubscribed: !!c.webhook_subscribed_at,
         webhookSubscribedAt: c.webhook_subscribed_at || null,
+        scheduleSyncPermissionMissing: c.auth_mode === "oauth" && !String(c.scope || "").split(/\s+/).includes("read_schedule"),
         retryAvailable: health.serverConfigured && health.credentialsReady && !health.reconnectRequired && failed.length > 0,
         exhausted: failed.filter(x => x.attempts >= 12).length,
         autoRetrying: failed.filter(x => x.attempts < 12).length,
@@ -628,21 +628,18 @@ export function installSalesPlatform(
         throw fail("ServiceM8 credentials cannot be read. Check EMAIL_TOKEN_KEY and reconnect the account.", 409);
       // Registration uses the stored callback token and stable per-object unique IDs.
       // Repeated clicks are a no-op once both subscriptions have been recorded.
-      if (!c.webhook_subscribed_at) {
-        try { await subscribe(req.businessId); }
-        catch (e) {
-          await unwrap(db.from("servicem8_connections")
-            .update({ last_error: "ServiceM8 webhook registration failed. " + safeError(e) })
-            .eq("business_id", req.businessId).eq("generation", c.generation)
-            .eq("webhook_token_hash", c.webhook_token_hash));
-          throw e;
-        }
-        // Clear only webhook warnings, retaining unrelated transfer diagnostics.
-        if (/webhook registration failed/i.test(c.last_error || "")) await unwrap(db.from("servicem8_connections").update({ last_error: null })
+      try { await subscribe(req.businessId); }
+      catch (e) {
+        await unwrap(db.from("servicem8_connections")
+          .update({ last_error: "ServiceM8 webhook registration failed. " + safeError(e) })
           .eq("business_id", req.businessId).eq("generation", c.generation)
-          .eq("webhook_token_hash", c.webhook_token_hash)
-          .eq("last_error", c.last_error));
+          .eq("webhook_token_hash", c.webhook_token_hash));
+        throw e;
       }
+      if (/webhook registration failed/i.test(c.last_error || "")) await unwrap(db.from("servicem8_connections").update({ last_error: null })
+        .eq("business_id", req.businessId).eq("generation", c.generation)
+        .eq("webhook_token_hash", c.webhook_token_hash)
+        .eq("last_error", c.last_error));
       const updated = await conn(req.businessId);
       if (!updated || updated.generation !== c.generation || updated.webhook_token_hash !== c.webhook_token_hash)
         throw fail("ServiceM8 connection changed during webhook registration. Try again.", 409);
@@ -847,7 +844,7 @@ export function installSalesPlatform(
         return res.type("text").send(req.body.challenge);
       }
       if (
-        !["job", "jobpayment"].includes(req.body.object) ||
+        !["job", "jobpayment", "jobactivity"].includes(req.body.object) ||
         !Array.isArray(req.body.entry) ||
         req.body.entry.length !== 1
       )
@@ -1248,6 +1245,32 @@ export function installSalesPlatform(
         generation: c.generation,
       })
     ).data;
+    let booking = null;
+    let schedulePermissionMissing = false;
+    try {
+      const activities = await listRemote(businessId, "/jobactivity.json?$filter=" +
+        encodeURIComponent("job_uuid eq '" + id + "' and activity_was_scheduled eq 1 and active eq 1"), c.generation);
+      const scheduled = activities.filter(a =>
+        (a.activity_was_scheduled === "1" || a.activity_was_scheduled === 1 || a.activity_was_scheduled === true) &&
+        (a.active == null || a.active === "1" || a.active === 1 || a.active === true) && a.start_date && a.end_date);
+      const parseSMDate = (value) => {
+        const raw = String(value || "").trim();
+        if (!raw) return null;
+        const normalized = raw.includes("T") ? raw : raw.replace(" ", "T");
+        const parsed = new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(normalized) ? normalized : normalized + "Z");
+        return Number.isFinite(parsed.getTime()) ? parsed : null;
+      };
+      const valid = scheduled.map(a => ({ activityUuid: a.uuid, start: parseSMDate(a.start_date), end: parseSMDate(a.end_date) }))
+        .filter(a => a.start && a.end && a.end > a.start).sort((a, b) => a.start - b.start);
+      const current = valid.find(a => a.end.getTime() > Date.now()) || valid.at(-1);
+      if (current) booking = { activityUuid: current.activityUuid, startAt: current.start.toISOString(), endAt: current.end.toISOString(), source: "servicem8" };
+    } catch (e) {
+      // Existing OAuth authorizations predate read_schedule. Keep job-status
+      // sync working if a connection lacks permission or a schedule response
+      // is temporarily unavailable. Booking data is optional to status sync.
+      if (e.status === 403) schedulePermissionMissing = true;
+      else console.warn('[ServiceM8] schedule read failed', { businessId, error: safeError(e) });
+    }
     let paymentTotal = null;
     try {
       const payments = await listRemote(
@@ -1263,6 +1286,8 @@ export function installSalesPlatform(
     const snapshot = {
       ...(map.snapshot?.handoffFingerprint ? { handoffFingerprint: map.snapshot.handoffFingerprint, handoffMode: map.snapshot.handoffMode } : {}),
       status: job.status,
+      booking,
+      schedulePermissionMissing,
       completed: job.status === "Completed",
       active: job.active == null ? null : Number(job.active) === 1,
       invoiceSent: Number(job.invoice_sent) === 1,
@@ -1283,6 +1308,12 @@ export function installSalesPlatform(
         .eq("object_type", "job")
         .eq("external_uuid", id),
     );
+    await unwrap(db.rpc("sync_servicem8_job_state", {
+      p_business_id: businessId,
+      p_job_id: map.local_id,
+      p_status: String(job.status || "Unknown"),
+      p_booking: booking,
+    }));
     await unwrap(
       db
         .from("servicem8_connections")
@@ -1337,6 +1368,9 @@ export function installSalesPlatform(
                 await call(task.business_id, "/jobpayment/" + id + ".json")
               ).data;
               id = pay.job_uuid;
+            } else if (task.payload.object === "jobactivity") {
+              const activity = (await call(task.business_id, "/jobactivity/" + id + ".json")).data;
+              id = activity.job_uuid;
             }
             await refreshRemote(task.business_id, id);
           } else throw fail("Unknown integration task.");

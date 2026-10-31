@@ -7,7 +7,7 @@ vm.runInNewContext(readFileSync(new URL("../../pricing-engine.js", import.meta.u
 const PUBLIC_SERVICES = catalogContext.window.TK_PRICING.SERVICES;
 export const API = "https://api.servicem8.com/api_1.0";
 export const SCOPES =
-  "vendor read_customers manage_customers read_customer_contacts manage_customer_contacts read_jobs create_jobs manage_jobs read_job_materials manage_job_materials read_attachments manage_attachments read_job_payments read_tax_rates";
+  "vendor read_customers manage_customers read_customer_contacts manage_customer_contacts read_jobs create_jobs manage_jobs read_job_materials manage_job_materials read_attachments manage_attachments read_job_payments read_tax_rates read_schedule";
 export const hash = (value) =>
   crypto.createHash("sha256").update(String(value)).digest("hex");
 export const uuid = (value) =>

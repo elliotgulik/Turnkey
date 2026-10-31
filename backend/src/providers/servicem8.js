@@ -43,7 +43,7 @@ export const DEFAULT_SCOPES = [
   'read_jobs', 'manage_jobs', 'create_jobs',
   'read_job_materials', 'manage_job_materials',
   'read_job_attachments', 'manage_job_attachments',
-  'read_job_payments'
+  'read_job_payments', 'read_schedule'
 ]
 
 export function getAuthUrl(redirectUri, state, scopes = DEFAULT_SCOPES) {

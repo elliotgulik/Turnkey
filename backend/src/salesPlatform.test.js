@@ -530,7 +530,27 @@ test('remote status readback preserves sales and quote state', async () => {
   const {worker}=setup(db,async url=>response(url.includes('jobpayment')?[{amount:'40'},{amount:'75'}]:{status:'Completed',active:1,invoice_sent:1,payment_received:1,total_invoice_amount:'115'}));
   await worker.refreshRemote('A',id(3));
   assert.equal(JSON.stringify([db.tables.jobs,db.tables.quotes]),before);
-  assert.deepEqual(db.tables.external_object_mappings[0].snapshot,{status:'Completed',completed:true,active:true,invoiceSent:true,paymentReceived:true,invoicedTotal:115,collectedTotal:115});
+  assert.deepEqual(db.tables.external_object_mappings[0].snapshot,{status:'Completed',booking:null,schedulePermissionMissing:false,completed:true,active:true,invoiceSent:true,paymentReceived:true,invoicedTotal:115,collectedTotal:115});
+});
+test('ServiceM8 scheduled activity syncs booking and status to its linked TurnKey job', async () => {
+  const db=database({
+    servicem8_connections:[{business_id:'A',generation:id(2),auth_mode:'api_key',api_key_enc:encryptToken('test')}],
+    external_object_mappings:[{business_id:'A',connection_generation:id(2),object_type:'job',external_uuid:id(3),local_id:id(4)}]
+  });
+  let localSync;
+  db.rpc=async(name,args)=>{assert.equal(name,'sync_servicem8_job_state');localSync=args;return {data:null,error:null};};
+  const {worker}=setup(db,async url=>{
+    if(url.includes('/jobactivity.json?'))return response([{uuid:id(6),activity_was_scheduled:'1',active:'1',start_date:'2026-11-02 09:00:00',end_date:'2026-11-02 10:30:00'}]);
+    if(url.includes('/jobpayment.json?'))return response([]);
+    return response({status:'Work Order',active:1});
+  });
+  await worker.refreshRemote('A',id(3));
+  assert.equal(localSync.p_business_id,'A');
+  assert.equal(localSync.p_job_id,id(4));
+  assert.equal(localSync.p_status,'Work Order');
+  assert.equal(localSync.p_booking.source,'servicem8');
+  assert.equal(localSync.p_booking.startAt,'2026-11-02T09:00:00.000Z');
+  assert.equal(db.tables.external_object_mappings[0].snapshot.booking.activityUuid,id(6));
 });
 test('a draft-only version can never be transferred even if the quote status says accepted',async()=>{
   const jobId=id(20),quoteId=id(21);
@@ -739,7 +759,7 @@ const webhookConnection=(extra={})=>{
   const token='d'.repeat(64);
   return privateConnection({webhook_enc:encryptToken(token),webhook_token_hash:SM.hash(token),webhook_subscribed_at:null,auto_handoff:true,...extra});
 };
-test('webhooks route registers both subscriptions from stored credentials once, returning safe health',async()=>{
+test('webhooks route refreshes all subscriptions from stored credentials, returning safe health',async()=>{
   const connection=webhookConnection({last_error:'Connected; webhook registration failed. Use manual refresh.'});
   const db=database({users:ownerRows,servicem8_connections:[connection]});const calls=[];
   const before={api_key_enc:connection.api_key_enc,auto_handoff:connection.auto_handoff,webhook_enc:connection.webhook_enc,webhook_token_hash:connection.webhook_token_hash};
@@ -751,11 +771,11 @@ test('webhooks route registers both subscriptions from stored credentials once, 
   let res=await route('POST','/api/sales/servicem8/webhooks',owner);
   assert.equal(res.statusCode,200);assert.equal(res.body.webhookSubscribed,true);assert.ok(res.body.webhookSubscribedAt);
   assert.equal(res.body.credentialsReady,true);assert.equal(res.body.lastError,null);
-  assert.deepEqual(calls.map(c=>c.body.get('object')),['job','jobpayment']);
-  assert.deepEqual(calls.map(c=>c.body.get('unique_id')),[`turnkey-${id(2)}-job`,`turnkey-${id(2)}-jobpayment`]);
+  assert.deepEqual(calls.map(c=>c.body.get('object')),['job','jobpayment','jobactivity']);
+  assert.deepEqual(calls.map(c=>c.body.get('unique_id')),[`turnkey-${id(2)}-job`,`turnkey-${id(2)}-jobpayment`,`turnkey-${id(2)}-jobactivity`]);
   assert.ok(calls.every(c=>c.body.get('callback_url').startsWith('https://backend.example/api/servicem8/webhook/')));
   res=await route('POST','/api/sales/servicem8/webhooks',owner);
-  assert.equal(res.statusCode,200);assert.equal(calls.length,2);
+  assert.equal(res.statusCode,200);assert.equal(calls.length,6);
   for(const [key,value] of Object.entries(before))assert.equal(connection[key],value);
   assert.equal(db.tables.integration_tasks,undefined);assert.equal(db.tables.jobs,undefined);
   assert.doesNotMatch(JSON.stringify(res.body),/synthetic-private-key|_enc|webhook_token_hash|dddddddd/);
