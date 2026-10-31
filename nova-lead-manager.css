@@ -48,3 +48,9 @@
 .nlm-selected-services li{position:relative;padding-left:15px;font-size:13px;font-weight:500;line-height:1.5;color:var(--ink);overflow-wrap:anywhere}
 .nlm-selected-services li::before{content:"";position:absolute;left:1px;top:.6em;width:5px;height:5px;border-radius:50%;background:var(--accent,var(--teal))}
 .nlm-services-empty{margin:0;font-size:12px;color:var(--ink-faint)}
+
+.nlm-form-answers{display:grid;gap:7px;margin:12px 0 0;font-size:12px;line-height:1.5}
+.nlm-form-answers>div{display:grid;grid-template-columns:minmax(100px,auto) 1fr;gap:12px;align-items:baseline}
+.nlm-form-answers dt{color:var(--ink-faint);font-weight:400;overflow-wrap:anywhere}
+.nlm-form-answers dd{margin:0;color:var(--ink);overflow-wrap:anywhere}
+@media(max-width:480px){.nlm-form-answers>div{grid-template-columns:1fr;gap:1px}}

@@ -100,3 +100,16 @@ test('lead cards show received date and exact Auckland time from the original su
   f.manager.render();
   assert.match(f.host.innerHTML, /Received Date not recorded/);
 });
+
+test('Meta poll answers stay separate from services and encoded questions are not split at commas', () => {
+  const leadManager = manager();
+  const record = {source:'Meta',notes:'residential_or_commercial: residential\nurgency: within_the_next_2_weeks\nlist_cleaning_services_below_(house,_roof,_windows_[outside_or_inside?]): house_wash, roof_treatment, windows_outside · Submitted via online quote tool'};
+  assert.deepEqual(Array.from(leadManager.services(record)), ['house wash','roof treatment','windows outside']);
+  const answers = Array.from(leadManager.formAnswers(record), x=>({kind:x.kind,label:x.label,answer:x.answer}));
+  assert.deepEqual(answers.slice(0,2), [
+    {kind:'property',label:'Property type',answer:'residential'},
+    {kind:'timing',label:'Preferred timing',answer:'within the next 2 weeks'},
+  ]);
+  assert.deepEqual(Array.from(leadManager.services({source:'Meta',notes:'urgency: within_the_next_2_weeks'})), []);
+  assert.deepEqual(Array.from(leadManager.services({requestedServices:[{name:'House wash',service_id:'housewash'}]})), ['House wash']);
+});
