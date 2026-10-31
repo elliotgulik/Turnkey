@@ -38,6 +38,9 @@ function serviceM8WallClock(value, timeZone) {
   const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(normalized);
   if (!m) return null;
   const target = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0));
+  const calendar = new Date(target);
+  if (+m[1] < 1000 || calendar.getUTCFullYear() !== +m[1] || calendar.getUTCMonth() + 1 !== +m[2] ||
+      calendar.getUTCDate() !== +m[3] || +m[4] > 23 || +m[5] > 59 || +(m[6] || 0) > 59) return null;
   let guess = target;
   try {
     for (let i = 0; i < 3; i++) {
@@ -51,10 +54,6 @@ function serviceM8WallClock(value, timeZone) {
   const date = new Date(guess);
   return Number.isFinite(+date) ? date : null;
 }
-const serviceM8TimeForFilter = (date, timeZone) => {
-  const p = zoneParts(date, timeZone || "UTC");
-  return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}:${p.second}`;
-};
 const serviceM8Record = (data) => Array.isArray(data) ? data[0] || null : data || null;
 async function serviceM8OptionalRecord(call, businessId, resource, uuid, generation) {
   if (!SM.uuid(uuid)) return null;
@@ -67,34 +66,23 @@ async function serviceM8OptionalRecord(call, businessId, resource, uuid, generat
 }
 async function serviceM8OptionalList(listRemote, businessId, resource, filter, generation) {
   try {
-    return await listRemote(businessId, `/${resource}.json?$filter=${encodeURIComponent(filter)}`, generation);
+    return await listRemote(businessId, `/${resource}.json${filter ? "?$filter=" + encodeURIComponent(filter) : ""}`, generation);
   } catch (error) {
     if ([403, 404].includes(error.status)) return [];
     throw error;
   }
 }
-async function mapServiceM8Limited(items, limit, mapper) {
-  const out = new Array(items.length);
-  let next = 0;
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (next < items.length) {
-      const index = next++;
-      out[index] = await mapper(items[index], index);
-    }
-  }));
-  return out;
-}
-async function serviceM8DispatchDetails({ call, listRemote, businessId, job, activity, generation }) {
+async function serviceM8DispatchDetails({ call, listRemote, businessId, job, activity, generation, cache }) {
   const staffIds = [...new Set([activity.staff_uuid, job.staff_uuid, job.assigned_staff_uuid].filter(SM.uuid))];
   const [company, contacts, materials, assignedStaff] = await Promise.all([
-    serviceM8OptionalRecord(call, businessId, "company", job.company_uuid, generation),
-    SM.uuid(job.company_uuid)
+    cache ? cache.company.get(job.company_uuid) : serviceM8OptionalRecord(call, businessId, "company", job.company_uuid, generation),
+    cache ? cache.contacts.get(job.company_uuid) || [] : SM.uuid(job.company_uuid)
       ? serviceM8OptionalList(listRemote, businessId, "companycontact", `company_uuid eq '${job.company_uuid}' and active eq 1`, generation)
       : [],
-    SM.uuid(job.uuid)
+    cache ? cache.materials.get(job.uuid) || [] : SM.uuid(job.uuid)
       ? serviceM8OptionalList(listRemote, businessId, "jobmaterial", `job_uuid eq '${job.uuid}' and active eq 1`, generation)
       : [],
-    Promise.all(staffIds.map(id => serviceM8OptionalRecord(call, businessId, "staff", id, generation))),
+    cache ? staffIds.map(id => cache.staff.get(id)) : Promise.all(staffIds.map(id => serviceM8OptionalRecord(call, businessId, "staff", id, generation))),
   ]);
   const activeContacts = contacts.filter(contact => contact.active == null || ["1", 1, true].includes(contact.active));
   const contact = activeContacts.find(item => ["1", 1, true].includes(item.is_primary_contact)) || activeContacts[0] || null;
@@ -116,8 +104,9 @@ async function serviceM8DispatchDetails({ call, listRemote, businessId, job, act
     address: [job.job_address, job.job_suburb, job.job_postcode].filter(Boolean).join(", ").slice(0, 500),
     services,
     lineItems: serviceNames,
+    assignedStaffIds: staffIds.map(id => "servicem8:" + id),
     assignedStaff: [...new Set(staffNames)].map(name => name.slice(0, 120)),
-    staffAssigned: staffNames.length > 0,
+    staffAssigned: staffIds.length > 0,
     status: String(job.status || "").slice(0, 80),
   };
 }
@@ -152,7 +141,7 @@ const publicVersion = (v) => {
         services: (Array.isArray(d.services) ? d.services : []).map(l => ({ svc: l.svc, label: l.label,
           qty: l.qty, priceSnapshot: l.priceSnapshot })) } } };
 };
-export async function allRows(db, table, businessId, columns = "*") {
+export async function allRows(db, table, businessId, columns = "*", orderBy = "id") {
   let rows = [];
   for (let offset = 0; ; offset += 1000) {
     const page = await unwrap(
@@ -160,7 +149,7 @@ export async function allRows(db, table, businessId, columns = "*") {
         .from(table)
         .select(columns)
         .eq("business_id", businessId)
-        .order("id")
+        .order(orderBy)
         .range(offset, offset + 999),
     );
     rows.push(...page);
@@ -191,7 +180,7 @@ export function installSalesPlatform(
   const oauthClientReady = !!(env.SERVICEM8_CLIENT_ID && env.SERVICEM8_CLIENT_SECRET) &&
     (typeof oauthProvider.isConfigured !== "function" || oauthProvider.isConfigured());
   const privateReady = encryptionReady && env.ENABLE_SERVICEM8_PRIVATE !== "false";
-  const integrationKinds = ["handoff", "webhook", "refresh_job"];
+  const integrationKinds = ["handoff", "webhook", "refresh_job", "dispatch_seed"];
   const oauthReady = !!(
     oauthClientReady &&
     encryptionReady &&
@@ -409,7 +398,7 @@ export function installSalesPlatform(
     );
     return generation;
   }
-  async function subscribe(businessId) {
+  async function subscribe(businessId, objects = ["job", "jobpayment", "jobactivity"]) {
     const c = await conn(businessId);
     if (!c) throw fail("Connect ServiceM8 before connecting status updates.", 409);
     if (!c.webhook_enc) throw fail("The stored ServiceM8 webhook callback is missing. Reconnect the account.", 409);
@@ -418,7 +407,7 @@ export function installSalesPlatform(
       throw fail("PUBLIC_BACKEND_URL must be the backend HTTPS origin.");
     const token = decryptToken(c.webhook_enc),
       callback = backend + "/api/servicem8/webhook/" + token;
-    for (const object of ["job", "jobpayment", "jobactivity"]) {
+    for (const object of objects) {
       await call(businessId, "/webhook_subscriptions/object", {
         base: "https://api.servicem8.com",
         generation,
@@ -438,6 +427,31 @@ export function installSalesPlatform(
       .eq("webhook_token_hash", tokenHash).select("business_id"));
     if (!saved.length) throw fail("ServiceM8 connection changed during webhook registration. Try again.", 409);
   }
+  async function inspectWebhooks(businessId, c, previousFailures) {
+    const result = await call(businessId, "/webhook_subscriptions?status=all", { generation: c.generation, base: "https://api.servicem8.com" });
+    if (!Array.isArray(result.data)) throw fail("ServiceM8 returned unexpected webhook subscriptions.");
+    const token = c.webhook_enc ? decryptToken(c.webhook_enc) : null;
+    const callback = token ? backend + "/api/servicem8/webhook/" + token : null;
+    const subscriptions = ["job", "jobpayment", "jobactivity"].map(object => {
+      const matches = result.data.filter(row => row.object === object && row.unique_id === `turnkey-${c.generation}-${object}` &&
+        (!callback || row.callback_url === callback));
+      const row = matches.find(item => [true, 1, "1"].includes(item.active)) || matches[0];
+      const reason = row?.last_failure_reason == null ? null : String(row.last_failure_reason)
+        .replace(/https?:\/\/\S+/gi, "[redacted URL]").split(token || "\u0000").join("[redacted]").slice(0, 500);
+      return { object, active: !!row && [true, 1, "1"].includes(row.active), missing: !row,
+        lastFailureReason: reason, lastFailureAt: row?.last_failure_at || null };
+    });
+    if (!previousFailures) {
+      const stored = await unwrap(db.from("external_object_mappings").select("snapshot").eq("business_id", businessId)
+        .eq("connection_generation", c.generation).eq("object_type", "webhook_status").eq("local_id", "servicem8:webhooks").maybeSingle());
+      previousFailures = stored?.snapshot?.previousFailures || [];
+    }
+    const snapshot = { checkedAt: new Date().toISOString(), subscriptions, previousFailures };
+    await unwrap(db.from("external_object_mappings").upsert({ business_id: businessId, connection_generation: c.generation,
+      object_type: "webhook_status", local_id: "servicem8:webhooks", external_uuid: c.generation, snapshot,
+      synced_at: snapshot.checkedAt }, { onConflict: "business_id,connection_generation,object_type,local_id" }));
+    return snapshot;
+  }
   async function enqueue(businessId, kind, key, payload) {
     const { error } = await db
       .from("integration_tasks")
@@ -447,7 +461,9 @@ export function installSalesPlatform(
     // poll — fire-and-forget so an explicit transfer/save request never
     // blocks on (or fails because of) the delivery itself; the task row
     // just queued is the actual durable record of "queued," not this call.
-    tick().catch((e) => console.error("[Sales handoff] immediate wake failed", e.code || e.name));
+    // Bulk seeds wait for the background poll, keeping import IO out of the
+    // calendar request even when provider mocks or adapters resolve immediately.
+    if (kind !== "dispatch_seed") tick().catch((e) => console.error("[Sales handoff] immediate wake failed", e.code || e.name));
   }
   app.get(
     "/api/sales/servicem8/status",
@@ -479,14 +495,25 @@ export function installSalesPlatform(
           .eq("connection_generation", c.generation)
           .eq("object_type", "job"),
       );
+      let webhookHealth;
+      if (req.query.webhooks === "all") webhookHealth = await inspectWebhooks(req.businessId, c);
+      else {
+        const stored = await unwrap(db.from("external_object_mappings").select("snapshot")
+          .eq("business_id", req.businessId).eq("connection_generation", c.generation)
+          .eq("object_type", "webhook_status").eq("local_id", "servicem8:webhooks").maybeSingle());
+        webhookHealth = stored?.snapshot || null;
+      }
       const health = connectionHealth(c);
       const failed = tasks.filter(x => x.state === "failed");
       res.json({
         connected: true,
+        ...(webhookHealth ? { webhookSubscriptions: webhookHealth.subscriptions, webhookHealth } : {}),
         privateEnabled: privateReady,
         ...health,
-        webhookSubscribed: !!c.webhook_subscribed_at,
+        webhookSubscribed: webhookHealth ? webhookHealth.subscriptions.every(row => row.active) : !!c.webhook_subscribed_at,
         webhookSubscribedAt: c.webhook_subscribed_at || null,
+        dispatchSeededAt: c.dispatch_seeded_at || null,
+        dispatchSeedVersion: "v2",
         scheduleSyncPermissionMissing: c.auth_mode === "oauth" && !String(c.scope || "").split(/\s+/).includes("read_schedule"),
         retryAvailable: health.serverConfigured && health.credentialsReady && !health.reconnectRequired && failed.length > 0,
         exhausted: failed.filter(x => x.attempts >= 12).length,
@@ -924,90 +951,9 @@ export function installSalesPlatform(
     wrap(async (req, res) => {
       const c = await conn(req.businessId);
       if (!c) throw fail("Connect ServiceM8 first.", 409);
-      if (c.dispatch_seeded_at) return res.json({ ok: true, synced: 0, total: 0, skipped: true, seededAt: c.dispatch_seeded_at });
-      const vendorResult = await call(req.businessId, "/vendor.json", { generation: c.generation });
-      const vendor = Array.isArray(vendorResult.data) ? vendorResult.data[0] : vendorResult.data;
-      const timeZone = vendor?.timezone_name || "UTC";
-      const filter = "activity_was_scheduled eq 1 and active eq 1";
-      let activities;
-      try {
-        activities = await listRemote(req.businessId, "/jobactivity.json?$filter=" + encodeURIComponent(filter), c.generation);
-      } catch (error) {
-        if (error.status === 403) throw fail("ServiceM8 denied schedule access. Reconnect and approve the read_schedule permission, then sync again.", 403);
-        throw error;
-      }
-      const scheduled = activities.filter(a => (a.activity_was_scheduled === "1" || a.activity_was_scheduled === 1 || a.activity_was_scheduled === true) &&
-        (a.active == null || a.active === "1" || a.active === 1 || a.active === true) && a.uuid && a.job_uuid && a.start_date && a.end_date);
-      if (scheduled.length > 10000) throw fail("ServiceM8 returned too many dispatch bookings for a safe sync. Contact support.", 413);
-      const jobs = new Map();
-      for (const activity of scheduled) {
-        if (jobs.has(activity.job_uuid)) continue;
-        const result = await call(req.businessId, "/job/" + activity.job_uuid + ".json", { generation: c.generation });
-        const row = Array.isArray(result.data) ? result.data[0] : result.data;
-        jobs.set(activity.job_uuid, row || {});
-      }
-      const activeWorkOrderIds = new Set([...jobs].filter(([, job]) =>
-        job.status === "Work Order" && (job.active == null || Number(job.active) === 1),
-      ).map(([jobUuid]) => jobUuid));
-      const events = scheduled.flatMap(activity => {
-        const start = serviceM8WallClock(activity.start_date, timeZone), end = serviceM8WallClock(activity.end_date, timeZone), job = jobs.get(activity.job_uuid) || {};
-        if (!activeWorkOrderIds.has(activity.job_uuid) || !start || !end || end <= start) return [];
-        return [{ activity, job, start, end }];
-      });
-      const detailedEvents = await mapServiceM8Limited(events, 6, async ({ activity, job, start, end }) => {
-        const details = await serviceM8DispatchDetails({ call, listRemote, businessId: req.businessId, job, activity, generation: c.generation });
-        const title = [details.personName, job.job_description || job.job_name].filter(Boolean).join(" · ");
-        const notes = [details.address, `ServiceM8 job ${activity.job_uuid}`].filter(Boolean).join("\n").slice(0, 2000);
-        return { external_id: activity.uuid, title: title.slice(0, 200), start_time: start.toISOString(), end_time: end.toISOString(), notes, details: { ...details, status: String(job.status || "Work Order") } };
-      });
-      for (const event of detailedEvents) {
-        await unwrap(db.rpc("sync_servicem8_dispatch_event", {
-          p_business_id: req.businessId, p_external_id: event.external_id, p_event: event,
-        }));
-      }
-      // Reconcile historical completed ServiceM8 jobs against existing
-      // TurnKey mappings so old quotes are promoted into the Completed stage.
-      const completed = await listRemote(req.businessId, "/job.json?$filter=" + encodeURIComponent("status eq 'Completed'"), c.generation);
-      const completedIds = new Set(completed.filter(job => job.status === "Completed" && job.uuid).map(job => job.uuid));
-      const historicalActivities = completedIds.size
-        ? await listRemote(req.businessId, "/jobactivity.json?$filter=" + encodeURIComponent("activity_was_scheduled eq 1"), c.generation)
-        : [];
-      const latestActivityByJob = new Map();
-      for (const activity of historicalActivities) {
-        if (!completedIds.has(activity.job_uuid) || !activity.uuid || !activity.start_date || !activity.end_date) continue;
-        const previous = latestActivityByJob.get(activity.job_uuid);
-        if (!previous || String(activity.start_date) > String(previous.start_date)) latestActivityByJob.set(activity.job_uuid, activity);
-      }
-      const completedDispatches = await mapServiceM8Limited([...latestActivityByJob.entries()], 6, async ([jobUuid, activity]) => {
-        const job = completed.find(row => row.uuid === jobUuid);
-        const start = serviceM8WallClock(activity.start_date, timeZone), end = serviceM8WallClock(activity.end_date, timeZone);
-        if (!job || !start || !end || end <= start) return null;
-        const details = await serviceM8DispatchDetails({ call, listRemote, businessId: req.businessId, job, activity, generation: c.generation });
-        const title = [details.personName, job.job_description || job.job_name].filter(Boolean).join(" · ");
-        const notes = [details.address, `ServiceM8 job ${jobUuid}`].filter(Boolean).join("\n").slice(0, 2000);
-        return { external_id: activity.uuid, title: title.slice(0,200), start_time: start.toISOString(), end_time: end.toISOString(), notes,
-          details: { ...details, status: "Completed" } };
-      });
-      for (const event of completedDispatches.filter(Boolean)) await unwrap(db.rpc("sync_servicem8_dispatch_event", {
-        p_business_id: req.businessId, p_external_id: event.external_id, p_event: event,
-      }));
-      const mappedJobs = await unwrap(db.from("external_object_mappings").select("local_id,external_uuid,snapshot")
-        .eq("business_id", req.businessId).eq("connection_generation", c.generation).eq("object_type", "job"));
-      const mappingByExternal = new Map((mappedJobs || []).map((mapping) => [mapping.external_uuid, mapping]));
-      let reconciledCompleted = 0;
-      for (const job of completed) {
-        if (job.status !== "Completed" || !job.uuid) continue;
-        const mapping = mappingByExternal.get(job.uuid);
-        if (!mapping || !SM.uuid(mapping.local_id)) continue;
-        await unwrap(db.rpc("sync_servicem8_job_state", {
-          p_business_id: req.businessId, p_job_id: mapping.local_id, p_status: "Completed", p_booking: mapping.snapshot?.booking || null,
-        }));
-        reconciledCompleted++;
-      }
-      await unwrap(db.from("servicem8_connections").update({ last_sync_at: new Date().toISOString(), dispatch_seeded_at: new Date().toISOString(), last_error: null })
-        .eq("business_id", req.businessId).eq("generation", c.generation));
-      const synced = detailedEvents.length + completedDispatches.filter(Boolean).length;
-      res.json({ ok: true, synced, total: synced, reconciledCompleted });
+      if (c.dispatch_seeded_at) return res.json({ ok: true, synced: 0, total: 0, skipped: true, seededAt: c.dispatch_seeded_at, seedVersion: "v2" });
+      await enqueue(req.businessId, "dispatch_seed", "dispatch-seed-v2:" + c.generation, { generation: c.generation });
+      res.status(202).json({ ok: true, queued: true, seedVersion: "v2" });
     }),
   );
   app.get(
@@ -1436,6 +1382,151 @@ export function installSalesPlatform(
     }
     await refreshRemote(task.business_id, remote.external_uuid);
   }
+  // Resource lists are fetched once per seed (plus pagination), never once per event.
+  async function seedDispatch(task) {
+    const businessId = task.business_id, c = await conn(businessId);
+    if (!c || task.payload.generation !== c.generation) throw fail("ServiceM8 connection changed before dispatch import.", 409);
+    if (c.dispatch_seeded_at) return;
+    let checkedAt = 0;
+    const checkpoint = async (force = false) => {
+      if (!force && Date.now() - checkedAt < 60000) return;
+      const claimed = await unwrap(db.from("integration_tasks").update({ lease_until: new Date(Date.now() + 300000).toISOString() })
+        .eq("id", task.id).eq("lease_token", task.lease_token).eq("state", "running").select("id"));
+      if (!claimed.length) throw fail("Dispatch import lease changed. The current worker will retry.", 409);
+      checkedAt = Date.now();
+    };
+    await checkpoint();
+    const seedList = (business, path, generation) => listRemote(business, path, generation, checkpoint);
+    const before = await inspectWebhooks(businessId, c);
+    const missing = before.subscriptions.filter(row => !row.active).map(row => row.object);
+    if (missing.length) {
+      await subscribe(businessId, missing);
+      const after = await inspectWebhooks(businessId, c, [...new Map([...before.previousFailures, ...before.subscriptions.filter(row => row.lastFailureReason)].map(row => [row.object, row])).values()]);
+      if (after.subscriptions.some(row => !row.active)) throw fail("ServiceM8 webhook subscriptions are still inactive. Inspect Connections and retry.", 503);
+    }
+    const vendor = serviceM8Record((await call(businessId, "/vendor.json", { generation: c.generation })).data);
+    const timeZone = vendor?.timezone_name || "UTC";
+    const activities = await seedList(businessId, "/jobactivity.json?$filter=" + encodeURIComponent("activity_was_scheduled eq 1"), c.generation);
+    const jobs = await seedList(businessId, "/job.json", c.generation);
+    // Optional OAuth resources may be unavailable. Only 403/404 are optional;
+    // rate limiting and transient failures must fail the task for durable retry.
+    const staff = await serviceM8OptionalList(seedList, businessId, "staff", "", c.generation);
+    const companies = await serviceM8OptionalList(seedList, businessId, "company", "", c.generation);
+    const contacts = await serviceM8OptionalList(seedList, businessId, "companycontact", "active eq 1", c.generation);
+    const materials = await serviceM8OptionalList(seedList, businessId, "jobmaterial", "active eq 1", c.generation);
+    const grouped = (rows, key) => {
+      const groups = new Map();
+      for (const row of rows) {
+        if (!groups.has(row[key])) groups.set(row[key], []);
+        groups.get(row[key]).push(row);
+      }
+      return groups;
+    };
+    const cache = { company: new Map(companies.map(row => [row.uuid, row])),
+      staff: new Map(staff.map(row => [row.uuid, row])), contacts: grouped(contacts, "company_uuid"), materials: grouped(materials, "job_uuid") };
+    for (const row of staff) {
+      await checkpoint();
+      if (!SM.uuid(row.uuid)) continue;
+      await unwrap(db.from("external_object_mappings").upsert({ business_id: businessId, connection_generation: c.generation,
+        object_type: "staff", local_id: "servicem8:" + row.uuid, external_uuid: row.uuid,
+        snapshot: { name: [row.first, row.last].filter(Boolean).join(" ").trim().slice(0, 160), email: String(row.email || "").slice(0, 254) },
+        synced_at: new Date().toISOString() }, { onConflict: "business_id,connection_generation,object_type,local_id" }));
+    }
+    const byJob = grouped(activities, "job_uuid");
+    for (const job of jobs) {
+      await checkpoint();
+      if (!SM.uuid(job.uuid)) continue;
+      await persistDispatch(businessId, c, job, byJob.get(job.uuid) || [], timeZone, cache, checkpoint);
+    }
+    await reconcileCompleted(businessId, c, jobs, checkpoint);
+    await checkpoint(true);
+    // All event, directory and reconciliation writes must succeed before stamping.
+    const saved = await unwrap(db.from("servicem8_connections").update({ last_sync_at: new Date().toISOString(),
+      dispatch_seeded_at: new Date().toISOString(), last_error: null }).eq("business_id", businessId).eq("generation", c.generation).select("business_id"));
+    if (!saved.length) throw fail("ServiceM8 connection changed before dispatch import was saved.", 409);
+  }
+  async function reconcileCompleted(businessId, c, remoteJobs, checkpoint) {
+    const [current, legacy, handoffs, records, batches, localJobs] = await Promise.all([
+      allRows(db, "external_object_mappings", businessId, "*", "external_uuid"), allRows(db, "servicem8_object_map", businessId),
+      allRows(db, "servicem8_handoffs", businessId), allRows(db, "import_records", businessId),
+      allRows(db, "import_batches", businessId), allRows(db, "jobs", businessId),
+    ]);
+    const locals = new Set(localJobs.map(job => job.id)), candidates = new Map(), reverse = new Map();
+    const add = (external, local, snapshot) => {
+      if (!SM.uuid(external) || !SM.uuid(local) || !locals.has(local)) return;
+      const targets = candidates.get(external) || new Map();
+      targets.set(local, snapshot || targets.get(local) || {}); candidates.set(external, targets);
+      const sources = reverse.get(local) || new Set(); sources.add(external); reverse.set(local, sources);
+    };
+    for (const row of current) if (row.connection_generation === c.generation && row.object_type === "job") add(row.external_uuid, row.local_id, row.snapshot);
+    for (const row of legacy) if (row.local_type === "job" && row.sm8_type === "job") add(row.sm8_uuid, row.local_id);
+    for (const row of handoffs) if (row.status === "synced") add(row.sm8_job_uuid, row.job_id);
+    const serviceM8Batches = new Set(batches.filter(row => row.source === "servicem8").map(row => row.id));
+    const references = new Map();
+    for (const job of remoteJobs) {
+      const ref = String(job.generated_job_id || "").trim();
+      if (ref) references.set(ref, [...(references.get(ref) || []), job.uuid]);
+    }
+    for (const row of records) {
+      if (row.entity_type !== "job" || !serviceM8Batches.has(row.batch_id) || !row.dedupe_key?.startsWith("servicem8:")) continue;
+      const matches = references.get(row.dedupe_key.slice("servicem8:".length));
+      if (matches?.length === 1) add(matches[0], row.entity_id);
+    }
+    for (const job of remoteJobs) {
+      await checkpoint();
+      if (job.status !== "Completed") continue;
+      const matches = candidates.get(job.uuid);
+      if (matches?.size !== 1) continue;
+      const [localId, snapshot] = [...matches][0];
+      if (reverse.get(localId)?.size !== 1) continue;
+      await unwrap(db.rpc("sync_servicem8_job_state", { p_business_id: businessId, p_job_id: localId, p_status: "Completed",
+        p_booking: snapshot.booking || null, p_schedule_permission_missing: true }));
+      await unwrap(db.from("external_object_mappings").upsert({ business_id: businessId, connection_generation: c.generation,
+        object_type: "job", local_id: localId, external_uuid: job.uuid, snapshot: { ...snapshot, status: "Completed", completed: true },
+        synced_at: new Date().toISOString() }, { onConflict: "business_id,connection_generation,object_type,local_id" }));
+    }
+  }
+  async function persistDispatch(businessId, c, job, activities, timeZone, cache, checkpoint = async () => {}) {
+    const completed = job.status === "Completed";
+    if (!completed && (job.status !== "Work Order" || (job.active != null && Number(job.active) !== 1))) return new Set();
+    const saved = new Set(), lookups = new Map();
+    const memo = (key, read) => {
+      if (!lookups.has(key)) lookups.set(key, read());
+      return lookups.get(key);
+    };
+    const detailCall = (business, path, options) => memo(path, () => call(business, path, options));
+    const detailList = (business, path, generation) => memo(path, () => listRemote(business, path, generation));
+    for (const activity of activities) {
+      if (!SM.uuid(activity.uuid) || !["1", 1, true].includes(activity.activity_was_scheduled)) continue;
+      if (!completed && activity.active != null && !["1", 1, true].includes(activity.active)) continue;
+      const start = serviceM8WallClock(activity.start_date, timeZone), end = serviceM8WallClock(activity.end_date, timeZone);
+      if (!start || !end || end <= start || end - start > 86400000) continue;
+      await save(activity, start, end, activity.uuid, "jobactivity");
+    }
+    if (completed && !saved.size) {
+      // Archive records without a booking still belong in Completed. Do not
+      // invent a historical booking date; use a valid completion/edit instant.
+      const parse = value => serviceM8WallClock(/^\d{4}-\d{2}-\d{2}$/.test(String(value || "")) ? value + " 00:00:00" : value, timeZone);
+      const start = parse(job.completion_date) || parse(job.edit_date);
+      const details = await serviceM8DispatchDetails({ call: detailCall, listRemote: detailList, businessId, job, activity: {}, generation: c.generation, cache });
+      await unwrap(db.from("external_object_mappings").upsert({ business_id: businessId, connection_generation: c.generation,
+        object_type: "completed_job", local_id: "servicem8:" + job.uuid, external_uuid: job.uuid,
+        snapshot: { ...details, source: "completed_summary", completedAt: start?.toISOString() || null }, synced_at: new Date().toISOString() },
+        { onConflict: "business_id,connection_generation,object_type,local_id" }));
+      if (start) await save({}, start, new Date(+start + 60000), "completed:" + job.uuid, "completed_summary", details);
+    }
+    return saved;
+    async function save(activity, start, end, externalId, source, cachedDetails) {
+      await checkpoint();
+      const details = cachedDetails || await serviceM8DispatchDetails({ call: detailCall, listRemote: detailList, businessId, job, activity, generation: c.generation, cache });
+      details.source = source;
+      const title = [details.personName, job.job_description || job.job_name].filter(Boolean).join(" · ");
+      await unwrap(db.rpc("sync_servicem8_dispatch_event", { p_business_id: businessId, p_external_id: externalId,
+        p_event: { title: title.slice(0, 200), start_time: start?.toISOString() || null, end_time: end?.toISOString() || null,
+          notes: [details.address, `ServiceM8 job ${job.uuid}`].filter(Boolean).join("\n").slice(0, 2000), details } }));
+      saved.add(externalId);
+    }
+  }
   async function refreshRemote(businessId, id, { allowUnmappedDispatch = false } = {}) {
     if (!SM.uuid(id)) throw fail("Invalid remote reference.");
     const c = await conn(businessId);
@@ -1450,71 +1541,57 @@ export function installSalesPlatform(
         .eq("external_uuid", id)
         .maybeSingle(),
     );
-    if (!map && allowUnmappedDispatch) {
-      const job = serviceM8Record((await call(businessId, "/job/" + id + ".json", { generation: c.generation })).data) || {};
-      let activities = [];
-      if (job.status === "Work Order" && (job.active == null || Number(job.active) === 1)) {
-        activities = await listRemote(businessId, "/jobactivity.json?$filter=" + encodeURIComponent(
-          "job_uuid eq '" + id + "' and activity_was_scheduled eq 1 and active eq 1"), c.generation);
-      } else if (job.status === "Completed") {
-        activities = await listRemote(businessId, "/jobactivity.json?$filter=" + encodeURIComponent(
-          "job_uuid eq '" + id + "' and activity_was_scheduled eq 1"), c.generation);
-      }
-      const vendorResult = await call(businessId, "/vendor.json", { generation: c.generation });
-      const vendor = serviceM8Record(vendorResult.data);
-      const timeZone = vendor?.timezone_name || "UTC";
-      const activeIds = new Set();
-      for (const activity of activities) {
-        const isCompletedJob = job.status === "Completed";
-        if (!SM.uuid(activity.uuid) || !activity.start_date || !activity.end_date) continue;
-        if (!isCompletedJob && activity.active != null && !["1", 1, true].includes(activity.active)) continue;
-        const start = serviceM8WallClock(activity.start_date, timeZone), end = serviceM8WallClock(activity.end_date, timeZone);
-        if (!start || !end || end <= start || end - start > 24 * 60 * 60 * 1000) continue;
-        const details = await serviceM8DispatchDetails({ call, listRemote, businessId, job, activity, generation: c.generation });
-        details.status = String(job.status || "Unknown");
-        const title = [details.personName, job.job_description || job.job_name].filter(Boolean).join(" · ");
-        const notes = [details.address, `ServiceM8 job ${id}`].filter(Boolean).join("\n").slice(0, 2000);
-        await unwrap(db.rpc("sync_servicem8_dispatch_event", { p_business_id: businessId, p_external_id: activity.uuid,
-          p_event: { title: title.slice(0, 200), start_time: start.toISOString(), end_time: end.toISOString(), notes, details } }));
-        activeIds.add(activity.uuid);
-      }
+    if (!map && !allowUnmappedDispatch) return;
+    const job = serviceM8Record((await call(businessId, "/job/" + id + ".json", { generation: c.generation })).data) || {};
+    job.uuid = job.uuid || id;
+    const clearCompleted = ["Work Order", "Quote", "Unsuccessful", "Cancelled", "Canceled"].includes(job.status);
+    if (clearCompleted) {
+      const removed = await unwrap(db.from("external_object_mappings").delete().eq("business_id", businessId)
+        .eq("connection_generation", c.generation).eq("object_type", "completed_job").eq("external_uuid", id).select("external_uuid"));
+      const summary = await unwrap(db.from("calendar_events").select("external_id").eq("business_id", businessId)
+        .eq("source", "servicem8").eq("external_id", "completed:" + id).maybeSingle());
+      if (removed?.length || summary) await unwrap(db.rpc("sync_servicem8_dispatch_event", {
+        p_business_id: businessId, p_external_id: "completed:" + id, p_event: null,
+      }));
+    }
+    let dispatchActivities = [], dispatchPermissionMissing = false, timeZone = "UTC";
+    try {
+      dispatchActivities = await listRemote(businessId, "/jobactivity.json?$filter=" + encodeURIComponent(
+        "job_uuid eq '" + id + "' and activity_was_scheduled eq 1"), c.generation);
+    } catch (error) {
+      if (error.status !== 403) throw error;
+      dispatchPermissionMissing = true;
+    }
+    if (!dispatchPermissionMissing || job.status === "Completed") {
+      const needsDispatch = dispatchActivities.length || (job.status === "Completed" && (job.completion_date || job.edit_date));
+      const vendor = needsDispatch ? serviceM8Record((await call(businessId, "/vendor.json", { generation: c.generation })).data) : null;
+      timeZone = vendor?.timezone_name || "UTC";
+      const activeIds = await persistDispatch(businessId, c, job, dispatchActivities, timeZone);
       const existing = await unwrap(db.from("calendar_events").select("external_id,details").eq("business_id", businessId)
         .eq("source", "servicem8").filter("details->>jobUuid", "eq", id));
       for (const event of existing || []) {
+        if (clearCompleted && event.external_id === "completed:" + id) continue;
         if (job.status === "Completed") {
           await unwrap(db.from("calendar_events").update({ details: { ...(event.details || {}), status: "Completed" } })
             .eq("business_id", businessId).eq("source", "servicem8").eq("external_id", event.external_id));
-        } else if (!activeIds.has(event.external_id)) {
+        } else if (event.details?.status !== "Completed" && !activeIds.has(event.external_id)) {
           await unwrap(db.rpc("sync_servicem8_dispatch_event", { p_business_id: businessId, p_external_id: event.external_id, p_event: null }));
         }
       }
-      return;
     }
     if (!map) return;
-    const job = (
-      await call(businessId, "/job/" + id + ".json", {
-        generation: c.generation,
-      })
-    ).data;
     let booking = null;
-    let schedulePermissionMissing = false;
+    let schedulePermissionMissing = dispatchPermissionMissing;
     try {
-      const activities = await listRemote(businessId, "/jobactivity.json?$filter=" +
-        encodeURIComponent("job_uuid eq '" + id + "' and activity_was_scheduled eq 1 and active eq 1"), c.generation);
+      if (dispatchPermissionMissing) throw { status: 403 };
+      const activities = dispatchActivities;
       const scheduled = activities.filter(a =>
         (a.activity_was_scheduled === "1" || a.activity_was_scheduled === 1 || a.activity_was_scheduled === true) &&
         (a.active == null || a.active === "1" || a.active === 1 || a.active === true) && a.start_date && a.end_date);
-      const parseSMDate = (value) => {
-        const raw = String(value || "").trim();
-        if (!raw) return null;
-        const normalized = raw.includes("T") ? raw : raw.replace(" ", "T");
-        const parsed = new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(normalized) ? normalized : normalized + "Z");
-        return Number.isFinite(parsed.getTime()) ? parsed : null;
-      };
-      const valid = scheduled.map(a => ({ activityUuid: a.uuid, start: parseSMDate(a.start_date), end: parseSMDate(a.end_date) }))
+      const valid = scheduled.map(a => ({ activityUuid: a.uuid, start: serviceM8WallClock(a.start_date, timeZone), end: serviceM8WallClock(a.end_date, timeZone) }))
         .filter(a => a.start && a.end && a.end > a.start).sort((a, b) => a.start - b.start);
       const current = valid.find(a => a.end.getTime() > Date.now()) || valid.at(-1);
-      if (current) booking = { activityUuid: current.activityUuid, startAt: current.start.toISOString(), endAt: current.end.toISOString(), source: "servicem8" };
+      if (current) booking = { activityUuid: current.activityUuid, startAt: current.start.toISOString(), endAt: current.end.toISOString(), timeZone, source: "servicem8" };
     } catch (e) {
       // Existing OAuth authorizations predate read_schedule. Keep job-status
       // sync working if a connection lacks permission or a schedule response
@@ -1569,7 +1646,7 @@ export function installSalesPlatform(
       p_job_id: map.local_id,
       p_status: String(job.status || "Unknown"),
       p_booking: booking,
-      p_schedule_permission_missing: schedulePermissionMissing,
+      p_schedule_permission_missing: schedulePermissionMissing || (job.status === "Completed" && !booking),
     }));
     await unwrap(
       db
@@ -1579,42 +1656,13 @@ export function installSalesPlatform(
         .eq("generation", c.generation),
     );
   }
-  async function syncDispatchWebhookActivity(businessId, c, activity) {
-    const activityId = String(activity.uuid || "");
-    if (!activityId) return activity.job_uuid || null;
-    const linked = await unwrap(db.from("external_object_mappings").select("local_id")
-      .eq("business_id", businessId).eq("connection_generation", c.generation)
-      .eq("object_type", "job").eq("external_uuid", activity.job_uuid).maybeSingle());
-    if (!linked) {
-      const scheduled = ["1", 1, true].includes(activity.activity_was_scheduled) &&
-        (activity.active == null || ["1", 1, true].includes(activity.active));
-      let event = null;
-      if (scheduled && activity.start_date && activity.end_date) {
-        const vendorResult = await call(businessId, "/vendor.json", { generation: c.generation });
-        const vendor = Array.isArray(vendorResult.data) ? vendorResult.data[0] : vendorResult.data;
-        const timeZone = vendor?.timezone_name || "UTC";
-        const start = serviceM8WallClock(activity.start_date, timeZone), end = serviceM8WallClock(activity.end_date, timeZone);
-        if (start && end && end > start && end - start <= 24 * 60 * 60 * 1000) {
-          const result = await call(businessId, "/job/" + activity.job_uuid + ".json", { generation: c.generation });
-          const job = serviceM8Record(result.data) || {};
-          const details = await serviceM8DispatchDetails({ call, listRemote, businessId, job, activity, generation: c.generation });
-          const title = [details.personName, job.job_description || job.job_name].filter(Boolean).join(" · ");
-          const notes = [details.address, `ServiceM8 job ${activity.job_uuid}`].filter(Boolean).join("\n").slice(0, 2000);
-          event = { title: title.slice(0, 200), start_time: start.toISOString(), end_time: end.toISOString(), notes, details };
-        }
-      }
-      await unwrap(db.rpc("sync_servicem8_dispatch_event", {
-        p_business_id: businessId, p_external_id: activityId, p_event: event,
-      }));
-    }
-    return activity.job_uuid || null;
-  }
-  async function listRemote(businessId, path, generation) {
+  async function listRemote(businessId, path, generation, beforePage) {
     const separator = path.includes("?") ? "&" : "?";
     let list = [],
       next = path + separator + "cursor=-1";
     const seen = new Set();
     for (let page = 0; page < 1000; page++) {
+      if (beforePage) await beforePage();
       const { data, nextCursor } = await call(businessId, next, { generation });
       if (!Array.isArray(data))
         throw fail("ServiceM8 returned an unexpected list.");
@@ -1636,7 +1684,8 @@ export function installSalesPlatform(
         const task = tasks?.[0];
         if (!task) break;
         try {
-          if (task.kind === "handoff") await transfer(task);
+          if (task.kind === "dispatch_seed") await seedDispatch(task);
+          else if (task.kind === "handoff") await transfer(task);
           else if (task.kind === "refresh_job")
             await refreshRemote(task.business_id, task.payload.uuid);
           else if (task.kind === "reminder") {
@@ -1667,7 +1716,8 @@ export function installSalesPlatform(
                   .eq("business_id", task.business_id).eq("source", "servicem8")
                   .eq("external_id", id).maybeSingle());
                 const linkedJobUuid = previous?.details?.jobUuid;
-                await unwrap(db.rpc("sync_servicem8_dispatch_event", {
+                // Completed dispatch history survives deleted remote activities.
+                if (!SM.uuid(linkedJobUuid) && previous?.details?.status !== "Completed") await unwrap(db.rpc("sync_servicem8_dispatch_event", {
                   p_business_id: task.business_id, p_external_id: id, p_event: null,
                 }));
                 id = SM.uuid(linkedJobUuid) ? linkedJobUuid : null;
@@ -1675,10 +1725,10 @@ export function installSalesPlatform(
               if (activity) {
                 const c = await conn(task.business_id);
                 if (!c) throw fail("ServiceM8 disconnected.");
-                id = await syncDispatchWebhookActivity(task.business_id, c, activity);
+                id = activity.job_uuid || null;
               }
             }
-            if (id) await refreshRemote(task.business_id, id, { allowUnmappedDispatch: task.payload.object === "job" });
+            if (id) await refreshRemote(task.business_id, id, { allowUnmappedDispatch: ["job", "jobactivity", "jobpayment"].includes(task.payload.object) });
           } else throw fail("Unknown integration task.");
           await unwrap(
             db
