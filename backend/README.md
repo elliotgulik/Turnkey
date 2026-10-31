@@ -124,3 +124,23 @@ Each business shares its own link: `https://your-site.netlify.app/booking.html?b
 ## Sales platform integration adapter
 
 The current frontend uses `/api/sales/servicem8/*`, with durable tasks, browser-bound OAuth state, connection role checks and generation-scoped mappings. The tokened webhook remains `/api/servicem8/webhook/:token`; other legacy ServiceM8 router endpoints listed above return HTTP 410. The original implementation files remain unchanged for provenance. Apply the canonical schema followed by both sales-platform migrations, and configure PUBLIC_BACKEND_URL / FRONTEND_URL. See [the connection guide](../docs/CONNECTIONS_SETUP.md) and [release report](../docs/DEPLOYMENT_REPORT.md) for exact setup and verified deployment state.
+
+
+### Automatic ServiceM8 booking reconciliation
+
+The durable `dispatch-reconcile-v3` task runs on backend startup and then every
+15 minutes. It stores bookings in `calendar_events`, creates or links customer
+and job records for booked Work Orders, and reconciles known job statuses.
+Completed history is preserved; missing records alone never cancel a job.
+Stable IDs, tenant-scoped mappings and task leases make retries idempotent.
+Ambiguous identity matches remain unlinked rather than merging customers.
+
+The `servicem8_background_wakeup` migration schedules a Supabase Cron health
+request to `https://turnkeynova.onrender.com/api/health` every 10 minutes so
+Render can wake without an open browser. This request contains no credentials
+or customer data. The existing server worker performs authenticated sync.
+Monitor `cron.job_run_details`, `net._http_response` and `integration_tasks`;
+network or hosting outages can delay updates. Available ServiceM8 webhooks
+trigger earlier updates; incomplete webhook coverage is reported separately.
+Disable only this wake-up with
+`select cron.unschedule('turnkey-servicem8-background-wakeup');`.
