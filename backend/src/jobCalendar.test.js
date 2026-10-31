@@ -9,7 +9,7 @@ import { installJobCalendar } from './jobCalendar.js'
 const id = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
 const BIZ = 'biz-a', OTHER_BIZ = 'biz-b'
 const owner = id(1), manager = id(2), tech = id(3), otherTech = id(4), foreignUser = id(9)
-const job = id(10), otherJob = id(11), foreignJob = id(12), cancelledJob = id(13)
+const job = id(10), otherJob = id(11), foreignJob = id(12), cancelledJob = id(13), completedJob = id(14)
 const customer = id(20)
 const connection = id(30)
 
@@ -115,7 +115,8 @@ function setup({ rpcImpl, getGoogleCalendarToken, googleConfigured = () => true 
       { id: job, business_id: BIZ, customer_id: customer, status: 'new', assigned_to: null, scheduled_date: null, details: {}, updated_at: '2026-01-01T00:00:00Z' },
       { id: otherJob, business_id: BIZ, customer_id: null, status: 'new', assigned_to: tech, scheduled_date: null, details: { assignedStaffIds: [tech] }, updated_at: '2026-01-01T00:00:00Z' },
       { id: foreignJob, business_id: OTHER_BIZ, status: 'new', assigned_to: null, scheduled_date: null, details: {}, updated_at: '2026-01-01T00:00:00Z' },
-      { id: cancelledJob, business_id: BIZ, status: 'cancelled', assigned_to: null, scheduled_date: null, details: { lostAt: 1 }, updated_at: '2026-01-01T00:00:00Z' }
+      { id: cancelledJob, business_id: BIZ, status: 'cancelled', assigned_to: null, scheduled_date: null, details: { lostAt: 1 }, updated_at: '2026-01-01T00:00:00Z' },
+      { id: completedJob, business_id: BIZ, status: 'completed', assigned_to: null, scheduled_date: '2024-05-10', details: {}, updated_at: '2024-05-10T00:00:00Z' }
     ],
     availability_blocks: [],
     calendar_events: [],
@@ -172,6 +173,12 @@ test('GET /range: unscheduled jobs are always included regardless of range', asy
   const h = setup()
   const res = await h.run('get', '/api/job-calendar/range', { query: { from: '2030-01-01T00:00:00Z', to: '2030-01-08T00:00:00Z' } })
   assert.ok(res.body.jobs.some((j) => j.id === job))
+})
+
+test('GET /range: completed jobs stay available to the Completed section outside the selected date range', async () => {
+  const h = setup()
+  const res = await h.run('get', '/api/job-calendar/range', { query: { from: '2030-01-01T00:00:00Z', to: '2030-01-08T00:00:00Z' } })
+  assert.ok(res.body.jobs.some((j) => j.id === completedJob))
 })
 
 test('GET /range: cancelled jobs are excluded', async () => {
