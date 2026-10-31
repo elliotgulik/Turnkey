@@ -147,7 +147,7 @@ export function installLeadConnections(
         .eq('business_id', businessId).eq('provider', 'meta').maybeSingle());
       if (!row) return res.status(404).json({ error: 'Connect a Meta Page first.' });
       const credentials = decodeMetaCredentials(decrypt(row.token_enc));
-      const result = await importMetaBatch({ businessId, pageId: row.external_id, token: credentials.retrievalToken,
+      const result = await importMetaBatch({ businessId, pageId: row.external_id, token: credentials.pageToken,
         cursor: req.body?.cursor, encrypt, decrypt, fetchEdge, addLead });
       res.json(result);
     } catch (error) {

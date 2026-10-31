@@ -23,3 +23,7 @@ export function decodeMetaCredentials(value) {
   } catch { /* Legacy rows encrypted a single raw Page token. */ }
   return { retrievalToken: value, pageToken: value };
 }
+
+export function decryptMetaCredentials(value, decrypt) {
+  return decodeMetaCredentials(decrypt(value));
+}

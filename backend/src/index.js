@@ -19,7 +19,7 @@ import { validateLeadPayload } from './leadValidation.js'
 import { handleWixLead } from './wixLeads.js'
 import { fetchMetaObject } from './metaGraph.js'
 import { ingestMetaWebhook } from './metaLeads.js'
-import { decodeMetaCredentials } from './metaCredentials.js'
+import { decodeMetaCredentials, decryptMetaCredentials } from './metaCredentials.js'
 import { installLeadConnections, installWixBodyParser } from './leadConnections.js'
 import * as gmail from './providers/gmail.js'
 import * as googleCalendar from './providers/googleCalendar.js'
@@ -514,7 +514,7 @@ app.post('/api/leads/meta', async (req, res) => {
           .from('lead_sources').select('business_id, token_enc').eq('provider', 'meta').eq('external_id', pageId).maybeSingle()
         if (error) throw error
         if (!data) return null
-        return { business_id: data.business_id, pageToken: decodeMetaCredentials(decryptToken(data.token_enc)).retrievalToken }
+        return { business_id: data.business_id, pageToken: decryptMetaCredentials(data.token_enc, decryptToken).pageToken }
       },
       fetchLead: async (leadgenId, pageToken) => {
         const graphRes = await fetchMetaObject(leadgenId, { token: pageToken, fields: 'id,created_time,field_data,form_id,ad_id' })

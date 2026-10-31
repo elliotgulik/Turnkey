@@ -12,7 +12,10 @@ export async function checkMetaConnection({ pageId, token, pageToken = token, re
   const response = await fetchPage(pageId, { token: pageToken, fields: 'id,name' });
   const page = await response.json();
   if (!response.ok || String(page.id) !== pageId) return metaConnectionIssue(page.error);
-  const formsResponse = await fetchEdge(pageId, 'leadgen_forms', { token: retrievalToken, fields: 'id', limit: 1 });
+  // Meta's Page lead edges are authorized with a Page access token. The
+  // system-user/user token is only the credential used to resolve and refresh
+  // that Page token during connection setup.
+  const formsResponse = await fetchEdge(pageId, 'leadgen_forms', { token: pageToken, fields: 'id', limit: 1 });
   const forms = await formsResponse.json();
   if (!formsResponse.ok) return {
     ...metaConnectionIssue(forms.error),

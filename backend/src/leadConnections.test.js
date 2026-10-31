@@ -187,7 +187,7 @@ test('Meta setup uses one System User token and derives the Page token server-si
     body: { pageId: '973487265846279', retrievalToken: 'system-user-token' },
   });
   assert.equal(res.statusCode, 200);
-  assert.equal(calls.find(x => x.edge === 'leadgen_forms').options.token, 'system-user-token');
+  assert.equal(calls.find(x => x.edge === 'leadgen_forms').options.token, 'derived-page-token');
   assert.equal(calls.find(x => x.edge === 'subscribed_apps').options.token, 'derived-page-token');
   assert.equal(res.body.health, 'ready');
   assert.match(encryptedPlaintext, /system-user-token/);
@@ -212,7 +212,7 @@ test("Meta connect accepts one System User token and stores the Page token retur
   });
   assert.equal(res.statusCode, 200);
   assert.equal(calls[0].options.token, "single-system-user-token");
-  assert.equal(calls.find((x) => x.edge === "leadgen_forms").options.token, "single-system-user-token");
+  assert.equal(calls.find((x) => x.edge === "leadgen_forms").options.token, "derived-page-token");
   assert.equal(calls.find((x) => x.edge === "subscribed_apps").options.token, "derived-page-token");
   assert.match(encryptedPlaintext, /single-system-user-token/);
   assert.match(encryptedPlaintext, /derived-page-token/);
@@ -243,7 +243,7 @@ test('Meta accepts a correctly-scoped user token and exchanges it before storing
   assert.equal(res.statusCode, 200);
   assert.deepEqual(checks, ['short-lived-user-token', 'exchanged-user-token']);
   assert.equal(calls.find(x => x.edge === 'page').options.token, 'exchanged-user-token');
-  assert.equal(calls.find(x => x.edge === 'leadgen_forms').options.token, 'exchanged-user-token');
+  assert.equal(calls.find(x => x.edge === 'leadgen_forms').options.token, 'page-scoped-token');
   assert.equal(calls.find(x => x.edge === 'subscribed_apps').options.token, 'page-scoped-token');
   assert.equal(res.body.tokenType, 'USER');
   assert.equal(res.body.adsReportingAvailable, false);
@@ -434,9 +434,11 @@ test('a missing Meta mapping and unreadable credential cannot trigger external r
 test('Meta historical import ignores client tenant/Page IDs and stores only mapped business leads', async () => {
   const db = fakeDb([meta, {...meta,id:'other',business_id:'B',external_id:'222'}]);
   const saved=[];
-  const route=setup(db,{addLead:async p=>{saved.push(p);return {id:'saved'};},fetchEdge:async(id,edge)=>({ok:true,json:async()=>({data:edge==='leadgen_forms'?(assert.equal(id,'111'),[{id:'333'}]):[{id:'444',form_id:'333',created_time:'2026-09-01',field_data:[{name:'full_name',values:['Fixture']}]}]})})});
+  const calls=[];
+  const route=setup(db,{decrypt:()=>JSON.stringify({version:1,retrievalToken:'system-user-token',pageToken:'derived-page-token'}),addLead:async p=>{saved.push(p);return {id:'saved'};},fetchEdge:async(id,edge,options)=>{calls.push({id,edge,options});return {ok:true,json:async()=>({data:edge==='leadgen_forms'?(assert.equal(id,'111'),[{id:'333'}]):[{id:'444',form_id:'333',created_time:'2026-09-01',field_data:[{name:'full_name',values:['Fixture']}]}]})}}});
   const res=await route('POST /api/connections/meta/import',{body:{businessId:'B',pageId:'222',formId:'999'}});
   assert.equal(res.statusCode,200);assert.equal(res.body.imported,1);assert.equal(saved[0].business_id,'A');assert.equal(saved[0].historicalImport,true);assert.equal(saved[0].external_id,'444');assert.equal(JSON.stringify(res.body).includes('private-page-token'),false);
+  assert.ok(calls.every(call=>call.options.token==='derived-page-token'));
 });
 test('Meta import storage failure is retryable and never claims completion', async () => {
   const db=fakeDb([meta]);

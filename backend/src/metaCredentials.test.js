@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { decodeMetaCredentials, encodeMetaCredentials } from './metaCredentials.js';
+import { decodeMetaCredentials, decryptMetaCredentials, encodeMetaCredentials } from './metaCredentials.js';
 
 test('versioned Meta credentials keep permanent lead retrieval and Page subscription tokens distinct', () => {
   const encoded = encodeMetaCredentials({ retrievalToken: 'system-user-token', pageToken: 'page-token' });
@@ -10,6 +10,11 @@ test('versioned Meta credentials keep permanent lead retrieval and Page subscrip
 
 test('legacy encrypted single-token rows remain usable for both Meta operations', () => {
   assert.deepEqual(decodeMetaCredentials('legacy-page-token'), { retrievalToken: 'legacy-page-token', pageToken: 'legacy-page-token' });
+});
+
+test('webhook credential lookup selects the Page token, not the system-user token', () => {
+  const encoded = encodeMetaCredentials({ retrievalToken: 'system-user-token', pageToken: 'page-token' });
+  assert.equal(decryptMetaCredentials(`encrypted:${encoded}`, value => value.slice('encrypted:'.length)).pageToken, 'page-token');
 });
 
 test('rejects missing or malformed credentials without exposing token contents', () => {
