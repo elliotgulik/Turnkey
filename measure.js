@@ -24,13 +24,13 @@ const kind = ['area', 'perimeter', 'line'].includes(params.get('kind')) ? params
 const interaction = kind === 'line' ? 'open' : 'closed';
 const startLat = parseFloat(params.get('lat'));
 const startLng = parseFloat(params.get('lng'));
-// Camera coordinates are only a fallback until the address is resolved.
+// Keep the original selected location pinned until an address resolves.
 let propertyPosition = Object.freeze({lat:startLat,lng:startLng});
 const propertyAddress = (params.get('address') || params.get('propertyAddress') || '').trim();
 let propertyResolved = false;
 let propertyLabel = propertyAddress
-  ? `${propertyAddress} — locating address; pin marks original Earth camera location`
-  : 'Original Earth camera location — no property address supplied';
+  ? `${propertyAddress} — locating address; pin marks the selected location`
+  : 'Selected location — no property address supplied';
 
 const els = {
   category: document.getElementById('tkm-category'),
@@ -199,10 +199,10 @@ els.modeToggle.addEventListener('click', (e) => {
 
 // Updating an address anchor never edits history, points, or the current camera.
 function updatePropertyAnchor(){
-  const shortLabel = propertyResolved ? 'Property' : 'Camera fallback';
+  const shortLabel = propertyResolved ? 'Property' : 'Location pin';
   document.getElementById('tkm-property-address').textContent = propertyLabel;
   document.getElementById('tkm-return-property').textContent = propertyResolved
-    ? 'Return to property' : 'Return to original camera';
+    ? 'Return to property' : 'Return to location pin';
   propertyMarker2d?.setOptions({position:propertyPosition,title:propertyLabel,
     label:{text:shortLabel,color:'#9b341e',fontWeight:'bold'}});
   if(propertyMarker3d){
@@ -236,7 +236,7 @@ async function resolvePropertyAnchor(){
     propertyResolved = true;
     propertyLabel = result.formatted_address || propertyAddress;
   } catch {
-    propertyLabel = `${propertyAddress} — address lookup unavailable or inconclusive; pin marks original Earth camera location`;
+    propertyLabel = `${propertyAddress} — address lookup unavailable or inconclusive; pin remains at the selected location`;
   } finally {
     clearTimeout(timer);
     updatePropertyAnchor();

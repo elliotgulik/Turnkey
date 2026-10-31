@@ -6,6 +6,7 @@ import { encryptToken, decryptToken } from "./crypto.js";
 import { fetchMetaObject, fetchMetaEdge } from "./metaGraph.js";
 import { checkMetaConnection } from "./metaConnectionHealth.js";
 import { decodeMetaCredentials, encodeMetaCredentials } from "./metaCredentials.js";
+import { inspectMetaSystemUserToken } from "./metaTokenValidation.js";
 
 export function installWixBodyParser(app) {
   app.use("/api/leads/wix", express.json({ limit: "64kb" }));
@@ -76,6 +77,7 @@ export function installLeadConnections(
     generateToken = generateWixToken,
     env = process.env,
     addLead,
+    inspectToken = inspectMetaSystemUserToken,
   },
 ) {
   const wrap = (message, fn) => async (req, res) => {
@@ -83,17 +85,18 @@ export function installLeadConnections(
       await fn(req, res);
     } catch (error) {
       const isConflict = error.status === 409 || error.code === "23505";
+      const safeStatus = [400, 403, 502, 503].includes(error.status) ? error.status : 503;
       console.error(
         "[Lead connections]",
         error.code || error.status || error.name,
       );
       res
-        .status(isConflict ? 409 : 503)
+        .status(isConflict ? 409 : safeStatus)
         .json({
           error: isConflict
             ? error.publicMessage ||
               "This connection is already linked or changed. Refresh Connections and try again."
-            : message,
+            : error.publicMessage || message,
         });
     }
   };
@@ -185,12 +188,11 @@ export function installLeadConnections(
     requireBusiness,
     wrap("Could not connect this Meta Page.", async (req, res) => {
       const pageId = String(req.body?.pageId || "").trim(),
-        suppliedPageToken = String(req.body?.pageToken || "").trim(),
-        retrievalToken = String(req.body?.retrievalToken || req.body?.token || suppliedPageToken).trim();
-      if (!/^\d{1,40}$/.test(pageId) || (suppliedPageToken.length > 10000) || !retrievalToken || retrievalToken.length > 10000)
+        retrievalToken = String(req.body?.retrievalToken || req.body?.token || "").trim();
+      if (!/^\d{1,40}$/.test(pageId) || !retrievalToken || retrievalToken.length > 10000)
         return res
           .status(400)
-          .json({ error: "Page ID and Meta access token are required" });
+          .json({ error: "Page ID and non-expiring TurnKey System User token are required" });
       const mapped = await unwrap(
         db
           .from("lead_sources")
@@ -203,8 +205,12 @@ export function installLeadConnections(
         throw conflict(
           "This Meta Page is already connected to another business.",
         );
+      // Reject short-lived personal tokens before storing them. This makes
+      // the supported setup a one-time System User credential, not a cycle of
+      // reconnecting every time a Graph Explorer token expires.
+      await inspectToken({ token: retrievalToken, appId: env.META_APP_ID, appSecret: env.META_APP_SECRET });
       const check = await fetchPage(pageId, {
-          token: suppliedPageToken || retrievalToken,
+          token: retrievalToken,
           fields: "id,name,access_token",
         }),
         page = await check.json();
@@ -218,7 +224,9 @@ export function installLeadConnections(
       // Meta can return the Page-scoped token when an authorized user/System
       // User token reads the Page node. Store both encrypted, but ask the user
       // for just the one durable credential.
-      const pageToken = suppliedPageToken || page.access_token || retrievalToken;
+      // The browser submits only the durable System User token. Resolve the
+      // Page-scoped token server-side; never ask the user to paste one.
+      const pageToken = page.access_token || retrievalToken;
       await saveLeadConnection(db, req.businessId, "meta", {
         external_id: pageId,
         token_enc: encrypt(encodeMetaCredentials({ retrievalToken, pageToken })),

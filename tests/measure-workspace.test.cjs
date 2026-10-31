@@ -98,11 +98,11 @@ for(const legacy of [false,true])for(const lookup of ['success','denied','empty'
   const anchor=lookup==='success'?{lat:-36.81,lng:174.71}:{lat:-36.8,lng:174.7};
   const label=await page.locator('#tkm-property-address').textContent();
   if(lookup==='success')assert.equal(label,'12 Test Road');
-  else assert.match(label,/original Earth camera location/i);
+  else assert.match(label,/selected location|no property address supplied/i);
   assert.deepEqual(await page.locator('test-property-marker').evaluate(m=>m.position),anchor);
   assert.deepEqual(await page.evaluate(()=>mapsTest.markers2d[0].position),anchor);
   assert.deepEqual(await page.evaluate(()=>({...mapsTest.map3d.center})),cameraBefore);
-  assert.equal(await page.locator('#tkm-return-property').textContent(),lookup==='success'?'Return to property':'Return to original camera');
+  assert.equal(await page.locator('#tkm-return-property').textContent(),lookup==='success'?'Return to property':'Return to location pin');
   await page.locator('#tkm-return-property').click();
   assert.deepEqual(await page.evaluate(()=>mapsTest.map3d.lastFlight.endCamera),{
    center:anchor,altitudeMode:'CLAMP_TO_GROUND',range:300,heading:0,tilt:60,roll:0});

@@ -89,6 +89,15 @@ test('quotes are created as drafts, never a fake-sent/approved status, and carry
   assert.equal('quoteSentAt' in jobDetails, false);
 });
 
+test('house levels, site access and itemised service options are saved with the quote',async()=>{
+ const {createQuoteDraft}=await loadModule();const api=makeApi();
+ const payload={...samplePayload,lines:[{svc:'housewash',qty:70,storeys:3,fixedPrice:720}],assumptions:{access:'hard',premium:false},costSnapshot:{access:'hard',recommended:720}};
+ const result=await createQuoteDraft(api,{}, {businessId:'biz1',payload});
+ const details=api.calls.createJob[0].payload.details;
+ assert.equal(details.services[0].storeys,3);assert.equal(details.assumptions.access,'hard');
+ assert.equal(details.costSnapshot.access,'hard');assert.equal(result.job.id,'job_1');
+});
+
 test('retrying after createJob fails reuses the already-created customer and quote, never duplicating them', async () => {
   const { createQuoteDraft } = await loadModule();
   let jobAttempt = 0;

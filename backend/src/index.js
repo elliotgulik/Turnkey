@@ -434,12 +434,12 @@ app.post('/api/leads/ack', requireBusiness, async (req, res) => {
    time, the same way most API-key UIs work, so there's nothing to decrypt
    or leak later.
 
-   Meta — requires the business to create a Meta App (Webhooks + Marketing
-   API products, leads_retrieval permission, App Review for production),
-   generate a long-lived Page Access Token, and paste the Page ID + token
-   into Connections. Meta's webhook only sends a lightweight ping
-   ({leadgen_id, page_id}) — the actual field data is fetched separately
-   via the Graph API using the stored Page token.
+   Meta — requires a Meta App (Webhooks + Marketing API), a System User token
+   set to Never with the required permissions, and the TurnKey app/Page/ad
+   account assigned to that System User. Connections accepts the Page ID and
+   that one token; the backend validates expiry and derives the Page token.
+   Meta's webhook sends only a lightweight ping; lead data is fetched through
+   the Graph API using the stored credentials.
    ===================================================================== */
 const META_APP_SECRET = process.env.META_APP_SECRET || ''
 const META_VERIFY_TOKEN = process.env.META_VERIFY_TOKEN || ''
@@ -862,8 +862,9 @@ app.get('/api/calendar/oauth/start', requireBusiness, (req, res) => {
     if (!googleCalendar.isConfigured()) return res.status(503).json({ error: 'Google Calendar is not configured on this server yet' })
     const origin = String(req.query.origin || '').slice(0, 200)
     if (!/^https?:\/\/[a-zA-Z0-9.-]+(:\d+)?$/.test(origin)) return res.status(400).json({ error: 'Missing or invalid origin' })
-    const redirectUri = `https://${req.get('host')}/api/calendar/oauth/callback/google`
+    const redirectUri = googleCalendarRedirectUri(req)
     const state = signState({ businessId: req.businessId, userId: req.userId, provider: 'google', origin, nonce: crypto.randomUUID() })
+    console.log('[Calendar OAuth] authorization request', { redirectUri })
     res.json({ url: googleCalendar.getAuthUrl(redirectUri, state) })
   } catch (err) {
     console.error('Calendar OAuth start failed', { businessId: req.businessId, error: err.message, stack: err.stack })
@@ -878,7 +879,7 @@ app.get('/api/calendar/oauth/callback/google', async (req, res) => {
   if (!claims) return bounce('error', 'That connection request expired or was invalid — please try again')
   if (!googleCalendar.isConfigured()) return bounce('error', 'Google Calendar is not configured')
   try {
-    const redirectUri = `https://${req.get('host')}/api/calendar/oauth/callback/google`
+    const redirectUri = googleCalendarRedirectUri(req)
     const tok = await googleCalendar.exchangeCode(req.query.code, redirectUri)
     const { error } = await authClient.from('calendar_connections').upsert({
       business_id: claims.businessId, user_id: claims.userId, provider: 'google', ical_url: '',
@@ -1414,11 +1415,14 @@ app.listen(PORT, () => {
   }
   // Wix needs no server-wide config (its secret is generated per-business
   // in Connections) so there's nothing to diagnose at boot for it. Meta
-  // does need two server-wide values before ANY business can connect a Page.
+  // webhook validation and durable-token verification have separate settings.
   if (isMetaConfigured()) {
     console.log('✅ Meta Lead Ads configured (META_APP_SECRET + META_VERIFY_TOKEN both set)')
   } else {
     const missing = [!META_APP_SECRET && 'META_APP_SECRET', !META_VERIFY_TOKEN && 'META_VERIFY_TOKEN'].filter(Boolean)
     console.warn(`⚠️  Meta Lead Ads NOT configured — missing ${missing.join(' and ')} in this server's environment. The webhook verification handshake and signature checks will both fail until these are set. See .env.example for where to get each value.`)
+  }
+  if (!process.env.META_APP_ID) {
+    console.warn('⚠️  Meta durable-token validation unavailable — set META_APP_ID on Render; Connections will reject Meta token setup until this matches the TurnKey Meta app.')
   }
 })

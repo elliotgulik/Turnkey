@@ -1,3 +1,7 @@
+## Version 0.2.8: quote levels and access settings
+
+Instant Quote lets you set house levels per house-wash line and site access difficulty for the whole job. Both feed the recommended price and internal labour estimate, and are saved on the TurnKey draft. Itemised prices and internal expenses are separated into clearer sections. An unresolved address is labelled **Location pin**; the pin remains on the map.
+
 ## Version 0.2.7: quote handoff and property location
 
 “Open in TurnKey” reuses an existing CRM tab, focuses its window and loads the saved quote. If no CRM tab is open, it opens one. Public quotes and measurement tabs are never replaced. Opening a saved quote reloads the CRM to fetch its latest saved data; save other edits first.

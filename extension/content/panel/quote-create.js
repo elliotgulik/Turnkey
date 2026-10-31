@@ -48,7 +48,7 @@ export async function createQuoteDraft(api, progress, { businessId, payload, bin
 
   const details = {
     address:payload.address || '', services:payload.lines, total:payload.total, areaPolys:payload.areaPolys,
-    ...(payload.costSnapshot ? {costSnapshot:payload.costSnapshot,estimatedCost:payload.estimatedCost,estimatedMarginPct:payload.estimatedMarginPct,gstRegistered:payload.gstRegistered,targetMargin:payload.targetMargin} : {})
+    ...(payload.costSnapshot ? {costSnapshot:payload.costSnapshot,estimatedCost:payload.estimatedCost,estimatedMarginPct:payload.estimatedMarginPct,gstRegistered:payload.gstRegistered,targetMargin:payload.targetMargin,assumptions:payload.assumptions} : {})
   };
   let quote = progress.quote, job = progress.job;
   if (binding?.jobId) {

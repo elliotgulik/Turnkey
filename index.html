@@ -381,6 +381,7 @@
   .svc-line{display:grid;grid-template-columns:1.4fr 80px 1fr auto auto;gap:8px;align-items:center;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--radius-sm);padding:11px 12px}
   .svc-line select,.svc-line input{padding:8px 10px;font-size:13px;background:var(--surface)}
   .sl-roof{grid-column:1/-1;margin-top:4px;width:100%}
+  .sl-detail-control{grid-column:1/-1;display:grid;gap:5px;margin-top:4px;color:var(--ink-faint);font-size:12px;font-weight:600}
   .sl-price{display:flex;align-items:center;gap:4px}
   .sl-rate-wrap{display:flex;align-items:center;gap:3px}
   .sl-at{font-size:11px;color:var(--ink-faint)}
@@ -2905,7 +2906,7 @@ function switchView(v){
   document.querySelectorAll('.view').forEach(s=>s.classList.remove('active'));
   document.getElementById('view-'+v).classList.add('active');
   setAccent(v);
-  if(currentBusinessId)try{sessionStorage.setItem('turnkey-view:'+currentBusinessId,v);}catch(e){}
+  if(typeof currentBusinessId!=='undefined'&&currentBusinessId)try{sessionStorage.setItem('turnkey-view:'+currentBusinessId,v);}catch(e){}
   if(v==='calendar')renderCalendar();
   if(v==='inbox')renderInbox();
   if(v==='jobsflow')renderJobsFlow();
@@ -4191,18 +4192,20 @@ function renderSvcLines(){
     let extraRow='';
     if(svc.usesRoofType){
       if(!line.roofType)line.roofType='concrete';
-      extraRow='<select class="sl-roof" onchange="draftLines['+i+'].roofType=this.value;draftLines['+i+'].customRate=null;renderSvcLines()">'+
+      extraRow='<select class="sl-roof" aria-label="Roof material" onchange="draftLines['+i+'].roofType=this.value;draftLines['+i+'].customRate=null;draftLines['+i+'].fixedPrice=null;renderSvcLines()">'+
         Object.entries(ROOF_TYPES).map(([k,v])=>`<option value="${k}" ${k===line.roofType?'selected':''}>Roof type: ${v.label} (\u00d7${v.mult})</option>`).join('')+'</select>';
     }
     if(line.svc==='housewash'){
       if(!line.storeys)line.storeys=1;
-      extraRow='<select class="sl-roof" onchange="draftLines['+i+'].storeys=+this.value;draftLines['+i+'].customRate=null;renderSvcLines()">'+
+      extraRow='<label class="sl-detail-control">House levels<select class="sl-roof" aria-label="House levels for house wash service" onchange="draftLines['+i+'].storeys=+this.value;draftLines['+i+'].customRate=null;draftLines['+i+'].fixedPrice=null;renderSvcLines()">'+
         Object.entries(STOREY_TYPES).map(([k,v])=>`<option value="${k}" ${+k===line.storeys?'selected':''}>${v.label}${k>1?' (\u00d7'+v.mult+')':''}</option>`).join('')+'</select>';
+      extraRow=extraRow+'</label>';
     }
     if(line.svc==='fence'){
       if(!line.sides)line.sides=1;
-      extraRow='<select class="sl-roof" onchange="draftLines['+i+'].sides=+this.value;draftLines['+i+'].customRate=null;renderSvcLines()">'+
+      extraRow='<label class="sl-detail-control">Fence sides<select class="sl-roof" aria-label="Fence sides to clean" onchange="draftLines['+i+'].sides=+this.value;draftLines['+i+'].customRate=null;draftLines['+i+'].fixedPrice=null;renderSvcLines()">'+
         Object.entries(FENCE_SIDES).map(([k,v])=>`<option value="${k}" ${+k===line.sides?'selected':''}>${v.label}${+k>1?' (\u00d7'+v.mult+')':''}</option>`).join('')+'</select>';
+      extraRow=extraRow+'</label>';
     }
     const isFixed=line.fixedPrice!=null;
     const isWindows=line.svc==='windows';
@@ -4305,10 +4308,10 @@ function renderAssumptions(){
   const adj=quoteTotal()-base;
   zone.innerHTML=`
     <div class="assume-box">
-      <div class="assume-h">Adjust assumptions <span class="assume-hint">these move the price before you send</span></div>
+      <div class="assume-h">Property conditions <span class="assume-hint">Adjust site access and surface care; estimates update instantly.</span></div>
       <div class="assume-row">
-        <div class="assume-label">Access difficulty<div class="assume-sub">Adjusts quote price and crew-time estimate</div></div>
-        <div class="seg">${Object.entries(ACCESS_OPTS).map(([k,v])=>`<button class="seg-btn ${quoteAssumptions.access===k?'sel':''}" onclick="setAssumeAccess('${k}')">${v.label}</button>`).join('')}</div>
+        <div class="assume-label">Site access<div class="assume-sub">Changes the price and estimated crew time</div></div>
+        <div class="seg">${Object.entries(ACCESS_OPTS).map(([k,v])=>`<button type="button" class="seg-btn ${quoteAssumptions.access===k?'sel':''}" aria-pressed="${quoteAssumptions.access===k}" title="${v.note}" onclick="setAssumeAccess('${k}')">${v.label}</button>`).join('')}</div>
       </div>
       <div class="assume-row">
         <div class="assume-label">Premium / delicate surface<div class="assume-sub">painted, heritage, or soft-wash-only — +12%</div></div>
@@ -8554,9 +8557,10 @@ function renderMetaConnectionCard(){
     ${m.connected?`<p>Page ${escapeHtmlSafe(m.pageId)}${m.pageName?' · '+escapeHtmlSafe(m.pageName):''}</p><p>${escapeHtmlSafe(m.message||'Meta connection saved. Check lead delivery status.')}</p><p>${leadReceiptLabel(m)}</p><div class="quote-action-row"><button class="btn ghost sm" onclick="checkMetaDelivery(false,this)">Check connection</button><button class="btn accent sm" onclick="checkMetaDelivery(true,this)">Enable lead delivery</button><button class="btn accent sm" onclick="TK_META_IMPORT.start()">Import existing leads</button><button class="btn ghost sm" onclick="disconnectMeta()">Disconnect</button></div><p id="meta-import-progress" role="status"></p>`:''}
     <div class="quote-action-row"><button class="btn ghost sm" onclick="openMetaAdsAnalytics()">Ad spend &amp; campaign insights</button></div>
     <details ${!m.connected||m.health==='reconnect'||m.health==='permissions'||m.health==='retrieval_permissions'?'open':''}><summary>${m.connected?'Reconnect Page':'Connect your Page'}</summary>
-      <p><b>One token only.</b> Paste your Meta user or System User token. TurnKey securely requests the matching Page token itself, then uses your saved token for lead retrieval and ad reporting. For the longest life, use a System User token set to <b>Never</b> and assigned the TurnKey app, NZ Nova Exterior Page and ad account. Grant <code>leads_retrieval</code>, <code>pages_manage_metadata</code> and <code>ads_read</code>, and allow TurnKey in Meta Leads Access. Meta can still revoke tokens.</p>
-      <div class="conn-keyrow"><input id="conn-meta-pageid" aria-label="Meta Page ID" placeholder="Page ID" value="${escapeHtmlSafe(m.pageId||'')}"></div>
-      <div class="conn-keyrow" style="margin-top:6px"><input id="conn-meta-retrieval-token" aria-label="Meta user or System User access token" placeholder="Meta access token — leads and ads" type="password" autocomplete="off"><button class="btn accent sm" onclick="connectMeta()">${m.connected?'Reconnect':'Connect'}</button></div>
+      <p><b>Connect once with a non-expiring System User token.</b> Do not use your Meta user ID or a Graph API Explorer/personal token. TurnKey verifies the token is for this app and set to Never, then retrieves and stores the Page token securely on the server. Meta can still revoke it if the app, business, Page access or permissions change.</p>
+      <p>In Meta Business Settings → Users → System Users, assign the TurnKey app, NZ Nova Exterior Page and ad account. Generate a token for the TurnKey app with expiration <b>Never</b> and <code>leads_retrieval</code>, <code>pages_manage_metadata</code> and <code>ads_read</code>. Ensure TurnKey is allowed under the Page’s Leads Access settings.</p>
+      <div class="conn-keyrow"><input id="conn-meta-pageid" aria-label="Meta Page ID" placeholder="Page ID (NZ Nova Exterior)" value="${escapeHtmlSafe(m.pageId||'')}"></div>
+      <div class="conn-keyrow" style="margin-top:6px"><input id="conn-meta-retrieval-token" aria-label="Non-expiring Meta System User access token" placeholder="TurnKey System User token — Expires: Never" type="password" autocomplete="off"><button class="btn accent sm" onclick="connectMeta()">${m.connected?'Reconnect':'Connect'}</button></div>
     </details></div>`;
 }
 function openMetaAdsAnalytics(){
@@ -8627,7 +8631,7 @@ async function disconnectWix(){
 async function connectMeta(){
   const pageId=(document.getElementById('conn-meta-pageid')?.value||'').trim();
   const retrievalToken=(document.getElementById('conn-meta-retrieval-token')?.value||'').trim();
-  if(!pageId||!retrievalToken){toast('Enter the Page ID and one Meta access token');return;}
+  if(!pageId||!retrievalToken){toast('Enter the Page ID and the TurnKey System User token (Expires: Never)');return;}
   const url=backendUrl();
   const {data:{session}}=await sb.auth.getSession();
   if(!url||!session){toast('Please sign in again');return;}
@@ -8930,8 +8934,10 @@ async function handleSignIn(){
   if(!email||!password){setAuthMsg('Enter your email and password');return;}
   setAuthBusy(true);
   setAuthMsg('Signing in…');
-  const {error}=await sb.auth.signInWithPassword({email,password});
-  setAuthBusy(false);
+  let error;
+  try{({error}=await sb.auth.signInWithPassword({email,password}));}
+  catch(e){setAuthMsg(friendlyAuthError(e?.message||'Could not reach the sign-in service. Check your connection and try again.'));return;}
+  finally{setAuthBusy(false);}
   if(error){
     // TEMPORARY (frontend-only UX change, not a backend/Supabase setting):
     // don't show any "too many attempts"-style message on the login screen
@@ -8966,8 +8972,10 @@ async function handleForgotPassword(){
   if(!email){setAuthMsg('Enter your email above first, then tap "Forgot your password?"');return;}
   setAuthBusy(true);
   setAuthMsg('Sending a reset link…');
-  const {error}=await sb.auth.resetPasswordForEmail(email,{redirectTo:window.location.origin+window.location.pathname});
-  setAuthBusy(false);
+  let error;
+  try{({error}=await sb.auth.resetPasswordForEmail(email,{redirectTo:window.location.origin+window.location.pathname}));}
+  catch(e){setAuthMsg(friendlyAuthError(e?.message||'Could not reach the reset service. Check your connection and try again.'));return;}
+  finally{setAuthBusy(false);}
   // resetPasswordForEmail() itself never reveals whether the email exists
   // — Supabase returns success either way; an error here means something
   // actually went wrong (rate limit, malformed address, the project's email
@@ -8982,13 +8990,14 @@ async function handlePasswordRecoverySubmit(){
   if(!password||password.length<6){setRecoveryMsg('Password needs to be at least 6 characters');return;}
   document.getElementById('auth-recovery-btn').disabled=true;
   setRecoveryMsg('Saving…');
-  const {error}=await sb.auth.updateUser({password});
-  if(error){
-    document.getElementById('auth-recovery-btn').disabled=false;
-    setRecoveryMsg(friendlyAuthError(error.message));
-    return;
-  }
-  setRecoveryMsg('Password updated — signing you in…',true);
+  let error,session;
+  try{
+    ({error}=await sb.auth.updateUser({password}));
+    if(error){setRecoveryMsg(friendlyAuthError(error.message));return;}
+    setRecoveryMsg('Password updated — signing you in…',true);
+    ({data:{session}}=await sb.auth.getSession());
+  }catch(e){setRecoveryMsg(friendlyAuthError(e?.message||'Could not save the password. Check your connection and try again.'));return;}
+  finally{document.getElementById('auth-recovery-btn').disabled=false;}
   // The session this recovery flow already has is a real, valid one —
   // Supabase's PASSWORD_RECOVERY event just labels it differently, and that
   // event handler deliberately skips handleAuthedSession() so the recovery
@@ -8996,8 +9005,6 @@ async function handlePasswordRecoverySubmit(){
   // so a successful reset previously just hid the recovery card and left a
   // blank overlay with no path back into the app — this is the actual
   // fix, not just the message.
-  const {data:{session}}=await sb.auth.getSession();
-  document.getElementById('auth-recovery-btn').disabled=false;
   if(session){
     setTimeout(()=>{ document.getElementById('auth-card-recovery').style.display='none';authRecoveryActive=false;appSessionGate.start(session); },700);
   }else{
@@ -9014,14 +9021,17 @@ async function handleSignUp(){
   if(!email||!password){setAuthMsg('Enter an email and password to create your account');return;}
   setAuthBusy(true);
   setAuthMsg('Creating your account…');
-  const {error}=await sb.auth.signUp({email,password});
-  setAuthBusy(false);
+  let error;
+  try{({error}=await sb.auth.signUp({email,password}));}
+  catch(e){setAuthMsg(friendlyAuthError(e?.message||'Could not reach the sign-up service. Check your connection and try again.'));return;}
+  finally{setAuthBusy(false);}
   if(error){setAuthMsg(friendlyAuthError(error.message));return;}
   setAuthMsg('Account created — check your email to confirm, then sign in.',true);
 }
 async function handleLogout(){
   if(!sb)return;
-  await sb.auth.signOut();
+  try{const {error}=await sb.auth.signOut();if(error)toast(friendlyAuthError(error.message));}
+  catch(e){toast(friendlyAuthError(e?.message||'Could not reach the sign-out service. Check your connection and try again.'));}
 }
 
 let currentUserId=null;
@@ -9065,9 +9075,11 @@ async function handleAuthedSession(session){
   businessStateReady=true;
   showApp();
   subscribeRealtime();
-  await loadStaffAndInvites();
-  if(version!==businessSessionVersion)return;
-  await loadBusinessProfile();
+  // These reads are independent once the business scope is resolved. Running
+  // them together removes one full backend round trip from every sign-in.
+  // Keep both best-effort: the main workspace is usable if either optional
+  // staff or profile data is temporarily unavailable.
+  await Promise.allSettled([loadStaffAndInvites(),loadBusinessProfile()]);
   if(version!==businessSessionVersion)return;
   seedDocTemplateFromProfile();
   preloadLogoDataUrl();
@@ -10285,10 +10297,14 @@ async function loadFromSupabase(){
     ]);
     if(biz!==currentBusinessId||version!==businessSessionVersion)return false;
     if(ce)throw ce; if(je)throw je; if(ie)throw ie;
-    const custById=Object.fromEntries((customers||[]).map(c=>[c.id,c]));
+    const custById=new Map((customers||[]).map(c=>[c.id,c]));
+    const invoiceByJobId=new Map();
+    for(const invoice of invoices||[]){
+      if(invoice?.job_id&&!invoiceByJobId.has(invoice.job_id))invoiceByJobId.set(invoice.job_id,invoice);
+    }
     records=(jobs||[]).map(j=>{
-      const c=custById[j.customer_id]||{};
-      const inv=(invoices||[]).find(i=>i.job_id===j.id);
+      const c=custById.get(j.customer_id)||{};
+      const inv=invoiceByJobId.get(j.id);
       const base=newRecord({
         name:c.name||'',email:c.email||'',phone:c.phone||'',
         address:c.address||'',suburb:c.suburb||'',notes:c.notes||'',source:c.source||''

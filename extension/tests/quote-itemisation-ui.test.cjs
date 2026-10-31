@@ -43,6 +43,14 @@ test('quote UI reuses outline quantities, requires manual panes and saves exactl
     await page.locator('[data-reuse="0"]').click();
     assert.equal(await page.locator('[data-line-svc="1"]').inputValue(),'housewash');
     assert.match(await page.locator('.tk-line-row').nth(1).innerText(),/60 m/);
+    const standardPrice=Number(await page.locator('[data-price]').inputValue());
+    await page.locator('[data-storeys="1"]').selectOption('3');
+    assert.ok(Number(await page.locator('[data-price]').inputValue())>standardPrice,'house levels update recommended pricing');
+    await page.locator('[data-access]').selectOption('hard');
+    assert.match(await page.locator('[data-storeys="1"] option:checked').innerText(),/Three storey/);
+    assert.equal(await page.locator('[data-create]').isDisabled(),false);
+    await page.locator('[data-access]').selectOption('standard');
+    await page.locator('[data-storeys="1"]').selectOption('1');
     await page.locator('[data-price]').fill('650.37');await page.locator('[data-price]').dispatchEvent('change');
     assert.match(await page.locator('[data-price-adjustment]').innerText(),/Manual total adjustment/);
     const displayed=await page.locator('[data-service-price]').evaluateAll(rows=>rows.map(row=>({svc:row.dataset.servicePrice,cents:Math.round(Number(row.querySelector('strong').textContent.replace(/[$,]/g,''))*100)})));
@@ -50,6 +58,7 @@ test('quote UI reuses outline quantities, requires manual panes and saves exactl
     await page.locator('[data-create]').click();
     const saved=await page.evaluate(()=>window.saved);
     assert.equal(saved.total,650.37);
+    assert.equal(saved.assumptions.access,'standard');
     assert.deepEqual(saved.lines.map(line=>({svc:line.svc,cents:Math.round(line.fixedPrice*100)})),displayed);
     assert.deepEqual(saved.lines.map(line=>[line.svc,line.qty]),[['driveway',200],['housewash',60],['windows',12]]);
     assert.deepEqual(saved.areaPolys.map(area=>[area.service,area.size,area.unit,area.type]),[['driveway',200,'m²','area'],['housewash',60,'m','perimeter']]);

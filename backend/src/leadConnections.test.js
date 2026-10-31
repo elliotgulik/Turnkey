@@ -96,6 +96,7 @@ function setup(db, options = {}) {
     decrypt: () => "private-page-token",
     fetchEdge: async () => ({ ok: true, json: async () => ({ success: true }) }),
     generateToken: () => "new-test-token",
+    inspectToken: async () => ({ type: 'SYSTEM_USER', expiresAt: 0 }),
     fetchPage: async (id) => ({
       ok: true,
       json: async () => ({ id, name: "Page" }),
@@ -144,7 +145,7 @@ test("Meta rejects a foreign page with 409 without fetching or changing either b
       assert.fail("foreign mapping must be rejected first"),
   });
   const res = await route("POST /api/connections/meta/connect", {
-    body: { pageId: "222", pageToken: "test" },
+    body: { pageId: "222", retrievalToken: "valid-system-user-token" },
   });
   assert.equal(res.statusCode, 409);
   assert.deepEqual(db.rows, before);
@@ -162,34 +163,38 @@ test("a racing Meta page claim returns 409 and preserves the prior connection", 
     });
   };
   const res = await setup(db)("POST /api/connections/meta/connect", {
-    body: { pageId: "222", pageToken: "test" },
+    body: { pageId: "222", retrievalToken: "valid-system-user-token" },
   });
   assert.equal(res.statusCode, 409);
   assert.equal(db.rows.find((r) => r.id === meta.id).external_id, "111");
   assert.equal(db.rows.find((r) => r.id === "racer").business_id, "B");
 });
-test('Meta setup uses the Page token for lead notifications and the permanent System User token for lead access', async () => {
+test('Meta setup uses one System User token and derives the Page token server-side', async () => {
   const db = fakeDb();
   const calls = [];
   let encryptedPlaintext;
   const res = await setup(db, {
     encrypt: value => { encryptedPlaintext = value; return 'encrypted-envelope'; },
+    fetchPage: async (id, options) => {
+      calls.push({ id, edge: 'page', options });
+      return { ok: true, json: async () => ({ id, name: 'Page', access_token: 'derived-page-token' }) };
+    },
     fetchEdge: async (id, edge, options) => {
       calls.push({ id, edge, options });
       return { ok: true, json: async () => edge === 'leadgen_forms' ? { data: [] } : { success: true } };
     },
   })('POST /api/connections/meta/connect', {
-    body: { pageId: '973487265846279', pageToken: 'page-token', retrievalToken: 'system-user-token' },
+    body: { pageId: '973487265846279', retrievalToken: 'system-user-token' },
   });
   assert.equal(res.statusCode, 200);
   assert.equal(calls.find(x => x.edge === 'leadgen_forms').options.token, 'system-user-token');
-  assert.equal(calls.find(x => x.edge === 'subscribed_apps').options.token, 'page-token');
+  assert.equal(calls.find(x => x.edge === 'subscribed_apps').options.token, 'derived-page-token');
   assert.equal(res.body.health, 'ready');
   assert.match(encryptedPlaintext, /system-user-token/);
-  assert.match(encryptedPlaintext, /page-token/);
-  assert.doesNotMatch(JSON.stringify(res.body), /system-user-token|page-token|encrypted-envelope/);
+  assert.match(encryptedPlaintext, /derived-page-token/);
+  assert.doesNotMatch(JSON.stringify(res.body), /system-user-token|derived-page-token|encrypted-envelope/);
 });
-test("Meta connect accepts one access token and stores the Page token returned by Meta", async () => {
+test("Meta connect accepts one System User token and stores the Page token returned by Meta", async () => {
   const db = fakeDb(), calls = [];
   let encryptedPlaintext;
   const res = await setup(db, {
@@ -212,6 +217,31 @@ test("Meta connect accepts one access token and stores the Page token returned b
   assert.match(encryptedPlaintext, /single-system-user-token/);
   assert.match(encryptedPlaintext, /derived-page-token/);
   assert.doesNotMatch(JSON.stringify(res.body), /single-system-user-token|derived-page-token/);
+});
+test('Meta connect refuses personal and expiring tokens before storing anything', async () => {
+  for (const validation of [
+    { type: 'USER', expiresAt: 1900000000 },
+    { type: 'SYSTEM_USER', expiresAt: 1900000000 },
+  ]) {
+    const db = fakeDb();
+    const res = await setup(db, {
+      inspectToken: async () => {
+        throw Object.assign(new Error('private token details'), {
+          status: 400,
+          publicMessage: validation.type === 'USER'
+            ? 'Use a Meta System User token set to Never.'
+            : 'This token expires; use a System User token set to Never.',
+        });
+      },
+    })('POST /api/connections/meta/connect', {
+      body: { pageId: '973487265846279', retrievalToken: 'short-lived-test-token' },
+    });
+    assert.equal(res.statusCode, 400);
+    assert.match(res.body.error, /Never/);
+    assert.equal(db.rows.length, 0);
+    assert.equal(db.writes.length, 0);
+    assert.doesNotMatch(JSON.stringify(res.body), /private token details/);
+  }
 });
 test("failed Wix regeneration preserves the working hash and never reveals a new URL", async () => {
   const db = fakeDb([wix]);

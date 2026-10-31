@@ -37,11 +37,13 @@ export function renderQuotePanel(container, ctx, actions) {
     svc: m.service || Object.keys(SERVICES)[0],
     qty: m.size,
     unit: m.unit,
-    categoryLabel: m.categoryLabel
+    categoryLabel: m.categoryLabel,
+    storeys: Number(m.storeys) || Number(ctx.boundJob?.details?.services?.find(line => line.svc === (m.service || Object.keys(SERVICES)[0]))?.storeys) || 1
   }));
   let customPrice=null, localMargin=ctx.TK_COST.targetMargin(ctx.TK_COST.COST_INPUTS.targetMargin), travelKm=ctx.TK_COST.COST_INPUTS.avgKm;
   const estimatedAt=new Date().toISOString();
-  const priceModel=()=>instantPricing(ctx.TK_PRICING,ctx.TK_COST,computeLines(),{targetMargin:localMargin,price:customPrice,travelKm,estimatedAt});
+  let access=ctx.boundJob?.details?.assumptions?.access || 'standard';
+  const priceModel=()=>instantPricing(ctx.TK_PRICING,ctx.TK_COST,computeLines(),{targetMargin:localMargin,price:customPrice,travelKm,estimatedAt,access});
   const savedWindows = ctx.boundJob?.details?.services?.find(line => line.svc === 'windows');
   const paneCount = Number.isInteger(savedWindows?.qty) && savedWindows.qty > 0 ? savedWindows.qty : 0;
   const wantsWindows = ctx.manualWindows || requestedServices(ctx.boundCustomer || {},ctx.boundJob).some(service => service.service_id === 'windows');
@@ -54,8 +56,8 @@ export function renderQuotePanel(container, ctx, actions) {
   let newCustomer = { name: '', phone: '', email: '' };
 
   function computeLines() {
-    const included = lineState.filter(l => l.include).map(l => ({svc:l.svc, qty:measurementQuantity(ctx.measurements.find(m => m.id === l.measurementId), SERVICES[l.svc])}));
-    const extras = extraLines.filter(l => l.include).map(l => ({svc:l.svc, qty:l.qty}));
+    const included = lineState.filter(l => l.include).map(l => ({svc:l.svc, qty:measurementQuantity(ctx.measurements.find(m => m.id === l.measurementId), SERVICES[l.svc]), ...(l.svc==='housewash'?{storeys:Number(l.storeys)||1}:{})}));
+    const extras = extraLines.filter(l => l.include).map(l => ({svc:l.svc, qty:l.qty, ...(l.svc==='housewash'?{storeys:Number(l.storeys)||1}:{})}));
     return included.concat(extras);
   }
 
@@ -101,6 +103,7 @@ export function renderQuotePanel(container, ctx, actions) {
                   <span class="tk-line-cat">${escapeHtml(l.categoryLabel)}</span>
                   <select class="tk-select" data-line-svc="${i}">${renderServiceOptions(l.svc, ctx.measurements.find(m => m.id === l.measurementId))}</select>
                   <span class="tk-line-qty">${measuredQuantity(l)} ${escapeHtml(SERVICES[l.svc]?.unit)}</span>
+                  ${l.svc==='housewash'?`<label class="tk-quote-field">House levels<select class="tk-select" aria-label="House levels for ${escapeHtml(l.categoryLabel)}" data-storeys="${i}">${Object.entries(ctx.TK_PRICING.STOREY_TYPES).map(([n,v])=>`<option value="${n}" ${Number(l.storeys)===Number(n)?'selected':''}>${escapeHtml(v.label)}</option>`).join('')}</select></label>`:''}
                   <button type="button" class="tk-link-btn" data-reuse="${i}">Reuse outline</button>
                 </div>`
                 )
@@ -113,6 +116,7 @@ export function renderQuotePanel(container, ctx, actions) {
                   <select class="tk-select" data-extra-svc="${i}">${renderServiceOptions(l.svc, null)}</select>
                   <input type="number" min="0" step="${SERVICES[l.svc]?.unit === 'panes' ? '1' : '0.1'}" class="tk-qty-input" aria-label="Manual ${escapeHtml(SERVICES[l.svc]?.unit)} for ${escapeHtml(SERVICES[l.svc]?.label)}" data-extra-qty="${i}" value="${l.qty || ''}"/>
                   <span class="tk-line-qty">Manual ${escapeHtml(SERVICES[l.svc]?.unit)}</span>
+                  ${l.svc==='housewash'?`<label class="tk-quote-field">House levels<select class="tk-select" aria-label="House levels for manual ${escapeHtml(SERVICES[l.svc]?.label)}" data-extra-storeys="${i}">${Object.entries(ctx.TK_PRICING.STOREY_TYPES).map(([n,v])=>`<option value="${n}" ${Number(l.storeys||1)===Number(n)?'selected':''}>${escapeHtml(v.label)}</option>`).join('')}</select></label>`:''}
                 </label>`
                 )
                 .join('')}
@@ -140,8 +144,9 @@ export function renderQuotePanel(container, ctx, actions) {
             </div>
 
             <div class="tk-price-block">
+              <section class="tk-quote-assumptions" aria-label="Site access settings"><div><h4>Property &amp; access</h4><p>Adjust for building height and conditions at this property.</p></div><label class="tk-quote-field">Access difficulty<select class="tk-select" data-access aria-label="Access difficulty"><option value="easy" ${access==='easy'?'selected':''}>Easy · open, ground-level access</option><option value="standard" ${access==='standard'?'selected':''}>Standard · typical access</option><option value="hard" ${access==='hard'?'selected':''}>Difficult · steep, tight or high access</option></select></label></section>
               <div class="tk-section-label">Itemised service prices</div>
-              <div data-role="itemised-prices">${(model.lines || []).map(l => `<div class="tk-price-line" data-service-price="${escapeHtml(l.svc)}"><span>${escapeHtml(SERVICES[l.svc]?.label || l.svc)} · ${l.qty} ${escapeHtml(SERVICES[l.svc]?.unit)}</span><strong>${money(l.fixedPrice)}</strong></div>`).join('')}</div>
+              <div data-role="itemised-prices">${(model.lines || []).map(l => `<div class="tk-price-line" data-service-price="${escapeHtml(l.svc)}"><span>${escapeHtml(SERVICES[l.svc]?.label || l.svc)} · ${l.qty} ${escapeHtml(SERVICES[l.svc]?.unit)}${l.svc==='housewash'?' · '+Number(l.storeys||1)+' storey':''}</span><strong>${money(l.fixedPrice)}</strong></div>`).join('')}</div>
               ${customPrice !== null && bd ? `<p class="tk-modal-sub" data-price-adjustment>Manual total adjustment: ${money(total - bd.recommended)} from recommended ${money(bd.recommended)}. Included in the itemised prices above.</p>` : ''}
               <div class="tk-section-label">Internal delivery estimate</div>
               <p class="tk-modal-sub">Based on your business’s saved cost settings. Travel is an estimate, not a live route calculation.</p>
@@ -172,6 +177,9 @@ export function renderQuotePanel(container, ctx, actions) {
     container.querySelector('[data-price]').addEventListener('change',e=>{customPrice=e.target.value===''?NaN:Number(e.target.value);paint();});
     container.querySelector('[data-margin]').addEventListener('change',e=>{const value=Number(e.target.value)/100;if(Number.isFinite(value)&&value>=0&&value<1)localMargin=value;paint();});
     container.querySelector('[data-travel]').addEventListener('change',e=>{const value=Number(e.target.value);if(Number.isFinite(value)&&value>=0)travelKm=value;paint();});
+    container.querySelector('[data-access]').addEventListener('change',e=>{access=e.target.value;customPrice=null;paint();});
+    container.querySelectorAll('[data-storeys]').forEach(select=>select.addEventListener('change',()=>{lineState[Number(select.dataset.storeys)].storeys=Number(select.value);customPrice=null;paint();}));
+    container.querySelectorAll('[data-extra-storeys]').forEach(select=>select.addEventListener('change',()=>{extraLines[Number(select.dataset.extraStoreys)].storeys=Number(select.value);customPrice=null;paint();}));
     container.querySelector('[data-use-recommended]').addEventListener('click',()=>{customPrice=null;paint();});
     container.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', () => actions.onCancel()));
     container.querySelectorAll('[data-line]').forEach((cb) =>
@@ -182,7 +190,7 @@ export function renderQuotePanel(container, ctx, actions) {
     );
     container.querySelectorAll('[data-line-svc]').forEach((sel) =>
       sel.addEventListener('change', () => {
-        lineState[+sel.getAttribute('data-line-svc')].svc = sel.value;
+        const line=lineState[+sel.getAttribute('data-line-svc')];line.svc = sel.value;if(line.svc==='housewash'&&!line.storeys)line.storeys=1;customPrice=null;
         paint();
       })
     );
@@ -194,7 +202,7 @@ export function renderQuotePanel(container, ctx, actions) {
     );
     container.querySelectorAll('[data-extra-svc]').forEach((sel) =>
       sel.addEventListener('change', () => {
-        extraLines[+sel.getAttribute('data-extra-svc')].svc = sel.value;
+        const line=extraLines[+sel.getAttribute('data-extra-svc')];line.svc = sel.value;if(line.svc==='housewash'&&!line.storeys)line.storeys=1;customPrice=null;
         paint();
       })
     );
@@ -273,7 +281,8 @@ export function renderQuotePanel(container, ctx, actions) {
           estimatedCost:finalModel.breakdown.costUnrounded,
           estimatedMarginPct:finalModel.marginPct,
           gstRegistered:ctx.TK_COST.COST_INPUTS.gstRegistered,
-          targetMargin:localMargin
+          targetMargin:localMargin,
+          assumptions:{access,premium:false}
         });
       } catch (err) {
         createBtn.disabled = false;
@@ -301,7 +310,7 @@ export function renderQuoteCreated(container, { address, total, lines, SERVICES,
         <p class="tk-modal-sub">${escapeHtml(address)}</p>
         <div class="tk-created-total">${money(total)}</div>
         <div class="tk-created-lines">
-          ${lines.map((l) => `<div class="tk-kv"><span>${escapeHtml(SERVICES[l.svc] ? SERVICES[l.svc].label : l.svc)}</span><span>${l.qty} ${escapeHtml(SERVICES[l.svc]?.unit || '')} · ${money(l.fixedPrice)}</span></div>`).join('')}
+          ${lines.map((l) => `<div class="tk-kv"><span>${escapeHtml(SERVICES[l.svc] ? SERVICES[l.svc].label : l.svc)}${l.svc==='housewash'?' · '+Number(l.storeys||1)+' storey':''}</span><span>${l.qty} ${escapeHtml(SERVICES[l.svc]?.unit || '')} · ${money(l.fixedPrice)}</span></div>`).join('')}
         </div>
         <div class="tk-modal-foot tk-created-foot">
           <button type="button" class="tk-btn" data-copy>Copy Quote Link</button>

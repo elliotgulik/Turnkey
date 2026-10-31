@@ -28,3 +28,17 @@ test('recommended price and edited total use the existing cost engine with exact
  assert.throws(()=>instantPricing(e.TK_PRICING,cost,lines,{price:-1}),/valid final price/);
  assert.equal(fs.readFileSync('extension/vendor/cost-engine.js','utf8'),fs.readFileSync('cost-engine.js','utf8'));
 });
+
+test('house levels and access difficulty change the instant quote price and saved cost assumptions',async()=>{
+ const {configureCosts,instantPricing}=await import('../content/panel/quote-pricing.js'),e=engines(),cost=e.TK_COST;
+ configureCosts(cost,{costInputs:{wage:40,targetMargin:0.55}});
+ const single=[{svc:'housewash',qty:300,storeys:1}],multi=[{svc:'housewash',qty:300,storeys:3}];
+ const base=instantPricing(e.TK_PRICING,cost,single,{access:'standard'});
+ const tall=instantPricing(e.TK_PRICING,cost,multi,{access:'standard'});
+ const difficult=instantPricing(e.TK_PRICING,cost,multi,{access:'hard'});
+ assert.ok(tall.total>base.total,'more storeys should change the recommended customer price');
+ assert.ok(difficult.total>tall.total,'difficult access should change the recommended customer price');
+ assert.ok(difficult.breakdown.labourHrs>tall.breakdown.labourHrs,'difficult access should increase estimated time');
+ assert.equal(difficult.lines[0].storeys,3);
+ assert.equal(difficult.snapshot.access,'hard');
+});

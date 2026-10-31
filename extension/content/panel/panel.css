@@ -168,6 +168,17 @@
 .tk-price-line { display:flex; justify-content:space-between; font-size:12.5px; color:var(--ink-soft); padding:2px 0; }
 .tk-price-total { display:flex; justify-content:space-between; font-size:22px; font-weight:700; color:var(--ink); margin-top:6px; }
 .tk-price-total span:last-child { color:var(--teal); }
+.tk-line-row { flex-wrap:wrap; gap:10px; padding:12px; border:1px solid var(--line); border-radius:10px; background:var(--surface-2); }
+.tk-line-cat { min-width:120px; }
+.tk-quote-field { display:grid; gap:5px; color:var(--ink-soft); font-size:11px; font-weight:700; }
+.tk-quote-field .tk-select { min-height:36px; font-size:12px; }
+.tk-quote-assumptions { display:grid; grid-template-columns:minmax(0,1fr) minmax(190px,1fr); align-items:center; gap:12px; padding:14px; margin:0 0 16px; border:1px solid #c8ded8; border-radius:12px; background:#f3faf7; }
+.tk-quote-assumptions h4 { margin:0; color:var(--ink); font-size:14px; }
+.tk-quote-assumptions p { margin:4px 0 0; font-size:12px; line-height:1.45; color:var(--ink-soft); }
+.tk-price-block [data-role="itemised-prices"] { display:grid; gap:4px; margin:8px 0 16px; }
+.tk-price-block [data-role="itemised-prices"] .tk-price-line { padding:8px 10px; border-radius:8px; background:var(--surface-2); color:var(--ink); }
+.tk-price-block .tk-section-label { margin-top:18px; }
+@media(max-width:560px) { .tk-quote-assumptions { grid-template-columns:1fr; } .tk-line-row { align-items:flex-start; } .tk-line-row .tk-select { max-width:100%; } }
 
 /* Quote created */
 .tk-quote-created { width:400px; padding:28px 24px; text-align:center; }

@@ -4,9 +4,9 @@ import { fetchMetaObject, fetchMetaEdge } from './metaGraph.js';
 // request details. Codes are enough to give a safe, actionable recovery step.
 export function metaConnectionIssue(error) {
   const code = Number(error?.code);
-  if (code === 190) return { health: 'reconnect', message: 'Meta access has expired or was revoked. Reconnect with a current Page Access Token.' };
+  if (code === 190) return { health: 'reconnect', message: 'Meta access was revoked or expired. Reconnect with the TurnKey System User token; a Page token is not needed in the browser.' };
   if (code === 10 || code === 200) return { health: 'permissions', message: 'Meta denied access. Authorize this Page with leads_retrieval and pages_manage_metadata, and allow TurnKey in Meta Leads Access settings.' };
-  return { health: 'error', message: 'Meta could not verify this connection. Check the Page ID, Page token and app permissions, then retry.' };
+  return { health: 'error', message: 'Meta could not verify this connection. Check the Page ID, TurnKey app assignment, System User access to the Page and required permissions.' };
 }
 export async function checkMetaConnection({ pageId, token, pageToken = token, retrievalToken = token, repair = false, appId, fetchPage = fetchMetaObject, fetchEdge = fetchMetaEdge }) {
   const response = await fetchPage(pageId, { token: pageToken, fields: 'id,name' });
