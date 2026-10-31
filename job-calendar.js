@@ -640,10 +640,17 @@
     renderFallbackAgenda(zone);
   }
 
+  const serviceM8JobId = (job) => job.details?.serviceM8JobUuid || job.details?.serviceM8Booking?.jobUuid;
+  function hasServiceM8Dispatch(job) {
+    const remoteId = serviceM8JobId(job);
+    return !!remoteId && state.events.some((event) => event.id && event.source === 'servicem8' &&
+      String(event.details?.status).toLowerCase() !== 'completed' && event.details?.jobUuid === remoteId);
+  }
+
   function buildFcEvents() {
     const out = [];
     state.jobs.forEach((job) => {
-      if (['completed','paid','cancelled'].includes(job.status)) return;
+      if (['completed','paid','cancelled'].includes(job.status) || hasServiceM8Dispatch(job)) return;
       const w = jobWindow(job); if (!w) return;
       const q=state.search.trim().toLowerCase();
       if(q&&![job.customer?.name,job.customer?.address,job.customer?.suburb].filter(Boolean).join(' ').toLowerCase().includes(q))return;
@@ -752,7 +759,7 @@
     const byDay = {};
     days.forEach((d) => { byDay[d] = []; });
     state.jobs.forEach((job) => {
-      if (['completed','paid','cancelled'].includes(job.status)) return;
+      if (['completed','paid','cancelled'].includes(job.status) || hasServiceM8Dispatch(job)) return;
       const w = jobWindow(job); if (!w) return;
       const q = state.search.trim().toLowerCase();
       if (q && ![job.customer?.name, job.customer?.address, job.customer?.suburb].filter(Boolean).join(' ').toLowerCase().includes(q)) return;
@@ -869,6 +876,7 @@
 
   function openServiceM8Detail(ev) {
     const details = ev.details || {};
+    const localJob = details.jobUuid && state.jobs.find((job) => serviceM8JobId(job) === details.jobUuid);
     const start = new Date(ev.start_time), end = new Date(ev.end_time);
     const date = localDateStr(start);
     let weather = null;
@@ -894,9 +902,23 @@
         <section class="tkjc-dispatch-weather"><h4>Weather for job day</h4>${weatherHtml}</section>
       </div>
       <p class="tkjc-detail-muted">Read-only from ServiceM8. Edit the booking there, then sync the dispatch calendar.</p>
-      <div class="tkjc-dialog-actions"><button type="button" data-tkjc="close">Close</button></div>
+      <div class="tkjc-dialog-actions">
+        ${localJob && typeof root.openCustomerProfile === 'function' ? '<button type="button" class="btn ghost" data-tkjc="open-customer">Open customer</button>' : ''}
+        ${localJob && typeof root.openDetail === 'function' ? '<button type="button" class="btn accent" data-tkjc="open-record">Open TurnKey record</button>' : ''}
+        <button type="button" data-tkjc="close">Close</button>
+      </div>
     </div>`;
     document.body.appendChild(overlay); bindOverlay(overlay);
+    const openLocal = (open) => {
+      if (overlay._scope.isStale()) { closeOverlay(overlay.id); return; }
+      const record = typeof records !== 'undefined' && Array.isArray(records)
+        ? records.find((record) => String(record.jobId) === String(localJob.id)) : null;
+      if (!record) { notify('This job is saved in TurnKey. Refresh the app to load its customer record.'); return; }
+      closeOverlay(overlay.id);
+      open(record.id);
+    };
+    overlay.querySelector('[data-tkjc="open-customer"]')?.addEventListener('click', () => openLocal(root.openCustomerProfile));
+    overlay.querySelector('[data-tkjc="open-record"]')?.addEventListener('click', () => openLocal(root.openDetail));
     overlay.querySelector('[data-tkjc="close"]').onclick = () => closeOverlay(overlay.id);
   }
   async function saveEvent(payload, overlay, onRevert) {

@@ -57,7 +57,7 @@ function metaFields(leadData) {
     throw new MetaWebhookError("Meta returned an invalid lead record");
   const fields = Object.create(null);
   for (const item of leadData.field_data.slice(0, 100)) {
-    if (typeof item?.name !== "string" || !item.name.trim() || item.name.length > 120 || !Array.isArray(item.values)) continue;
+    if (typeof item?.name !== "string" || !item.name.trim() || item.name.length > 1000 || !Array.isArray(item.values)) continue;
     const values = item.values.slice(0, 100)
       .filter(v => typeof v === "string" || (typeof v === "number" && Number.isFinite(v)))
       .map(v => String(v).trim()).filter(Boolean);
@@ -84,7 +84,7 @@ export function normalizeMetaLead(leadData, businessId, { historical = false, no
       const line = `${key}: ${values.map(value => value.slice(0, 4000)).join(", ")}`;
       notes += `${notes ? "\n" : ""}${line}`.slice(0, 4000 - notes.length);
     }
-    if (serviceFields.has(key.replace(/[^a-z0-9]/g, "")))
+    if (serviceFields.has(key.replace(/[^a-z0-9]/g, "")) || /^listcleaningservices/.test(key.replace(/[^a-z0-9]/g, "")))
       requestedServices.push(...values.slice(0, 100 - requestedServices.length).map(value => value.slice(0, 500)));
   }
   const payload = {

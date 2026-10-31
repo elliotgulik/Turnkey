@@ -54,3 +54,5 @@
 .nlm-form-answers dt{color:var(--ink-faint);font-weight:400;overflow-wrap:anywhere}
 .nlm-form-answers dd{margin:0;color:var(--ink);overflow-wrap:anywhere}
 @media(max-width:480px){.nlm-form-answers>div{grid-template-columns:1fr;gap:1px}}
+
+.nlm-booked{font-size:12px;font-weight:600;color:var(--accent,var(--teal));margin:10px 0 0}

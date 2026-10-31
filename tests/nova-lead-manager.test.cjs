@@ -113,3 +113,15 @@ test('Meta poll answers stay separate from services and encoded questions are no
   assert.deepEqual(Array.from(leadManager.services({source:'Meta',notes:'urgency: within_the_next_2_weeks'})), []);
   assert.deepEqual(Array.from(leadManager.services({requestedServices:[{name:'House wash',service_id:'housewash'}]})), ['House wash']);
 });
+
+test('saved Meta services are available to Pipeline and quote details through the shared accessor', () => {
+  const source=fs.readFileSync('index.html','utf8');
+  const start=source.indexOf('function extractServicesFromNotes(notes){');
+  const end=source.indexOf('// The one accessor',start);
+  const context={labelToServiceId:()=>null};
+  vm.runInNewContext(source.slice(start,end),context);
+  const notes='residential_or_commercial: residential\nlist_cleaning_services_below_(house,_roof,_windows_[outside_or_inside?],_driveway,_patio,_deck,_fence,_solar_panels: House,windows · Submitted via online quote tool';
+  assert.deepEqual(Array.from(context.extractServicesFromNotes(notes),x=>x.name),['House','windows']);
+  assert.deepEqual(Array.from(manager().services({notes:'Follow up: tomorrow',jobNotes:notes})),['House','windows']);
+  assert.deepEqual(Array.from(manager().services({source:'Wix',notes:'Please call me tomorrow'})),[]);
+});

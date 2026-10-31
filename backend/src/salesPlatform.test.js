@@ -25,6 +25,7 @@ function database(tables = {}) {
             : k === "lease_until" && r[k] && v ? Date.parse(r[k]) === Date.parse(v) : r[k] === v);
           return q;
         },
+        is(k, v) { filters.push(r => v === null ? r[k] == null : r[k] === v); return q; },
         filter(k, operator, v) {
           assert.equal(operator, "eq");
           filters.push(r => k === "details->>jobUuid" ? r.details?.jobUuid === v : r[k] === v);
@@ -614,7 +615,7 @@ test('status flags distinguish server configuration, unreadable credentials and 
   const {route}=setup(db);
   res=await route('GET','/api/sales/servicem8/status',owner);
   assert.equal(res.body.credentialsReady,true);assert.equal(res.body.serverConfigured,true);
-  assert.equal(res.body.webhookSubscribed,true);assert.equal(res.body.retryAvailable,true);assert.equal(res.body.failed,1);assert.equal(res.body.exhausted,1);
+  assert.equal(res.body.webhookSubscribed,false);assert.equal(res.body.syncMode,'periodic');assert.equal(res.body.retryAvailable,true);assert.equal(res.body.failed,1);assert.equal(res.body.exhausted,1);
   db.tables.servicem8_connections[0].last_error='Connected, but webhook registration failed. Reconnect or use manual refresh.';
   res=await route('GET','/api/sales/servicem8/status',owner);
   assert.equal(res.body.reconnectRequired,false,'webhook warning is not a credential failure');
@@ -623,7 +624,7 @@ test('status flags distinguish server configuration, unreadable credentials and 
   assert.equal(res.body.credentialsReady,false);assert.equal(res.body.reconnectRequired,true);assert.equal(res.body.retryAvailable,false);
   assert.doesNotMatch(JSON.stringify(res.body),/synthetic-private-key|invalid-ciphertext|_enc/);
 });
-function seedFixture({ extraJobs = [], extraActivities = [], tables = {}, failEvent = false, pages = false, denied = [], rateLimited = null, initialSubscriptions = [], keepInactive = false } = {}) {
+function seedFixture({ extraJobs = [], extraActivities = [], tables = {}, failEvent = false, pages = false, denied = [], rateLimited = null, initialSubscriptions = [], keepInactive = false, subscriptionResponse } = {}) {
   const connection = privateConnection({ webhook_enc: encryptToken('e'.repeat(64)), webhook_token_hash: SM.hash('e'.repeat(64)) });
   const db = database({ users: ownerRows, servicem8_connections: [connection], jobs: [{ id:id(35), business_id:'A' }],
     external_object_mappings: [{business_id:'A',connection_generation:id(2),object_type:'job',local_id:id(35),external_uuid:id(34),snapshot:{booking:{startAt:'2026-10-30T20:00:00.000Z',endAt:'2026-10-30T21:00:00.000Z'}}}], ...tables });
@@ -663,7 +664,7 @@ function seedFixture({ extraJobs = [], extraActivities = [], tables = {}, failEv
         callback_url:'https://backend.example/api/servicem8/webhook/'+'e'.repeat(64)});
       return response({});
     }
-    if (url.includes('/webhook_subscriptions?status=all')) return response(subscriptions);
+    if (url.includes('/webhook_subscriptions?status=all')) return subscriptionResponse ? subscriptionResponse() : response(subscriptions);
     if (url.endsWith('/vendor.json')) return response({timezone_name:'Pacific/Auckland'});
     const resource = new URL(url).pathname.split('/').at(-1).replace('.json','');
     assert.ok(Object.hasOwn(resources, resource), 'no per-record provider calls: ' + url);
@@ -680,7 +681,7 @@ function seedFixture({ extraJobs = [], extraActivities = [], tables = {}, failEv
   });
   return { ...tools, db, connection, resources, calls, saved, stateSyncs, subscriptions, retryWrites: () => { failEvent = false; } };
 }
-test('dispatch seed returns 202 without provider IO, dedupes v2, and imports once in the worker', async () => {
+test('dispatch seed returns 202 without provider IO, dedupes v3, and imports once in the worker', async () => {
   const f = seedFixture();
   for (let n = 0; n < 2; n++) {
     const result = await f.route('POST','/api/job-calendar/servicem8/sync',owner);
@@ -689,10 +690,10 @@ test('dispatch seed returns 202 without provider IO, dedupes v2, and imports onc
   assert.equal(f.calls.length,0);
   assert.equal(f.db.tables.integration_tasks.length,1);
   const task = f.db.tables.integration_tasks[0];
-  assert.equal(task.kind,'dispatch_seed'); assert.equal(task.dedupe_key,'dispatch-seed-v2:'+id(2));
+  assert.equal(task.kind,'dispatch_seed'); assert.equal(task.dedupe_key,'dispatch-seed-v3:'+id(2));
   await f.worker.tick();
   assert.equal(task.state,'succeeded');
-  assert.equal(f.calls.length,12,'six resource lists, vendor, three registrations and two webhook inspections');
+  assert.equal(f.calls.length,8,'six resource lists, vendor and read-only webhook inspection');
   assert.equal(f.saved.length,2);
   const event = f.saved.find(row => row.p_external_id === id(30)).p_event;
   assert.equal(event.start_time,'2026-11-03T20:00:00.000Z');
@@ -703,8 +704,7 @@ test('dispatch seed returns 202 without provider IO, dedupes v2, and imports onc
   const staff = f.db.tables.external_object_mappings.find(row => row.object_type === 'staff');
   assert.equal(staff.local_id,'servicem8:'+id(32));
   assert.deepEqual(staff.snapshot,{name:'Jordan Lee',email:'jordan@example.test'});
-  assert.equal(f.stateSyncs[0].p_job_id,id(35));
-  assert.equal(f.stateSyncs[0].p_schedule_permission_missing,true);
+  assert.equal(f.stateSyncs.find(row=>row.p_job_id===id(35)).p_schedule_permission_missing,true);
   assert.ok(f.connection.dispatch_seeded_at);
   const count = f.calls.length;
   assert.equal((await f.route('POST','/api/job-calendar/servicem8/sync',owner)).body.skipped,true);
@@ -720,7 +720,7 @@ test('seed keeps every staff activity and archives completed jobs with and witho
       {uuid:id(81),status:'Completed',completion_date:'invalid',edit_date:'invalid'}]});
   await f.route('POST','/api/job-calendar/servicem8/sync',owner); await f.worker.tick();
   assert.equal(f.db.tables.integration_tasks[0].state,'succeeded');
-  assert.equal(f.calls.length,12,'provider calls do not scale with activity count');
+  assert.equal(f.calls.length,8,'provider calls do not scale with activity count');
   assert.equal(f.saved.length,154,'151 work-order bookings, both historical activities, one dated archive');
   assert.ok(f.saved.some(row=>row.p_external_id==='completed:'+id(80) && row.p_event.details.source==='completed_summary'));
   assert.ok(f.db.tables.external_object_mappings.some(row=>row.object_type==='completed_job' && row.external_uuid===id(81) && row.snapshot.completedAt===null));
@@ -778,7 +778,7 @@ test('ServiceM8 activity webhooks keep unlinked dispatch bookings updated', asyn
     : url.endsWith('/vendor.json') ? response({ timezone_name: 'Pacific/Auckland' })
       : url.endsWith('/job/' + id(42) + '.json') ? response({ uuid:id(42), status:'Work Order', company_name: 'Nova Exterior', job_description: 'House wash' })
         : url.includes('/jobactivity.json?') ? response([activity])
-        : url.includes('/jobmaterial.json') || url.includes('/companycontact.json') ? response([])
+        : url.includes('/jobmaterial.json') || url.includes('/companycontact.json') || url.includes('/jobpayment.json') ? response([])
           : url.includes('/staff/') ? response({ first: 'Jordan', last: 'Lee' })
         : response({}));
   await worker.tick();
@@ -827,7 +827,7 @@ test('webhook success stamps subscription readiness; failed registration retains
     await route('POST','/api/sales/servicem8/private',{...owner,body:{apiKey:'synthetic-api-key-123456'}});
     const res=await route('GET','/api/sales/servicem8/status',owner);
     assert.equal(res.body.connected,true);assert.equal(res.body.credentialsReady,true);
-    assert.equal(res.body.webhookSubscribed,!failSubscription);
+    assert.equal(res.body.webhookSubscribed,false,"registration timestamp alone does not verify delivery health");
     assert.equal(res.body.reconnectRequired,false);
     if(failSubscription) assert.match(res.body.lastError,/webhook registration failed/);
   }
@@ -1370,8 +1370,8 @@ test('completed reconciliation accepts only exact unique tenant links or Service
   }});
   await f.route('POST','/api/job-calendar/servicem8/sync',owner); await f.worker.tick();
   assert.equal(f.db.tables.integration_tasks[0].state,'succeeded');
-  assert.deepEqual(f.stateSyncs.map(row=>row.p_job_id).sort(),[id(35),id(201),id(202),id(203)].sort());
-  assert.ok(f.stateSyncs.every(row=>row.p_schedule_permission_missing===true));
+  assert.deepEqual(f.stateSyncs.filter(row=>row.p_status==='Completed').map(row=>row.p_job_id).sort(),[id(35),id(201),id(202),id(203)].sort());
+  assert.ok(f.stateSyncs.filter(row=>row.p_status==='Completed').every(row=>row.p_schedule_permission_missing===true));
   assert.ok(f.db.tables.external_object_mappings.some(row=>row.object_type==='job' && row.local_id===id(203) && row.external_uuid===id(103)));
 });
 test('mapped activity refresh updates dispatch details and converts linked bookings in vendor timezone', async () => {
@@ -1415,7 +1415,7 @@ test('status explicitly diagnoses inactive subscriptions with status=all without
     {object:'job',unique_id:'other-integration',active:false,callback_url:'secret'},
   ]);});
   const ordinary=await route('GET','/api/sales/servicem8/status',owner);
-  assert.equal(requested,undefined); assert.equal(ordinary.body.dispatchSeedVersion,'v2');
+  assert.equal(requested,undefined); assert.equal(ordinary.body.dispatchSeedVersion,'v3');
   const result=await route('GET','/api/sales/servicem8/status',{...owner,query:{webhooks:'all'}});
   assert.equal(requested,'https://api.servicem8.com/webhook_subscriptions?status=all');
   assert.deepEqual(result.body.webhookSubscriptions[0],{object:'job',active:false,missing:false,lastFailureReason:'Timeout',lastFailureAt:'2026-10-30 01:00:00'});
@@ -1465,35 +1465,18 @@ test('seed storage failures in directory and final marker never report success',
   }
 });
 
-test('seed verifies live webhook health and repairs only missing or inactive subscriptions', async () => {
-  const f=seedFixture({initialSubscriptions:['job','jobpayment']});
-  f.subscriptions.push({object:'jobactivity',unique_id:'turnkey-'+id(2)+'-jobactivity',active:false,
-    callback_url:'https://backend.example/api/servicem8/webhook/'+'e'.repeat(64),
-    last_failure_reason:'Failed callback https://backend.example/api/servicem8/webhook/'+'e'.repeat(64),last_failure_at:'2026-10-30 00:00:00'});
+test('inactive webhook health never blocks snapshot import or registers upstream', async () => {
+  const f=seedFixture({keepInactive:true});
   f.connection.webhook_subscribed_at='2026-10-16T00:00:00Z';
   await f.route('POST','/api/job-calendar/servicem8/sync',owner); await f.worker.tick();
   assert.equal(f.db.tables.integration_tasks[0].state,'succeeded');
-  const registrations=f.calls.filter(call=>call.url.includes('/webhook_subscriptions/object'));
-  assert.deepEqual(registrations.map(call=>new URLSearchParams(call.options.body).get('object')),['jobactivity']);
+  assert.ok(f.connection.dispatch_seeded_at); assert.equal(f.saved.length,2);
+  assert.ok(f.db.tables.jobs.some(row=>row.status==='scheduled'));
+  assert.equal(f.calls.filter(call=>call.url.includes('/webhook_subscriptions/object')).length,0);
   const status=await f.route('GET','/api/sales/servicem8/status',owner);
-  assert.equal(status.body.webhookSubscribed,true);
-  assert.equal(status.body.webhookHealth.previousFailures.length,1);
-  assert.match(status.body.webhookHealth.previousFailures[0].lastFailureReason,/redacted URL/);
-  assert.doesNotMatch(JSON.stringify(status.body),/eeeeeeee|callback_url|_enc/);
-});
-test('seed does not register healthy webhooks and fails if registration remains inactive', async () => {
-  const healthy=seedFixture({initialSubscriptions:['job','jobpayment','jobactivity']});
-  await healthy.route('POST','/api/job-calendar/servicem8/sync',owner); await healthy.worker.tick();
-  assert.equal(healthy.db.tables.integration_tasks[0].state,'succeeded');
-  assert.equal(healthy.calls.length,8,'six resource lists, vendor, one webhook inspection');
-  const inactive=seedFixture({keepInactive:true});
-  await inactive.route('POST','/api/job-calendar/servicem8/sync',owner); await inactive.worker.tick();
-  assert.equal(inactive.db.tables.integration_tasks[0].state,'failed');
-  assert.equal(inactive.connection.dispatch_seeded_at,undefined);
-  const status=await inactive.route('GET','/api/sales/servicem8/status',owner);
   assert.equal(status.body.webhookSubscribed,false);
+  assert.ok(status.body.webhookSubscriptions.every(row=>!row.active));
 });
-
 test('explicit resumed or unsuccessful webhook clears only its completed summary and synthetic event', async () => {
   for (const status of ['Work Order','Quote','Unsuccessful']) {
     const task={id:id(950),business_id:'A',kind:'webhook',payload:{object:'job',uuid:id(951)}};
@@ -1511,4 +1494,144 @@ test('explicit resumed or unsuccessful webhook clears only its completed summary
     assert.ok(db.tables.external_object_mappings.every(row=>row.business_id==='B'||row.connection_generation===id(99)));
     assert.deepEqual(writes,[{name:'sync_servicem8_dispatch_event',args:{p_business_id:'A',p_external_id:'completed:'+id(951),p_event:null}}]);
   }
+});
+
+test('v3 imports despite a v2 marker and exhausted task, and explicitly resets failed v3 attempts', async () => {
+  const f=seedFixture(); f.connection.dispatch_seeded_at='2026-10-31T00:00:00Z';
+  f.db.tables.integration_tasks=[{id:id(2001),business_id:'A',kind:'dispatch_seed',dedupe_key:'dispatch-seed-v2:'+id(2),state:'failed',attempts:12}];
+  let res=await f.route('POST','/api/job-calendar/servicem8/sync',owner);
+  assert.equal(res.statusCode,202);assert.equal(res.body.seedVersion,'v3');assert.equal(f.calls.length,0);
+  const task=f.db.tables.integration_tasks.find(row=>row.dedupe_key==='dispatch-seed-v3:'+id(2));
+  Object.assign(task,{id:id(2002),state:'failed',attempts:12,last_error:'old failure',lease_token:id(77)});
+  res=await f.route('POST','/api/job-calendar/servicem8/sync',owner);
+  assert.equal(res.statusCode,202);assert.equal(task.attempts,0);assert.equal(task.lease_token,null);
+  await f.worker.tick();assert.equal(task.state,'succeeded');
+  assert.ok(f.db.tables.jobs.some(row=>row.status==='scheduled'));
+});
+test('snapshot creates real booked customer/job once, stores safe service requests, and preserves local booking day', async () => {
+  const f=seedFixture();f.resources.jobmaterial[0].amount='115';f.resources.jobmaterial[0].price='100';
+  await f.route('POST','/api/job-calendar/servicem8/sync',owner);await f.worker.tick();
+  const job=f.db.tables.jobs.find(row=>row.details?.serviceM8JobUuid===id(31));
+  const customer=f.db.tables.customers.find(row=>row.id===job.customer_id);
+  assert.equal(job.status,'scheduled');assert.equal(job.scheduled_date,'2026-11-04');
+  assert.equal(job.details.serviceM8Booking.startAt,'2026-11-03T20:00:00.000Z');
+  assert.equal(customer.name,'Alex Smith');assert.equal(customer.email,'alex@example.test');assert.equal(customer.phone,'021 555 0100');
+  assert.equal(customer.address,'29 Selwyn Cres');assert.equal(customer.business_id,'A');
+  assert.deepEqual(job.details.services,[]);
+  assert.deepEqual(job.details.requestedServices,[{name:'House wash',service_id:null},{name:'Window clean',service_id:null}]);
+  assert.deepEqual(job.details.serviceM8LineItems[0],{name:'House wash',quantity:'1',amount:'115',price:'100'});
+  const counts=[f.db.tables.jobs.length,f.db.tables.customers.length];
+  await f.worker.scheduleReconciliation();
+  const recurring=f.db.tables.integration_tasks.find(row=>row.payload.recurring);recurring.next_attempt_at=new Date(0).toISOString();
+  await f.worker.tick();
+  assert.deepEqual([f.db.tables.jobs.length,f.db.tables.customers.length],counts);
+  assert.equal(f.calls.length,16,'two snapshots use only paginated resource lists');
+  assert.ok(f.calls.every(row=>row.options.method==='GET'),'background import never writes upstream');
+});
+test('strict contact plus address fallback reuses a unique existing Meta/Wix customer and lead job', async () => {
+  for(const channel of ['Meta','Wix']){
+    const f=seedFixture({tables:{customers:[{id:id(2101),business_id:'A',source:channel,name:'Existing lead',email:'ALEX@example.test',phone:'0215550100',address:'29 Selwyn Cres'}],
+      jobs:[{id:id(2102),business_id:'A',customer_id:id(2101),status:'quoted',details:{services:[],notes:'Keep lead notes'}}],external_object_mappings:[]}});
+    await f.route('POST','/api/job-calendar/servicem8/sync',owner);await f.worker.tick();
+    assert.equal(f.db.tables.integration_tasks[0].state,'succeeded');
+    assert.equal(f.db.tables.customers.length,1);assert.equal(f.db.tables.jobs.length,1);
+    const link=f.db.tables.external_object_mappings.find(row=>row.object_type==='job');
+    assert.equal(link.local_id,id(2102));assert.equal(link.external_uuid,id(31));
+    const sync=f.stateSyncs.find(row=>row.p_job_id===id(2102));
+    assert.equal(sync.p_status,'Work Order');assert.equal(sync.p_booking.timeZone,'Pacific/Auckland');
+    assert.equal(f.db.tables.jobs[0].details.notes,'Keep lead notes');
+  }
+});
+test('name alone, contact without matching address, ambiguous profiles and foreign tenants cannot steal a lead', async () => {
+  const scenarios=[
+    [{id:id(2201),business_id:'A',name:'Alex Smith',address:'29 Selwyn Cres'}],
+    [{id:id(2201),business_id:'A',name:'Alex Smith',email:'alex@example.test',address:'Different address'}],
+    [{id:id(2201),business_id:'B',name:'Alex Smith',email:'alex@example.test',address:'29 Selwyn Cres'}],
+  ];
+  for(const customers of scenarios){
+    const f=seedFixture({tables:{customers,jobs:[{id:id(2202),business_id:customers[0].business_id,customer_id:id(2201),status:'quoted'}],external_object_mappings:[]}});
+    await f.route('POST','/api/job-calendar/servicem8/sync',owner);await f.worker.tick();
+    const link=f.db.tables.external_object_mappings.find(row=>row.object_type==='job');
+    assert.notEqual(link.local_id,id(2202));assert.equal(f.db.tables.jobs[0].status,'quoted');
+  }
+  const f=seedFixture({tables:{customers:[2201,2202].map(n=>({id:id(n),business_id:'A',email:'alex@example.test',address:'29 Selwyn Cres'})),jobs:[],external_object_mappings:[]}});
+  await f.route('POST','/api/job-calendar/servicem8/sync',owner);await f.worker.tick();
+  assert.equal(f.db.tables.jobs.length,0,'ambiguous contact/address identity is not linked or duplicated');
+});
+test('recurring snapshot completes exact old links, preserves calendar history and updates the booked date', async () => {
+  const event={id:id(2301),business_id:'A',source:'servicem8',external_id:id(2302),start_time:'2026-08-30T00:00:00Z',
+    details:{jobUuid:id(34),status:'Work Order',personName:'Historical customer'}};
+  const f=seedFixture({tables:{calendar_events:[event]}});
+  await f.worker.scheduleReconciliation();await f.worker.tick();
+  const task=f.db.tables.integration_tasks[0];assert.equal(task.state,'pending');assert.equal(task.attempts,0);
+  assert.ok(Date.parse(task.next_attempt_at)>Date.now()+14*60000);
+  assert.equal(event.details.status,'Completed');assert.equal(event.start_time,'2026-08-30T00:00:00Z');
+  const sync=f.stateSyncs.find(row=>row.p_job_id===id(35));assert.equal(sync.p_status,'Completed');assert.equal(sync.p_schedule_permission_missing,true);
+  const remote=f.resources.job.find(row=>row.uuid===id(31));remote.status='Completed';
+  task.next_attempt_at=new Date(0).toISOString();await f.worker.tick();
+  const local=f.db.tables.jobs.find(row=>row.details?.serviceM8JobUuid===id(31));
+  assert.equal(f.stateSyncs.findLast(row=>row.p_job_id===local.id).p_status,'Completed');
+});
+test('inspection outage/malformed response imports and status reports periodic mode instead of timestamp health', async () => {
+  for(const subscriptionResponse of [()=>response({},503),()=>response({unexpected:'shape'})]){
+    const f=seedFixture({subscriptionResponse});f.connection.webhook_subscribed_at='2026-10-16T00:00:00Z';
+    await f.route('POST','/api/job-calendar/servicem8/sync',owner);await f.worker.tick();
+    assert.equal(f.db.tables.integration_tasks[0].state,'succeeded');assert.ok(f.connection.dispatch_seeded_at);
+    const result=await f.route('GET','/api/sales/servicem8/status',owner);
+    assert.equal(result.body.webhookSubscribed,false);assert.equal(result.body.syncMode,'periodic');
+    assert.match(result.body.syncWarning,/15 minutes/);assert.ok(result.body.webhookHealth.inspectionError);
+  }
+});
+test('recurring scheduler dedupes tenants, retries exhausted tasks and never requires a browser', async () => {
+  const f=seedFixture();f.db.tables.servicem8_connections.push(privateConnection({business_id:'B',generation:id(2401)}));
+  await f.worker.scheduleReconciliation();await f.worker.scheduleReconciliation();
+  assert.equal(f.db.tables.integration_tasks.length,2);assert.equal(f.calls.length,0);
+  const task=f.db.tables.integration_tasks.find(row=>row.business_id==='A');
+  Object.assign(task,{id:id(2402),state:'failed',attempts:12,next_attempt_at:new Date(0).toISOString()});
+  await f.worker.scheduleReconciliation();assert.equal(task.state,'pending');assert.equal(task.attempts,0);
+  assert.equal(f.db.tables.integration_tasks.length,2);
+});
+test('official subscription array accepts current callback identity despite a legacy unique_id', async () => {
+  const f=seedFixture();
+  f.subscriptions.push({type:'object',object:'job',callback_url:'https://backend.example/api/servicem8/webhook/'+'e'.repeat(64),
+    unique_id:'old-subscription-id',fields:['uuid','status'],active:1,last_failure_reason:null,last_failure_at:null});
+  await f.route('POST','/api/job-calendar/servicem8/sync',owner);await f.worker.tick();
+  const result=await f.route('GET','/api/sales/servicem8/status',owner);
+  assert.equal(result.body.webhookSubscriptions.find(row=>row.object==='job').active,true);
+  assert.equal(result.body.webhookSubscribed,false);
+  assert.deepEqual(result.body.webhookSubscriptions.find(row=>row.object==='job').fields,['uuid','status']);
+});
+
+test('Completed can link one strong existing lead without creating new completed profiles or altering totals/history', async () => {
+  const lead={id:id(2501),business_id:'A',customer_id:id(2502),status:'quoted',scheduled_date:'2026-08-30',details:{total:650,services:[],notes:'Keep local note'}};
+  const f=seedFixture({tables:{jobs:[lead],customers:[{id:id(2502),business_id:'A',email:'alex@example.test',address:'29 Selwyn Crescent'}],external_object_mappings:[]}});
+  f.resources.job[0].status='Completed';
+  await f.route('POST','/api/job-calendar/servicem8/sync',owner);await f.worker.tick();
+  assert.equal(f.db.tables.integration_tasks[0].state,'succeeded');
+  assert.equal(f.db.tables.jobs.length,1);assert.equal(f.db.tables.customers.length,1);
+  const sync=f.stateSyncs.find(row=>row.p_job_id===lead.id);assert.equal(sync.p_status,'Completed');assert.equal(sync.p_schedule_permission_missing,true);
+  assert.equal(lead.scheduled_date,'2026-08-30');assert.equal(lead.details.total,650);assert.equal(lead.details.notes,'Keep local note');
+  const map=f.db.tables.external_object_mappings.find(row=>row.object_type==='job');assert.equal(map.snapshot.profile.email,'alex@example.test');
+});
+test('strict address identity compares numbered street line with road aliases despite extra SM8 suburb/postcode', async () => {
+  const f=seedFixture({tables:{jobs:[{id:id(2601),business_id:'A',customer_id:id(2602),status:'quoted'}],
+    customers:[{id:id(2602),business_id:'A',phone:'0215550100',address:'39 puhinui rd manukau'}],external_object_mappings:[]}});
+  f.resources.job[0].job_address='39 Puhinui Rd';f.resources.job[0].job_suburb='Manukau City Centre Auckland';f.resources.job[0].job_postcode='2104';
+  await f.route('POST','/api/job-calendar/servicem8/sync',owner);await f.worker.tick();
+  assert.equal(f.db.tables.jobs.length,1);assert.equal(f.db.tables.customers.length,1);
+  assert.equal(f.db.tables.external_object_mappings.find(row=>row.object_type==='job').local_id,id(2601));
+});
+
+test('periodic full snapshot retires explicitly cancelled/rescheduled bookings while preserving completed and absent-job history', async () => {
+  const event=(n,job,status='Work Order',business='A')=>({id:id(n),business_id:business,source:'servicem8',external_id:id(n),details:{jobUuid:id(job),status}});
+  const f=seedFixture({extraJobs:[{uuid:id(2701),status:'Unsuccessful'}],tables:{calendar_events:[
+    event(2702,2701),event(2703,31),event(2704,31,'Completed'),event(2705,2799),event(2706,2701,'Work Order','B')]}});
+  await f.worker.scheduleReconciliation();await f.worker.tick();
+  const removals=f.saved.filter(row=>row.p_event===null);
+  assert.deepEqual(removals.map(row=>row.p_external_id).sort(),[id(2702),id(2703)].sort());
+  assert.ok(f.saved.some(row=>row.p_external_id===id(30)&&row.p_event));
+  assert.ok(removals.every(row=>row.p_business_id==='A'));
+  const broken=seedFixture({rateLimited:'jobactivity',tables:{calendar_events:[event(2707,31)]}});
+  await broken.worker.scheduleReconciliation();await broken.worker.tick();
+  assert.equal(broken.db.tables.integration_tasks[0].state,'failed');assert.equal(broken.saved.length,0,'failed full schedule fetch never deletes events');
 });

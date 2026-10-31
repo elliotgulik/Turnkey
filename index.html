@@ -1385,7 +1385,7 @@
 
 </style>
 <link rel="stylesheet" href="sales-platform.css?v=20261018c">
-<link rel="stylesheet" href="nova-lead-manager.css?v=20261101c">
+<link rel="stylesheet" href="nova-lead-manager.css?v=20261101d">
 <link rel="stylesheet" href="quote-workspace.css?v=20261017a">
 <link rel="stylesheet" href="conversations.css?v=20261020a">
 <link rel="stylesheet" href="marketing-analytics.css?v=20261025b">
@@ -10855,8 +10855,8 @@ function labelToServiceId(label){
 // a matching rewrite there, since the payload shape itself was already
 // tested and working) — always returns {name,service_id}.
 function normalizeReqSvc(x){
-  if(x&&typeof x==='object')return{name:x.name||'',service_id:x.service_id||labelToServiceId(x.name)};
-  const name=String(x||'');
+  if(x&&typeof x==='object'){const name=String(x.name||x.label||'').replace(/_/g,' ').trim();return{name,service_id:x.service_id||labelToServiceId(name)};}
+  const name=String(x||'').replace(/_/g,' ').trim();
   return{name,service_id:labelToServiceId(name)};
 }
 // Migration for leads created before requestedServices existed at all —
@@ -10865,9 +10865,17 @@ function normalizeReqSvc(x){
 // sentence back out. Never mutates or removes anything from notes itself —
 // this only reads it to reconstruct structured data alongside it.
 function extractServicesFromNotes(notes){
-  const m=/Services requested:\s*([^.]+)\./.exec(notes||'');
-  if(!m)return[];
-  return m[1].split(',').map(s=>s.trim()).filter(Boolean).map(name=>({name,service_id:labelToServiceId(name)}));
+  const text=String(notes||'').split(/\s*·\s*Submitted via online quote tool/)[0];
+  const answers=[];
+  for(const line of text.split(/\n/)){
+    const at=line.indexOf(':');if(at<0)continue;
+    const key=line.slice(0,at).toLowerCase().replace(/[^a-z0-9]/g,'');
+    if(!/(?:services|requestedservice|selectservice)/.test(key))continue;
+    let answer=line.slice(at+1).trim();
+    if(key==='servicesrequested')answer=answer.replace(/\.\s*$/,'');
+    answers.push(...answer.split(/[,;\n]+/).map(x=>x.replace(/_/g,' ').replace(/\s+/g,' ').trim()).filter(Boolean));
+  }
+  return [...new Set(answers)].map(name=>({name,service_id:labelToServiceId(name)}));
 }
 // The one accessor everything else should call — never read
 // r.requestedServices directly. Self-heals old records the first time
@@ -10878,7 +10886,7 @@ function extractServicesFromNotes(notes){
 // migration pass or forced write needed).
 function getRequestedServices(r){
   if(r.requestedServices&&r.requestedServices.length)return r.requestedServices.map(normalizeReqSvc);
-  const extracted=extractServicesFromNotes(r.notes||r.jobNotes);
+  const extracted=extractServicesFromNotes([r.notes,r.jobNotes].filter(Boolean).join('\n'));
   if(extracted.length)r.requestedServices=extracted;
   return extracted;
 }
@@ -11029,22 +11037,22 @@ async function retryPendingPhotos(){
 <script src="pipeline-model.js?v=20261018e"></script>
 <script src="lead-priority.js?v=20261017a"></script>
 <script src="meta-import.js?v=20261020a"></script>
-<script src="sales-platform.js?v=20261031c"></script>
+<script src="sales-platform.js?v=20261101d"></script>
 <script type="module" src="measurement-import.js?v=20261017a"></script>
 <script src="quote-workspace.js?v=20261017a"></script>
 <script src="conversations.js?v=20261020a"></script>
 <script src="conversations-bridge.js?v=20261020a"></script>
 <script src="servicem8-import.js?v=20261017a"></script>
 <script src="marketing-analytics.js?v=20261025b"></script>
-<footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a> · <span id="tk-app-version">v20261031c</span></footer>
+<footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a> · <span id="tk-app-version">v20261101d</span></footer>
 <script src="extension-quote-link.js?v=20261022a"></script>
 <script src="job-workspace.js?v=20261031a"></script>
-<script src="job-calendar.js?v=20261031c"></script>
+<script src="job-calendar.js?v=20261101d"></script>
 <script src="operations-workspace.js?v=20261031b"></script>
 <script src="operations-bridge.js?v=20261018c"></script>
 <script src="workspace-controls.js?v=20261019a"></script>
 <script src="settings-experience.js?v=20261019d"></script>
 <script src="workspace-experience.js?v=20261019b"></script>
-<script src="nova-lead-manager.js?v=20261101c"></script>
+<script src="nova-lead-manager.js?v=20261101d"></script>
 </body>
 </html>

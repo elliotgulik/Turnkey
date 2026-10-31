@@ -209,6 +209,65 @@ const { chromium } = require('playwright'),
     assert.doesNotMatch(await page.locator('#tkjc-sidebar-list').innerText(), /Alice/);
     await page.click('[data-tkjc="clear-filters"]');
 
+    // Imported WorkOrders also exist as real jobs. Keep every persisted
+    // dispatch activity, hiding only the matching local job's calendar card.
+    await page.evaluate(async () => {
+      const dispatch = fixture.events.find(e => e.id === 'sm8-booking');
+      dispatch.details.jobUuid = 'sm8-local-match';
+      fixture.events.push({...structuredClone(dispatch),id:'sm8-second-day',external_id:'activity-2',
+        start_time:'2026-07-21T01:00:00.000Z',end_time:'2026-07-21T02:00:00.000Z'});
+      fixture.events.push({...structuredClone(dispatch),id:'sm8-second-staff',external_id:'activity-3',
+        details:{...structuredClone(dispatch.details),assignedStaff:['Jordan Lee','Second crew member'],assignedStaffIds:['servicem8:remote-1','servicem8:remote-2']}});
+      fixture.staff.push({id:'servicem8:remote-2',name:'Second crew member',source:'servicem8',role:'servicem8',readOnly:true});
+      const local = {id:'local-import',status:'scheduled',scheduled_date:'2026-07-20',customer:{name:'Imported local job'},
+        details:{serviceM8JobUuid:'sm8-local-match',serviceM8Booking:{startAt:dispatch.start_time,endAt:dispatch.end_time}}};
+      fixture.jobs.push(local,{...structuredClone(local),id:'unmatched-import',customer:{name:'Unmatched imported job'},
+        details:{...structuredClone(local.details),serviceM8JobUuid:'sm8-no-dispatch'}});
+      window.records = [{id:'record-ui-id',jobId:'local-import',customerId:'customer-id'}];
+      window.openDetail = id => {window.openedRecord = id;};
+      window.openCustomerProfile = id => {window.openedCustomer = id;};
+      await TK_JOB_CALENDAR.refresh();
+    });
+    if (process.env.TURNKEY_CALENDAR_SDK) {
+      assert.deepEqual(await page.evaluate(() => ({
+        local:!!testFc.getEventById('job:local-import'),unmatched:!!testFc.getEventById('job:unmatched-import'),
+        dispatch:testFc.getEvents().filter(e => ['event:sm8-booking','event:sm8-second-day','event:sm8-second-staff'].includes(e.id)).length,
+        readOnly:testFc.getEvents().filter(e => ['event:sm8-booking','event:sm8-second-day','event:sm8-second-staff'].includes(e.id)).every(e => e.startEditable === false)
+      })), {local:false,unmatched:true,dispatch:3,readOnly:true});
+    } else {
+      assert.equal(await page.locator('[data-tkjc-agenda-job="local-import"]').count(), 0);
+      assert.equal(await page.locator('[data-tkjc-agenda-job="unmatched-import"]').count(), 1);
+      assert.equal(await page.locator('[data-tkjc-agenda-event="sm8-booking"], [data-tkjc-agenda-event="sm8-second-day"], [data-tkjc-agenda-event="sm8-second-staff"]').count(), 3);
+    }
+    assert.equal(await page.locator('[data-tkjc-chip="servicem8:remote-2"]').count(), 1, 'all remote staff remain available');
+    const openDispatch = async () => {
+      if (process.env.TURNKEY_CALENDAR_SDK) await page.locator('.fc-event-title').filter({hasText:'Nova Exterior'}).first().click();
+      else await page.locator('[data-tkjc-agenda-event="sm8-booking"]').click();
+    };
+    await openDispatch();
+    assert.equal(await page.locator('#tkjc-event-overlay input, #tkjc-event-overlay select').count(), 0, 'remote booking dates stay read-only');
+    assert.match(await page.locator('#tkjc-event-overlay').innerText(), /Jordan Lee/);
+    await page.click('[data-tkjc="open-record"]');
+    assert.equal(await page.evaluate(() => openedRecord), 'record-ui-id', 'openDetail receives the app record id, not job id');
+    await openDispatch();
+    await page.click('[data-tkjc="open-customer"]');
+    assert.equal(await page.evaluate(() => openedCustomer), 'record-ui-id', 'customer profile expects the app record id');
+    await page.evaluate(() => {window.records = [];window.openedRecord = null;});
+    await openDispatch();
+    await page.click('[data-tkjc="open-record"]');
+    assert.equal(await page.evaluate(() => openedRecord), null);
+    assert.match(await page.evaluate(() => lastNotify), /Refresh the app/);
+    await page.click('#tkjc-event-overlay [data-tkjc="close"]');
+    await page.evaluate(async () => {
+      fixture.jobs = fixture.jobs.filter(j => !['local-import','unmatched-import'].includes(j.id));
+      fixture.events = fixture.events.filter(e => !['sm8-second-day','sm8-second-staff'].includes(e.id));
+      fixture.staff = fixture.staff.filter(u => u.id !== 'servicem8:remote-2');
+      await TK_JOB_CALENDAR.refresh();
+    });
+    await openDispatch();
+    assert.equal(await page.locator('[data-tkjc="open-record"], [data-tkjc="open-customer"]').count(), 0, 'unmatched dispatch has no local record actions');
+    await page.click('#tkjc-event-overlay [data-tkjc="close"]');
+
     /* ===== 2. mobile More sheet gets a Calendar row ===== */
     await page.evaluate(() => { document.getElementById('view-dashboard').classList.add('active'); document.getElementById('view-calendar').classList.remove('active'); window.openMoreSheet(); });
     await page.locator('[data-tkjc-more="calendar"]').waitFor();
@@ -657,7 +716,7 @@ const { chromium } = require('playwright'),
             pollReads++;
             return {...rangeData(),staff:[...rangeData().staff,remoteStaff],
               completedEvents:[{id:'archived',source:'servicem8',end_time:'2025-01-01T02:00Z',details:{jobUuid:'archive-job',status:'Completed',personName:'Archived remote job',assignedStaffIds:[remoteStaff.id]}}],
-              servicem8:{state:'queued',webhookSubscribed:false,lastSyncedAt:'2026-07-14T00:00Z',lastError:'sensitive internal error <script>'}};
+              servicem8:{state:'queued',seededAt:'2026-07-13T00:00Z',webhookSubscribed:false,lastSyncedAt:'2026-07-14T00:00Z',lastError:'sensitive internal error <script>'}};
           }
           throw Error('Unexpected polling write ' + path);
         }

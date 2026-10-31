@@ -235,3 +235,16 @@ test("matching entry and event page IDs accept numeric IDs normalized to strings
     fetchLead: async id => lead(id), addLead: async () => ({ id: "saved" }),
   });
 });
+
+test('long Meta service question names retain actual answers as requested services', async () => {
+  let saved;
+  const question='list_cleaning_services_below_(house,_roof,_windows_[outside_or_inside?],_driveway,_patio,_deck,_fence,_solar_panels_and_other_services)';
+  await ingestMetaWebhook({
+    ...signed(payloadFor('long-form-question')),appSecret:SECRET,
+    lookupPage:async()=>({business_id:'business-a',pageToken:'token'}),
+    fetchLead:async id=>({id,field_data:[{name:question,values:['House','outside_windows']}]}),
+    addLead:async payload=>{saved=payload;return {id:'saved'};},
+  });
+  assert.deepEqual(saved.requestedServices,['House','outside_windows']);
+  assert.match(saved.customer.notes,/House, outside_windows/);
+});
