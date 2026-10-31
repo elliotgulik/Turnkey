@@ -37,6 +37,21 @@ const CALENDAR_DETAIL_KEYS = [
   'calendarGoogleSyncState', 'calendarGoogleSyncError', 'calendarGoogleSyncedAt',
   'serviceM8Booking', 'serviceM8Status'
 ]
+const SERVICE_M8_EVENT_KEYS = ['personName', 'companyName', 'email', 'phone', 'address', 'services', 'lineItems', 'assignedStaff', 'staffAssigned', 'status']
+function filterServiceM8CalendarDetails(value) {
+  const input = value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+  const output = Object.fromEntries(SERVICE_M8_EVENT_KEYS.filter(key => input[key] != null).map(key => [key, input[key]]))
+  output.services = Array.isArray(output.services) ? output.services.slice(0, 20).map(x => String(x).slice(0, 200)) : []
+  output.lineItems = Array.isArray(output.lineItems) ? output.lineItems.slice(0, 40).map(item => ({
+    name: String(item?.name || '').slice(0, 200), quantity: String(item?.quantity || '').slice(0, 40),
+  })).filter(item => item.name) : []
+  output.assignedStaff = Array.isArray(output.assignedStaff) ? output.assignedStaff.slice(0, 20).map(x => String(x).slice(0, 120)) : []
+  output.staffAssigned = output.staffAssigned === true
+  for (const key of ['personName', 'companyName', 'email', 'phone', 'address', 'status']) {
+    if (output[key] != null) output[key] = String(output[key]).slice(0, key === 'address' ? 500 : 254)
+  }
+  return output
+}
 function filterCalendarDetails(details) {
   const out = {}
   if (!details || typeof details !== 'object') return out
@@ -222,8 +237,12 @@ export function installJobCalendar(app, { db, requireBusiness, getGoogleCalendar
     // must still show up, or a holiday/busy span spanning the view's edge
     // would silently vanish from one of the two weeks it touches.
     const eventRows = await fetchAllPaged(() => db.from('calendar_events')
-      .select('id, user_id, title, start_time, end_time, busy_status, source, notes, connection_id, external_id').eq('business_id', req.businessId)
+      .select('id, user_id, title, start_time, end_time, busy_status, source, notes, connection_id, external_id, details').eq('business_id', req.businessId)
       .lt('start_time', to.toISOString()).gt('end_time', from.toISOString()))
+    const eventsOut = eventRows.map(event => ({
+      ...event,
+      details: event.source === 'servicem8' ? filterServiceM8CalendarDetails(event.details) : undefined,
+    }))
     const blockRows = await fetchAllPaged(() => db.from('availability_blocks')
       .select('id, user_id, block_type, start_at, end_at, all_day, reason').eq('business_id', req.businessId)
       .lt('start_at', to.toISOString()).gt('end_at', from.toISOString()))
@@ -235,7 +254,7 @@ export function installJobCalendar(app, { db, requireBusiness, getGoogleCalendar
     res.json({
       jobs: jobsOut,
       staff,
-      events: scoped(eventRows),
+      events: scoped(eventsOut),
       blocks: scoped(blockRows),
       google: {
         connected: !!connection,

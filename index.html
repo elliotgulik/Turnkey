@@ -1384,8 +1384,8 @@
 <link rel="stylesheet" href="marketing-analytics.css?v=20261025b">
 <link rel="stylesheet" href="sales-experience.css?v=20261019a">
 <link rel="stylesheet" href="settings-experience.css?v=20261019a">
-<link rel="stylesheet" href="job-workspace.css?v=20261018.1">
-<link rel="stylesheet" href="job-calendar.css?v=20261018c">
+<link rel="stylesheet" href="job-workspace.css?v=20261031.1">
+<link rel="stylesheet" href="job-calendar.css?v=20261031a">
 <link rel="stylesheet" href="operations-workspace.css?v=20261018c">
 <link rel="stylesheet" href="workspace-experience.css?v=20261022a">
 </head>
@@ -1447,6 +1447,7 @@
         <button data-view="customers"><span class="nav-ico" data-icon="customers"></span>Customers</button>
         <button data-view="operations"><span class="nav-ico" data-icon="jobsflow"></span>Jobs &amp; invoices</button>
         <button data-view="calendar"><span class="nav-ico" data-icon="calendar"></span>Calendar</button>
+        <button data-view="worklog"><span class="nav-ico" data-icon="jobsflow"></span>Staff work log</button>
         <button data-view="inbox"><span class="nav-ico" data-icon="inbox"></span>Conversations <span class="count" id="cnt-inbox">0</span></button>
         <div class="sidebar-label">Business</div>
         <button data-view="sales"><span class="nav-ico" data-icon="sales"></span>Analytics</button>
@@ -1478,6 +1479,7 @@
     <section class="view" id="view-leads"></section>
     <section class="view" id="view-customers"></section>
     <section class="view" id="view-calendar"></section>
+    <section class="view" id="view-worklog"></section>
     <section class="view" id="view-operations"></section>
     <section class="view" id="view-inbox"></section>
     <section class="view" id="view-ops"></section>
@@ -2901,13 +2903,14 @@ function resetAll(){
 document.getElementById('tabs').addEventListener('click',e=>{const b=e.target.closest('button[data-view]');if(b)switchView(b.dataset.view)});
 document.getElementById('bottom-nav').addEventListener('click',e=>{const b=e.target.closest('button[data-view]');if(b)switchView(b.dataset.view)});
 function switchView(v){
-  if(!['dashboard','leads','pipeline','sales','goals','inbox','pricing','detail','calendar','operations','customers'].includes(v)||!document.getElementById('view-'+v))v='dashboard';
+  if(!['dashboard','leads','pipeline','sales','goals','inbox','pricing','detail','calendar','worklog','operations','customers'].includes(v)||!document.getElementById('view-'+v))v='dashboard';
   document.querySelectorAll('nav.tabs button[data-view], .bottom-nav button[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===v));
   document.querySelectorAll('.view').forEach(s=>s.classList.remove('active'));
   document.getElementById('view-'+v).classList.add('active');
   setAccent(v);
   if(typeof currentBusinessId!=='undefined'&&currentBusinessId)try{sessionStorage.setItem('turnkey-view:'+currentBusinessId,v);}catch(e){}
   if(v==='calendar')renderCalendar();
+  if(v==='worklog')window.TK_JOB_WORK?.openWorkLogPage();
   if(v==='inbox')renderInbox();
   if(v==='jobsflow')renderJobsFlow();
   if(v==='ops')renderOps();
@@ -2924,6 +2927,7 @@ const MODULE_ACCENT={
   jobsflow:['--m-sales','--m-sales-wash'], customers:['--m-sales','--m-sales-wash'],
   sales:['--m-sales','--m-sales-wash'],
   calendar:['--m-cal','--m-cal-wash'],
+  worklog:['--m-ops','--m-ops-wash'],
   inbox:['--m-money','--m-money-wash'],
   ops:['--m-ops','--m-ops-wash'],
   pricing:['--m-pricing','--m-pricing-wash'],
@@ -8554,7 +8558,7 @@ function renderMetaConnectionCard(){
   const m=metaStatus,ready=m.health==='ready';
   return `<div class="conn-card ${ready?'live':''}">
     <div class="conn-top"><span class="conn-name">Meta — Facebook &amp; Instagram lead ads</span><span class="conn-badge ${ready?'on':'off'}">${ready?'● LEAD NOTIFICATIONS ENABLED':m.connected?'CHECK DELIVERY':'not connected'}</span></div>
-    ${m.connected?`<p>Page ${escapeHtmlSafe(m.pageId)}${m.pageName?' · '+escapeHtmlSafe(m.pageName):''}</p><p>${escapeHtmlSafe(m.message||'Meta connection saved. Check lead delivery status.')}</p><p>${leadReceiptLabel(m)}</p><div class="quote-action-row"><button class="btn ghost sm" onclick="checkMetaDelivery(false,this)">Check connection</button><button class="btn accent sm" onclick="checkMetaDelivery(true,this)">Enable lead delivery</button><button class="btn accent sm" onclick="TK_META_IMPORT.start()">Import existing leads</button><button class="btn ghost sm" onclick="disconnectMeta()">Disconnect</button></div><p id="meta-import-progress" role="status"></p>`:''}
+    ${m.connected?`<p>Page ${escapeHtmlSafe(m.pageId)}${m.pageName?' · '+escapeHtmlSafe(m.pageName):''}</p><p>${escapeHtmlSafe(m.message||'Meta connection saved. Check lead delivery status.')}</p><p>${leadReceiptLabel(m)}</p><p>Import all past leads Meta still makes available across your forms. New leads arrive automatically through the connected lead webhook.</p><div class="quote-action-row"><button class="btn ghost sm" onclick="checkMetaDelivery(false,this)">Check connection</button><button class="btn accent sm" onclick="checkMetaDelivery(true,this)">Enable lead delivery</button><button class="btn accent sm" onclick="TK_META_IMPORT.start()">Import all available leads</button><button class="btn ghost sm" onclick="disconnectMeta()">Disconnect</button></div><p id="meta-import-progress" role="status"></p>`:''}
     <div class="quote-action-row"><button class="btn ghost sm" onclick="openMetaAdsAnalytics()">Ad spend &amp; campaign insights</button></div>
     <details ${!m.connected||m.health==='reconnect'||m.health==='permissions'||m.health==='retrieval_permissions'?'open':''}><summary>${m.connected?'Reconnect Page':'Connect your Page'}</summary>
       <p><b>Connect once with a non-expiring System User token.</b> Do not use your Meta user ID or a Graph API Explorer/personal token. TurnKey verifies the token is for this app and set to Never, then retrieves and stores the Page token securely on the server. Meta can still revoke it if the app, business, Page access or permissions change.</p>
@@ -8878,6 +8882,7 @@ function saveState(){
 const sb=(window.TURNKEY_CONFIG&&window.TURNKEY_CONFIG.supabaseUrl&&window.TURNKEY_CONFIG.supabaseAnonKey)
   ?window.supabase.createClient(window.TURNKEY_CONFIG.supabaseUrl,window.TURNKEY_CONFIG.supabaseAnonKey)
   :null;
+window.TK_SUPABASE_CLIENT=sb;
 let currentBusinessId=null;
 let businessStateReady=false;
 let businessSessionVersion=0;
@@ -10926,8 +10931,8 @@ async function retryPendingPhotos(){
 <script src="marketing-analytics.js?v=20261025b"></script>
 <footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a> · <span id="tk-app-version">v20261025b</span></footer>
 <script src="extension-quote-link.js?v=20261022a"></script>
-<script src="job-workspace.js?v=20261018"></script>
-<script src="job-calendar.js?v=20261018d"></script>
+<script src="job-workspace.js?v=20261031a"></script>
+<script src="job-calendar.js?v=20261031a"></script>
 <script src="operations-workspace.js?v=20261018c"></script>
 <script src="operations-bridge.js?v=20261018c"></script>
 <script src="workspace-controls.js?v=20261019a"></script>

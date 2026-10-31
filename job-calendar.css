@@ -186,6 +186,16 @@
   font-size: 13px;
   margin-bottom: 6px;
 }
+.tkjc-agenda-date > span { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tkjc-weather, .tkjc-fc-weather {
+  display: inline-flex; align-items: center; width: fit-content; border-radius: 999px;
+  padding: 2px 8px; font-size: 10px; font-weight: 700; line-height: 1.5;
+  background: #e7f3ed; color: #276548;
+}
+.tkjc-weather-warn { background: #fff3d8; color: #835b0d; }
+.tkjc-weather-bad { background: #fde8e7; color: #9b3934; }
+.tkjc-weather.historical, .tkjc-fc-weather.historical { border: 1px dashed currentColor; }
+.tkjc-fc-weather { margin: 2px 4px; font-size: 9px; }
 .tkjc-agenda-add {
   border: 1px solid var(--line);
   background: #fff;
@@ -259,6 +269,27 @@
 }
 .tkjc-dialog h3 {
   margin: 0 0 10px;
+}
+.tkjc-dispatch-dialog { max-width: 700px; }
+.tkjc-dispatch-heading { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
+.tkjc-dispatch-heading h3 { margin: 3px 0; font-size: 23px; }
+.tkjc-dispatch-heading p { margin: 0; color: var(--ink-faint); }
+.tkjc-dispatch-kicker { color: #426b8b; font-size: 10px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+.tkjc-dispatch-status { background: #e9f3f7; color: #315a70; border-radius: 999px; padding: 5px 10px; font-size: 11px; font-weight: 700; }
+.tkjc-dispatch-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 16px 0; }
+.tkjc-dispatch-grid section { background: #f7f9fb; border: 1px solid #e3e9ee; border-radius: 10px; padding: 12px; min-width: 0; }
+.tkjc-dispatch-grid h4 { margin: 0 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-faint); }
+.tkjc-dispatch-grid p { margin: 0; overflow-wrap: anywhere; }
+.tkjc-dispatch-grid ul { margin: 0; padding-left: 18px; }
+.tkjc-dispatch-grid li span { color: var(--ink-faint); }
+.tkjc-dispatch-weather { grid-column: 1 / -1; }
+.tkjc-weather-summary { display: grid; gap: 3px; }
+.tkjc-weather-summary span, .tkjc-weather-summary small, .tkjc-detail-muted { color: var(--ink-faint); }
+.tkjc-detail-muted { font-size: 12px; }
+@media (max-width: 600px) {
+  .tkjc-dispatch-grid { grid-template-columns: 1fr; }
+  .tkjc-dispatch-weather { grid-column: auto; }
+  .tkjc-dispatch-heading h3 { font-size: 20px; }
 }
 .tkjc-dialog label {
   display: flex;

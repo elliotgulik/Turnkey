@@ -39,7 +39,7 @@ export function isConfigured() {
 // that scopes can be requested incrementally later — this list is a
 // deliberate starting point, not exhaustive.
 export const DEFAULT_SCOPES = [
-  'read_customers', 'manage_customers',
+  'read_customers', 'manage_customers', 'read_customer_contacts', 'read_staff',
   'read_jobs', 'manage_jobs', 'create_jobs',
   'read_job_materials', 'manage_job_materials',
   'read_job_attachments', 'manage_job_attachments',

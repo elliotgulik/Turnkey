@@ -25,6 +25,7 @@ test('independent calendar SQL: real schema, private RPCs, ownership, conflicts 
  await db.exec(sql);
  await db.exec(fs.readFileSync(path.join(__dirname,'../supabase/migrations/20261031133000_servicem8_dispatch_calendar.sql'),'utf8'));
  await db.exec(fs.readFileSync(path.join(__dirname,'../supabase/migrations/20261031140000_servicem8_dispatch_webhook.sql'),'utf8'));
+ await db.exec(fs.readFileSync(path.join(__dirname,'../supabase/migrations/20261031150000_servicem8_dispatch_event_details.sql'),'utf8'));
  const event = (n=30, caller=1, staff=3, patch={}) => {
    const args = ['a',id(caller),id(n),id(staff),'Site visit','2026-10-19T08:00Z','2026-10-19T09:00Z','busy','notes','UTC'];
    for (const [k,v] of Object.entries(patch)) args[Number(k)]=v;
@@ -36,7 +37,8 @@ test('independent calendar SQL: real schema, private RPCs, ownership, conflicts 
  const reject = (promise,code) => assert.rejects(promise,e => e.code===code);
  await t.test('ServiceM8 dispatch sync is service-role only, idempotent, and prunes canceled bookings only in-range',async()=>{
    const from='2026-11-01T00:00:00Z',to='2026-11-08T00:00:00Z';
-   const events=[{external_id:'activity-1',title:'Nova · House wash',start_time:'2026-11-04T09:00:00Z',end_time:'2026-11-04T10:00:00Z',notes:'29 Selwyn Cres'},
+   const details={personName:'Alex Smith',email:'alex@example.test',services:['House wash'],assignedStaff:['Jordan Lee']};
+   const events=[{external_id:'activity-1',title:'Alex Smith · House wash',start_time:'2026-11-04T09:00:00Z',end_time:'2026-11-04T10:00:00Z',notes:'29 Selwyn Cres',details},
      {external_id:'activity-2',title:'Nova · Driveway',start_time:'2026-11-09T09:00:00Z',end_time:'2026-11-09T10:00:00Z',notes:null}];
    await assert.rejects(db.query('select sync_servicem8_dispatch_calendar($1,$2,$3,$4)', ['a',from,to,JSON.stringify(events)]),e=>e.code==='42501');
    await db.exec('set role service_role');
@@ -46,13 +48,15 @@ test('independent calendar SQL: real schema, private RPCs, ownership, conflicts 
      const repeated=await db.query('select sync_servicem8_dispatch_calendar($1,$2,$3,$4) n',['a',from,to,JSON.stringify(events)]);
      assert.equal(repeated.rows[0].n,1);
      assert.equal((await db.query("select count(*)::int n from calendar_events where source='servicem8'")).rows[0].n,1);
+     assert.deepEqual((await db.query("select details from calendar_events where source='servicem8'")).rows[0].details,details);
      await db.query('select sync_servicem8_dispatch_calendar($1,$2,$3,$4)',['a',from,to,'[]']);
      assert.equal((await db.query("select count(*)::int n from calendar_events where source='servicem8'")).rows[0].n,0);
      assert.equal((await db.query("select count(*)::int n from calendar_events where source='turnkey'")).rows[0].n,0);
-     const item={title:'Webhook booking',start_time:'2026-11-04T20:00:00Z',end_time:'2026-11-04T21:00:00Z',notes:'Address'};
+     const item={title:'Webhook booking',start_time:'2026-11-04T20:00:00Z',end_time:'2026-11-04T21:00:00Z',notes:'Address',details};
      await db.query('select sync_servicem8_dispatch_event($1,$2,$3)',['a','activity-live',JSON.stringify(item)]);
      await db.query('select sync_servicem8_dispatch_event($1,$2,$3)',['a','activity-live',JSON.stringify({...item,title:'Moved booking'})]);
      assert.equal((await db.query("select title from calendar_events where source='servicem8'")).rows[0].title,'Moved booking');
+     assert.deepEqual((await db.query("select details from calendar_events where source='servicem8'")).rows[0].details,details);
      await db.query('select sync_servicem8_dispatch_event($1,$2,$3)',['a','activity-live',null]);
      assert.equal((await db.query("select count(*)::int n from calendar_events where source='servicem8'")).rows[0].n,0);
    } finally { await db.exec('reset role'); }

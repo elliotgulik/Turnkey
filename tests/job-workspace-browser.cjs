@@ -58,9 +58,11 @@ const { chromium } = require('playwright'),
       window.fixture = {
         business: 'biz-a', userId: 'owner-1', version: 0, role: 'owner',
         staff: [{ id: 'owner-1', email: 'owner@test.example', role: 'owner' }],
-        calls: [], logsResult: [], delayEquipment: false, equipmentResolver: null
+        calls: [], realtimeHandlers: [], logsResult: [], equipmentResult: [{ id: 'asset-1', name: 'Washer', due: false, remainingHours: 7.5 }], delayEquipment: false, equipmentResolver: null
       };
+      const supabase = { channel() { const channel = { on(_event, _filter, handler) { fixture.realtimeHandlers.push(handler); return channel; }, subscribe() { return channel; } }; return channel; }, removeChannel() {} };
       window.TK_JOB_WORK.configure({
+        supabase,
         getBusinessId: () => fixture.business,
         getUserId: () => fixture.userId,
         getVersion: () => fixture.version,
@@ -70,13 +72,14 @@ const { chromium } = require('playwright'),
           fixture.calls.push({ path: p, options });
           if (p.startsWith('/staff')) return { role: fixture.role, staff: fixture.staff };
           if (p.startsWith('/equipment') && (!options || !options.method)) {
-            if (fixture.delayEquipment) return new Promise((resolve) => { fixture.equipmentResolver = () => resolve({ equipment: [] }); });
-            return { equipment: [] };
+            if (fixture.delayEquipment) return new Promise((resolve) => { fixture.equipmentResolver = () => resolve({ equipment: fixture.equipmentResult }); });
+            return { equipment: fixture.equipmentResult };
           }
           if (p.startsWith('/equipment') && options && options.method === 'POST') return { ok: true, asset: { id: 'asset-1', name: 'Washer' } };
+          if (p.startsWith('/logs') && options && options.method === 'POST') return { ok: true, logId: 'log-1', deduped: false };
           if (p.startsWith('/logs') && p.includes('jobId')) return { logs: [], usage: [] };
           if (p.startsWith('/logs') && p.includes('from=')) return { logs: fixture.logsResult };
-          if (p.startsWith('/logs') && options && options.method === 'POST') return { ok: true, logId: 'log-1', deduped: false };
+          if (p.startsWith('/jobs?date=')) return { jobs: [{ id: 'job-1', name: 'Customer One', address: '1 Test Street', services: ['House wash'] }] };
           if (p.includes('/photos') && (!options || !options.method)) return { photos: [] };
           return { ok: true };
         }
@@ -130,6 +133,25 @@ const { chromium } = require('playwright'),
     await page.locator('.tkj-overlay').waitFor({ state: 'detached' });
     const secondPostCall = (await page.evaluate(() => fixture.calls.filter((c) => c.path === '/logs' && c.options && c.options.method === 'POST')))[1];
     assert.equal(JSON.parse(secondPostCall.options.body).requestId, sentBody.requestId);
+
+    /* ===== 3. employee work-log page records shift and travel-adjusted equipment ===== */
+    await page.evaluate(() => { document.getElementById('view-worklog').classList.add('active'); window.TK_JOB_WORK.openWorkLogPage(); });
+    await page.locator('#view-worklog [data-work="form"]').waitFor();
+    await page.locator('#view-worklog [name="jobId"] option[value="job-1"]').waitFor({ state: 'attached' });
+    const dailyLogQueries = await page.evaluate(() => fixture.calls.filter(c => c.path.startsWith('/logs?from=')).length);
+    await page.evaluate(() => fixture.realtimeHandlers[0]?.());
+    await page.waitForFunction((before) => fixture.calls.filter(c => c.path.startsWith('/logs?from=')).length > before, dailyLogQueries);
+    await page.locator('#view-worklog [name="jobId"] option[value="job-1"]').waitFor({ state: 'attached' });
+    await page.selectOption('#view-worklog [name="jobId"]', 'job-1');
+    await page.check('#view-worklog [name="assetId"][value="asset-1"]');
+    await page.fill('#view-worklog [name="travelMinutes"]', '45');
+    assert.match(await page.locator('#view-worklog [data-work="runtime"]').innerText(), /7\.3 hours/);
+    await page.locator('#view-worklog [data-work="submit"]').click();
+    await page.waitForFunction(() => window.fixture.calls.some(c => c.path.startsWith('/logs') && c.options?.method === 'POST' && JSON.parse(c.options.body).travelMinutes === 45));
+    const workBody = await page.evaluate(() => JSON.parse(fixture.calls.find(c => c.path.startsWith('/logs') && c.options?.method === 'POST' && JSON.parse(c.options.body).travelMinutes === 45).options.body));
+    assert.equal(workBody.jobId, 'job-1');
+    assert.equal(workBody.equipmentHoursAuto, true);
+    assert.deepEqual(workBody.equipment, [{ assetId: 'asset-1' }]);
 
     /* ===== 3. local-timezone correctness in the staff calendar ===== */
     // One log entry "right now" (from the page's own clock, under the

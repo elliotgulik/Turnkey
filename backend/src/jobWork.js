@@ -104,6 +104,38 @@ export function installJobWork(app, { db, requireBusiness, bucket = 'turnkey-upl
     res.json({ staff, role: r })
   }))
 
+  app.get('/api/job-work/jobs', requireBusiness, wrap(async (req, res) => {
+    const r = await role(req)
+    const date = String(req.query.date || '').slice(0, 10)
+    const parsedDate = new Date(date + 'T00:00:00Z')
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(parsedDate.getTime()) || parsedDate.toISOString().slice(0, 10) !== date) throw fail('Choose a valid work date')
+    const from = new Date(date + 'T00:00:00Z'); from.setUTCDate(from.getUTCDate() - 14)
+    const to = new Date(date + 'T00:00:00Z'); to.setUTCDate(to.getUTCDate() + 31)
+    const rows = await fetchAllPaged(() => db.from('jobs')
+      .select('id, status, scheduled_date, assigned_to, customer_id, details')
+      .eq('business_id', req.businessId).gte('scheduled_date', from.toISOString().slice(0, 10))
+      .lt('scheduled_date', to.toISOString().slice(0, 10)).order('scheduled_date', { ascending: true }))
+    const visible = rows.filter(job => {
+      if (isPrivileged(r)) return true
+      const assigned = Array.isArray(job.details?.assignedStaffIds) ? job.details.assignedStaffIds : []
+      return job.assigned_to === req.userId || assigned.includes(req.userId)
+    })
+    const customerIds = [...new Set(visible.map(job => job.customer_id).filter(Boolean))]
+    const customers = []
+    for (let i = 0; i < customerIds.length; i += 100) {
+      customers.push(...await fetchAllPaged(() => db.from('customers').select('id,name,address,suburb')
+        .eq('business_id', req.businessId).in('id', customerIds.slice(i, i + 100))))
+    }
+    const byId = new Map(customers.map(customer => [customer.id, customer]))
+    res.json({ jobs: visible.map(job => ({
+      id: job.id, status: job.status, scheduled_date: job.scheduled_date,
+      name: byId.get(job.customer_id)?.name || 'Customer',
+      address: [byId.get(job.customer_id)?.address, byId.get(job.customer_id)?.suburb].filter(Boolean).join(', '),
+      services: (Array.isArray(job.details?.services) ? job.details.services : []).map(service =>
+        String(service.label || service.svc || '').slice(0, 120)).filter(Boolean).slice(0, 12),
+    })) })
+  }))
+
   /* ===================== work logs / calendar ===================== */
 
   function parseWindow(body) {
@@ -132,7 +164,12 @@ export function installJobWork(app, { db, requireBusiness, bucket = 'turnkey-upl
 
     const { startAt, endAt } = parseWindow(body)
     const durationHours = (endAt.getTime() - startAt.getTime()) / 3600000
-    const notes = body.notes != null ? String(body.notes).slice(0, 2000) : null
+    const travelMinutes = body.travelMinutes == null ? 0 : Number(body.travelMinutes)
+    if (!Number.isInteger(travelMinutes) || travelMinutes < 0 || travelMinutes > durationHours * 60) throw fail('Travel time must be whole minutes between zero and the logged shift length')
+    const userNotes = body.notes != null ? String(body.notes).slice(0, 1800) : ''
+    const travelNote = travelMinutes ? `[Travel: ${travelMinutes} min]` : ''
+    const notes = [travelNote, userNotes].filter(Boolean).join(' · ').slice(0, 2000) || null
+    const equipmentRunHours = Math.max(0, durationHours - travelMinutes / 60)
 
     const equipmentInput = Array.isArray(body.equipment) ? body.equipment : []
     if (equipmentInput.length > 20) throw fail('Use at most 20 equipment entries per submission')
@@ -142,7 +179,7 @@ export function installJobWork(app, { db, requireBusiness, bucket = 'turnkey-upl
       if (!uuid(item?.assetId)) throw fail('Invalid equipment asset id')
       if (seenAssets.has(item.assetId)) throw fail('Each equipment asset can only be listed once per entry')
       seenAssets.add(item.assetId)
-      const hours = Number(item.hours)
+      const hours = body.equipmentHoursAuto === true ? equipmentRunHours : Number(item.hours)
       if (!Number.isFinite(hours) || hours < 0) throw fail('Equipment hours must be zero or greater')
       if (hours > durationHours) throw fail('Equipment runtime hours cannot exceed the logged work duration')
       equipment.push({ asset_id: item.assetId, hours, notes: item.notes != null ? String(item.notes).slice(0, 500) : null })

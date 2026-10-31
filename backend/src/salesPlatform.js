@@ -55,6 +55,70 @@ const serviceM8TimeForFilter = (date, timeZone) => {
   const p = zoneParts(date, timeZone || "UTC");
   return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}:${p.second}`;
 };
+const serviceM8Record = (data) => Array.isArray(data) ? data[0] || null : data || null;
+async function serviceM8OptionalRecord(call, businessId, resource, uuid, generation) {
+  if (!SM.uuid(uuid)) return null;
+  try {
+    return serviceM8Record((await call(businessId, `/${resource}/${uuid}.json`, { generation })).data);
+  } catch (error) {
+    if ([403, 404].includes(error.status)) return null;
+    throw error;
+  }
+}
+async function serviceM8OptionalList(listRemote, businessId, resource, filter, generation) {
+  try {
+    return await listRemote(businessId, `/${resource}.json?$filter=${encodeURIComponent(filter)}`, generation);
+  } catch (error) {
+    if ([403, 404].includes(error.status)) return [];
+    throw error;
+  }
+}
+async function mapServiceM8Limited(items, limit, mapper) {
+  const out = new Array(items.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const index = next++;
+      out[index] = await mapper(items[index], index);
+    }
+  }));
+  return out;
+}
+async function serviceM8DispatchDetails({ call, listRemote, businessId, job, activity, generation }) {
+  const [company, contacts, materials, assignedStaff] = await Promise.all([
+    serviceM8OptionalRecord(call, businessId, "company", job.company_uuid, generation),
+    SM.uuid(job.company_uuid)
+      ? serviceM8OptionalList(listRemote, businessId, "companycontact", `company_uuid eq '${job.company_uuid}' and active eq 1`, generation)
+      : [],
+    SM.uuid(job.uuid)
+      ? serviceM8OptionalList(listRemote, businessId, "jobmaterial", `job_uuid eq '${job.uuid}' and active eq 1`, generation)
+      : [],
+    serviceM8OptionalRecord(call, businessId, "staff", activity.staff_uuid, generation),
+  ]);
+  const activeContacts = contacts.filter(contact => contact.active == null || ["1", 1, true].includes(contact.active));
+  const contact = activeContacts.find(item => ["1", 1, true].includes(item.is_primary_contact)) || activeContacts[0] || null;
+  const personName = [contact?.first, contact?.last].filter(Boolean).join(" ").trim() ||
+    company?.name || job.company_name || job.client_name || "ServiceM8 booking";
+  const serviceNames = materials.map(item => ({
+    name: String(item.name || "").trim(),
+    quantity: String(item.quantity || "").trim(),
+  })).filter(item => item.name).slice(0, 40);
+  const staffName = [assignedStaff?.first, assignedStaff?.last].filter(Boolean).join(" ").trim();
+  const services = serviceNames.length ? serviceNames.map(item => item.name) :
+    String(job.job_description || job.job_name || "").split(/\r?\n/).map(line => line.trim()).filter(Boolean).slice(0, 20);
+  return {
+    personName: personName.slice(0, 160),
+    companyName: String(company?.name || job.company_name || "").slice(0, 160),
+    email: String(contact?.email || company?.email || "").slice(0, 254),
+    phone: String(contact?.mobile || contact?.phone || company?.phone || "").slice(0, 80),
+    address: [job.job_address, job.job_suburb, job.job_postcode].filter(Boolean).join(", ").slice(0, 500),
+    services,
+    lineItems: serviceNames,
+    assignedStaff: staffName ? [staffName.slice(0, 120)] : [],
+    staffAssigned: !!activity.staff_uuid,
+    status: String(job.status || "").slice(0, 80),
+  };
+}
 // The reservation compares delivered/public content, not the entire CRM record.
 // Full canonical version/payload validation below remains deliberately separate.
 const contentFingerprint = (s) => {
@@ -885,12 +949,16 @@ export function installSalesPlatform(
       const events = scheduled.flatMap(activity => {
         const start = serviceM8WallClock(activity.start_date, timeZone), end = serviceM8WallClock(activity.end_date, timeZone), job = jobs.get(activity.job_uuid) || {};
         if (!start || !end || end <= start) return [];
-        const title = [job.company_name || job.client_name, job.job_description || job.job_name].filter(Boolean).join(" · ") || "ServiceM8 booking";
-        const notes = [job.job_address, job.job_suburb, `ServiceM8 job ${activity.job_uuid}`, activity.staff_uuid ? `ServiceM8 staff ${activity.staff_uuid}` : null].filter(Boolean).join("\n").slice(0, 2000);
-        return [{ external_id: activity.uuid, title: title.slice(0, 200), start_time: start.toISOString(), end_time: end.toISOString(), notes }];
+        return [{ activity, job, start, end }];
+      });
+      const detailedEvents = await mapServiceM8Limited(events, 6, async ({ activity, job, start, end }) => {
+        const details = await serviceM8DispatchDetails({ call, listRemote, businessId: req.businessId, job, activity, generation: c.generation });
+        const title = [details.personName, job.job_description || job.job_name].filter(Boolean).join(" · ");
+        const notes = [details.address, `ServiceM8 job ${activity.job_uuid}`].filter(Boolean).join("\n").slice(0, 2000);
+        return { external_id: activity.uuid, title: title.slice(0, 200), start_time: start.toISOString(), end_time: end.toISOString(), notes, details };
       });
       const synced = await unwrap(db.rpc("sync_servicem8_dispatch_calendar", {
-        p_business_id: req.businessId, p_from: from.toISOString(), p_to: to.toISOString(), p_events: events,
+        p_business_id: req.businessId, p_from: from.toISOString(), p_to: to.toISOString(), p_events: detailedEvents,
       }));
       await unwrap(db.from("servicem8_connections").update({ last_sync_at: new Date().toISOString(), last_error: null })
         .eq("business_id", req.businessId).eq("generation", c.generation));
@@ -1416,10 +1484,11 @@ export function installSalesPlatform(
         const start = serviceM8WallClock(activity.start_date, timeZone), end = serviceM8WallClock(activity.end_date, timeZone);
         if (start && end && end > start && end - start <= 24 * 60 * 60 * 1000) {
           const result = await call(businessId, "/job/" + activity.job_uuid + ".json", { generation: c.generation });
-          const job = Array.isArray(result.data) ? result.data[0] : result.data || {};
-          const title = [job.company_name || job.client_name, job.job_description || job.job_name].filter(Boolean).join(" · ") || "ServiceM8 booking";
-          const notes = [job.job_address, job.job_suburb, `ServiceM8 job ${activity.job_uuid}`, activity.staff_uuid ? `ServiceM8 staff ${activity.staff_uuid}` : null].filter(Boolean).join("\n").slice(0, 2000);
-          event = { title: title.slice(0, 200), start_time: start.toISOString(), end_time: end.toISOString(), notes };
+          const job = serviceM8Record(result.data) || {};
+          const details = await serviceM8DispatchDetails({ call, listRemote, businessId, job, activity, generation: c.generation });
+          const title = [details.personName, job.job_description || job.job_name].filter(Boolean).join(" · ");
+          const notes = [details.address, `ServiceM8 job ${activity.job_uuid}`].filter(Boolean).join("\n").slice(0, 2000);
+          event = { title: title.slice(0, 200), start_time: start.toISOString(), end_time: end.toISOString(), notes, details };
         }
       }
       await unwrap(db.rpc("sync_servicem8_dispatch_event", {

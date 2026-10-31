@@ -615,7 +615,15 @@ test('dispatch sync imports ServiceM8 bookings into the calendar for the selecte
     : url.includes('/jobactivity.json')
     ? response([activity])
     : url.includes('/job/' + id(31) + '.json')
-      ? response({ uuid: id(31), company_name: 'Nova Exterior', job_description: 'House wash', job_address: '29 Selwyn Cres' })
+      ? response({ uuid: id(31), company_uuid: id(33), company_name: 'Nova Exterior', job_description: 'House wash', job_address: '29 Selwyn Cres' })
+      : url.includes('/company/' + id(33) + '.json')
+        ? response({ uuid: id(33), name: 'Nova Exterior' })
+        : url.includes('/companycontact.json')
+          ? response([{ active: '1', is_primary_contact: '1', first: 'Alex', last: 'Smith', email: 'alex@example.test', mobile: '021 555 0100' }])
+          : url.includes('/jobmaterial.json')
+            ? response([{ name: 'House wash', quantity: '1' }, { name: 'Window clean', quantity: '8' }])
+            : url.includes('/staff/' + id(32) + '.json')
+              ? response({ first: 'Jordan', last: 'Lee' })
       : response({}));
   const result = await route('POST', '/api/job-calendar/servicem8/sync', { ...owner, body: { from: '2026-11-01T00:00:00Z', to: '2026-11-08T00:00:00Z' } });
   assert.equal(result.statusCode, 200);
@@ -623,8 +631,14 @@ test('dispatch sync imports ServiceM8 bookings into the calendar for the selecte
   assert.equal(saved.p_business_id, 'A');
   assert.equal(saved.p_events[0].external_id, id(30));
   assert.equal(saved.p_events[0].start_time, '2026-11-03T20:00:00.000Z', 'ServiceM8 local Auckland times are converted to the correct instant');
-  assert.match(saved.p_events[0].title, /Nova Exterior.*House wash/);
+  assert.match(saved.p_events[0].title, /Alex Smith.*House wash/);
   assert.match(saved.p_events[0].notes, /29 Selwyn Cres/);
+  assert.deepEqual(saved.p_events[0].details, {
+    personName: 'Alex Smith', companyName: 'Nova Exterior', email: 'alex@example.test', phone: '021 555 0100',
+    address: '29 Selwyn Cres', services: ['House wash', 'Window clean'],
+    lineItems: [{ name: 'House wash', quantity: '1' }, { name: 'Window clean', quantity: '8' }],
+    assignedStaff: ['Jordan Lee'], staffAssigned: true, status: '',
+  });
 });
 test('dispatch sync rejects invalid date windows before calling ServiceM8', async () => {
   const db = database({ users: ownerRows, servicem8_connections: [privateConnection()] });
@@ -653,7 +667,9 @@ test('ServiceM8 activity webhooks keep unlinked dispatch bookings updated', asyn
     start_date: '2026-11-04 09:00:00', end_date: '2026-11-04 10:30:00' };
   const { worker } = setup(db, async url => url.endsWith('/jobactivity/' + id(41) + '.json') ? response(activity)
     : url.endsWith('/vendor.json') ? response({ timezone_name: 'Pacific/Auckland' })
-      : url.endsWith('/job/' + id(42) + '.json') ? response({ company_name: 'Nova Exterior', job_description: 'House wash' })
+      : url.endsWith('/job/' + id(42) + '.json') ? response({ uuid:id(42), company_name: 'Nova Exterior', job_description: 'House wash' })
+        : url.includes('/jobmaterial.json') || url.includes('/companycontact.json') ? response([])
+          : url.includes('/staff/') ? response({ first: 'Jordan', last: 'Lee' })
         : response({}));
   await worker.tick();
   const sync = writes.find(w => w.name === 'sync_servicem8_dispatch_event');
@@ -662,6 +678,7 @@ test('ServiceM8 activity webhooks keep unlinked dispatch bookings updated', asyn
   assert.equal(sync.args.p_external_id, id(41));
   assert.equal(sync.args.p_event.start_time, '2026-11-03T20:00:00.000Z');
   assert.match(sync.args.p_event.title, /Nova Exterior.*House wash/);
+  assert.deepEqual(sync.args.p_event.details.assignedStaff, ['Jordan Lee']);
 });
 test('private connection requires encryption configuration before any remote request',async()=>{
   const db=database({users:ownerRows});const {route}=setup(db,undefined,{env:{}});

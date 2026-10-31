@@ -50,6 +50,8 @@ const { chromium } = require('playwright'),
       window.renderAllCalls = 0;
       window.renderAll = function () { window.renderAllCalls++; };
       window.toast = function (m) { window.lastToast = m; };
+      window.weatherForDate = (iso) => iso === '2026-07-20' ? { type:'forecast', cond:'Mostly fine', tempHi:18, rainPct:10, windKmh:12, label:'Good working conditions' } : { type:'unavailable' };
+      window.calendarDayWeatherBadge = () => ({ label:'Excellent', cls:'good', forecast:true });
       window.closeModal = function (id) { const el = document.getElementById(id); if (el) el.classList.remove('open'); };
       window.switchView = function (v) {
         document.querySelectorAll('.view').forEach((s) => s.classList.remove('active'));
@@ -89,9 +91,11 @@ const { chromium } = require('playwright'),
             details: { calendarStartAt: '2026-07-12T01:00:00.000Z', calendarEndAt: '2026-07-12T03:00:00.000Z', scheduledStartMin: null, scheduledDurationMin: null, assignedStaffIds: ['owner-1'], calendarTeamLabel: null, calendarNotes: '', calendarGoogleSync: true, googleEventId: null, calendarGoogleSyncError: 'Rate limited' } }
         ],
         events: [], blocks: [], google: { connected: false },
-        calls: [], putError: null, delayPut: false, putResolver: null
+        calls: [], realtimeHandlers: [], putError: null, delayPut: false, putResolver: null
       };
+      const supabase = { channel() { const channel = { on(_event, _filter, handler) { fixture.realtimeHandlers.push(handler); return channel; }, subscribe() { return channel; } }; return channel; }, removeChannel() {} };
       window.TK_JOB_CALENDAR.configure({
+        supabase,
         getBusinessId: () => fixture.business,
         getUserId: () => fixture.userId,
         getVersion: () => fixture.version,
@@ -118,7 +122,8 @@ const { chromium } = require('playwright'),
             fixture.calls.push({ dispatchSync: JSON.parse(options.body) });
             fixture.events = fixture.events.filter(e => e.source !== 'servicem8').concat({ id: 'sm8-booking', user_id: null,
               title: 'Nova Exterior · House wash', source: 'servicem8', connection_id: null, external_id: 'activity-1', busy_status: 'busy',
-              start_time: '2026-07-20T01:00:00.000Z', end_time: '2026-07-20T02:00:00.000Z', notes: 'ServiceM8 job' });
+              start_time: '2026-07-20T01:00:00.000Z', end_time: '2026-07-20T02:00:00.000Z', notes: 'ServiceM8 job',
+              details: { personName:'Alex Smith', companyName:'Nova Exterior', email:'alex@example.test', phone:'021 555 0100', address:'29 Selwyn Cres', services:['House wash'], lineItems:[{name:'House wash',quantity:'1'}], assignedStaff:['Jordan Lee'], status:'Work Order' } });
             return { synced: 1 };
           }
           if (options && options.method === 'PUT' && p.startsWith('/jobs/')) {
@@ -166,10 +171,20 @@ const { chromium } = require('playwright'),
     const sidebarText = await page.locator('#tkjc-sidebar-list').innerText();
     assert.match(sidebarText, /Bob/); // unscheduled
     assert.match(sidebarText, /Alice/); // scheduled, in range
+    const rangeCount = await page.evaluate(() => fixture.calls.filter(c => c.path.startsWith('/range')).length);
+    await page.evaluate(() => fixture.realtimeHandlers[0]?.());
+    await page.waitForFunction((before) => fixture.calls.filter(c => c.path.startsWith('/range')).length > before, rangeCount);
     await page.click('[data-tkjc="sync-servicem8"]');
     await page.waitForFunction(() => /ServiceM8 dispatch synced/.test(window.lastNotify || ''));
     assert.equal(await page.evaluate(() => fixture.calls.some(c => c.dispatchSync?.from && c.dispatchSync?.to)), true);
     assert.match(await page.locator('#tkjc-main').innerText(), /Nova Exterior · House wash/);
+    await page.locator('[data-tkjc-agenda-event="sm8-booking"]').click();
+    const dispatchDetail = await page.locator('#tkjc-event-overlay').innerText();
+    assert.match(dispatchDetail, /Alex Smith/);
+    assert.match(dispatchDetail, /29 Selwyn Cres/);
+    assert.match(dispatchDetail, /Jordan Lee/);
+    assert.match(dispatchDetail, /Forecast/);
+    await page.locator('#tkjc-event-overlay [data-tkjc="close"]').click();
 
     /* ===== 2. mobile More sheet gets a Calendar row ===== */
     await page.evaluate(() => { document.getElementById('view-dashboard').classList.add('active'); document.getElementById('view-calendar').classList.remove('active'); window.openMoreSheet(); });

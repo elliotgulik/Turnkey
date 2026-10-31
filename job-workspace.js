@@ -339,6 +339,132 @@
     });
   }
 
+  /* ===================== employee work-log page ===================== */
+  let workPageLoadSeq = 0, workRealtimeChannel = null, workRealtimeKey = '', workRealtimeTimer = null;
+  function workDateRange(date) {
+    const start = new Date(date + 'T00:00:00');
+    const end = new Date(start); end.setDate(end.getDate() + 1);
+    return { from: start.toISOString(), to: end.toISOString() };
+  }
+  function ensureWorkRealtime(scope) {
+    const client = config.supabase || root.TK_SUPABASE_CLIENT;
+    if ((config.request && !config.supabase) || !client?.channel) return;
+    const key = scope.biz + ':' + scope.user;
+    if (workRealtimeKey === key && workRealtimeChannel) return;
+    if (workRealtimeChannel) client.removeChannel?.(workRealtimeChannel);
+    workRealtimeKey = key;
+    workRealtimeChannel = client.channel('tk-work-log-' + key)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'job_work_logs', filter: 'business_id=eq.' + scope.biz }, () => {
+        clearTimeout(workRealtimeTimer);
+        workRealtimeTimer = setTimeout(() => { if (!scope.isStale() && document.getElementById('view-worklog')?.classList.contains('active')) renderWorkLogPage(); }, 300);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'equipment_usage', filter: 'business_id=eq.' + scope.biz }, () => {
+        clearTimeout(workRealtimeTimer);
+        workRealtimeTimer = setTimeout(() => { if (!scope.isStale() && document.getElementById('view-worklog')?.classList.contains('active')) renderWorkLogPage(); }, 300);
+      })
+      .subscribe();
+  }
+  function openWorkLogPage() { renderWorkLogPage(); }
+  async function renderWorkLogPage() {
+    const page = document.getElementById('view-worklog');
+    if (!page) return;
+    const scope = makeScope(), seq = ++workPageLoadSeq;
+    const selectedDate = page.querySelector('[name="workDate"]')?.value || localDateStr(new Date());
+    ensureWorkRealtime(scope);
+    page.innerHTML = `<div class="tkj-work-page">
+      <header class="tkj-work-heading"><div><span>TEAM</span><h1>Staff work log</h1><p>Log one shift against its job. Paid hours stay on the timesheet; travel is excluded from equipment runtime.</p></div><button type="button" class="btn ghost" data-work="refresh">Refresh</button></header>
+      <div class="tkj-work-stats" aria-live="polite"><div><span>Shift hours</span><strong data-work-stat="shift">…</strong></div><div><span>Travel</span><strong data-work-stat="travel">…</strong></div><div><span>On-site time</span><strong data-work-stat="onsite">…</strong></div></div>
+      <div class="tkj-work-columns"><section class="tkj-work-card"><h2>Submit today’s hours</h2><p class="tkj-sub">Choose the job, enter the full shift and today’s travel. TurnKey calculates equipment runtime automatically.</p>
+        <form data-work="form"><label>Work date<input type="date" name="workDate" value="${esc(selectedDate)}" required></label>
+          <label>Job<select name="jobId" required><option value="">Loading assigned jobs…</option></select></label>
+          <div class="tkj-row"><label>Shift starts<input type="time" name="startTime" value="08:00" required></label><label>Shift ends<input type="time" name="endTime" value="16:00" required></label></div>
+          <label>Travel today (minutes)<input type="number" name="travelMinutes" min="0" max="1440" step="5" value="0" required></label>
+          <div class="tkj-work-runtime"><span>Equipment runtime for this shift</span><strong data-work="runtime">8.0 hours</strong><small>Calculated as shift length minus travel time. All equipment selected below gets this runtime.</small></div>
+          <fieldset class="tkj-work-assets"><legend>Equipment used this shift</legend><div data-work="assets">Loading equipment…</div></fieldset>
+          <label>Notes<textarea name="notes" maxlength="1600" placeholder="Work completed, issues or handover"></textarea></label>
+          <p class="tkj-dialog-message" data-work="message" role="status" aria-live="polite"></p>
+          <button type="submit" class="btn primary" data-work="submit">Save shift &amp; timesheet</button>
+        </form></section>
+        <section class="tkj-work-card"><h2>Equipment service status</h2><p class="tkj-sub">Runtime updates as work hours are submitted. Service due is shown clearly.</p><div data-work="equipment-summary">Loading…</div></section></div>
+      <section class="tkj-work-card tkj-work-timesheet"><div class="tkj-work-section-head"><div><h2>Timesheet for <span data-work="date-label">${esc(selectedDate)}</span></h2><p class="tkj-sub">Employee work entries appear here as soon as they’re saved.</p></div><button type="button" class="btn ghost sm" data-work="calendar">Open staff calendar</button></div><div data-work="entries">Loading timesheet…</div></section>
+    </div>`;
+
+    const form = page.querySelector('[data-work="form"]');
+    const runtimeEl = page.querySelector('[data-work="runtime"]');
+    const calcRuntime = () => {
+      const start = form.startTime.value, end = form.endTime.value;
+      let minutes = start && end ? (Number(end.slice(0,2)) * 60 + Number(end.slice(3,5))) - (Number(start.slice(0,2)) * 60 + Number(start.slice(3,5))) : 0;
+      if (minutes <= 0) minutes += 1440;
+      const travel = Math.max(0, Number(form.travelMinutes.value || 0));
+      const usable = Math.max(0, minutes - travel);
+      runtimeEl.textContent = (usable / 60).toFixed(1) + ' hours';
+      form.travelMinutes.max = String(minutes);
+      return { minutes, travel, usable };
+    };
+    form.addEventListener('input', calcRuntime);
+    form.workDate.addEventListener('change', () => renderWorkLogPage());
+    page.querySelector('[data-work="refresh"]').onclick = () => renderWorkLogPage();
+    page.querySelector('[data-work="calendar"]').onclick = () => root.TK_JOB_WORK.openCalendar();
+
+    const setMessage = (text, isError = false) => {
+      const target = page.querySelector('[data-work="message"]');
+      if (target) { target.textContent = text; target.classList.toggle('tkj-error', isError); }
+    };
+    try {
+      const range = workDateRange(selectedDate);
+      const [jobsData, equipmentData, logsData] = await Promise.all([
+        request('/jobs?date=' + encodeURIComponent(selectedDate), {}, scope),
+        request('/equipment', {}, scope),
+        request('/logs?' + new URLSearchParams(range), {}, scope),
+      ]);
+      if (scope.isStale() || seq !== workPageLoadSeq || !page.isConnected) return;
+      const jobs = jobsData.jobs || [], equipment = equipmentData.equipment || [], logs = logsData.logs || [], usage = logsData.usage || [];
+      form.jobId.innerHTML = '<option value="">Select a job</option>' + jobs.map(job => `<option value="${esc(job.id)}">${esc(job.name)}${job.address ? ' · ' + esc(job.address) : ''}${job.services?.length ? ' · ' + esc(job.services.join(', ')) : ''}</option>`).join('');
+      page.querySelector('[data-work="assets"]').innerHTML = equipment.length ? equipment.map(asset => `<label class="tkj-work-asset"><input type="checkbox" name="assetId" value="${esc(asset.id)}"><span><b>${esc(asset.name)}</b><small>${asset.due ? 'Service due' : Number(asset.remainingHours).toFixed(1) + 'h until service'}</small></span></label>`).join('') : '<p>No equipment set up yet.</p>';
+      page.querySelector('[data-work="equipment-summary"]').innerHTML = equipment.length ? `<div class="tkj-work-eq-list">${equipment.map(asset => `<div><span>${esc(asset.name)}</span><b class="${asset.due ? 'due' : ''}">${asset.due ? 'Service due' : Number(asset.remainingHours).toFixed(1) + 'h remaining'}</b></div>`).join('')}</div>` : '<p>Add equipment in Settings to start service-hour tracking.</p>';
+      const grossMinutes = logs.reduce((sum, log) => sum + Number(log.minutes || 0), 0);
+      const travelMinutes = logs.reduce((sum, log) => sum + Number((/\[Travel: (\d+) min\]/.exec(log.notes || '') || [])[1] || 0), 0);
+      const onSiteMinutes = Math.max(0, grossMinutes - travelMinutes);
+      page.querySelector('[data-work-stat="shift"]').textContent = fmtDuration(grossMinutes);
+      page.querySelector('[data-work-stat="travel"]').textContent = fmtDuration(travelMinutes);
+      page.querySelector('[data-work-stat="onsite"]').textContent = fmtDuration(onSiteMinutes);
+      page.querySelector('[data-work="date-label"]').textContent = new Date(selectedDate + 'T12:00:00').toLocaleDateString('en-NZ', { weekday: 'long', day: 'numeric', month: 'long' });
+      const jobById = new Map(jobs.map(job => [job.id, job]));
+      page.querySelector('[data-work="entries"]').innerHTML = logs.length ? `<div class="tkj-work-entry-list">${logs.map(log => {
+        const travel = Number((/\[Travel: (\d+) min\]/.exec(log.notes || '') || [])[1] || 0);
+        const job = jobById.get(log.job_id);
+        const equipmentHours = usage.filter(row => row.log_id === log.id).reduce((sum, row) => sum + Number(row.hours || 0), 0);
+        return `<article><div><strong>${esc(job?.name || 'Job')}</strong><small>${esc(fmtDateTime(log.start_at))} – ${esc(new Date(log.end_at).toLocaleTimeString('en-NZ', { hour:'numeric', minute:'2-digit' }))}${log.notes ? ' · ' + esc(log.notes.replace(/\[Travel: \d+ min\](\s*·\s*)?/, '').trim()) : ''}</small></div><div class="tkj-work-entry-metrics"><b>${esc(fmtDuration(log.minutes))}</b><small>${travel ? fmtDuration(travel) + ' travel · ' : ''}${fmtDuration(Math.max(0, log.minutes - travel))} on site${equipmentHours ? ' · ' + equipmentHours.toFixed(1) + 'h equipment' : ''}</small></div></article>`;
+      }).join('')}</div>` : '<div class="tkj-empty-state"><strong>No hours submitted for this day</strong><span>Save a shift above to start this timesheet.</span></div>';
+      if (!jobs.length) setMessage('No jobs assigned in this date window. Ask a manager to assign you a job in the calendar.', true);
+      calcRuntime();
+
+      form.onsubmit = async event => {
+        event.preventDefault();
+        if (scope.isStale()) return;
+        const calculated = calcRuntime();
+        const startAt = toIso(form.workDate.value, form.startTime.value), endAt = toIso(form.workDate.value, form.endTime.value);
+        if (+new Date(endAt) <= +new Date(startAt)) { setMessage('End time must be later than start time.', true); return; }
+        if (calculated.travel > calculated.minutes) { setMessage('Travel cannot exceed the length of this shift.', true); return; }
+        if (!form.jobId.value) { setMessage('Choose a job before saving your timesheet entry.', true); return; }
+        const payload = { jobId: form.jobId.value, startAt, endAt, travelMinutes: calculated.travel, equipmentHoursAuto: true,
+          equipment: [...form.querySelectorAll('[name="assetId"]:checked')].map(input => ({ assetId: input.value })), notes: form.notes.value.trim() || undefined };
+        const requestId = await stableRequestId(payload);
+        if (scope.isStale()) return;
+        const submit = form.querySelector('[data-work="submit"]'); submit.disabled = true; setMessage('Saving shift…');
+        try {
+          await request('/logs', { method: 'POST', body: JSON.stringify({ ...payload, requestId }) }, scope);
+          if (scope.isStale()) return;
+          notify('Shift saved to the timesheet; equipment runtime updated.');
+          root.dispatchEvent(new Event('turnkey:equipment-changed'));
+          renderWorkLogPage();
+        } catch (error) { if (!error.stale) setMessage(error.message, true); if (submit.isConnected) submit.disabled = false; }
+      };
+    } catch (error) {
+      if (!error.stale && seq === workPageLoadSeq) setMessage('Could not load work log: ' + error.message, true);
+    }
+  }
+
   /* ===================== staff calendar (actual logged hours) ===================== */
 
   async function openCalendar() {
@@ -591,8 +717,9 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();
 
-  root.TK_JOB_WORK = {
+    root.TK_JOB_WORK = {
     configure(options) { config = { ...options }; roleCache = null; roleCacheKey = null; staffListCache = null; },
+    openWorkLogPage,
     openCalendar,
     openEquipment,
     renderJobCard

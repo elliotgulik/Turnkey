@@ -147,6 +147,32 @@ test('worker can log their own hours', async () => {
   assert.equal(res.body.ok, true)
 })
 
+test('work-log job picker scopes employees to assigned jobs and hides other businesses', async () => {
+  const h = setup()
+  h.tables.jobs = [
+    { id: job, business_id: BIZ, status: 'scheduled', scheduled_date: '2026-10-31', assigned_to: worker, customer_id: id(40), details: { services: [{ label: 'House wash' }] } },
+    { id: id(12), business_id: BIZ, status: 'scheduled', scheduled_date: '2026-10-31', assigned_to: otherWorker, customer_id: id(41), details: { services: [{ label: 'Windows' }], assignedStaffIds: [worker] } },
+    { id: id(13), business_id: BIZ, status: 'scheduled', scheduled_date: '2026-10-31', assigned_to: null, customer_id: id(43), details: {} },
+    { id: foreignJob, business_id: OTHER_BIZ, status: 'scheduled', scheduled_date: '2026-10-31', assigned_to: worker, customer_id: id(42), details: {} }
+  ]
+  h.tables.customers = [
+    { id: id(40), business_id: BIZ, name: 'Assigned customer', address: '1 Test St', suburb: 'Auckland' },
+    { id: id(41), business_id: BIZ, name: 'Crew customer', address: '2 Test St', suburb: 'Auckland' },
+    { id: id(43), business_id: BIZ, name: 'Unassigned customer', address: '4 Test St' },
+    { id: id(42), business_id: OTHER_BIZ, name: 'Foreign customer', address: '3 Test St' }
+  ]
+  const own = await h.run('get', '/api/job-work/jobs', { query: { date: '2026-10-31' } })
+  assert.equal(own.statusCode, 200)
+  assert.deepEqual(own.body.jobs.map(row => row.name).sort(), ['Assigned customer', 'Crew customer'])
+  const assigned = own.body.jobs.find(row => row.name === 'Assigned customer')
+  assert.equal(assigned.address, '1 Test St, Auckland')
+  assert.deepEqual(assigned.services, ['House wash'])
+  const admin = await h.run('get', '/api/job-work/jobs', { userId: owner, query: { date: '2026-10-31' } })
+  assert.deepEqual(admin.body.jobs.map(row => row.name).sort(), ['Assigned customer', 'Crew customer', 'Unassigned customer'])
+  const invalid = await h.run('get', '/api/job-work/jobs', { query: { date: '2026-02-31' } })
+  assert.equal(invalid.statusCode, 400)
+})
+
 test('a missing or invalid requestId is rejected, never silently generated', async () => {
   const h = setup()
   const missing = await h.run('post', '/api/job-work/logs', { body: { jobId: job, startAt: '2026-01-01T08:00:00Z', endAt: '2026-01-01T10:00:00Z' } })

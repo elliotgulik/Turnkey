@@ -108,6 +108,7 @@
   const STATUS_COLOR = { scheduled: '#2b6cb0', in_progress: '#b7791f', completed: '#2f855a', invoiced: '#6b46c1', paid: '#1a7f5a', cancelled: '#94a3b8' };
 
   let state = null;
+  let realtimeChannel = null, realtimeKey = '', realtimeTimer = null;
   function freshState() {
     return {
       bizKey: null, loaded: false, loading: false, loadError: '', loadSeq: 0,
@@ -130,7 +131,13 @@
     if (!state) state = freshState();
     const scope = makeScope();
     const bizKey = scope.biz + ':' + scope.user;
-    if (state.bizKey !== bizKey) { state = freshState(); state.bizKey = bizKey; destroyFc(); }
+    if (state.bizKey !== bizKey) {
+      state = freshState(); state.bizKey = bizKey; destroyFc();
+      clearTimeout(realtimeTimer);
+      if (realtimeChannel) { try { root.TK_SUPABASE_CLIENT?.removeChannel?.(realtimeChannel); } catch (_) {} }
+      realtimeChannel = null; realtimeKey = '';
+    }
+    ensureCalendarRealtime(scope);
     const seq = ++state.loadSeq;
     const { fromISO, toISO } = rangeForView(state.view, state.anchor);
     if (state.range.fromISO !== fromISO || state.range.toISO !== toISO) {
@@ -162,6 +169,25 @@
     if (scope.isStale() || seq !== state.loadSeq) return;
     state.loading = false;
     renderBody();
+  }
+
+  function ensureCalendarRealtime(scope) {
+    const client = config.supabase || root.TK_SUPABASE_CLIENT;
+    if ((config.request && !config.supabase) || !client?.channel) return;
+    const key = scope.biz + ':' + scope.user;
+    if (realtimeKey === key && realtimeChannel) return;
+    if (realtimeChannel) { try { client.removeChannel?.(realtimeChannel); } catch (_) {} }
+    realtimeKey = key;
+    const refresh = () => {
+      clearTimeout(realtimeTimer);
+      realtimeTimer = setTimeout(() => {
+        if (!scope.isStale() && document.getElementById('view-calendar')?.classList.contains('active')) load();
+      }, 350);
+    };
+    realtimeChannel = client.channel('tk-calendar-live-' + key)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'jobs', filter: 'business_id=eq.' + scope.biz }, refresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'calendar_events', filter: 'business_id=eq.' + scope.biz }, refresh)
+      .subscribe();
   }
 
   function refreshFromHydratedApp() {
@@ -463,6 +489,16 @@
       fcInstance = new FullCalendar.Calendar(document.getElementById('tkjc-fc'), {
         initialView: fcViewName, initialDate: state.anchor, firstDay: 1, fixedWeekCount: true, height: 'auto', editable: true, selectable: true, dayMaxEvents: true,
         headerToolbar: false,
+        dayCellDidMount: (arg) => {
+          const badge = root.calendarDayWeatherBadge?.(localDateStr(arg.date));
+          const top = arg.el.querySelector('.fc-daygrid-day-top');
+          if (!badge || !top || top.querySelector('.tkjc-fc-weather')) return;
+          const label = document.createElement('span');
+          label.className = 'tkjc-fc-weather tkjc-weather-' + badge.cls + (badge.forecast ? '' : ' historical');
+          label.textContent = badge.label;
+          label.title = badge.forecast ? 'Live weather forecast' : 'Historical monthly average — not a forecast';
+          top.appendChild(label);
+        },
         events: buildFcEvents(),
         eventClick: (info) => onFcEventClick(info),
         dateClick: (info) => onFcDateClick(info),
@@ -541,8 +577,9 @@
     zone.innerHTML = `<div class="tkjc-agenda">${days.map((dISO) => {
       const d = parseLocalDate(dISO);
       const items = byDay[dISO] || [];
+      const weather = root.calendarDayWeatherBadge?.(dISO);
       return `<div class="tkjc-agenda-day">
-        <div class="tkjc-agenda-date"><span>${esc(fmtDateLabel(d))}</span><button type="button" class="tkjc-agenda-add" data-tkjc-add="${esc(dISO)}" aria-label="Add on ${esc(dISO)}">+</button></div>
+        <div class="tkjc-agenda-date"><span>${esc(fmtDateLabel(d))}${weather ? `<small class="tkjc-weather tkjc-weather-${weather.cls}${weather.forecast ? '' : ' historical'}" title="${weather.forecast ? 'Live forecast' : 'Historical monthly average — not a forecast'}">${esc(weather.label)}</small>` : ''}</span><button type="button" class="tkjc-agenda-add" data-tkjc-add="${esc(dISO)}" aria-label="Add on ${esc(dISO)}">+</button></div>
         <div class="tkjc-agenda-items">
           ${items.length ? items.map((it) => renderAgendaItem(it)).join('') : '<div class="tkjc-agenda-empty">—</div>'}
         </div>
@@ -584,6 +621,7 @@
       busyStatus: ev.busy_status, startAt: start.toISOString(), endAt: end.toISOString(), timeZone: timeZoneName() };
   }
   function openEventModal(ev, isNewSeed = false) {
+    if (ev?.source === 'servicem8' && !isNewSeed) return openServiceM8Detail(ev);
     const existing = !!ev && !isNewSeed;
     ev = ev || { id: crypto.randomUUID(), user_id: state.myUserId, title: '', busy_status: 'busy', start_time: new Date().toISOString(), end_time: new Date(Date.now() + 3600000).toISOString() };
     const readOnly = existing && (!nativeEvent(ev) || !canEditItem(ev));
@@ -624,6 +662,39 @@
       } catch (e) { if (!e.stale) field('message').textContent = e.message; }
       finally { field('delete').disabled = false; }
     };
+  }
+
+  function openServiceM8Detail(ev) {
+    const details = ev.details || {};
+    const start = new Date(ev.start_time), end = new Date(ev.end_time);
+    const date = localDateStr(start);
+    let weather = null;
+    try { weather = root.weatherForDate?.(date) || null; } catch (error) { console.warn('[Calendar] Weather unavailable', error); }
+    let weatherHtml = '<p class="tkjc-detail-muted">No weather data is available for this date yet.</p>';
+    if (weather?.type === 'forecast') {
+      weatherHtml = `<div class="tkjc-weather-summary"><strong>Forecast · ${esc(weather.cond || 'Conditions')}</strong><span>${esc(weather.tempHi)}°C high · ${esc(weather.rainPct)}% rain · ${esc(weather.windKmh)} km/h wind</span><small>${esc(weather.label || '')}</small></div>`;
+    } else if (weather?.type === 'historical') {
+      weatherHtml = `<div class="tkjc-weather-summary historical"><strong>Historical average · ${esc(weather.month)}</strong><span>${esc(weather.avgHighTemp)}°C average high · rain on ${esc(weather.rainDayPct)}% of days</span><small>Planning guide only — not a forecast for this date.</small></div>`;
+    }
+    const contactName = details.personName || details.companyName || ev.title || 'ServiceM8 booking';
+    const lineItems = details.lineItems?.length
+      ? details.lineItems.map(item => `<li>${esc(item.name)}${item.quantity ? ` <span>× ${esc(item.quantity)}</span>` : ''}</li>`).join('')
+      : (details.services || []).map(service => `<li>${esc(service)}</li>`).join('');
+    const overlay = document.createElement('div'); overlay.id = 'tkjc-event-overlay'; overlay.className = 'tkjc-overlay';
+    overlay.innerHTML = `<div class="tkjc-dialog tkjc-dispatch-dialog" role="dialog" aria-modal="true" aria-labelledby="tkjc-event-title">
+      <div class="tkjc-dispatch-heading"><div><span class="tkjc-dispatch-kicker">ServiceM8 dispatch</span><h3 id="tkjc-event-title">${esc(contactName)}</h3><p>${esc(start.toLocaleDateString('en-NZ', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }))} · ${esc(fmtTimeOfDate(start))}–${esc(fmtTimeOfDate(end))}</p></div><span class="tkjc-dispatch-status">${esc(details.status || 'Booked')}</span></div>
+      <div class="tkjc-dispatch-grid">
+        <section><h4>Job address</h4><p>${details.address ? esc(details.address) : 'No address supplied by ServiceM8'}</p></section>
+        <section><h4>Contact</h4><p>${details.email ? `<a href="mailto:${esc(details.email)}">${esc(details.email)}</a>` : 'No email on file'}<br>${details.phone ? `<a href="tel:${esc(details.phone.replace(/[^+\d]/g, ''))}">${esc(details.phone)}</a>` : 'No phone on file'}</p></section>
+        <section><h4>Services</h4>${lineItems ? `<ul>${lineItems}</ul>` : '<p>No service line items returned.</p>'}</section>
+        <section><h4>Assigned team</h4><p>${details.assignedStaff?.length ? details.assignedStaff.map(esc).join(', ') : details.staffAssigned ? 'Assigned in ServiceM8 (staff name unavailable — reconnect with staff read access).' : 'ServiceM8 has no assigned staff for this booking.'}</p></section>
+        <section class="tkjc-dispatch-weather"><h4>Weather for job day</h4>${weatherHtml}</section>
+      </div>
+      <p class="tkjc-detail-muted">Read-only from ServiceM8. Edit the booking there, then sync the dispatch calendar.</p>
+      <div class="tkjc-dialog-actions"><button type="button" data-tkjc="close">Close</button></div>
+    </div>`;
+    document.body.appendChild(overlay); bindOverlay(overlay);
+    overlay.querySelector('[data-tkjc="close"]').onclick = () => closeOverlay(overlay.id);
   }
   async function saveEvent(payload, overlay, onRevert) {
     try {

@@ -294,6 +294,61 @@
   padding-left: 18px;
 }
 
+/* ===== employee work-log page ===== */
+.tkj-work-page { max-width: 1280px; margin: 0 auto; padding: 8px 0 36px; color: var(--ink,#172534); }
+.tkj-work-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:18px; margin: 10px 0 22px; }
+.tkj-work-heading > div > span { color:var(--accent,#2e9486); font-size:11px; font-weight:800; letter-spacing:.13em; }
+.tkj-work-heading h1 { margin:4px 0; font-size:clamp(24px,3vw,34px); letter-spacing:-.035em; }
+.tkj-work-heading p,.tkj-sub { margin:4px 0 0; color:var(--ink-faint,#667788); font-size:13px; line-height:1.55; }
+.tkj-work-stats { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin-bottom:16px; }
+.tkj-work-stats > div { padding:16px 18px; border:1px solid var(--line,#e1e8ec); border-radius:14px; background:var(--surface,#fff); }
+.tkj-work-stats span,.tkj-work-stats strong { display:block; }
+.tkj-work-stats span { color:var(--ink-faint,#667788); font-size:12px; }
+.tkj-work-stats strong { margin-top:5px; font-size:24px; letter-spacing:-.03em; }
+.tkj-work-columns { display:grid; grid-template-columns:minmax(0,1.2fr) minmax(280px,.8fr); gap:16px; align-items:start; }
+.tkj-work-card { min-width:0; margin-bottom:16px; padding:20px; border:1px solid var(--line,#e1e8ec); border-radius:16px; background:var(--surface,#fff); box-shadow:0 5px 20px #14233308; }
+.tkj-work-card h2 { margin:0; font-size:17px; letter-spacing:-.02em; }
+.tkj-work-card form { display:grid; gap:13px; margin-top:16px; }
+.tkj-work-card form > label,.tkj-row label { display:grid; gap:6px; color:var(--ink-soft,#42566a); font-size:12px; font-weight:650; }
+.tkj-work-card input:not([type=checkbox]),.tkj-work-card select,.tkj-work-card textarea { box-sizing:border-box; width:100%; min-height:43px; padding:10px 12px; border:1px solid var(--line,#dce5ec); border-radius:10px; background:var(--surface-2,#f7f9fa); color:var(--ink,#172534); font:inherit; font-size:14px; }
+.tkj-work-card textarea { min-height:84px; resize:vertical; }
+.tkj-work-runtime { display:grid; gap:5px; padding:14px; border-radius:12px; background:var(--accent-wash,#eaf6f3); }
+.tkj-work-runtime span { font-size:12px; color:var(--ink-soft,#42566a); }
+.tkj-work-runtime strong { font-size:20px; }
+.tkj-work-runtime small,.tkj-work-asset small,.tkj-work-entry-list small { color:var(--ink-faint,#667788); font-size:11px; line-height:1.45; }
+.tkj-work-assets { min-width:0; margin:0; padding:0; border:0; }
+.tkj-work-assets legend { margin-bottom:8px; color:var(--ink-soft,#42566a); font-size:12px; font-weight:700; }
+.tkj-work-asset { display:flex; align-items:center; gap:10px; min-height:48px; margin:5px 0; padding:8px 10px; border:1px solid var(--line,#e1e8ec); border-radius:10px; cursor:pointer; }
+.tkj-work-asset input { width:17px; height:17px; accent-color:var(--accent,#2e9486); }
+.tkj-work-asset span,.tkj-work-asset b,.tkj-work-asset small { display:block; }
+.tkj-work-asset b { font-size:13px; }
+.tkj-work-eq-list { display:grid; gap:8px; margin-top:14px; }
+.tkj-work-eq-list > div { display:flex; justify-content:space-between; align-items:center; gap:10px; padding:12px; border-radius:10px; background:var(--surface-2,#f7f9fa); font-size:12px; }
+.tkj-work-eq-list b { color:#22745e; text-align:right; }
+.tkj-work-eq-list b.due { color:#b45309; }
+.tkj-work-timesheet { margin-top:0; }
+.tkj-work-section-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:14px; }
+.tkj-work-entry-list { display:grid; }
+.tkj-work-entry-list article { display:flex; justify-content:space-between; gap:18px; padding:13px 0; border-top:1px solid var(--line,#e7ecef); }
+.tkj-work-entry-list article > div:first-child,.tkj-work-entry-metrics { display:grid; gap:4px; }
+.tkj-work-entry-list strong { font-size:13px; }
+.tkj-work-entry-metrics { text-align:right; white-space:nowrap; }
+.tkj-empty-state { display:grid; gap:5px; padding:20px; border-radius:12px; background:var(--surface-2,#f7f9fa); color:var(--ink-faint,#667788); font-size:12px; }
+.tkj-empty-state strong { color:var(--ink,#172534); font-size:14px; }
+@media (max-width: 760px) {
+  .tkj-work-columns { grid-template-columns:1fr; gap:0; }
+  .tkj-work-heading { align-items:flex-start; }
+  .tkj-work-stats { gap:7px; }
+  .tkj-work-stats > div { padding:12px; }
+  .tkj-work-stats strong { font-size:20px; }
+  .tkj-work-card { padding:15px; }
+}
+@media (max-width: 430px) {
+  .tkj-work-entry-list article { gap:8px; }
+  .tkj-work-entry-metrics { font-size:12px; }
+  .tkj-work-section-head { align-items:flex-start; flex-direction:column; }
+}
+
 /* ===== floating launcher — accessible from anywhere, since there's no
    index.html nav/settings entry to attach these to without editing it. ===== */
 .tkj-launcher {
