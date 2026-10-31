@@ -218,30 +218,36 @@ test("Meta connect accepts one System User token and stores the Page token retur
   assert.match(encryptedPlaintext, /derived-page-token/);
   assert.doesNotMatch(JSON.stringify(res.body), /single-system-user-token|derived-page-token/);
 });
-test('Meta connect refuses personal and expiring tokens before storing anything', async () => {
-  for (const validation of [
-    { type: 'USER', expiresAt: 1900000000 },
-    { type: 'SYSTEM_USER', expiresAt: 1900000000 },
-  ]) {
-    const db = fakeDb();
-    const res = await setup(db, {
-      inspectToken: async () => {
-        throw Object.assign(new Error('private token details'), {
-          status: 400,
-          publicMessage: validation.type === 'USER'
-            ? 'Use a Meta System User token set to Never.'
-            : 'This token expires; use a System User token set to Never.',
-        });
-      },
-    })('POST /api/connections/meta/connect', {
-      body: { pageId: '973487265846279', retrievalToken: 'short-lived-test-token' },
-    });
-    assert.equal(res.statusCode, 400);
-    assert.match(res.body.error, /Never/);
-    assert.equal(db.rows.length, 0);
-    assert.equal(db.writes.length, 0);
-    assert.doesNotMatch(JSON.stringify(res.body), /private token details/);
-  }
+test('Meta accepts a correctly-scoped user token and exchanges it before storing', async () => {
+  const db = fakeDb(), checks = [], calls = [];
+  const res = await setup(db, {
+    inspectToken: async ({ token }) => {
+      checks.push(token);
+      return { type: 'USER', expiresAt: token === 'short-lived-user-token' ? 1900000000 : 0, scopes: ['leads_retrieval', 'pages_manage_metadata'] };
+    },
+    exchangeUserToken: async ({ token }) => {
+      assert.equal(token, 'short-lived-user-token');
+      return { accessToken: 'exchanged-user-token', expiresIn: 5184000 };
+    },
+    fetchPage: async (id, options) => {
+      calls.push({ edge: 'page', options });
+      return { ok: true, json: async () => ({ id, name: 'Nova Exterior', access_token: 'page-scoped-token' }) };
+    },
+    fetchEdge: async (_id, edge, options) => {
+      calls.push({ edge, options });
+      return { ok: true, json: async () => edge === 'leadgen_forms' ? { data: [] } : { success: true } };
+    },
+  })('POST /api/connections/meta/connect', {
+    body: { pageId: '973487265846279', token: 'short-lived-user-token' },
+  });
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(checks, ['short-lived-user-token', 'exchanged-user-token']);
+  assert.equal(calls.find(x => x.edge === 'page').options.token, 'exchanged-user-token');
+  assert.equal(calls.find(x => x.edge === 'leadgen_forms').options.token, 'exchanged-user-token');
+  assert.equal(calls.find(x => x.edge === 'subscribed_apps').options.token, 'page-scoped-token');
+  assert.equal(res.body.tokenType, 'USER');
+  assert.equal(res.body.adsReportingAvailable, false);
+  assert.doesNotMatch(JSON.stringify(res.body), /short-lived-user-token|exchanged-user-token|page-scoped-token/);
 });
 test("failed Wix regeneration preserves the working hash and never reveals a new URL", async () => {
   const db = fakeDb([wix]);

@@ -434,10 +434,10 @@ app.post('/api/leads/ack', requireBusiness, async (req, res) => {
    time, the same way most API-key UIs work, so there's nothing to decrypt
    or leak later.
 
-   Meta — requires a Meta App (Webhooks + Marketing API), a System User token
-   set to Never with the required permissions, and the TurnKey app/Page/ad
-   account assigned to that System User. Connections accepts the Page ID and
-   that one token; the backend validates expiry and derives the Page token.
+   Meta — requires a Meta App (Webhooks + Marketing API), a user or System
+   User token with the required lead permissions, and access to the Page.
+   Connections accepts the Page ID and one token; the backend validates it,
+   exchanges eligible short-lived user tokens, and derives the Page token.
    Meta's webhook sends only a lightweight ping; lead data is fetched through
    the Graph API using the stored credentials.
    ===================================================================== */
