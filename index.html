@@ -832,6 +832,7 @@
   .fc-card-compact{padding:4px 8px}
   .fc-card-compact .fc-card-row1{font-size:12px}
   .fc-card-block{border-left:3px solid #6b5620;background-image:repeating-linear-gradient(135deg,rgba(0,0,0,.06) 0 6px,transparent 6px 12px)}
+  .fc-card-servicem8{border-left:3px solid #278575;color:#174b43}
   .fc-card-external{color:var(--ink-soft);font-style:italic}
   .fc-card-external .fc-card-name{opacity:.85}
   @media(max-width:640px){.fc-wrap .fc-daygrid-day-frame{min-height:90px}.fc-card-compact{padding:3px 6px}.fc-card-compact .fc-card-row1{font-size:11px}.fc-card-time{display:none}}
@@ -1957,7 +1958,7 @@ function isCancelled(r){return r.stage==='cancelled'}
 // and the ServiceM8 importer's lost→cancelled mapping stay as they are),
 // told apart from a cancelled JOB by never having been won.
 function isSalesStage(r){return r.stage==='new'||r.stage==='quoted'||r.stage==='followup'}
-function isLost(r){return r.stage==='cancelled'&&(!!r.lostAt||!(r.wonAt||r.approvedAt))}
+function isLost(r){return r.stage==='cancelled'&&!r.serviceM8Cancelled&&(!!r.lostAt||!(r.wonAt||r.approvedAt))}
 const LOST_REASONS=[
   {key:'price',label:'Price too high'},
   {key:'competitor',label:'Went with a competitor'},
@@ -5433,6 +5434,7 @@ function openDetail(id){
           </div>
         </div>
         <div class="panel"><h4>Quote <span class="eng-badge">Pricing</span></h4>
+          ${r.serviceM8Status?`<div class="kv" style="background:var(--teal-wash);border-radius:8px;padding:9px 11px;margin-bottom:10px"><span class="k">ServiceM8 status</span><span class="v">${escapeHtmlSafe(r.serviceM8Status)}${r.serviceM8Booking?.startAt?' · booked '+new Date(r.serviceM8Booking.startAt).toLocaleString('en-NZ',{dateStyle:'medium',timeStyle:'short'}):''}</span></div>`:''}
           <!-- Only shown when there's nothing priced yet — a mapped lead's
                svcRows below already lists every requested service with real
                measurements/pricing, so this would just repeat the same names.
@@ -7479,7 +7481,15 @@ function buildCalendarEvents(){
     classNames:['cal-ev-event'],
     extendedProps:{kind:'event',eventId:e.id,notes:e.notes,userId:e.user_id}
   }));
-  const externalEvents=calendarEventsRaw.filter(e=>e.source!=='turnkey'&&calPassesFilter(e.user_id)).map(e=>({
+  const serviceM8Events=calendarEventsRaw.filter(e=>e.source==='servicem8'&&calPassesFilter(e.user_id)).map(e=>({
+    id:'sm8-'+e.id,
+    title:e.title||'ServiceM8 booking',
+    start:e.start_time,end:e.end_time,allDay:false,
+    backgroundColor:'#dcefeb',borderColor:'#278575',textColor:'#174b43',
+    classNames:['cal-ev-servicem8'],
+    extendedProps:{kind:'servicem8',eventId:e.id,notes:e.notes,details:e.details||{},statusLabel:e.details?.status||'Booked'}
+  }));
+  const externalEvents=calendarEventsRaw.filter(e=>e.source!=='turnkey'&&e.source!=='servicem8'&&calPassesFilter(e.user_id)).map(e=>({
     id:'ext-'+e.id,
     title:'Busy'+(e.title?' · '+e.title:''),
     start:e.start_time,end:e.end_time,allDay:false,
@@ -7495,13 +7505,14 @@ function buildCalendarEvents(){
     classNames:['cal-ev-block'],
     extendedProps:{kind:'block',blockId:b.id,userId:b.user_id,reason:b.reason}
   }));
-  return [...jobEvents,...nativeEvents,...externalEvents,...blockEvents];
+  return [...jobEvents,...nativeEvents,...serviceM8Events,...externalEvents,...blockEvents];
 }
 const BLOCK_TYPE_LABEL={holiday:'Holiday',sick:'Sick',personal:'Personal',training:'Training',unavailable:'Unavailable',business_closed:'Business closed',public_holiday:'Public holiday',other:'Blocked'};
 function fcHandleEventDrop(info){
   const kind=info.event.extendedProps.kind;
   if(kind==='event'){moveCalEvent(info);return;}
   if(kind==='block'){moveAvailabilityBlock(info);return;}
+  if(kind==='servicem8'){info.revert();toast('This booking is managed in ServiceM8');return;}
   if(kind==='external'){info.revert();toast('External calendar events can’t be moved from TurnKey');return;}
   const r=records.find(x=>x.id===info.event.extendedProps.recordId);
   if(!r){info.revert();return;}
@@ -7556,7 +7567,30 @@ function fcHandleEventClick(info){
   if(kind==='job'){openDetail(info.event.extendedProps.recordId);return;}
   if(kind==='event'){openCalEventDetail(info.event.extendedProps.eventId);return;}
   if(kind==='block'){openCalBlockDetail(info.event.extendedProps.blockId);return;}
+  if(kind==='servicem8'){openServiceM8CalendarDetail(info.event.extendedProps.eventId);return;}
   toast('Busy — synced from an external calendar, not editable in TurnKey');
+}
+function openServiceM8CalendarDetail(id){
+  const e=calendarEventsRaw.find(x=>x.id===id&&x.source==='servicem8');if(!e)return;
+  const d=e.details||{}, esc=escapeHtmlSafe;
+  let overlay=document.getElementById('servicem8-event-overlay');
+  if(!overlay){
+    overlay=document.createElement('div');overlay.id='servicem8-event-overlay';overlay.className='overlay';
+    document.body.appendChild(overlay);
+  }
+  const when=new Date(e.start_time).toLocaleString('en-NZ',{dateStyle:'full',timeStyle:'short'});
+  const end=new Date(e.end_time).toLocaleTimeString('en-NZ',{hour:'numeric',minute:'2-digit'});
+  overlay.innerHTML=`<div class="modal"><div class="modal-head"><div><h3>${esc(d.personName||e.title||'ServiceM8 booking')}</h3><p>ServiceM8 dispatch · ${esc(d.status||'Booked')}</p></div><button class="x" aria-label="Close" onclick="closeModal('servicem8-event-overlay')">×</button></div><div class="modal-body">
+    <div class="kv"><span class="k">When</span><span class="v">${esc(when)} – ${esc(end)}</span></div>
+    ${d.address?`<div class="kv"><span class="k">Address</span><span class="v">${esc(d.address)}</span></div>`:''}
+    ${d.phone?`<div class="kv"><span class="k">Phone</span><span class="v"><a href="tel:${esc(d.phone.replace(/[^+\d]/g,''))}">${esc(d.phone)}</a></span></div>`:''}
+    ${d.email?`<div class="kv"><span class="k">Email</span><span class="v"><a href="mailto:${esc(d.email)}">${esc(d.email)}</a></span></div>`:''}
+    ${d.services?.length?`<div class="kv"><span class="k">Services</span><span class="v">${d.services.map(esc).join(', ')}</span></div>`:''}
+    ${d.assignedStaff?.length?`<div class="kv"><span class="k">Assigned team</span><span class="v">${d.assignedStaff.map(esc).join(', ')}</span></div>`:''}
+    ${e.notes?`<div class="kv"><span class="k">Notes</span><span class="v">${esc(e.notes).replace(/\n/g,'<br>')}</span></div>`:''}
+    <p style="font-size:12px;color:var(--ink-faint);margin-top:14px">This booking is managed in ServiceM8. Changes sync back to this calendar automatically.</p>
+  </div><div class="modal-foot"><button class="btn primary" onclick="closeModal('servicem8-event-overlay')">Done</button></div></div>`;
+  openModal('servicem8-event-overlay');
 }
 function fcHandleDateClick(info){
   const dateISO=info.dateStr.slice(0,10);
@@ -7579,14 +7613,14 @@ function fcEventContent(arg){
   const p=arg.event.extendedProps;
   const compact=arg.view.type==='dayGridMonth';
   const timeStr=arg.event.start?fmtTime(arg.event.start.getHours()*60+arg.event.start.getMinutes()):'';
-  if(p.kind==='event'||p.kind==='block'||p.kind==='external'){
+  if(p.kind==='event'||p.kind==='block'||p.kind==='external'||p.kind==='servicem8'){
     // Deliberately distinct markup (not just a colour) from a job card — a
     // glance should never leave someone unsure whether they're looking at
     // a booked customer job or something else on the calendar.
-    const icon=p.kind==='event'?'🗓':p.kind==='block'?'🚫':'●';
+    const icon=p.kind==='event'?'🗓':p.kind==='block'?'🚫':p.kind==='servicem8'?'↔':'●';
     return {html:`<div class="fc-card fc-card-${p.kind} ${compact?'fc-card-compact':''}">
-      <div class="fc-card-row1"><span class="fc-card-name">${icon} ${(arg.event.title||'').replace(/</g,'&lt;')}</span></div>
-      ${compact?'':`<div class="fc-card-row2"><span class="fc-card-status">${timeStr}</span></div>`}
+      <div class="fc-card-row1"><span class="fc-card-name">${icon} ${escapeHtmlSafe(arg.event.title||'')}</span></div>
+      ${compact?'':`<div class="fc-card-row2"><span class="fc-card-status">${p.kind==='servicem8'?(p.statusLabel||'Booked')+' · ':''}${timeStr}</span>${p.kind==='servicem8'&&p.details?.assignedStaff?.length?`<span class="fc-card-tech">${p.details.assignedStaff.join(', ').replace(/</g,'&lt;')}</span>`:''}</div>`}
     </div>`};
   }
   const techBit=p.tech&&p.tech!=='Unassigned'?`<span class="fc-card-tech">${p.tech}</span>`:'';
@@ -7751,6 +7785,7 @@ function renderCalendar(){
       <div class="cal-legend">
         ${Object.entries({scheduled:'Scheduled',in_progress:'In Progress',completed:'Completed',invoiced:'Invoiced',paid:'Paid'}).map(([k,label])=>`<span><i style="background:${JOB_STATUS_CAL_COLOR[k]}"></i>${label}</span>`).join('')}
         <span><i style="background:#7a5bbf"></i>Event</span>
+        <span><i style="background:#278575"></i>ServiceM8 booking</span>
         <span><i style="background:#9a7a32"></i>Blocked</span>
         <span><i style="background:#c7cdd1"></i>External (busy)</span>
       </div>
@@ -10376,7 +10411,27 @@ function subscribeRealtime(){
     // session is already authenticated, so it can never fire for the
     // subscriber's own signup.
     .on('postgres_changes',{event:'INSERT',schema:'public',table:'users',filter:'business_id=eq.'+currentBusinessId},handleTeamJoinRealtimeEvent)
+    .on('postgres_changes',{event:'UPDATE',schema:'public',table:'jobs',filter:'business_id=eq.'+currentBusinessId},handleServiceM8JobRealtimeEvent)
+    .on('postgres_changes',{event:'*',schema:'public',table:'calendar_events',filter:'business_id=eq.'+currentBusinessId},handleServiceM8CalendarRealtimeEvent)
     .subscribe();
+}
+async function handleServiceM8JobRealtimeEvent(payload){
+  const row=payload&&payload.new;if(!row||!row.details?.serviceM8SyncedAt)return;
+  const current=records.find(r=>r.jobId===row.id);
+  if(current&&current.serviceM8SyncedAt===row.details.serviceM8SyncedAt)return;
+  const hadOverlay=!!document.querySelector('.overlay.open');
+  if(!hadOverlay){
+    await loadFromSupabase();
+    const updated=records.find(r=>r.jobId===row.id);
+    if(updated)toast(updated.name+' · ServiceM8: '+(updated.serviceM8Status||'updated'),4000);
+  }
+}
+async function handleServiceM8CalendarRealtimeEvent(payload){
+  const row=(payload&&payload.new)||(payload&&payload.old);
+  if(!document.getElementById('view-calendar')?.classList.contains('active'))return;
+  if(payload?.eventType!=='DELETE'&&(!row||row.source!=='servicem8'))return;
+  await loadCalendarExtras();
+  refreshCalendarEvents();
 }
 function unsubscribeRealtime(){
   if(realtimeChannel){sb.removeChannel(realtimeChannel);realtimeChannel=null;}

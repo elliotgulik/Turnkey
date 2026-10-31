@@ -548,9 +548,22 @@ test('ServiceM8 scheduled activity syncs booking and status to its linked TurnKe
   assert.equal(localSync.p_business_id,'A');
   assert.equal(localSync.p_job_id,id(4));
   assert.equal(localSync.p_status,'Work Order');
+  assert.equal(localSync.p_schedule_permission_missing,false);
   assert.equal(localSync.p_booking.source,'servicem8');
   assert.equal(localSync.p_booking.startAt,'2026-11-02T09:00:00.000Z');
   assert.equal(db.tables.external_object_mappings[0].snapshot.booking.activityUuid,id(6));
+});
+test('schedule permission failures preserve the last confirmed booking during status refresh',async()=>{
+  const previous={activityUuid:id(8),startAt:'2026-11-02T20:00:00.000Z',endAt:'2026-11-02T21:30:00.000Z',source:'servicem8'};
+  const db=database({servicem8_connections:[privateConnection()],external_object_mappings:[{
+    business_id:'A',connection_generation:id(2),object_type:'job',external_uuid:id(3),local_id:id(4),snapshot:{booking:previous}
+  }]});let localSync;
+  db.rpc=async(name,args)=>{assert.equal(name,'sync_servicem8_job_state');localSync=args;return {data:null,error:null};};
+  const {worker}=setup(db,async url=>url.includes('/jobactivity.json?')?response({},403):url.includes('/jobpayment.json?')?response([]):response({status:'Work Order',active:1}));
+  await worker.refreshRemote('A',id(3));
+  assert.equal(localSync.p_schedule_permission_missing,true);
+  assert.deepEqual(localSync.p_booking,previous);
+  assert.equal(db.tables.external_object_mappings[0].snapshot.schedulePermissionMissing,true);
 });
 test('a draft-only version can never be transferred even if the quote status says accepted',async()=>{
   const jobId=id(20),quoteId=id(21);
@@ -634,7 +647,7 @@ test('dispatch sync imports ServiceM8 bookings into the calendar for the selecte
   assert.match(saved.p_events[0].title, /Alex Smith.*House wash/);
   assert.match(saved.p_events[0].notes, /29 Selwyn Cres/);
   assert.deepEqual(saved.p_events[0].details, {
-    personName: 'Alex Smith', companyName: 'Nova Exterior', email: 'alex@example.test', phone: '021 555 0100',
+    personName: 'Alex Smith', jobUuid: id(31), companyName: 'Nova Exterior', email: 'alex@example.test', phone: '021 555 0100',
     address: '29 Selwyn Cres', services: ['House wash', 'Window clean'],
     lineItems: [{ name: 'House wash', quantity: '1' }, { name: 'Window clean', quantity: '8' }],
     assignedStaff: ['Jordan Lee'], staffAssigned: true, status: '',
@@ -678,7 +691,32 @@ test('ServiceM8 activity webhooks keep unlinked dispatch bookings updated', asyn
   assert.equal(sync.args.p_external_id, id(41));
   assert.equal(sync.args.p_event.start_time, '2026-11-03T20:00:00.000Z');
   assert.match(sync.args.p_event.title, /Nova Exterior.*House wash/);
+  assert.equal(sync.args.p_event.details.jobUuid, id(42));
   assert.deepEqual(sync.args.p_event.details.assignedStaff, ['Jordan Lee']);
+});
+test('deleted ServiceM8 activity removes its calendar booking and clears the linked job schedule', async () => {
+  const task={id:id(44),business_id:'A',kind:'webhook',state:'pending',attempts:0,payload:{object:'jobactivity',uuid:id(45)}};
+  const db=database({servicem8_connections:[privateConnection()],integration_tasks:[task],
+    external_object_mappings:[{business_id:'A',connection_generation:id(2),object_type:'job',local_id:id(46),external_uuid:id(47)}],
+    calendar_events:[{id:id(48),business_id:'A',source:'servicem8',external_id:id(45),details:{jobUuid:id(47)}}]});
+  let claimed=false;const syncs=[];
+  db.rpc=async(name,args)=>{
+    if(name==='claim_integration_task'){
+      if(claimed)return {data:[]};claimed=true;Object.assign(task,{state:'running',lease_token:id(49),attempts:1});return {data:[structuredClone(task)]};
+    }
+    syncs.push({name,args});return {data:null,error:null};
+  };
+  const {worker}=setup(db,async url=>{
+    if(url.endsWith('/jobactivity/'+id(45)+'.json'))return response({},404);
+    if(url.endsWith('/job/'+id(47)+'.json'))return response({status:'Work Order',active:1});
+    if(url.includes('/jobactivity.json?')||url.includes('/jobpayment.json?'))return response([]);
+    return response({});
+  });
+  await worker.tick();
+  assert.equal(task.state,'succeeded');
+  assert.equal(syncs.find(x=>x.name==='sync_servicem8_dispatch_event').args.p_event,null);
+  const state=syncs.find(x=>x.name==='sync_servicem8_job_state');
+  assert.equal(state.args.p_job_id,id(46));assert.equal(state.args.p_booking,null);
 });
 test('private connection requires encryption configuration before any remote request',async()=>{
   const db=database({users:ownerRows});const {route}=setup(db,undefined,{env:{}});

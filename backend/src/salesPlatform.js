@@ -108,6 +108,7 @@ async function serviceM8DispatchDetails({ call, listRemote, businessId, job, act
     String(job.job_description || job.job_name || "").split(/\r?\n/).map(line => line.trim()).filter(Boolean).slice(0, 20);
   return {
     personName: personName.slice(0, 160),
+    jobUuid: String(job.uuid || activity.job_uuid || "").slice(0, 80),
     companyName: String(company?.name || job.company_name || "").slice(0, 160),
     email: String(contact?.email || company?.email || "").slice(0, 254),
     phone: String(contact?.mobile || contact?.phone || company?.phone || "").slice(0, 80),
@@ -1413,7 +1414,12 @@ export function installSalesPlatform(
       // Existing OAuth authorizations predate read_schedule. Keep job-status
       // sync working if a connection lacks permission or a schedule response
       // is temporarily unavailable. Booking data is optional to status sync.
-      if (e.status === 403) schedulePermissionMissing = true;
+      if (e.status === 403) {
+        schedulePermissionMissing = true;
+        // Do not erase a known booking or demote a scheduled TurnKey job
+        // merely because this ServiceM8 authorization cannot read schedules.
+        booking = map.snapshot?.booking || null;
+      }
       else console.warn('[ServiceM8] schedule read failed', { businessId, error: safeError(e) });
     }
     let paymentTotal = null;
@@ -1458,6 +1464,7 @@ export function installSalesPlatform(
       p_job_id: map.local_id,
       p_status: String(job.status || "Unknown"),
       p_booking: booking,
+      p_schedule_permission_missing: schedulePermissionMissing,
     }));
     await unwrap(
       db
@@ -1551,10 +1558,14 @@ export function installSalesPlatform(
                 if (error.status !== 404) throw error;
                 const c = await conn(task.business_id);
                 if (!c) throw error;
+                const previous = await unwrap(db.from("calendar_events").select("details")
+                  .eq("business_id", task.business_id).eq("source", "servicem8")
+                  .eq("external_id", id).maybeSingle());
+                const linkedJobUuid = previous?.details?.jobUuid;
                 await unwrap(db.rpc("sync_servicem8_dispatch_event", {
                   p_business_id: task.business_id, p_external_id: id, p_event: null,
                 }));
-                id = null;
+                id = SM.uuid(linkedJobUuid) ? linkedJobUuid : null;
               }
               if (activity) {
                 const c = await conn(task.business_id);
