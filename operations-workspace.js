@@ -39,8 +39,25 @@
     const owned = (r,c) => (options.recordBusiness ? options.recordBusiness(r) : typeof recordBusinesses !== 'undefined' ? recordBusinesses.get(r) : r.businessId || r.business_id) === c.businessId;
     const job = r => ['won','scheduled','completed','paid'].includes(r.stage) || (r.stage === 'cancelled' && !r.lostAt && !!(r.wonAt || r.approvedAt));
     const status = r => ['completed','paid','cancelled'].includes(r.stage) ? r.stage : r.jobStatus || r.stage;
-    let host, stamp, timer, unsubscribe, lastData, busy = false, epoch = 0, message = '', launched = false;
+    let host, stamp, timer, completedRefreshTimer, unsubscribe, lastData, busy = false, epoch = 0, message = '', launched = false;
+    let sm8CompletedRows=[], sm8CompletedLoading=false, sm8CompletedError='', sm8CompletedLoaded=false;
     let view = 'jobs', search = '', filter = 'all', layout = 'table', customer = '';
+    const servicem8Completed = r => String(r.serviceM8Status || '').trim().toLowerCase() === 'completed';
+    async function loadCompleted(force = false) {
+      if (sm8CompletedLoading || (sm8CompletedLoaded && !force)) return;
+      const token = epoch; sm8CompletedLoading = true; sm8CompletedError = ''; refresh();
+      try {
+        const result = await root.TK_SALES_PLATFORM?.listServiceM8Jobs?.('Completed');
+        if (!result) throw Error('ServiceM8 completed jobs are unavailable.');
+        if (token !== epoch) return;
+        sm8CompletedRows = Array.isArray(result.jobs) ? result.jobs : [];
+        sm8CompletedLoaded = true;
+      } catch (error) {
+        if (token === epoch) sm8CompletedError = error.message || 'Could not load ServiceM8 completed jobs.';
+      } finally {
+        if (token === epoch) { sm8CompletedLoading = false; refresh(); }
+      }
+    }
     const visible = c => {
       const seen = new Set();
       if (!c.ready || !c.businessId || !c.userId) return [];
@@ -78,7 +95,7 @@
     }
     const button = (name,label,r,c) => allowed(name,r,c) ? `<button type="button" data-action="${name}" data-record="${escape(r.id)}" ${busy?'disabled':''}>${label}</button>` : '';
     function actions(r,c) {
-      return button('openDetail','Open record',r,c) + (view === 'invoices' ? button('previewInvoice','Preview / send',r,c) + button('openPaymentModal','Record payment',r,c) : button('openSchedule','Schedule / crew',r,c) + button('startJob','Start',r,c) + button('pauseJob','Pause',r,c) + button('resumeJob','Resume',r,c) + button('completeJob','Complete',r,c));
+      return button('openDetail','Open record',r,c) + (view === 'invoices' ? button('previewInvoice','Preview / send',r,c) + button('openPaymentModal','Record payment',r,c) : view === 'completed' ? button('previewInvoice','View / send invoice',r,c) : button('openSchedule','Schedule / crew',r,c) + button('startJob','Start',r,c) + button('pauseJob','Pause',r,c) + button('resumeJob','Resume',r,c) + button('completeJob','Complete',r,c));
     }
     function closeFlows() {
       if (!launched) return;
@@ -110,6 +127,7 @@
     }
     function reset() {
       ++epoch; closeFlows(); busy = false; search = ''; filter = 'all'; customer = ''; message = ''; view = 'jobs'; layout = 'table';
+      sm8CompletedRows=[];sm8CompletedLoading=false;sm8CompletedError='';sm8CompletedLoaded=false;
       stamp = keyOf(context()); if (host) host.replaceChildren();
     }
     function refresh() {
@@ -118,15 +136,16 @@
       if (stamp !== keyOf(c)) reset();
       if (!c.ready || !c.businessId || !c.userId) { host.innerHTML = '<p class="tko-empty">Sign in and load your business to view operations.</p>'; return; }
       const scope = visible(c);
-      const invoiceView = view === 'invoices';
-      const rows = scope.filter(r => invoiceView ? manager(c) && !!r.invoiceId : job(r)).filter((r,i,all) => !invoiceView || all.findIndex(x => x.invoiceId === r.invoiceId) === i);
+      const invoiceView = view === 'invoices', completedView = view === 'completed';
+      const rows = scope.filter(r => invoiceView ? manager(c) && !!r.invoiceId : completedView ? false : job(r) && !servicem8Completed(r)).filter((r,i,all) => !invoiceView || all.findIndex(x => x.invoiceId === r.invoiceId) === i);
       const needle = search.toLocaleLowerCase().trim();
       const shown = rows.filter(r => {
         const s = invoiceView ? invoiceStatus(r) : status(r);
         const matches = filter === 'all' || (invoiceView && filter === 'unpaid' ? s !== 'paid' && Number.isFinite(balance(r)) && balance(r) > 0 : filter === 'unscheduled' ? !r.scheduledDateISO && !r.scheduledDate && !r.calendarStartAt : s === filter);
         return matches && (!needle || [r.name,r.email,r.phone,r.address,r.suburb,r.jobId,r.invoiceId,crew(r)].join(' ').toLocaleLowerCase().includes(needle));
       });
-      const filters = invoiceView ? ['all','draft','sent','unpaid','partial','overdue','paid'] : ['all','unscheduled','won','scheduled','travelling','on_site','in_progress','paused','completed','paid','cancelled'];
+      const sm8Shown=sm8CompletedRows.filter(r=>!needle||[r.customer,r.address,r.description,r.reference].join(' ').toLocaleLowerCase().includes(needle));
+      const filters = invoiceView ? ['all','draft','sent','unpaid','partial','overdue','paid'] : completedView ? ['all','completed'] : ['all','unscheduled','won','scheduled','travelling','on_site','in_progress','paused','completed','paid','cancelled'];
       const customers = [...new Map(scope.filter(r => r.customerId).map(r => [r.customerId,r])).values()];
       const currentFocus = host.contains(root.document.activeElement) ? root.document.activeElement.dataset.control : null;
       const caret = currentFocus === 'search' ? root.document.activeElement.selectionStart : null;
@@ -136,10 +155,10 @@
         return `<td data-label="Customer"><strong>${escape(r.name || 'Unnamed customer')}</strong><small>${escape([r.address,r.suburb].filter(Boolean).join(', '))}</small>${invoiceView?`<small>Invoice ${escape(r.invoiceId)}</small>${r.payments?.length?`<details><summary>Payment history</summary>${r.payments.map(p=>`<p>${escape(p.date || 'No date')} · ${Number.isFinite(Number(p.amount))?escape(currency(Number(p.amount))):'Amount unavailable'} · ${escape(p.method || 'No method')}${p.notes?' · '+escape(p.notes):''}</p>`).join('')}</details>`:''}`:''}</td><td data-label="${invoiceView?'Due':'Schedule'}">${escape(invoiceView ? r.dueDate || 'No due date' : schedule(r))}</td><td data-label="${invoiceView?'Payment':'Crew'}">${escape(invoiceView ? r.paymentMethod || 'No method recorded' : crew(r))}</td><td data-label="Status"><span class="tko-status">${escape(labels[s] || s || 'Unknown')}</span></td><td data-label="Value">${Number.isFinite(r.total)?escape(currency(r.total)):'Unavailable'}${invoiceView?`<small>Balance: ${Number.isFinite(b)?escape(currency(b)):'Unavailable'}</small>`:''}</td><td data-label="Actions"><div class="tko-actions">${actions(r,c)}</div></td>`;
       };
       host.classList.add('tko-workspace');
-      host.innerHTML = `<nav class="tko-nav" aria-label="Operations"><button type="button" data-view="jobs" aria-current="${view==='jobs'?'page':'false'}">Jobs</button>${manager(c)?`<button type="button" data-view="invoices" aria-current="${invoiceView?'page':'false'}">Invoices</button>`:''}</nav><section aria-label="${invoiceView?'Invoices':'Jobs'}"><header><div><h2>${invoiceView?'Invoices':'Jobs'}</h2><p>${invoiceView?'Existing invoices and payment balances.':'Won jobs, scheduling and work in progress.'}</p></div>${!invoiceView && manager(c) && typeof action('calendar') === 'function'?'<button type="button" data-action="calendar">Open calendar</button>':''}</header>
-      ${!invoiceView && manager(c) && typeof action('createJob') === 'function'?'<div class="tko-new"><button type="button" data-action="createJob">＋ New job</button><p>Search for an existing customer or add their details in the job form.</p></div>':!invoiceView && manager(c) && typeof action('openNewJobModal') === 'function'?`<div class="tko-new"><label>Existing customer<select data-control="customer"><option value="">Choose customer</option>${customers.map(r=>`<option value="${escape(r.customerId)}" ${customer===r.customerId?'selected':''}>${escape(r.name || r.email || 'Unnamed customer')}</option>`).join('')}</select></label><button type="button" data-action="openNewJobModal" ${!customer||busy?'disabled':''}>New job</button></div>`:''}
+      host.innerHTML = `<nav class="tko-nav" aria-label="Operations"><button type="button" data-view="jobs" aria-current="${view==='jobs'?'page':'false'}">Jobs</button><button type="button" data-view="completed" aria-current="${completedView?'page':'false'}">Completed</button>${manager(c)?`<button type="button" data-view="invoices" aria-current="${invoiceView?'page':'false'}">Invoices</button>`:''}</nav><section aria-label="${invoiceView?'Invoices':completedView?'Completed ServiceM8 jobs':'Jobs'}"><header><div><h2>${invoiceView?'Invoices':completedView?'Completed jobs':'Jobs'}</h2><p>${invoiceView?'Existing invoices and payment balances.':completedView?'Jobs ServiceM8 has marked complete.':'Won jobs, scheduling and work in progress.'}</p></div>${completedView?'<button type="button" data-action="refresh-completed" '+(sm8CompletedLoading?'disabled':'')+'>Refresh</button>':!invoiceView && manager(c) && typeof action('calendar') === 'function'?'<button type="button" data-action="calendar">Open calendar</button>':''}</header>
+      ${!invoiceView && !completedView && manager(c) && typeof action('createJob') === 'function'?'<div class="tko-new"><button type="button" data-action="createJob">＋ New job</button><p>Search for an existing customer or add their details in the job form.</p></div>':!invoiceView && !completedView && manager(c) && typeof action('openNewJobModal') === 'function'?`<div class="tko-new"><label>Existing customer<select data-control="customer"><option value="">Choose customer</option>${customers.map(r=>`<option value="${escape(r.customerId)}" ${customer===r.customerId?'selected':''}>${escape(r.name || r.email || 'Unnamed customer')}</option>`).join('')}</select></label><button type="button" data-action="openNewJobModal" ${!customer||busy?'disabled':''}>New job</button></div>`:''}
       <div class="tko-tools"><label>Search<input type="search" data-control="search" value="${escape(search)}" placeholder="Customer, address, crew or reference"></label><label>Status<select data-control="filter">${filters.map(f=>`<option value="${f}" ${filter===f?'selected':''}>${escape(labels[f] || (f==='all'?'All':f==='unpaid'?'Unpaid':'Unscheduled'))}</option>`).join('')}</select></label>${!invoiceView?`<label>View<select data-control="layout"><option value="table" ${layout==='table'?'selected':''}>Table</option><option value="board" ${layout==='board'?'selected':''}>Board</option></select></label>`:''}</div><p role="status">${escape(message || `${shown.length} ${invoiceView?(shown.length===1?'invoice':'invoices'):(shown.length===1?'job':'jobs')}`)}</p>
-      ${shown.length ? !invoiceView && layout === 'board' ? `<div class="tko-board">${[...new Set(shown.map(status))].map(s=>`<section class="tko-column" aria-label="${escape(labels[s]||s)}"><h3>${escape(labels[s]||s)}</h3>${shown.filter(r=>status(r)===s).map(r=>`<article data-row="${escape(r.id)}"><h4>${escape(r.name)}</h4><p>${escape(r.address || r.suburb || '')}</p><p>${escape(schedule(r))}</p><p>${escape(crew(r))}</p><p>${Number.isFinite(r.total)?escape(currency(r.total)):'Unavailable'}</p><div class="tko-actions">${actions(r,c)}</div></article>`).join('')}</section>`).join('')}</div>` : `<table><caption class="tko-sr">${invoiceView?'Invoices':'Jobs'}</caption><thead><tr>${['Customer',invoiceView?'Due':'Schedule',invoiceView?'Payment':'Crew','Status','Value','Actions'].map(h=>`<th scope="col">${h}</th>`).join('')}</tr></thead><tbody>${shown.map(r=>`<tr data-row="${escape(r.id)}">${cells(r)}</tr>`).join('')}</tbody></table>` : '<p class="tko-empty">No matching records.</p>'}
+      ${completedView ? sm8CompletedLoading ? '<p role="status">Loading completed ServiceM8 jobs…</p>' : sm8CompletedError ? `<p class="tko-empty" role="alert">${escape(sm8CompletedError)}</p>` : sm8Shown.length ? `<table><caption class="tko-sr">Completed ServiceM8 jobs</caption><thead><tr>${['Customer','Address','Job','Completed','Value','Actions'].map(h=>`<th scope="col">${h}</th>`).join('')}</tr></thead><tbody>${sm8Shown.map(r=>`<tr><td data-label="Customer"><strong>${escape(r.customer)}</strong>${r.reference?`<small>${escape(r.reference)}</small>`:''}</td><td data-label="Address">${escape(r.address||'—')}</td><td data-label="Job">${escape(r.description)}</td><td data-label="Completed">${escape(r.completedAt||'—')}</td><td data-label="Value">${Number.isFinite(r.amount)?escape(currency(r.amount)):'Unavailable'}</td><td data-label="Actions"><a class="tko-action" target="_blank" rel="noopener" href="https://go.servicem8.com/OpenJob/${encodeURIComponent(r.uuid)}">Open in ServiceM8</a></td></tr>`).join('')}</tbody></table>` : '<p class="tko-empty">No completed jobs in ServiceM8.</p>' : shown.length ? !invoiceView && layout === 'board' ? `<div class="tko-board">${[...new Set(shown.map(status))].map(s=>`<section class="tko-column" aria-label="${escape(labels[s]||s)}"><h3>${escape(labels[s]||s)}</h3>${shown.filter(r=>status(r)===s).map(r=>`<article data-row="${escape(r.id)}"><h4>${escape(r.name)}</h4><p>${escape(r.address || r.suburb || '')}</p><p>${escape(schedule(r))}</p><p>${escape(crew(r))}</p><p>${Number.isFinite(r.total)?escape(currency(r.total)):'Unavailable'}</p><div class="tko-actions">${actions(r,c)}</div></article>`).join('')}</section>`).join('')}</div>` : `<table><caption class="tko-sr">${invoiceView?'Invoices':'Jobs'}</caption><thead><tr>${['Customer',invoiceView?'Due':'Schedule',invoiceView?'Payment':'Crew','Status','Value','Actions'].map(h=>`<th scope="col">${h}</th>`).join('')}</tr></thead><tbody>${shown.map(r=>`<tr data-row="${escape(r.id)}">${cells(r)}</tr>`).join('')}</tbody></table>` : '<p class="tko-empty">No matching records.</p>'}
       ${invoiceView?`<details><summary>Payment terms</summary><p class="tko-terms">${escape(get('getInvoiceTerms',()=>typeof docTemplate!=='undefined'?docTemplate.invoiceTerms:'') || 'No payment terms configured. Configure them in Settings Templates.')}</p><p>Open the invoice preview for the existing PDF and email flow. Record payment opens the payment ledger and history.</p></details>`:''}</section>`;
       if (currentFocus) { const el = host.querySelector(`[data-control="${currentFocus}"]`); if (el) { el.focus(); if (caret !== null) el.setSelectionRange(caret,caret); } }
     }
@@ -148,13 +167,14 @@
       const c = context();
       if (stamp !== keyOf(c)) { refresh(); return; }
       if (!c.ready || !c.businessId || !c.userId) return;
-      if (el.dataset.view) { view = el.dataset.view === 'invoices' && manager(c) ? 'invoices' : 'jobs'; filter = 'all'; search = ''; message = ''; refresh(); return; }
+      if (el.dataset.view) { view = el.dataset.view === 'invoices' && manager(c) ? 'invoices' : ['jobs','completed'].includes(el.dataset.view) ? el.dataset.view : 'jobs'; filter = 'all'; search = ''; message = ''; refresh(); if (view === 'completed') loadCompleted(); return; }
+      if (el.dataset.action === 'refresh-completed') { await loadCompleted(true); return; }
       if (busy || el.disabled) return;
       const name = el.dataset.action;
       const r = visible(c).find(r => String(r.id) === el.dataset.record);
       if (name === 'openNewJobModal') { if (!visible(c).some(r => r.customerId === customer) || !allowed(name,null,c)) return; }
       else if (name === 'createJob') { if (!allowed(name,null,c)) return; }
-      else if (name !== 'calendar' && (!r || !(view === 'invoices' ? r.invoiceId && manager(c) : job(r)) || !allowed(name,r,c))) return;
+      else if (name !== 'calendar' && (!r || !(view === 'invoices' ? r.invoiceId && manager(c) : job(r) && (view !== 'completed' || servicem8Completed(r))) || !allowed(name,r,c))) return;
       else if (name === 'calendar' && !allowed(name,null,c)) return;
       busy = true; launched = true; message = ''; const token = epoch; refresh();
       try {
@@ -191,7 +211,7 @@
       root.removeEventListener('turnkey:business-ready',refresh);
       if (host) { reset(); host.removeEventListener('click',click); host.removeEventListener('input',change); host.removeEventListener('change',change); host.classList.remove('tko-workspace'); host = null; }
     }
-    const api = {install,refresh,render:refresh,reset,destroy,open(section) { if (stamp !== keyOf(context())) reset(); view = section === 'invoices' && manager(context()) ? 'invoices' : 'jobs'; filter = 'all'; search = ''; refresh(); }};
+    const api = {install,refresh,render:refresh,reset,destroy,open(section) { if (stamp !== keyOf(context())) reset(); view = section === 'invoices' && manager(context()) ? 'invoices' : section === 'completed' ? 'completed' : 'jobs'; filter = 'all'; search = ''; refresh(); if(view==='completed')loadCompleted(); }};
     return api;
   }
   let instance;

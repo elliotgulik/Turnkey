@@ -138,6 +138,15 @@
     if (!response.ok) throw Object.assign(Error(data.error || "Request failed"), {code:data.code,status:response.status,missingFields:data.missingFields});
     return data;
   }
+  async function syncServiceM8Dispatch() {
+    return api("/api/job-calendar/servicem8/sync", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  }
+  async function listServiceM8Jobs(status = "Completed") {
+    return api("/api/sales/servicem8/jobs?status=" + encodeURIComponent(status));
+  }
   async function refreshMetrics() {
     const call = ++serial;
     if (!backendUrl()) return;
@@ -1407,6 +1416,8 @@
       toast('Quote queued for ServiceM8. Send and schedule it there.');
     },
     refresh: loadSales,
+    syncServiceM8Dispatch,
+    listServiceM8Jobs,
     report: currentReport,
     reset: () => {
       pipelineScope="all"; pipelineSearch=""; pipelineDueOnly=false;

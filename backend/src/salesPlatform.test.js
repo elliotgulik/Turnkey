@@ -617,10 +617,10 @@ test('status flags distinguish server configuration, unreadable credentials and 
   assert.equal(res.body.credentialsReady,false);assert.equal(res.body.reconnectRequired,true);assert.equal(res.body.retryAvailable,false);
   assert.doesNotMatch(JSON.stringify(res.body),/synthetic-private-key|invalid-ciphertext|_enc/);
 });
-test('dispatch sync imports ServiceM8 bookings into the calendar for the selected range', async () => {
+test('dispatch sync imports all active ServiceM8 bookings and staff without depending on calendar date view', async () => {
   const db = database({ users: ownerRows, servicem8_connections: [privateConnection()] });
-  let saved;
-  db.rpc = async (name, args) => { assert.equal(name, 'sync_servicem8_dispatch_calendar'); saved = args; return { data: 1, error: null }; };
+  const saved=[];
+  db.rpc = async (name, args) => { assert.equal(name, 'sync_servicem8_dispatch_event'); saved.push(args); return { data: null, error: null }; };
   const activity = { uuid: id(30), job_uuid: id(31), staff_uuid: id(32),
     activity_was_scheduled: '1', active: '1', start_date: '2026-11-04 09:00:00', end_date: '2026-11-04 10:30:00' };
   const { route } = setup(db, async (url) => url.endsWith('/vendor.json')
@@ -628,7 +628,7 @@ test('dispatch sync imports ServiceM8 bookings into the calendar for the selecte
     : url.includes('/jobactivity.json')
     ? response([activity])
     : url.includes('/job/' + id(31) + '.json')
-      ? response({ uuid: id(31), company_uuid: id(33), company_name: 'Nova Exterior', job_description: 'House wash', job_address: '29 Selwyn Cres' })
+      ? response({ uuid: id(31), company_uuid: id(33), company_name: 'Nova Exterior', job_description: 'House wash', job_address: '29 Selwyn Cres', status: 'Work Order', active: 1 })
       : url.includes('/company/' + id(33) + '.json')
         ? response({ uuid: id(33), name: 'Nova Exterior' })
         : url.includes('/companycontact.json')
@@ -638,28 +638,39 @@ test('dispatch sync imports ServiceM8 bookings into the calendar for the selecte
             : url.includes('/staff/' + id(32) + '.json')
               ? response({ first: 'Jordan', last: 'Lee' })
       : response({}));
-  const result = await route('POST', '/api/job-calendar/servicem8/sync', { ...owner, body: { from: '2026-11-01T00:00:00Z', to: '2026-11-08T00:00:00Z' } });
+  const result = await route('POST', '/api/job-calendar/servicem8/sync', { ...owner, body: {} });
   assert.equal(result.statusCode, 200);
   assert.equal(result.body.synced, 1);
-  assert.equal(saved.p_business_id, 'A');
-  assert.equal(saved.p_events[0].external_id, id(30));
-  assert.equal(saved.p_events[0].start_time, '2026-11-03T20:00:00.000Z', 'ServiceM8 local Auckland times are converted to the correct instant');
-  assert.match(saved.p_events[0].title, /Alex Smith.*House wash/);
-  assert.match(saved.p_events[0].notes, /29 Selwyn Cres/);
-  assert.deepEqual(saved.p_events[0].details, {
+  assert.equal(saved.length, 1);
+  assert.equal(saved[0].p_business_id, 'A');
+  assert.equal(saved[0].p_external_id, id(30));
+  assert.equal(saved[0].p_event.start_time, '2026-11-03T20:00:00.000Z', 'ServiceM8 local Auckland times are converted to the correct instant');
+  assert.match(saved[0].p_event.title, /Alex Smith.*House wash/);
+  assert.match(saved[0].p_event.notes, /29 Selwyn Cres/);
+  assert.deepEqual(saved[0].p_event.details, {
     personName: 'Alex Smith', jobUuid: id(31), companyName: 'Nova Exterior', email: 'alex@example.test', phone: '021 555 0100',
     address: '29 Selwyn Cres', services: ['House wash', 'Window clean'],
     lineItems: [{ name: 'House wash', quantity: '1' }, { name: 'Window clean', quantity: '8' }],
-    assignedStaff: ['Jordan Lee'], staffAssigned: true, status: '',
+    assignedStaff: ['Jordan Lee'], staffAssigned: true, status: 'Work Order',
   });
 });
-test('dispatch sync rejects invalid date windows before calling ServiceM8', async () => {
+test('completed ServiceM8 job list includes every completed job and excludes other statuses', async () => {
   const db = database({ users: ownerRows, servicem8_connections: [privateConnection()] });
-  let calls = 0;
-  const { route } = setup(db, async () => { calls++; return response([]); });
-  const result = await route('POST', '/api/job-calendar/servicem8/sync', { ...owner, body: { from: 'not-a-date', to: '2026-11-08T00:00:00Z' } });
-  assert.equal(result.statusCode, 400);
-  assert.equal(calls, 0);
+  let requested;
+  const { route } = setup(db, async url => {
+    requested = url;
+    return response([
+      { uuid: id(70), status: 'Completed', active: 1, company_name: 'Customer A', job_description: 'House wash', job_address: '1 Main Rd', completion_date: '2026-10-30', total_invoice_amount: '575' },
+      { uuid: id(71), status: 'Work Order', active: 1, company_name: 'Customer B' },
+      { uuid: id(72), status: 'Completed', active: 0, company_name: 'Inactive customer' },
+    ]);
+  });
+  const res = await route('GET', '/api/sales/servicem8/jobs', { ...owner, query: { status: 'Completed' } });
+  assert.equal(res.statusCode, 200);
+  assert.match(requested, /status%20eq%20'Completed'/);
+  assert.equal(res.body.jobs.length, 2, 'historical completed records are included even when inactive');
+  assert.equal(res.body.jobs[0].amount, 575);
+  assert.equal(res.body.jobs[1].customer, 'Inactive customer');
 });
 test('ServiceM8 activity webhooks keep unlinked dispatch bookings updated', async () => {
   const task = { id: id(40), business_id: 'A', kind: 'webhook', state: 'pending', attempts: 0,

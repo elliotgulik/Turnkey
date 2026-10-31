@@ -1376,6 +1376,12 @@
   .settings-group>summary::after{content:'+';font-size:18px;color:var(--ink-faint)}
   .settings-group[open]>summary::after{content:'−'}
   .settings-group-body{padding:0 0 14px}
+  .sales-list-tools{display:flex;flex-wrap:wrap;align-items:end;gap:12px;padding:12px;margin:10px 0 14px;background:var(--surface-2);border:1px solid var(--line);border-radius:12px}
+  .sales-list-tools label{display:grid;gap:5px;min-width:190px;font-size:12px;font-weight:650;color:var(--ink-soft)}
+  .sales-list-tools input,.sales-list-tools select{min-height:40px;padding:8px 11px;border:1px solid var(--line);border-radius:9px;background:var(--surface);color:var(--ink);font:inherit}
+  .sales-list-tools span{font-size:12px;color:var(--ink-faint);padding-bottom:10px}
+  .sales-filter-card{display:contents}
+  .sales-filter-card[hidden]{display:none!important}
 
 </style>
 <link rel="stylesheet" href="sales-platform.css?v=20261018c">
@@ -1964,6 +1970,7 @@ const LOST_REASONS=[
   {key:'competitor',label:'Went with a competitor'},
   {key:'timing',label:'Not now / timing'},
   {key:'no_response',label:'Stopped responding'},
+  {key:'not_in_servicem8',label:'Not in ServiceM8'},
   {key:'diy',label:'Doing it themselves'},
   {key:'scope',label:'Not a job we do / out of area'},
   {key:'other',label:'Other'}
@@ -5699,6 +5706,14 @@ function cardFlag(r){
   return null;
 }
 let lastLoggedOpenValue=null; // dedupes the Open-pipeline debug log below — see render()
+let salesLeadSort='newest',salesLeadSource='all';
+function salesFilterCard(r){return `<div class="sales-filter-card">${cardHtml(r)}</div>`}
+function filterSalesCards(input){
+  const view=input.closest('.view');if(!view)return;
+  const q=input.value.trim().toLocaleLowerCase();
+  view.querySelectorAll('.sales-filter-card').forEach(card=>{card.hidden=!!q&&!card.textContent.toLocaleLowerCase().includes(q)});
+  view.querySelectorAll('.col').forEach(col=>{const cards=[...col.querySelectorAll('.sales-filter-card')];const badge=col.querySelector('.col-count');if(badge)badge.textContent=q?cards.filter(card=>!card.hidden).length:cards.length;});
+}
 function render(){
   autoFollowUp();
   if(typeof saveState==='function')saveState();
@@ -5746,6 +5761,7 @@ function render(){
       <div class="pipe-primary"><button class="btn primary" onclick="openLeadModal()">+ New lead</button></div>
       <div class="pipe-legend">${actionCount?`<span class="legend-flag">● ${actionCount} need${actionCount===1?'s':''} action</span>`:'<span class="legend-clear">✓ nothing stuck</span>'}</div>
     </div>
+    <div class="sales-list-tools"><label>Search pipeline<input type="search" placeholder="Customer, phone, suburb or service" oninput="filterSalesCards(this)"></label><span>Search across every stage. Use the stage buttons to focus one column on mobile.</span></div>
     <div class="stage-pills" id="stage-pills">${STAGES.map(stage=>{
       const n=records.filter(r=>r.stage===stage.key).length;
       return `<button class="stage-pill ${stage.key===pipelineMobileStage?'active':''}" data-stage="${stage.key}" style="--pill-tone:${stage.tone};--pill-wash:${stage.wash}" onclick="selectPipelineStage('${stage.key}')">${stage.label} <span>${n}</span></button>`;
@@ -5756,7 +5772,7 @@ function render(){
   board.innerHTML=STAGES.map(stage=>{
     const items=records.filter(r=>r.stage===stage.key);
     const stageVal=items.reduce((s,r)=>s+r.total,0);
-    const body=items.length?items.map(cardHtml).join(''):`<div class="col-empty">—</div>`;
+    const body=items.length?items.map(salesFilterCard).join(''):`<div class="col-empty">—</div>`;
     return `<div class="col${stage.key===pipelineMobileStage?' mobile-active':''}" data-stage="${stage.key}" style="--col-tone:${stage.tone};--col-wash:${stage.wash}">
       <div class="col-head">
         <span class="col-title"><span class="dot" style="background:${stage.dot}"></span>${stage.label}</span>
@@ -5767,12 +5783,14 @@ function render(){
     </div>`;
   }).join('');
 
-  // leads view
+  // Leads view — search, source and value/date sorting keep a large inbox scannable.
+  const leadSources=[...new Set(leads.map(r=>r.source).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+  const sortedLeads=[...leads].filter(r=>salesLeadSource==='all'||r.source===salesLeadSource).sort((a,b)=>salesLeadSort==='value'?(Number(b.estimatedValue||b.total||0)-Number(a.estimatedValue||a.total||0)):salesLeadSort==='name'?(a.name||'').localeCompare(b.name||''):Number(b.createdAt||0)-Number(a.createdAt||0));
   document.getElementById('view-leads').innerHTML=`
     <div class="view-head"><div><h2>Leads</h2><p>Enquiries waiting for a quote. In production they arrive straight from your website — no copy-paste.</p></div></div>
-    <div class="info-strip"><b>Instant lead capture:</b> a website enquiry lands here in seconds, the source is recorded for cost-per-lead tracking, and a 3-step follow-up sequence arms automatically.</div>
-    <div class="pipe-bar"><div class="pipe-primary"><button class="btn primary" onclick="openLeadModal()">+ New lead</button></div></div>
-    ${leads.length?`<div class="board" style="grid-template-columns:repeat(auto-fill,minmax(220px,1fr))">${leads.map(cardHtml).join('')}</div>`:`<div class="empty-state"><div class="big">No open leads yet</div><div class="sm">Click <b>+ New lead</b> above, or share your booking link (Connections) so website enquiries land here automatically.</div></div>`}
+    <div class="pipe-bar"><div class="pipe-primary"><button class="btn primary" onclick="openLeadModal()">+ New lead</button><strong>${sortedLeads.length} leads</strong></div></div>
+    <div class="sales-list-tools"><label>Search leads<input type="search" placeholder="Customer, phone, suburb or service" oninput="filterSalesCards(this)"></label><label>Lead source<select onchange="salesLeadSource=this.value;render()"><option value="all">All sources</option>${leadSources.map(source=>`<option value="${escapeHtmlSafe(source)}" ${salesLeadSource===source?'selected':''}>${escapeHtmlSafe(source)}</option>`).join('')}</select></label><label>Sort by<select onchange="salesLeadSort=this.value;render()"><option value="newest" ${salesLeadSort==='newest'?'selected':''}>Newest first</option><option value="value" ${salesLeadSort==='value'?'selected':''}>Estimated value</option><option value="name" ${salesLeadSort==='name'?'selected':''}>Customer name</option></select></label></div>
+    ${sortedLeads.length?`<div class="board" style="grid-template-columns:repeat(auto-fill,minmax(250px,1fr))">${sortedLeads.map(salesFilterCard).join('')}</div>`:`<div class="empty-state"><div class="big">${leads.length?'No leads match these filters':'No open leads yet'}</div><div class="sm">${leads.length?'Change the source filter to see more leads.':'Click <b>+ New lead</b> above, or share your booking link so website enquiries land here.'}</div></div>`}
     <p style="font-size:13px;color:var(--ink-faint);margin-top:18px">Looking for an existing customer? Head to <a href="#" onclick="switchView('customers');return false" style="color:var(--teal)">Customers</a>.</p>`;
 }
 // One row per CUSTOMER, not per job — a repeat customer with two jobs shows
@@ -7384,6 +7402,25 @@ function weatherAlerts(){
    innerHTML on its container, since renderCalendar() can be called more than once per
    visit — e.g. when live weather finishes loading while the tab is already open). */
 let fcCalendarInstance=null;
+let serviceM8CalendarSyncPromise=null, serviceM8CalendarSyncedFor='';
+async function syncServiceM8CalendarOnce(){
+  const calendar=document.getElementById('view-calendar');
+  if(!fcCalendarInstance||!calendar?.classList.contains('active')||!['owner','manager'].includes(currentUserRole)||!window.TK_SALES_PLATFORM?.syncServiceM8Dispatch)return;
+  const key=[currentBusinessId,businessSessionVersion].join('/');
+  if(key===serviceM8CalendarSyncedFor)return;
+  if(serviceM8CalendarSyncPromise)return serviceM8CalendarSyncPromise;
+  serviceM8CalendarSyncPromise=(async()=>{
+    try{
+      await window.TK_SALES_PLATFORM.syncServiceM8Dispatch();
+      serviceM8CalendarSyncedFor=key;
+      await loadCalendarExtras();renderCalFilterRow();refreshCalendarEvents();
+    }catch(error){
+      console.warn('[Calendar] ServiceM8 sync failed',error);
+      if(![401,403,409].includes(error.status))toast(error.message||'Could not sync ServiceM8 bookings');
+    }
+  })().finally(()=>{serviceM8CalendarSyncPromise=null;});
+  return serviceM8CalendarSyncPromise;
+}
 // Calendar-eligible = "was actually booked for a date, and is still an
 // active/completed booking" — broader than isBooked() (scheduled/completed
 // only, which on purpose excludes paid jobs too) so a paid job still shows on
@@ -7456,6 +7493,13 @@ function calPassesFilter(userId){
   if(!userId)return calEmployeeFilter.has('unassigned');
   return calEmployeeFilter.has(userId);
 }
+function serviceM8StaffFilterId(name){return 'sm8:'+String(name||'').trim().toLocaleLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')}
+function calPassesServiceM8Filter(event){
+  if(!calEmployeeFilter.size)return true;
+  const names=Array.isArray(event.details?.assignedStaff)?event.details.assignedStaff:[];
+  if(!names.length)return calEmployeeFilter.has('unassigned');
+  return names.some(name=>calEmployeeFilter.has(serviceM8StaffFilterId(name)));
+}
 function buildCalendarEvents(){
   const jobEvents=records.filter(r=>isCalendarJob(r)&&calPassesFilter(r.assignedStaffId)).map(r=>{
     const key=jobStatusKeyOf(r);
@@ -7481,7 +7525,7 @@ function buildCalendarEvents(){
     classNames:['cal-ev-event'],
     extendedProps:{kind:'event',eventId:e.id,notes:e.notes,userId:e.user_id}
   }));
-  const serviceM8Events=calendarEventsRaw.filter(e=>e.source==='servicem8'&&calPassesFilter(e.user_id)).map(e=>({
+  const serviceM8Events=calendarEventsRaw.filter(e=>e.source==='servicem8'&&calPassesServiceM8Filter(e)).map(e=>({
     id:'sm8-'+e.id,
     title:e.title||'ServiceM8 booking',
     start:e.start_time,end:e.end_time,allDay:false,
@@ -7833,7 +7877,7 @@ function renderCalendar(){
   }else{
     refreshCalendarEvents();
   }
-  loadCalendarExtras().then(refreshCalendarEvents);
+  loadCalendarExtras().then(()=>syncServiceM8CalendarOnce()).then(refreshCalendarEvents);
 }
 // Employee filter chips above the calendar — "All" (default, empty set),
 // individual employees, multi-select, and "Unassigned". Filtering happens in
@@ -7841,9 +7885,11 @@ function renderCalendar(){
 // native events, blocks, external busy) respects the same selection.
 function renderCalFilterRow(){
   const zone=document.getElementById('cal-filter-row');if(!zone)return;
-  const chip=(id,label,color)=>`<button type="button" class="cal-chip ${calEmployeeFilter.has(id)?'sel':''}" style="${calEmployeeFilter.has(id)?`background:${color||'var(--teal)'};border-color:${color||'var(--teal)'};color:#fff`:''}" onclick="toggleCalFilter('${id}')">${label}</button>`;
+  const chip=(id,label,color)=>`<button type="button" class="cal-chip ${calEmployeeFilter.has(id)?'sel':''}" style="${calEmployeeFilter.has(id)?`background:${color||'var(--teal)'};border-color:${color||'var(--teal)'};color:#fff`:''}" onclick="toggleCalFilter('${id}')">${escapeHtmlSafe(label)}</button>`;
+  const serviceStaff=[...new Set(calendarEventsRaw.filter(e=>e.source==='servicem8').flatMap(e=>Array.isArray(e.details?.assignedStaff)?e.details.assignedStaff:[]).filter(Boolean))];
   zone.innerHTML=`<button type="button" class="cal-chip ${!calEmployeeFilter.size?'sel':''}" onclick="calEmployeeFilter.clear();renderCalFilterRow();refreshCalendarEvents()">All</button>`+
     staff.map(u=>chip(u.id,(u.name||u.email||'Unnamed').split(' ')[0],u.color)).join('')+
+    serviceStaff.map(name=>chip(serviceM8StaffFilterId(name),name)).join('')+
     chip('unassigned','Unassigned');
 }
 function toggleCalFilter(id){
@@ -10431,6 +10477,7 @@ async function handleServiceM8CalendarRealtimeEvent(payload){
   if(!document.getElementById('view-calendar')?.classList.contains('active'))return;
   if(payload?.eventType!=='DELETE'&&(!row||row.source!=='servicem8'))return;
   await loadCalendarExtras();
+  renderCalFilterRow();
   refreshCalendarEvents();
 }
 function unsubscribeRealtime(){
@@ -10977,18 +11024,18 @@ async function retryPendingPhotos(){
 <script src="pipeline-model.js?v=20261018e"></script>
 <script src="lead-priority.js?v=20261017a"></script>
 <script src="meta-import.js?v=20261020a"></script>
-<script src="sales-platform.js?v=20261019b"></script>
+<script src="sales-platform.js?v=20261031b"></script>
 <script type="module" src="measurement-import.js?v=20261017a"></script>
 <script src="quote-workspace.js?v=20261017a"></script>
 <script src="conversations.js?v=20261020a"></script>
 <script src="conversations-bridge.js?v=20261020a"></script>
 <script src="servicem8-import.js?v=20261017a"></script>
 <script src="marketing-analytics.js?v=20261025b"></script>
-<footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a> · <span id="tk-app-version">v20261025b</span></footer>
+<footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a> · <span id="tk-app-version">v20261031b</span></footer>
 <script src="extension-quote-link.js?v=20261022a"></script>
 <script src="job-workspace.js?v=20261031a"></script>
 <script src="job-calendar.js?v=20261031a"></script>
-<script src="operations-workspace.js?v=20261018c"></script>
+<script src="operations-workspace.js?v=20261031b"></script>
 <script src="operations-bridge.js?v=20261018c"></script>
 <script src="workspace-controls.js?v=20261019a"></script>
 <script src="settings-experience.js?v=20261019d"></script>
