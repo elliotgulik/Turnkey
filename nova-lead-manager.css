@@ -41,3 +41,10 @@
 .nlm-scopes button:focus-visible{outline:2px solid var(--accent,var(--teal));outline-offset:3px}
 .nlm-scopes button span{font-size:11px;font-variant-numeric:tabular-nums}
 .nlm-stage-select select:disabled{opacity:1;color:var(--ink-soft);cursor:default}
+
+/* Plain, readable selected services in cards and lead details. */
+.nlm-services,.nlm-service-list{display:block}
+.nlm-selected-services{margin:0;padding:0;list-style:none;display:grid;gap:6px}
+.nlm-selected-services li{position:relative;padding-left:15px;font-size:13px;font-weight:500;line-height:1.5;color:var(--ink);overflow-wrap:anywhere}
+.nlm-selected-services li::before{content:"";position:absolute;left:1px;top:.6em;width:5px;height:5px;border-radius:50%;background:var(--accent,var(--teal))}
+.nlm-services-empty{margin:0;font-size:12px;color:var(--ink-faint)}
