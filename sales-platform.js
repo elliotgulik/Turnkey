@@ -1396,6 +1396,7 @@
       loadConnection();
   });
   window.TK_SALES_PLATFORM = {
+    moveStage: async (id, key) => move(record(id), key),
     transferQuote: async (id) => {
       const r=record(id);
       if(!r||M.won(r))throw Error('Select an editable quote to transfer.');

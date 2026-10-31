@@ -1377,6 +1377,7 @@
 
 </style>
 <link rel="stylesheet" href="sales-platform.css?v=20261018c">
+<link rel="stylesheet" href="nova-lead-manager.css?v=20261031a">
 <link rel="stylesheet" href="quote-workspace.css?v=20261017a">
 <link rel="stylesheet" href="conversations.css?v=20261020a">
 <link rel="stylesheet" href="marketing-analytics.css?v=20261025b">
@@ -6525,13 +6526,15 @@ async function savePricingConfig(){
     costInputs:Object.assign({},COST_INPUTS),
     overheads:Object.fromEntries(Object.entries(TK_COST.OVERHEADS).map(([k,v])=>[k,v.perMonth])),
     svcCost:TK_COST.chemicalConfig().svcCost,
-    sourceSpend:Object.assign({},salesSourceSpend)
+    sourceSpend:Object.assign({},salesSourceSpend),
+    novaLeadManager:(typeof window!=='undefined'?window.TK_NOVA_LEAD_MANAGER?.getConfig?.():null)||null
   };
   const {error}=await sb.from('businesses').upsert({id:currentBusinessId,pricing_config:config});
   if(error)console.error('Save pricing config failed',error);
 }
 function applyPricingConfig(config){
   TK_COST.applyChemicalConfig(config||{});
+  if(typeof window!=='undefined')window.TK_NOVA_LEAD_MANAGER?.setConfig?.(config?.novaLeadManager);
   if(!config)return;
   if(config.rates)Object.entries(config.rates).forEach(([k,v])=>{if(SERVICES[k])SERVICES[k].rate=v;});
   if(config.costInputs)Object.assign(COST_INPUTS,config.costInputs);
@@ -10914,5 +10917,6 @@ async function retryPendingPhotos(){
 <script src="workspace-controls.js?v=20261019a"></script>
 <script src="settings-experience.js?v=20261019d"></script>
 <script src="workspace-experience.js?v=20261019b"></script>
+<script src="nova-lead-manager.js?v=20261031a"></script>
 </body>
 </html>
