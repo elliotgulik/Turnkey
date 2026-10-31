@@ -617,13 +617,16 @@ test('status flags distinguish server configuration, unreadable credentials and 
   assert.equal(res.body.credentialsReady,false);assert.equal(res.body.reconnectRequired,true);assert.equal(res.body.retryAvailable,false);
   assert.doesNotMatch(JSON.stringify(res.body),/synthetic-private-key|invalid-ciphertext|_enc/);
 });
-test('dispatch sync imports all active ServiceM8 bookings and staff without depending on calendar date view', async () => {
-  const db = database({ users: ownerRows, servicem8_connections: [privateConnection()] });
-  const saved=[];
-  db.rpc = async (name, args) => { assert.equal(name, 'sync_servicem8_dispatch_event'); saved.push(args); return { data: null, error: null }; };
+test('dispatch seed imports once, reconciles completed mapped jobs, and is independent of calendar date view', async () => {
+  const db = database({ users: ownerRows, servicem8_connections: [privateConnection()],
+    external_object_mappings:[{business_id:'A',connection_generation:id(2),object_type:'job',local_id:id(35),external_uuid:id(34),snapshot:{booking:{startAt:'2026-10-30T20:00:00.000Z',endAt:'2026-10-30T21:00:00.000Z'}}}],
+    jobs:[{id:id(35),business_id:'A',status:'quoted'}] });
+  const saved=[], stateSyncs=[];
+  db.rpc = async (name, args) => { if(name==='sync_servicem8_dispatch_event')saved.push(args); else if(name==='sync_servicem8_job_state')stateSyncs.push(args); return { data: null, error: null }; };
   const activity = { uuid: id(30), job_uuid: id(31), staff_uuid: id(32),
     activity_was_scheduled: '1', active: '1', start_date: '2026-11-04 09:00:00', end_date: '2026-11-04 10:30:00' };
-  const { route } = setup(db, async (url) => url.endsWith('/vendor.json')
+  let remoteCalls=0;
+  const { route } = setup(db, async (url) => { remoteCalls++; return url.endsWith('/vendor.json')
     ? response({ timezone_name: 'Pacific/Auckland' })
     : url.includes('/jobactivity.json')
     ? response([activity])
@@ -637,10 +640,13 @@ test('dispatch sync imports all active ServiceM8 bookings and staff without depe
             ? response([{ name: 'House wash', quantity: '1' }, { name: 'Window clean', quantity: '8' }])
             : url.includes('/staff/' + id(32) + '.json')
               ? response({ first: 'Jordan', last: 'Lee' })
-      : response({}));
+      : url.includes('/job.json?') ? response([{uuid:id(34),status:'Completed'}])
+      : url.includes('/job/' + id(34) + '.json') ? response({uuid:id(34),status:'Completed'})
+      : response({}); });
   const result = await route('POST', '/api/job-calendar/servicem8/sync', { ...owner, body: {} });
   assert.equal(result.statusCode, 200);
   assert.equal(result.body.synced, 1);
+  assert.equal(result.body.reconciledCompleted, 1);
   assert.equal(saved.length, 1);
   assert.equal(saved[0].p_business_id, 'A');
   assert.equal(saved[0].p_external_id, id(30));
@@ -653,6 +659,14 @@ test('dispatch sync imports all active ServiceM8 bookings and staff without depe
     lineItems: [{ name: 'House wash', quantity: '1' }, { name: 'Window clean', quantity: '8' }],
     assignedStaff: ['Jordan Lee'], staffAssigned: true, status: 'Work Order',
   });
+  assert.equal(stateSyncs[0].p_job_id,id(35));
+  assert.equal(stateSyncs[0].p_status,'Completed');
+  assert.deepEqual(stateSyncs[0].p_booking,db.tables.external_object_mappings[0].snapshot.booking);
+  assert.ok(db.tables.servicem8_connections[0].dispatch_seeded_at);
+  const callsAfterSeed=remoteCalls;
+  const second=await route('POST','/api/job-calendar/servicem8/sync',{...owner,body:{}});
+  assert.equal(second.body.skipped,true);
+  assert.equal(remoteCalls,callsAfterSeed,'later calendar views do not trigger another ServiceM8 import');
 });
 test('completed ServiceM8 job list includes every completed job and excludes other statuses', async () => {
   const db = database({ users: ownerRows, servicem8_connections: [privateConnection()] });

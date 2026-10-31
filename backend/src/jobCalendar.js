@@ -206,6 +206,7 @@ export function installJobCalendar(app, { db, requireBusiness, getGoogleCalendar
     const allJobs = await fetchAllPaged(() => db.from('jobs').select('*').eq('business_id', req.businessId))
     const visibleJobs = allJobs.filter((j) => j.status !== 'cancelled' && (privileged || isAssignedToStaff(j, req.userId)))
     const jobs = visibleJobs.filter((j) => {
+      if (j.status === 'completed' || j.status === 'paid') return true // archive lives in the Completed section, independent of date view
       if (!j.scheduled_date && !j.details?.calendarStartAt) return true // unscheduled — always surfaced for drag-in
       const interval = sniffJobInterval(j)
       return interval && interval[1] > from && interval[0] < to

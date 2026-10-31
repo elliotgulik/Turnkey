@@ -89,6 +89,8 @@ const { chromium } = require('playwright'),
           { id: 'job-3', status: 'scheduled', assigned_to: null, scheduled_date: '2026-07-12', updated_at: '2026-07-01T00:00:00.000Z',
             customer: { name: 'Carol', address: '3 Test Rd', suburb: 'Town' },
             details: { calendarStartAt: '2026-07-12T01:00:00.000Z', calendarEndAt: '2026-07-12T03:00:00.000Z', scheduledStartMin: null, scheduledDurationMin: null, assignedStaffIds: ['owner-1'], calendarTeamLabel: null, calendarNotes: '', calendarGoogleSync: true, googleEventId: null, calendarGoogleSyncError: 'Rate limited' } }
+          ,{ id: 'job-4', status: 'completed', assigned_to: null, scheduled_date: '2026-07-02', updated_at: '2026-07-02T00:00:00.000Z',
+            customer: { name: 'Done Customer', address: '4 Test Rd', suburb: 'Town' }, details: {} }
         ],
         events: [], blocks: [], google: { connected: false },
         calls: [], realtimeHandlers: [], putError: null, delayPut: false, putResolver: null
@@ -124,7 +126,7 @@ const { chromium } = require('playwright'),
               title: 'Nova Exterior · House wash', source: 'servicem8', connection_id: null, external_id: 'activity-1', busy_status: 'busy',
               start_time: '2026-07-20T01:00:00.000Z', end_time: '2026-07-20T02:00:00.000Z', notes: 'ServiceM8 job',
               details: { personName:'Alex Smith', companyName:'Nova Exterior', email:'alex@example.test', phone:'021 555 0100', address:'29 Selwyn Cres', services:['House wash'], lineItems:[{name:'House wash',quantity:'1'}], assignedStaff:['Jordan Lee'], status:'Work Order' } });
-            return { synced: 1 };
+            return { synced: 1, reconciledCompleted: 1 };
           }
           if (options && options.method === 'PUT' && p.startsWith('/jobs/')) {
             const jobId = p.split('/jobs/')[1];
@@ -172,12 +174,20 @@ const { chromium } = require('playwright'),
     assert.match(sidebarText, /Bob/); // unscheduled
     assert.match(sidebarText, /Alice/); // scheduled, in range
     const rangeCount = await page.evaluate(() => fixture.calls.filter(c => c.path.startsWith('/range')).length);
+    await page.waitForFunction(() => fixture.calls.some(c => c.dispatchSync));
+    assert.equal(await page.locator('[data-tkjc="sync-servicem8"]').count(), 0);
+    assert.equal(await page.locator('#tkjc-load-status').isHidden(), true);
+    const seededRangeCount = await page.evaluate(() => fixture.calls.filter(c => c.path.startsWith('/range')).length);
+    await page.evaluate(() => window.renderAll());
+    await page.waitForTimeout(450);
+    assert.equal(await page.evaluate(() => fixture.calls.filter(c => c.path.startsWith('/range')).length), seededRangeCount, 'app renders do not restart calendar fetches');
     await page.evaluate(() => fixture.realtimeHandlers[0]?.());
-    await page.waitForFunction((before) => fixture.calls.filter(c => c.path.startsWith('/range')).length > before, rangeCount);
-    await page.click('[data-tkjc="sync-servicem8"]');
-    await page.waitForFunction(() => /ServiceM8 dispatch synced/.test(window.lastNotify || ''));
-    assert.equal(await page.evaluate(() => fixture.calls.some(c => c.dispatchSync?.from && c.dispatchSync?.to)), true);
+    await page.waitForFunction((before) => fixture.calls.filter(c => c.path.startsWith('/range')).length > before, seededRangeCount);
+    assert.equal(await page.evaluate(() => fixture.calls.some(c => c.dispatchSync && !('from' in c.dispatchSync))), true);
     assert.match(await page.locator('#tkjc-main').innerText(), /Nova Exterior · House wash/);
+    await page.click('[data-tkjc-section="completed"]');
+    assert.match(await page.locator('#tkjc-main').innerText(), /Done Customer/);
+    await page.click('[data-tkjc-section="schedule"]');
     await page.locator('[data-tkjc-agenda-event="sm8-booking"]').click();
     const dispatchDetail = await page.locator('#tkjc-event-overlay').innerText();
     assert.match(dispatchDetail, /Alex Smith/);

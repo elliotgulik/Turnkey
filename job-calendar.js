@@ -109,11 +109,13 @@
 
   let state = null;
   let realtimeChannel = null, realtimeKey = '', realtimeTimer = null;
+  const servicem8SeedAttempts = new Set();
+  const servicem8SeedRunning = new Set();
   function freshState() {
     return {
       bizKey: null, loaded: false, loading: false, loadError: '', loadSeq: 0,
       jobs: [], staff: [], events: [], blocks: [], google: { connected: false }, canManage: false, myRole: null, myUserId: null,
-      view: 'month', anchor: new Date(), range: { fromISO: null, toISO: null },
+      view: 'month', section: 'schedule', anchor: new Date(), range: { fromISO: null, toISO: null },
       staffFilter: new Set(), search: ''
     };
   }
@@ -145,7 +147,9 @@
       state.jobs = []; state.events = []; state.blocks = []; state.loaded = false;
     }
     state.range = { fromISO, toISO };
-    state.loading = true;
+    // Keep an already-rendered calendar visible during realtime refreshes. Only
+    // show the blocking loading state before this range has its first response.
+    state.loading = !state.loaded;
     state.loadError = '';
     state.canManage = false;
     // Date/view changes are local UI actions, independent of backend latency.
@@ -169,6 +173,28 @@
     if (scope.isStale() || seq !== state.loadSeq) return;
     state.loading = false;
     renderBody();
+    if (state.canManage) ensureServiceM8Seed(scope, bizKey);
+  }
+
+  function ensureServiceM8Seed(scope, bizKey) {
+    if (servicem8SeedAttempts.has(bizKey) || scope.isStale()) return;
+    servicem8SeedAttempts.add(bizKey);
+    servicem8SeedRunning.add(bizKey);
+    request('/servicem8/sync', { method: 'POST', body: JSON.stringify({}) }, scope)
+      .then((result) => {
+        if (!scope.isStale() && result && (result.synced > 0 || result.reconciledCompleted > 0)) {
+          // Import may produce many Realtime notifications; one range reload is enough.
+          clearTimeout(realtimeTimer);
+          realtimeTimer = setTimeout(() => { if (!scope.isStale()) load(); }, 400);
+        }
+      })
+      .catch((error) => {
+        // Keep the calendar usable; retry on a later app session if the one-time
+        // initial seed failed. Ordinary date/view changes never trigger imports.
+        servicem8SeedAttempts.delete(bizKey);
+        if (!error?.stale && !scope.isStale()) notify(error.message || 'Could not load ServiceM8 bookings');
+      })
+      .finally(() => servicem8SeedRunning.delete(bizKey));
   }
 
   function ensureCalendarRealtime(scope) {
@@ -179,6 +205,7 @@
     if (realtimeChannel) { try { client.removeChannel?.(realtimeChannel); } catch (_) {} }
     realtimeKey = key;
     const refresh = () => {
+      if (servicem8SeedRunning.has(key)) return;
       clearTimeout(realtimeTimer);
       realtimeTimer = setTimeout(() => {
         if (!scope.isStale() && document.getElementById('view-calendar')?.classList.contains('active')) load();
@@ -216,10 +243,9 @@
     host.dataset.tkjc = '1';
     host.dataset.tkjcBiz = bizKey;
     host.innerHTML = `
-      <div class="view-head"><div><h2>Calendar</h2><p>Book jobs, assign crews, and block out unavailable time. Sync ServiceM8 dispatch bookings or connect Google Calendar to overlay busy times.</p></div>
+      <div class="view-head"><div><h2>Calendar</h2><p>Book jobs, assign crews, and block unavailable time. ServiceM8 dispatch bookings stay saved here and update automatically when ServiceM8 sends changes.</p></div>
         <div class="tkjc-head-actions">
           <button type="button" class="btn ghost sm" data-tkjc="actual-hours">Actual hours</button>
-          <button type="button" class="btn ghost sm" data-tkjc="sync-servicem8">Sync ServiceM8 dispatch</button>
           <button type="button" class="btn ghost sm" data-tkjc="event">+ Appointment</button>
           <button type="button" class="btn ghost sm" data-tkjc="block">+ Block time</button>
           <button type="button" class="btn accent sm" data-tkjc="book">+ Book job</button>
@@ -238,6 +264,10 @@
           <button type="button" data-tkjc-view="day">Day</button>
           <button type="button" data-tkjc-view="list">List</button>
         </div>
+      </div>
+      <div class="tkjc-views tkjc-sections" role="group" aria-label="Calendar section">
+        <button type="button" data-tkjc-section="schedule" class="active" aria-pressed="true">Schedule</button>
+        <button type="button" data-tkjc-section="completed" aria-pressed="false">Completed</button>
       </div>
       <div id="tkjc-load-status" role="status" aria-live="polite" hidden></div>
       <div class="tkjc-legend">
@@ -269,30 +299,17 @@
       if (root.TK_JOB_WORK && typeof root.TK_JOB_WORK.openCalendar === 'function') root.TK_JOB_WORK.openCalendar();
       else notify('Staff calendar (actual hours) is not available yet.');
     });
-    host.querySelector('[data-tkjc="sync-servicem8"]').addEventListener('click', async (event) => {
-      const button = event.currentTarget;
-      const scope = makeScope();
-      const { fromISO, toISO } = rangeForView(state.view, state.anchor);
-      button.disabled = true;
-      const oldText = button.textContent;
-      button.textContent = 'Syncing dispatch…';
-      try {
-        const result = await request('/servicem8/sync', { method: 'POST', body: JSON.stringify({
-          from: parseLocalDate(fromISO).toISOString(), to: parseLocalDate(toISO).toISOString()
-        }) }, scope);
-        if (scope.isStale()) return;
-        notify(`ServiceM8 dispatch synced · ${result.synced || 0} bookings`);
-        await load();
-      } catch (error) {
-        if (!error.stale) notify(error.message || 'Could not sync ServiceM8 dispatch');
-      } finally {
-        if (button.isConnected) { button.disabled = false; button.textContent = oldText; }
-      }
-    });
     host.querySelector('[data-tkjc="today"]').addEventListener('click', () => { state.anchor = new Date(); load(); });
     host.querySelector('[data-tkjc="prev"]').addEventListener('click', () => { shiftAnchor(-1); load(); });
     host.querySelector('[data-tkjc="next"]').addEventListener('click', () => { shiftAnchor(1); load(); });
     host.querySelectorAll('[data-tkjc-view]').forEach((btn) => btn.addEventListener('click', () => { state.view = btn.dataset.tkjcView; load(); }));
+    host.querySelectorAll('[data-tkjc-section]').forEach((btn) => btn.addEventListener('click', () => {
+      state.section = btn.dataset.tkjcSection;
+      host.querySelectorAll('[data-tkjc-section]').forEach((item) => {
+        const active = item === btn; item.classList.toggle('active', active); item.setAttribute('aria-pressed', String(active));
+      });
+      renderSidebar(); renderMain();
+    }));
     const search = host.querySelector('#tkjc-search');
     search.addEventListener('input', () => { state.search = search.value; renderSidebar(); renderMain(); });
   }
@@ -322,6 +339,10 @@
       statusEl.querySelector('button')?.addEventListener('click', () => load());
     }
     renderGooglePanel();
+    document.querySelectorAll('[data-tkjc-section]').forEach((btn) => {
+      const active = btn.dataset.tkjcSection === state.section;
+      btn.classList.toggle('active', active); btn.setAttribute('aria-pressed', String(active));
+    });
     renderStaffChips();
     renderSidebar();
     renderMain();
@@ -412,8 +433,10 @@
       const c = job.customer || {};
       return [c.name, c.address, c.suburb].filter(Boolean).join(' ').toLowerCase().includes(q);
     };
-    const unscheduled = state.jobs.filter((j) => !jobWindow(j) && matches(j));
-    const scheduled = state.jobs.filter((j) => jobWindow(j) && matches(j)).sort((a, b) => {
+    const completed = state.jobs.filter((j) => ['completed','paid'].includes(j.status) && matches(j));
+    const activeJobs = state.jobs.filter((j) => !['completed','paid'].includes(j.status));
+    const unscheduled = activeJobs.filter((j) => !jobWindow(j) && matches(j));
+    const scheduled = activeJobs.filter((j) => jobWindow(j) && matches(j)).sort((a, b) => {
       const wa = jobWindow(a), wb = jobWindow(b);
       return wa.start - wb.start;
     });
@@ -426,7 +449,10 @@
         <span class="tkjc-sidebar-time">${esc(jobTimeLabel(job))}</span>
       </button>`;
     };
-    zone.innerHTML = `
+    zone.innerHTML = state.section === 'completed' ? `
+      <div class="tkjc-sidebar-group">Completed jobs (${completed.length})</div>
+      ${completed.length ? completed.map((job) => `<div class="tkjc-sidebar-row completed"><span class="tkjc-sidebar-name">${esc(jobTitle(job))}</span><span class="tkjc-sidebar-sub">${esc([job.customer?.address, job.customer?.suburb].filter(Boolean).join(', ') || 'No address on file')}</span><span class="tkjc-sidebar-time">Completed${job.scheduled_date ? ' · ' + esc(fmtDateLabel(parseLocalDate(job.scheduled_date))) : ''}</span></div>`).join('') : '<p class="tkjc-empty">No completed jobs have synced yet.</p>'}
+      ${state.events.filter((event) => event.source === 'servicem8' && event.details?.status === 'Completed' && matches({ customer: { name: event.details?.personName, address: event.details?.address } })).map((event) => `<div class="tkjc-sidebar-row completed"><span class="tkjc-sidebar-name">${esc(event.details?.personName || event.title || 'ServiceM8 job')}</span><span class="tkjc-sidebar-sub">${esc(event.details?.address || '')}</span><span class="tkjc-sidebar-time">Completed in ServiceM8</span></div>`).join('')}` : `
       <div class="tkjc-sidebar-group">Unscheduled (${unscheduled.length})</div>
       ${unscheduled.length ? unscheduled.map(row).join('') : '<p class="tkjc-empty">Nothing waiting to be booked.</p>'}
       <div class="tkjc-sidebar-group">In this range (${scheduled.length})</div>
@@ -442,6 +468,13 @@
   /* ===================== main calendar area ===================== */
   function renderMain() {
     const zone = document.getElementById('tkjc-main'); if (!zone) return;
+    if (state.section === 'completed') {
+      const q = state.search.trim().toLowerCase();
+      const jobs = state.jobs.filter((job) => ['completed','paid'].includes(job.status) && (!q || [job.customer?.name,job.customer?.address,job.customer?.suburb].filter(Boolean).join(' ').toLowerCase().includes(q)));
+      const events = state.events.filter((event) => event.source === 'servicem8' && event.details?.status === 'Completed' && (!q || [event.title,event.details?.personName,event.details?.address].filter(Boolean).join(' ').toLowerCase().includes(q)));
+      zone.innerHTML = `<div class="tkjc-completed-list"><h3>Completed jobs</h3>${jobs.map((job) => `<article class="tkjc-completed-row"><strong>${esc(jobTitle(job))}</strong><span>${esc([job.customer?.address,job.customer?.suburb].filter(Boolean).join(', ') || 'Address unavailable')}</span><small>${esc(job.scheduled_date ? fmtDateLabel(parseLocalDate(job.scheduled_date)) : 'Completed job')}</small><b>${esc(job.status === 'paid' ? 'Paid' : 'Completed')}</b></article>`).join('')}${events.map((event) => `<article class="tkjc-completed-row"><strong>${esc(event.details?.personName || event.title || 'ServiceM8 job')}</strong><span>${esc(event.details?.address || 'Address unavailable')}</span><small>${esc(fmtDateLabel(new Date(event.end_time)))}</small><b>Completed in ServiceM8</b></article>`).join('')}${!jobs.length&&!events.length?'<p class="tkjc-empty">No completed jobs found.</p>':''}</div>`;
+      return;
+    }
     if (typeof FullCalendar !== 'undefined') { renderWithFullCalendar(zone); return; }
     renderFallbackAgenda(zone);
   }
@@ -449,6 +482,7 @@
   function buildFcEvents() {
     const out = [];
     state.jobs.forEach((job) => {
+      if (['completed','paid'].includes(job.status)) return;
       const w = jobWindow(job); if (!w) return;
       const q=state.search.trim().toLowerCase();
       if(q&&![job.customer?.name,job.customer?.address,job.customer?.suburb].filter(Boolean).join(' ').toLowerCase().includes(q))return;
@@ -463,6 +497,7 @@
       });
     });
     state.events.forEach((ev) => {
+      if (ev.source === 'servicem8' && ev.details?.status === 'Completed') return;
       if (ev.user_id && !matchesStaffFilter([ev.user_id])) return;
       const free = ev.busy_status === 'free';
       out.push({
@@ -554,6 +589,7 @@
     const byDay = {};
     days.forEach((d) => { byDay[d] = []; });
     state.jobs.forEach((job) => {
+      if (['completed','paid'].includes(job.status)) return;
       const w = jobWindow(job); if (!w) return;
       if (!matchesStaffFilter(jobStaffIds(job))) return;
       const dISO = localDateStr(w.start);
@@ -568,6 +604,7 @@
       });
     });
     state.events.forEach((ev) => {
+      if (ev.source === 'servicem8' && ev.details?.status === 'Completed') return;
       if (ev.user_id && !matchesStaffFilter([ev.user_id])) return;
       days.forEach((dISO) => {
         if (new Date(ev.start_time) < parseLocalDate(addDaysISO(dISO, 1)) && new Date(ev.end_time) > parseLocalDate(dISO)) byDay[dISO].push({ kind: 'event', event: ev });
@@ -1062,14 +1099,8 @@
   function wrapRenderAll() {
     if (typeof root.renderAll !== 'function' || root.renderAll.__tkjc) return false;
     const original = root.renderAll;
-    let debounce = null;
     const wrapped = function () {
       original.apply(this, arguments);
-      const host = document.getElementById('view-calendar');
-      if (host && host.classList.contains('active') && host.dataset.tkjc === '1') {
-        clearTimeout(debounce);
-        debounce = setTimeout(() => load(), 300);
-      }
     };
     wrapped.__tkjc = true;
     root.renderAll = wrapped;

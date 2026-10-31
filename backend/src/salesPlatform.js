@@ -924,6 +924,7 @@ export function installSalesPlatform(
     wrap(async (req, res) => {
       const c = await conn(req.businessId);
       if (!c) throw fail("Connect ServiceM8 first.", 409);
+      if (c.dispatch_seeded_at) return res.json({ ok: true, synced: 0, total: 0, skipped: true, seededAt: c.dispatch_seeded_at });
       const vendorResult = await call(req.businessId, "/vendor.json", { generation: c.generation });
       const vendor = Array.isArray(vendorResult.data) ? vendorResult.data[0] : vendorResult.data;
       const timeZone = vendor?.timezone_name || "UTC";
@@ -957,16 +958,56 @@ export function installSalesPlatform(
         const details = await serviceM8DispatchDetails({ call, listRemote, businessId: req.businessId, job, activity, generation: c.generation });
         const title = [details.personName, job.job_description || job.job_name].filter(Boolean).join(" · ");
         const notes = [details.address, `ServiceM8 job ${activity.job_uuid}`].filter(Boolean).join("\n").slice(0, 2000);
-        return { external_id: activity.uuid, title: title.slice(0, 200), start_time: start.toISOString(), end_time: end.toISOString(), notes, details };
+        return { external_id: activity.uuid, title: title.slice(0, 200), start_time: start.toISOString(), end_time: end.toISOString(), notes, details: { ...details, status: String(job.status || "Work Order") } };
       });
       for (const event of detailedEvents) {
         await unwrap(db.rpc("sync_servicem8_dispatch_event", {
           p_business_id: req.businessId, p_external_id: event.external_id, p_event: event,
         }));
       }
-      await unwrap(db.from("servicem8_connections").update({ last_sync_at: new Date().toISOString(), last_error: null })
+      // Reconcile historical completed ServiceM8 jobs against existing
+      // TurnKey mappings so old quotes are promoted into the Completed stage.
+      const completed = await listRemote(req.businessId, "/job.json?$filter=" + encodeURIComponent("status eq 'Completed'"), c.generation);
+      const completedIds = new Set(completed.filter(job => job.status === "Completed" && job.uuid).map(job => job.uuid));
+      const historicalActivities = completedIds.size
+        ? await listRemote(req.businessId, "/jobactivity.json?$filter=" + encodeURIComponent("activity_was_scheduled eq 1"), c.generation)
+        : [];
+      const latestActivityByJob = new Map();
+      for (const activity of historicalActivities) {
+        if (!completedIds.has(activity.job_uuid) || !activity.uuid || !activity.start_date || !activity.end_date) continue;
+        const previous = latestActivityByJob.get(activity.job_uuid);
+        if (!previous || String(activity.start_date) > String(previous.start_date)) latestActivityByJob.set(activity.job_uuid, activity);
+      }
+      const completedDispatches = await mapServiceM8Limited([...latestActivityByJob.entries()], 6, async ([jobUuid, activity]) => {
+        const job = completed.find(row => row.uuid === jobUuid);
+        const start = serviceM8WallClock(activity.start_date, timeZone), end = serviceM8WallClock(activity.end_date, timeZone);
+        if (!job || !start || !end || end <= start) return null;
+        const details = await serviceM8DispatchDetails({ call, listRemote, businessId: req.businessId, job, activity, generation: c.generation });
+        const title = [details.personName, job.job_description || job.job_name].filter(Boolean).join(" · ");
+        const notes = [details.address, `ServiceM8 job ${jobUuid}`].filter(Boolean).join("\n").slice(0, 2000);
+        return { external_id: activity.uuid, title: title.slice(0,200), start_time: start.toISOString(), end_time: end.toISOString(), notes,
+          details: { ...details, status: "Completed" } };
+      });
+      for (const event of completedDispatches.filter(Boolean)) await unwrap(db.rpc("sync_servicem8_dispatch_event", {
+        p_business_id: req.businessId, p_external_id: event.external_id, p_event: event,
+      }));
+      const mappedJobs = await unwrap(db.from("external_object_mappings").select("local_id,external_uuid,snapshot")
+        .eq("business_id", req.businessId).eq("connection_generation", c.generation).eq("object_type", "job"));
+      const mappingByExternal = new Map((mappedJobs || []).map((mapping) => [mapping.external_uuid, mapping]));
+      let reconciledCompleted = 0;
+      for (const job of completed) {
+        if (job.status !== "Completed" || !job.uuid) continue;
+        const mapping = mappingByExternal.get(job.uuid);
+        if (!mapping || !SM.uuid(mapping.local_id)) continue;
+        await unwrap(db.rpc("sync_servicem8_job_state", {
+          p_business_id: req.businessId, p_job_id: mapping.local_id, p_status: "Completed", p_booking: mapping.snapshot?.booking || null,
+        }));
+        reconciledCompleted++;
+      }
+      await unwrap(db.from("servicem8_connections").update({ last_sync_at: new Date().toISOString(), dispatch_seeded_at: new Date().toISOString(), last_error: null })
         .eq("business_id", req.businessId).eq("generation", c.generation));
-      res.json({ ok: true, synced: detailedEvents.length, total: detailedEvents.length });
+      const synced = detailedEvents.length + completedDispatches.filter(Boolean).length;
+      res.json({ ok: true, synced, total: synced, reconciledCompleted });
     }),
   );
   app.get(
@@ -1415,13 +1456,18 @@ export function installSalesPlatform(
       if (job.status === "Work Order" && (job.active == null || Number(job.active) === 1)) {
         activities = await listRemote(businessId, "/jobactivity.json?$filter=" + encodeURIComponent(
           "job_uuid eq '" + id + "' and activity_was_scheduled eq 1 and active eq 1"), c.generation);
+      } else if (job.status === "Completed") {
+        activities = await listRemote(businessId, "/jobactivity.json?$filter=" + encodeURIComponent(
+          "job_uuid eq '" + id + "' and activity_was_scheduled eq 1"), c.generation);
       }
       const vendorResult = await call(businessId, "/vendor.json", { generation: c.generation });
       const vendor = serviceM8Record(vendorResult.data);
       const timeZone = vendor?.timezone_name || "UTC";
       const activeIds = new Set();
       for (const activity of activities) {
+        const isCompletedJob = job.status === "Completed";
         if (!SM.uuid(activity.uuid) || !activity.start_date || !activity.end_date) continue;
+        if (!isCompletedJob && activity.active != null && !["1", 1, true].includes(activity.active)) continue;
         const start = serviceM8WallClock(activity.start_date, timeZone), end = serviceM8WallClock(activity.end_date, timeZone);
         if (!start || !end || end <= start || end - start > 24 * 60 * 60 * 1000) continue;
         const details = await serviceM8DispatchDetails({ call, listRemote, businessId, job, activity, generation: c.generation });
@@ -1432,10 +1478,16 @@ export function installSalesPlatform(
           p_event: { title: title.slice(0, 200), start_time: start.toISOString(), end_time: end.toISOString(), notes, details } }));
         activeIds.add(activity.uuid);
       }
-      const existing = await unwrap(db.from("calendar_events").select("external_id").eq("business_id", businessId)
+      const existing = await unwrap(db.from("calendar_events").select("external_id,details").eq("business_id", businessId)
         .eq("source", "servicem8").filter("details->>jobUuid", "eq", id));
-      for (const event of existing || []) if (!activeIds.has(event.external_id))
-        await unwrap(db.rpc("sync_servicem8_dispatch_event", { p_business_id: businessId, p_external_id: event.external_id, p_event: null }));
+      for (const event of existing || []) {
+        if (job.status === "Completed") {
+          await unwrap(db.from("calendar_events").update({ details: { ...(event.details || {}), status: "Completed" } })
+            .eq("business_id", businessId).eq("source", "servicem8").eq("external_id", event.external_id));
+        } else if (!activeIds.has(event.external_id)) {
+          await unwrap(db.rpc("sync_servicem8_dispatch_event", { p_business_id: businessId, p_external_id: event.external_id, p_event: null }));
+        }
+      }
       return;
     }
     if (!map) return;
