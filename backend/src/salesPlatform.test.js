@@ -604,6 +604,65 @@ test('status flags distinguish server configuration, unreadable credentials and 
   assert.equal(res.body.credentialsReady,false);assert.equal(res.body.reconnectRequired,true);assert.equal(res.body.retryAvailable,false);
   assert.doesNotMatch(JSON.stringify(res.body),/synthetic-private-key|invalid-ciphertext|_enc/);
 });
+test('dispatch sync imports ServiceM8 bookings into the calendar for the selected range', async () => {
+  const db = database({ users: ownerRows, servicem8_connections: [privateConnection()] });
+  let saved;
+  db.rpc = async (name, args) => { assert.equal(name, 'sync_servicem8_dispatch_calendar'); saved = args; return { data: 1, error: null }; };
+  const activity = { uuid: id(30), job_uuid: id(31), staff_uuid: id(32),
+    activity_was_scheduled: '1', active: '1', start_date: '2026-11-04 09:00:00', end_date: '2026-11-04 10:30:00' };
+  const { route } = setup(db, async (url) => url.endsWith('/vendor.json')
+    ? response({ timezone_name: 'Pacific/Auckland' })
+    : url.includes('/jobactivity.json')
+    ? response([activity])
+    : url.includes('/job/' + id(31) + '.json')
+      ? response({ uuid: id(31), company_name: 'Nova Exterior', job_description: 'House wash', job_address: '29 Selwyn Cres' })
+      : response({}));
+  const result = await route('POST', '/api/job-calendar/servicem8/sync', { ...owner, body: { from: '2026-11-01T00:00:00Z', to: '2026-11-08T00:00:00Z' } });
+  assert.equal(result.statusCode, 200);
+  assert.equal(result.body.synced, 1);
+  assert.equal(saved.p_business_id, 'A');
+  assert.equal(saved.p_events[0].external_id, id(30));
+  assert.equal(saved.p_events[0].start_time, '2026-11-03T20:00:00.000Z', 'ServiceM8 local Auckland times are converted to the correct instant');
+  assert.match(saved.p_events[0].title, /Nova Exterior.*House wash/);
+  assert.match(saved.p_events[0].notes, /29 Selwyn Cres/);
+});
+test('dispatch sync rejects invalid date windows before calling ServiceM8', async () => {
+  const db = database({ users: ownerRows, servicem8_connections: [privateConnection()] });
+  let calls = 0;
+  const { route } = setup(db, async () => { calls++; return response([]); });
+  const result = await route('POST', '/api/job-calendar/servicem8/sync', { ...owner, body: { from: 'not-a-date', to: '2026-11-08T00:00:00Z' } });
+  assert.equal(result.statusCode, 400);
+  assert.equal(calls, 0);
+});
+test('ServiceM8 activity webhooks keep unlinked dispatch bookings updated', async () => {
+  const task = { id: id(40), business_id: 'A', kind: 'webhook', state: 'pending', attempts: 0,
+    payload: { object: 'jobactivity', uuid: id(41) } };
+  const db = database({ servicem8_connections: [privateConnection()], integration_tasks: [task] });
+  const writes = [];
+  let claimed = false;
+  db.rpc = async (name, args) => {
+    if (name === 'claim_integration_task') {
+      if (claimed) return { data: [] };
+      claimed = true; task.state = 'running'; task.lease_token = id(99); task.attempts++;
+      return { data: [structuredClone(task)] };
+    }
+    writes.push({ name, args });
+    return { data: null, error: null };
+  };
+  const activity = { uuid: id(41), job_uuid: id(42), staff_uuid: id(43), activity_was_scheduled: '1', active: '1',
+    start_date: '2026-11-04 09:00:00', end_date: '2026-11-04 10:30:00' };
+  const { worker } = setup(db, async url => url.endsWith('/jobactivity/' + id(41) + '.json') ? response(activity)
+    : url.endsWith('/vendor.json') ? response({ timezone_name: 'Pacific/Auckland' })
+      : url.endsWith('/job/' + id(42) + '.json') ? response({ company_name: 'Nova Exterior', job_description: 'House wash' })
+        : response({}));
+  await worker.tick();
+  const sync = writes.find(w => w.name === 'sync_servicem8_dispatch_event');
+  assert.equal(task.state, 'succeeded');
+  assert.equal(sync.args.p_business_id, 'A');
+  assert.equal(sync.args.p_external_id, id(41));
+  assert.equal(sync.args.p_event.start_time, '2026-11-03T20:00:00.000Z');
+  assert.match(sync.args.p_event.title, /Nova Exterior.*House wash/);
+});
 test('private connection requires encryption configuration before any remote request',async()=>{
   const db=database({users:ownerRows});const {route}=setup(db,undefined,{env:{}});
   const res=await route('POST','/api/sales/servicem8/private',{...owner,body:{apiKey:'synthetic-api-key-123456'}});

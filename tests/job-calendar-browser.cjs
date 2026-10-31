@@ -114,6 +114,13 @@ const { chromium } = require('playwright'),
             return { job: structuredClone(j), googleWarning: 'Google copy remains unchanged.' };
           }
           if (p.startsWith('/range')) return structuredClone({ jobs: fixture.jobs, staff: fixture.staff, events: fixture.events, blocks: fixture.blocks, google: fixture.google, canManage: fixture.canManage });
+          if (p === '/servicem8/sync' && options?.method === 'POST') {
+            fixture.calls.push({ dispatchSync: JSON.parse(options.body) });
+            fixture.events = fixture.events.filter(e => e.source !== 'servicem8').concat({ id: 'sm8-booking', user_id: null,
+              title: 'Nova Exterior · House wash', source: 'servicem8', connection_id: null, external_id: 'activity-1', busy_status: 'busy',
+              start_time: '2026-07-20T01:00:00.000Z', end_time: '2026-07-20T02:00:00.000Z', notes: 'ServiceM8 job' });
+            return { synced: 1 };
+          }
           if (options && options.method === 'PUT' && p.startsWith('/jobs/')) {
             const jobId = p.split('/jobs/')[1];
             const run = () => {
@@ -159,6 +166,10 @@ const { chromium } = require('playwright'),
     const sidebarText = await page.locator('#tkjc-sidebar-list').innerText();
     assert.match(sidebarText, /Bob/); // unscheduled
     assert.match(sidebarText, /Alice/); // scheduled, in range
+    await page.click('[data-tkjc="sync-servicem8"]');
+    await page.waitForFunction(() => /ServiceM8 dispatch synced/.test(window.lastNotify || ''));
+    assert.equal(await page.evaluate(() => fixture.calls.some(c => c.dispatchSync?.from && c.dispatchSync?.to)), true);
+    assert.match(await page.locator('#tkjc-main').innerText(), /Nova Exterior · House wash/);
 
     /* ===== 2. mobile More sheet gets a Calendar row ===== */
     await page.evaluate(() => { document.getElementById('view-dashboard').classList.add('active'); document.getElementById('view-calendar').classList.remove('active'); window.openMoreSheet(); });
@@ -287,7 +298,7 @@ const { chromium } = require('playwright'),
     await page.evaluate(() => { fixture.eventError = null; });
     await page.click('[data-event="save"]');
     await page.locator('#tkjc-event-overlay').waitFor({state:'detached'});
-    const created = await page.evaluate(() => fixture.events[0]);
+    const created = await page.evaluate((id) => fixture.events.find(event => event.id === id), firstId);
     assert.equal(created.id, firstId); assert.equal(created.user_id, 'tech-1');
     assert.equal(created.title, 'Site visit <safe>');
     if (!process.env.TURNKEY_CALENDAR_SDK) {
@@ -299,7 +310,7 @@ const { chromium } = require('playwright'),
     await page.selectOption('[data-event="busy"]', 'free');
     await page.click('[data-event="save"]');
     await page.locator('#tkjc-event-overlay').waitFor({state:'detached'});
-    assert.equal(await page.evaluate(() => fixture.events[0].busy_status), 'free');
+    assert.equal(await page.evaluate(id => fixture.events.find(event => event.id === id).busy_status, created.id), 'free');
 
     // Imported rows never expose a writable form, even to an owner.
     await page.evaluate(() => {

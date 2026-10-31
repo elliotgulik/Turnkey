@@ -24,6 +24,37 @@ const fail = (message, status = 400) =>
 const canonical = (v) => JSON.stringify(v, (_, value) => value && typeof value === "object" && !Array.isArray(value)
   ? Object.fromEntries(Object.keys(value).sort().map(k => [k, value[k]])) : value);
 const pick = (value, keys) => Object.fromEntries(keys.map(key => [key, value?.[key]]));
+const zoneParts = (date, timeZone) => Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
+  timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+}).formatToParts(date).filter(p => p.type !== "literal").map(p => [p.type, p.value]));
+function serviceM8WallClock(value, timeZone) {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  const normalized = raw.includes("T") ? raw : raw.replace(" ", "T");
+  if (/[zZ]|[+-]\d\d:?\d\d$/.test(normalized)) {
+    const date = new Date(normalized);
+    return Number.isFinite(+date) ? date : null;
+  }
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(normalized);
+  if (!m) return null;
+  const target = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0));
+  let guess = target;
+  try {
+    for (let i = 0; i < 3; i++) {
+      const p = zoneParts(new Date(guess), timeZone || "UTC");
+      const shown = Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second);
+      const adjustment = target - shown;
+      guess += adjustment;
+      if (!adjustment) break;
+    }
+  } catch { return null; }
+  const date = new Date(guess);
+  return Number.isFinite(+date) ? date : null;
+}
+const serviceM8TimeForFilter = (date, timeZone) => {
+  const p = zoneParts(date, timeZone || "UTC");
+  return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}:${p.second}`;
+};
 // The reservation compares delivered/public content, not the entire CRM record.
 // Full canonical version/payload validation below remains deliberately separate.
 const contentFingerprint = (s) => {
@@ -821,6 +852,52 @@ export function installSalesPlatform(
     }),
   );
   app.post(
+    "/api/job-calendar/servicem8/sync",
+    requireBusiness,
+    admin,
+    wrap(async (req, res) => {
+      const c = await conn(req.businessId);
+      if (!c) throw fail("Connect ServiceM8 first.", 409);
+      const from = new Date(req.body?.from), to = new Date(req.body?.to);
+      if (!req.body?.from || !req.body?.to || !Number.isFinite(+from) || !Number.isFinite(+to) || to <= from || to - from > 93 * 86400000)
+        throw fail("Choose a valid dispatch range of 93 days or less.");
+      const vendorResult = await call(req.businessId, "/vendor.json", { generation: c.generation });
+      const vendor = Array.isArray(vendorResult.data) ? vendorResult.data[0] : vendorResult.data;
+      const timeZone = vendor?.timezone_name || "UTC";
+      const filter = "activity_was_scheduled eq 1 and active eq 1 and start_date lt '" + serviceM8TimeForFilter(to, timeZone) + "' and end_date gt '" + serviceM8TimeForFilter(from, timeZone) + "'";
+      let activities;
+      try {
+        activities = await listRemote(req.businessId, "/jobactivity.json?$filter=" + encodeURIComponent(filter), c.generation);
+      } catch (error) {
+        if (error.status === 403) throw fail("ServiceM8 denied schedule access. Reconnect and approve the read_schedule permission, then sync again.", 403);
+        throw error;
+      }
+      const scheduled = activities.filter(a => (a.activity_was_scheduled === "1" || a.activity_was_scheduled === 1 || a.activity_was_scheduled === true) &&
+        (a.active == null || a.active === "1" || a.active === 1 || a.active === true) && a.uuid && a.job_uuid && a.start_date && a.end_date);
+      if (scheduled.length > 500) throw fail("This dispatch range contains too many bookings. Choose a shorter range.", 413);
+      const jobs = new Map();
+      for (const activity of scheduled) {
+        if (jobs.has(activity.job_uuid)) continue;
+        const result = await call(req.businessId, "/job/" + activity.job_uuid + ".json", { generation: c.generation });
+        const row = Array.isArray(result.data) ? result.data[0] : result.data;
+        jobs.set(activity.job_uuid, row || {});
+      }
+      const events = scheduled.flatMap(activity => {
+        const start = serviceM8WallClock(activity.start_date, timeZone), end = serviceM8WallClock(activity.end_date, timeZone), job = jobs.get(activity.job_uuid) || {};
+        if (!start || !end || end <= start) return [];
+        const title = [job.company_name || job.client_name, job.job_description || job.job_name].filter(Boolean).join(" · ") || "ServiceM8 booking";
+        const notes = [job.job_address, job.job_suburb, `ServiceM8 job ${activity.job_uuid}`, activity.staff_uuid ? `ServiceM8 staff ${activity.staff_uuid}` : null].filter(Boolean).join("\n").slice(0, 2000);
+        return [{ external_id: activity.uuid, title: title.slice(0, 200), start_time: start.toISOString(), end_time: end.toISOString(), notes }];
+      });
+      const synced = await unwrap(db.rpc("sync_servicem8_dispatch_calendar", {
+        p_business_id: req.businessId, p_from: from.toISOString(), p_to: to.toISOString(), p_events: events,
+      }));
+      await unwrap(db.from("servicem8_connections").update({ last_sync_at: new Date().toISOString(), last_error: null })
+        .eq("business_id", req.businessId).eq("generation", c.generation));
+      res.json({ ok: true, synced: Number(synced) || events.length, range: { from: from.toISOString(), to: to.toISOString() } });
+    }),
+  );
+  app.post(
     "/api/servicem8/webhook/:token",
     wrap(async (req, res) => {
       if (!/^[A-Za-z0-9_-]{32,128}$/.test(req.params.token))
@@ -1322,6 +1399,35 @@ export function installSalesPlatform(
         .eq("generation", c.generation),
     );
   }
+  async function syncDispatchWebhookActivity(businessId, c, activity) {
+    const activityId = String(activity.uuid || "");
+    if (!activityId) return activity.job_uuid || null;
+    const linked = await unwrap(db.from("external_object_mappings").select("local_id")
+      .eq("business_id", businessId).eq("connection_generation", c.generation)
+      .eq("object_type", "job").eq("external_uuid", activity.job_uuid).maybeSingle());
+    if (!linked) {
+      const scheduled = ["1", 1, true].includes(activity.activity_was_scheduled) &&
+        (activity.active == null || ["1", 1, true].includes(activity.active));
+      let event = null;
+      if (scheduled && activity.start_date && activity.end_date) {
+        const vendorResult = await call(businessId, "/vendor.json", { generation: c.generation });
+        const vendor = Array.isArray(vendorResult.data) ? vendorResult.data[0] : vendorResult.data;
+        const timeZone = vendor?.timezone_name || "UTC";
+        const start = serviceM8WallClock(activity.start_date, timeZone), end = serviceM8WallClock(activity.end_date, timeZone);
+        if (start && end && end > start && end - start <= 24 * 60 * 60 * 1000) {
+          const result = await call(businessId, "/job/" + activity.job_uuid + ".json", { generation: c.generation });
+          const job = Array.isArray(result.data) ? result.data[0] : result.data || {};
+          const title = [job.company_name || job.client_name, job.job_description || job.job_name].filter(Boolean).join(" · ") || "ServiceM8 booking";
+          const notes = [job.job_address, job.job_suburb, `ServiceM8 job ${activity.job_uuid}`, activity.staff_uuid ? `ServiceM8 staff ${activity.staff_uuid}` : null].filter(Boolean).join("\n").slice(0, 2000);
+          event = { title: title.slice(0, 200), start_time: start.toISOString(), end_time: end.toISOString(), notes };
+        }
+      }
+      await unwrap(db.rpc("sync_servicem8_dispatch_event", {
+        p_business_id: businessId, p_external_id: activityId, p_event: event,
+      }));
+    }
+    return activity.job_uuid || null;
+  }
   async function listRemote(businessId, path, generation) {
     const separator = path.includes("?") ? "&" : "?";
     let list = [],
@@ -1369,10 +1475,25 @@ export function installSalesPlatform(
               ).data;
               id = pay.job_uuid;
             } else if (task.payload.object === "jobactivity") {
-              const activity = (await call(task.business_id, "/jobactivity/" + id + ".json")).data;
-              id = activity.job_uuid;
+              let activity;
+              try {
+                activity = (await call(task.business_id, "/jobactivity/" + id + ".json")).data;
+              } catch (error) {
+                if (error.status !== 404) throw error;
+                const c = await conn(task.business_id);
+                if (!c) throw error;
+                await unwrap(db.rpc("sync_servicem8_dispatch_event", {
+                  p_business_id: task.business_id, p_external_id: id, p_event: null,
+                }));
+                id = null;
+              }
+              if (activity) {
+                const c = await conn(task.business_id);
+                if (!c) throw fail("ServiceM8 disconnected.");
+                id = await syncDispatchWebhookActivity(task.business_id, c, activity);
+              }
             }
-            await refreshRemote(task.business_id, id);
+            if (id) await refreshRemote(task.business_id, id);
           } else throw fail("Unknown integration task.");
           await unwrap(
             db

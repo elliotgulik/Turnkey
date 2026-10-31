@@ -8,8 +8,8 @@
 
    Mount after index.html's own script and after job-workspace.js (order
    doesn't actually matter — every hook below retries until its target
-   exists). No dependency on, or edits to, ServiceM8/quote/sales/booking/
-   extension files, or job-workspace.js/.css.
+   exists). ServiceM8 dispatch bookings are imported as read-only calendar
+   events; TurnKey-owned scheduling writes continue to use calendar RPCs.
 
    TK_JOB_CALENDAR.configure({...}) lets tests substitute every external
    dependency, same pattern as job-workspace.js's TK_JOB_WORK.configure() —
@@ -190,9 +190,10 @@
     host.dataset.tkjc = '1';
     host.dataset.tkjcBiz = bizKey;
     host.innerHTML = `
-      <div class="view-head"><div><h2>Calendar</h2><p>Book jobs, assign crews, and block out unavailable time. Works without Google Calendar — connect one in Connections to also overlay your own busy times.</p></div>
+      <div class="view-head"><div><h2>Calendar</h2><p>Book jobs, assign crews, and block out unavailable time. Sync ServiceM8 dispatch bookings or connect Google Calendar to overlay busy times.</p></div>
         <div class="tkjc-head-actions">
           <button type="button" class="btn ghost sm" data-tkjc="actual-hours">Actual hours</button>
+          <button type="button" class="btn ghost sm" data-tkjc="sync-servicem8">Sync ServiceM8 dispatch</button>
           <button type="button" class="btn ghost sm" data-tkjc="event">+ Appointment</button>
           <button type="button" class="btn ghost sm" data-tkjc="block">+ Block time</button>
           <button type="button" class="btn accent sm" data-tkjc="book">+ Book job</button>
@@ -241,6 +242,26 @@
     host.querySelector('[data-tkjc="actual-hours"]').addEventListener('click', () => {
       if (root.TK_JOB_WORK && typeof root.TK_JOB_WORK.openCalendar === 'function') root.TK_JOB_WORK.openCalendar();
       else notify('Staff calendar (actual hours) is not available yet.');
+    });
+    host.querySelector('[data-tkjc="sync-servicem8"]').addEventListener('click', async (event) => {
+      const button = event.currentTarget;
+      const scope = makeScope();
+      const { fromISO, toISO } = rangeForView(state.view, state.anchor);
+      button.disabled = true;
+      const oldText = button.textContent;
+      button.textContent = 'Syncing dispatch…';
+      try {
+        const result = await request('/servicem8/sync', { method: 'POST', body: JSON.stringify({
+          from: parseLocalDate(fromISO).toISOString(), to: parseLocalDate(toISO).toISOString()
+        }) }, scope);
+        if (scope.isStale()) return;
+        notify(`ServiceM8 dispatch synced · ${result.synced || 0} bookings`);
+        await load();
+      } catch (error) {
+        if (!error.stale) notify(error.message || 'Could not sync ServiceM8 dispatch');
+      } finally {
+        if (button.isConnected) { button.disabled = false; button.textContent = oldText; }
+      }
     });
     host.querySelector('[data-tkjc="today"]').addEventListener('click', () => { state.anchor = new Date(); load(); });
     host.querySelector('[data-tkjc="prev"]').addEventListener('click', () => { shiftAnchor(-1); load(); });
@@ -420,7 +441,7 @@
       const free = ev.busy_status === 'free';
       out.push({
         id: 'event:' + ev.id, title: ev.title || (free ? 'Free' : 'Busy'), start: ev.start_time, end: ev.end_time,
-        display: nativeEvent(ev) ? 'auto' : 'background', backgroundColor: nativeEvent(ev) ? '#387d78' : (free ? 'transparent' : '#c7cdd1'), editable: nativeEvent(ev) && canEditItem(ev),
+        display: nativeEvent(ev) || ev.source === 'servicem8' ? 'auto' : 'background', backgroundColor: nativeEvent(ev) ? '#387d78' : ev.source === 'servicem8' ? '#426b8b' : (free ? 'transparent' : '#c7cdd1'), editable: nativeEvent(ev) && canEditItem(ev),
         extendedProps: { kind: 'event', eventId: ev.id, free }
       });
     });
@@ -554,7 +575,7 @@
     }
     const ev = it.event;
     const free = ev.busy_status === 'free';
-    return `<button type="button" data-tkjc-agenda-event="${esc(ev.id)}" class="tkjc-agenda-chip tkjc-agenda-event ${nativeEvent(ev) ? 'native' : 'external'} ${free ? 'free' : 'busy'}"><b>${esc(ev.title || (free ? 'Free' : 'Busy'))}</b><span>${free ? 'Free' : 'Busy'} — ${nativeEvent(ev) ? 'Appointment' : 'external (read-only)'}</span></button>`;
+    return `<button type="button" data-tkjc-agenda-event="${esc(ev.id)}" class="tkjc-agenda-chip tkjc-agenda-event ${nativeEvent(ev) ? 'native' : 'external'} ${free ? 'free' : 'busy'}"><b>${esc(ev.title || (free ? 'Free' : 'Busy'))}</b><span>${free ? 'Free' : 'Busy'} — ${nativeEvent(ev) ? 'Appointment' : ev.source === 'servicem8' ? 'ServiceM8 dispatch (read-only)' : 'external (read-only)'}</span></button>`;
   }
 
   const localInput = (date) => localDateStr(date) + 'T' + pad2(date.getHours()) + ':' + pad2(date.getMinutes());
@@ -569,7 +590,7 @@
     const overlay = document.createElement('div'); overlay.id = 'tkjc-event-overlay'; overlay.className = 'tkjc-overlay';
     overlay.innerHTML = `<div class="tkjc-dialog" role="dialog" aria-modal="true" aria-labelledby="tkjc-event-title">
       <h3 id="tkjc-event-title">${readOnly ? 'View event' : existing ? 'Edit appointment' : 'New appointment'}</h3>
-      ${existing && !nativeEvent(ev) ? '<p>External calendar event — read-only. Edit it in its source calendar.</p>' : ''}
+      ${existing && !nativeEvent(ev) ? `<p>${ev.source === 'servicem8' ? 'ServiceM8 dispatch booking — read-only. Change its time or crew in ServiceM8, then sync the dispatch board here.' : 'External calendar event — read-only. Edit it in its source calendar.'}</p>` : ''}
       <fieldset class="tkjc-event-fields" ${readOnly ? 'disabled' : ''}>
         <label>Title<input data-event="title" maxlength="200" value="${esc(ev.title)}"></label>
         <label>Staff<select data-event="staff" ${state.canManage ? '' : 'disabled'}>${state.staff.map(u => `<option value="${esc(u.id)}" ${u.id === ev.user_id ? 'selected' : ''}>${esc(u.name || u.email)}</option>`).join('')}</select></label>
