@@ -86,3 +86,17 @@ test('production lead manager separates completed and paid from confirmed and op
   f.manager.reset(); f.manager.render();
   assert.deepEqual(ids(), [0]);
 });
+
+test('lead cards show received date and exact Auckland time from the original submission', () => {
+  const f = statusFixture();
+  f.records[0].requestSubmittedAt = '2026-10-31T23:04:05Z';
+  f.records[0].createdAt = '2026-11-01T01:00:00Z';
+  f.manager.render();
+  assert.match(f.host.innerHTML, /Received 1 Nov 2026, 12:04:05 pm NZDT/);
+  f.records[0].requestSubmittedAt = 'invalid';
+  f.manager.render();
+  assert.match(f.host.innerHTML, /Received 1 Nov 2026, 2:00:00 pm NZDT/);
+  delete f.records[0].createdAt;
+  f.manager.render();
+  assert.match(f.host.innerHTML, /Received Date not recorded/);
+});
