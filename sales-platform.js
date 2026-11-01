@@ -468,7 +468,7 @@
       (!list.length ? `<div class="sale-no-results">${empty('No matching opportunities. Reset filters to see your pipeline.')}${button('Reset filters', 'pipeline-reset')}</div>` : '') +
       `<div class="sale-kanban" style="--pipeline-columns:${scopeStages.length}">${scopeStages.map(s => {
         const rs = list.filter(r => uiStage(r) === s.key);
-        return `<section class="sale-column" id="pipeline-${s.key}" ${s.key === 'completed' ? '' : `data-drop-stage="${s.key}"`}><header><h3>${esc(s.label)} <span>${rs.length}</span></h3><small>${esc(money(rs.reduce((n, r) => n + (window.TK_LEADS.value(r) || 0), 0)))}</small><p>${esc(s.description || defaults.find(d => d.key === s.key)?.description || '')}</p></header>${rs.map(card).join('') || empty('No opportunities in this stage')}</section>`;
+        return `<section class="sale-column" id="pipeline-${s.key}" ${s.key === 'completed' ? '' : `data-drop-stage="${s.key}"`}><header><h3>${esc(s.label)} <span>${rs.length}</span></h3><small>${esc(money(rs.reduce((n, r) => n + (window.TK_SM8_PRICING?.amount(r) ?? window.TK_LEADS.value(r) ?? 0), 0)))}</small><p>${esc(s.description || defaults.find(d => d.key === s.key)?.description || '')}</p></header>${rs.map(card).join('') || empty('No opportunities in this stage')}</section>`;
       }).join('')}</div>`;
     refreshCustomerSummary();
     renderLeads();

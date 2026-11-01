@@ -13,7 +13,7 @@
 <script src="cost-engine.js?v=20261018f"></script>
 <script src="sales-engine.js?v=20261017a"></script>
 <script src="map-snapshot.js?v=20261022a"></script>
-<script src="format-utils.js?v=20261017a"></script>
+<script src="format-utils.js?v=20261102b"></script>
 <!-- OneSignal Web Push SDK — harmless to load even when onesignalAppId is
      unset (initOneSignal() below just never calls OneSignal.init() in that
      case), so this stays a plain unconditional tag like every other CDN
@@ -2828,7 +2828,7 @@ async function disablePushNotifications(btn){
   }
 }
 
-function money(n){const v=Math.round(n||0);return (v<0?'-$':'$')+Math.abs(v).toLocaleString('en-NZ');}
+function money(n){return TK_FORMAT.money(n);}
 function segOf(t){return t>=1200?'Large':t>=500?'Mid':'Small'}
 
 function newRecord(d){const r=Object.assign({
@@ -4726,7 +4726,7 @@ function hexToRgb(hex){
 
 // Public document amounts: use frozen line prices and explain any difference
 // between the itemised lines and the agreed total (access, discount, rounding).
-function docMoney(value){return new Intl.NumberFormat('en-NZ',{style:'currency',currency:'NZD'}).format(Number(value)||0);}
+function docMoney(value){return TK_FORMAT.money(value);}
 function docFinancials(r){
   const cents=n=>Math.round((Number(n)||0)*100)/100;
   const lines=(r.services||[]).map(l=>cents(l.priceSnapshot??TK_PRICING.lineTotal(l)));
@@ -4826,7 +4826,7 @@ function buildDocPDF(mode,r,outputType){
     y+=4.5;
     doc.setFont('helvetica','normal');doc.setFontSize(8);
     doc.setTextColor(100,110,120);
-    var sub=s.priceSnapshot!=null||s.fixedPrice!=null?(s.qty+' '+v.unit+' \u00b7 agreed price'):(s.qty+' '+v.unit+' \u00d7 $'+rate.toFixed(2)+'/'+v.unit+(note?' \u00b7 '+note:''));
+    var sub=s.priceSnapshot!=null||s.fixedPrice!=null?(s.qty+' '+v.unit+' \u00b7 agreed price'):(s.qty+' '+v.unit+' \u00d7 '+TK_FORMAT.money(rate)+'/'+v.unit+(note?' \u00b7 '+note:''));
     doc.text(sub,ML,y);
     doc.setTextColor(30,40,50);
     y+=7;
@@ -4899,7 +4899,7 @@ function buildDocEmailBody(mode,r){
     var rate=TK_PRICING.effectiveRate(s);
     var amt=s._price!=null?s._price:Math.round(TK_PRICING.lineTotal(s));
     var note=lineVariantNote(s);
-    var desc=s._price!=null?v.label+' ('+s.qty+' panes)':s.fixedPrice!=null?v.label+' (fixed price)':v.label+': '+s.qty+' '+v.unit+' × $'+rate.toFixed(2)+'/'+v.unit+(note?' · '+note:'');
+    var desc=s._price!=null?v.label+' ('+s.qty+' panes)':s.fixedPrice!=null?v.label+' (fixed price)':v.label+': '+s.qty+' '+v.unit+' × '+TK_FORMAT.money(rate)+'/'+v.unit+(note?' · '+note:'');
     return '  · '+desc+' = '+money(amt);
   }).join('\n');
   var gst=TK_PRICING.gstFromInclusive(r.total).gst;
@@ -6430,7 +6430,7 @@ function renderPricing(){
           const sc=SVC_COST[k]; if(!sc) return '';
           const usage=Object.entries(TK_COST.serviceChemicals(k));
           const unset=TK_COST.unsetChemicals([{svc:k,qty:1}]);
-          return `<div class="kv"><span class="k">${v.label.split(' (')[0]}</span><span class="v">${usage.length?usage.map(([id,n])=>`${Number((n*1000).toFixed(3))} mL/${v.unit} · ${CHEMICALS[id].label}`).join(' + '):'No chemicals'} · ${unset.length?'Supplier cost not set — estimate incomplete':`$${TK_COST.lineChemCost({svc:k,qty:1}).toFixed(2)}/${v.unit}`}</span></div>`;
+          return `<div class="kv"><span class="k">${v.label.split(' (')[0]}</span><span class="v">${usage.length?usage.map(([id,n])=>`${Number((n*1000).toFixed(3))} mL/${v.unit} · ${CHEMICALS[id].label}`).join(' + '):'No chemicals'} · ${unset.length?'Supplier cost not set — estimate incomplete':`${money(TK_COST.lineChemCost({svc:k,qty:1}))}/${v.unit}`}</span></div>`;
         }).join('')}
       </div>
     </div>
@@ -6466,7 +6466,7 @@ function renderOverheadsPanel(){
     <p style="font-size:13px;color:var(--ink-soft);margin:-4px 0 14px">Costs the business pays every month regardless of jobs. They're spread across your jobs so every quote covers its share.</p>
     ${Object.entries(TK_COST.OVERHEADS).map(([k,o])=>row(k,o)).join('')}
     <div class="rate-tier" style="padding:9px 0;border-bottom:1px solid var(--line-soft)"><label>Jobs per month</label><div class="ri"><input type="number" min="1" value="${COST_INPUTS.jobsPerMonth}" onchange="setCostInput('jobsPerMonth',this.value);renderPricing()"><span>${done90?`last 90 days averaged ${actualPerMonth}/month`:'how many jobs you typically complete'}</span></div></div>
-    <div class="kv" style="padding-top:10px"><span class="k" style="font-weight:600">Overhead per job</span><span class="v">${monthly>0?`${money(monthly)}/mo ÷ ${COST_INPUTS.jobsPerMonth} = <b>$${perJob.toFixed(2)}</b>`:'Not set — quotes currently ignore overheads'}</span></div>
+    <div class="kv" style="padding-top:10px"><span class="k" style="font-weight:600">Overhead per job</span><span class="v">${monthly>0?`${money(monthly)}/mo ÷ ${COST_INPUTS.jobsPerMonth} = <b>${money(perJob)}</b>`:'Not set — quotes currently ignore overheads'}</span></div>
   </div>`;
 }
 // How fast a crew covers each service and how much chemical it uses — the
@@ -11022,25 +11022,25 @@ async function retryPendingPhotos(){
 <script src="meta-import.js?v=20261020a"></script>
 <script src="lead-answer-utils.js?v=20261101g"></script>
 <script src="lead-request-view.js?v=20261101g"></script>
-<script src="servicem8-pricing-view.js?v=20261101f"></script>
-<script src="sales-platform.js?v=20261102a"></script>
+<script src="servicem8-pricing-view.js?v=20261102b"></script>
+<script src="sales-platform.js?v=20261102b"></script>
 <script type="module" src="measurement-import.js?v=20261017a"></script>
 <script src="pricing-learning-engine.js?v=20261101h"></script>
 <script src="quote-workspace.js?v=20261017a"></script>
 <script src="conversations.js?v=20261020a"></script>
 <script src="conversations-bridge.js?v=20261020a"></script>
 <script src="servicem8-import.js?v=20261017a"></script>
-<script src="marketing-analytics.js?v=20261025b"></script>
-<footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a> · <span id="tk-app-version">v20261102a</span></footer>
-<script src="extension-quote-link.js?v=20261101h"></script>
+<script src="marketing-analytics.js?v=20261102b"></script>
+<footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a> · <span id="tk-app-version">v20261102b</span></footer>
+<script src="extension-quote-link.js?v=20261102b"></script>
 <script src="job-workspace.js?v=20261031a"></script>
 <script src="job-calendar.js?v=20261101f"></script>
-<script src="operations-workspace.js?v=20261101f"></script>
+<script src="operations-workspace.js?v=20261102b"></script>
 <script src="operations-bridge.js?v=20261018c"></script>
 <script src="workspace-controls.js?v=20261019a"></script>
 <script src="settings-experience.js?v=20261019d"></script>
 <script src="workspace-experience.js?v=20261019b"></script>
-<script src="nova-lead-manager.js?v=20261102a"></script>
+<script src="nova-lead-manager.js?v=20261102b"></script>
 <script src="pricing-learning-ui.js?v=20261101h"></script>
 </body>
 </html>

@@ -9,7 +9,8 @@ import { renderCustomerContext, requestedServices } from './customer-context.js'
 // then creates the quote in Supabase using the same table shape
 // syncRecordToSupabase() writes in index.html.
 function money(n) {
-  return '$' + (Math.round(n * 100) / 100).toLocaleString('en-NZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const amount=Math.round((Math.abs(n)+Number.EPSILON)*10)/10;
+  return (n<0&&amount!==0?'-':'')+'NZ$'+amount.toLocaleString('en-NZ',{minimumFractionDigits:1,maximumFractionDigits:1});
 }
 
 // Every value interpolated into innerHTML/attribute strings below can come

@@ -35,7 +35,7 @@
     const action = name => Object.prototype.hasOwnProperty.call(options.actions || {}, name) ? options.actions[name] : name === 'calendar' && root.TK_JOB_CALENDAR?.open ? () => root.TK_JOB_CALENDAR.open() : root[name];
     const balance = r => (options.paymentBalance || root.paymentBalance)?.(r);
     const invoiceStatus = r => (options.invoiceDisplayStatus || root.invoiceDisplayStatus)?.(r);
-    const currency = v => (options.money || root.money || (n => new Intl.NumberFormat('en-NZ',{style:'currency',currency:'NZD'}).format(n)))(v);
+    const currency = v => (options.money || root.money || (n => new Intl.NumberFormat('en-NZ',{style:'currency',currency:'NZD',currencyDisplay:'code',minimumFractionDigits:1,maximumFractionDigits:1}).format(n)))(v);
     const owned = (r,c) => (options.recordBusiness ? options.recordBusiness(r) : typeof recordBusinesses !== 'undefined' ? recordBusinesses.get(r) : r.businessId || r.business_id) === c.businessId;
     const job = r => ['won','scheduled','completed','paid'].includes(r.stage) || (r.stage === 'cancelled' && !r.lostAt && !!(r.wonAt || r.approvedAt));
     const status = r => ['completed','paid','cancelled'].includes(r.stage) ? r.stage : r.jobStatus || r.stage;

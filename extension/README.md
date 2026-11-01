@@ -1,4 +1,4 @@
-## Version 0.2.9: editable service prices and quote learning
+## Version 0.2.10: editable service prices and quote learning
 
 Edit the final GST-inclusive dollar amount for each service independently. The customer total is their exact sum. Manual prices survive access, height, travel and margin changes. Entering a quote total requires **Distribute entered total across services**; this explicitly replaces line prices. **Discard entered total** keeps them, and service/all-service reset buttons restore recommendations.
 
@@ -6,7 +6,7 @@ Each service shows configured pricing, its target-margin floor, base, learned do
 
 Learning uses the connected business’s authenticated backend. Open the extension popup and **Enable quote learning & ServiceM8** if backend access has not yet been granted. If learning is unavailable, base pricing and manual edits still work. Learning is submitted after the quote is saved; a failed submission shows a warning and a safe retry button on the saved-quote screen. Manage learning settings and resets in TurnKey.
 
-Build the downloadable ZIP with `node extension/scripts/pack.cjs`; this refreshes all vendored engines from the root source and writes `extension/dist/turnkey-earth-extension-0.2.9.zip`. Unzip, load the folder containing `manifest.json`, and refresh Earth and TurnKey. Main publishes the download in the site's assets.
+Build the downloadable ZIP with `node extension/scripts/pack.cjs`; this refreshes all vendored engines from the root source and writes `extension/dist/turnkey-earth-extension-0.2.10.zip`. Unzip, load the folder containing `manifest.json`, and refresh Earth and TurnKey. Main publishes the download in the site's assets.
 
 ## Version 0.2.8: quote levels and access settings
 

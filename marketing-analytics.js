@@ -33,6 +33,7 @@
     v == null
       ? "—"
       : Number(v).toLocaleString(undefined, { maximumFractionDigits: 2 });
+  const currencyMoney=(v,currency='NZD')=>v==null?'—':currency==='NZD'&&window.TK_FORMAT?.money?window.TK_FORMAT.money(v):new Intl.NumberFormat('en-NZ',{style:'currency',currency,minimumFractionDigits:1,maximumFractionDigits:1}).format(v);
   function tenant() {
     return config.getBusinessId
       ? config.getBusinessId()
@@ -124,7 +125,7 @@
       const data = await request("/report?" + new URLSearchParams({ ...range, level: "campaign", limit: "500", view: "entities" }));
       if (generation !== inlineSerial || !target.isConnected || business !== tenant()) return;
       const value = (v, decimals = 2) => v == null ? "—" : Number(v).toLocaleString(undefined, { maximumFractionDigits: decimals });
-      const currency = data.account.currency, cash = (v) => v == null ? "—" : `${currency} ${value(v)}`;
+      const currency = data.account.currency, cash = (v) => v == null ? "—" : currencyMoney(v,currency);
       const metrics = [
         ["Spend", cash(data.totals?.spend)], ["Impressions", value(data.totals?.impressions, 0)],
         ["Reach¹", value(data.totals?.reach, 0)], ["All clicks", value(data.totals?.clicks, 0)],
@@ -195,10 +196,10 @@
       ["cpl", "CPL²"],
     ];
     rootEl.innerHTML = `<p class="tkm-coverage ${c.complete ? "" : "tkm-warning"}">${c.complete ? "Saved coverage" : "Incomplete coverage — totals unavailable"}: ${c.days}/${c.expectedDays} days · ${esc(currency)} · ${esc(data.account.timezone)} · ${esc(c.sources.join(" / ") || "No saved data")}<br>Oldest daily refresh: ${esc(c.oldestRefresh || "Never")}. Saved data may lag Meta; refresh the selected dates to include revisions.</p>
-      <div class="tkm-cards">${["spend", "impressions", "clicks", "leads", "cpl"].map((k) => `<article><span>${esc(cols.find((x) => x[0] === k)[1])}</span><strong>${fmt(totals?.[k])}</strong></article>`).join("")}</div>
-      <div class="tkm-scroll"><table><caption>${state.view === "daily" ? "Daily entity metrics" : "Entity totals for selected dates"} · ${esc(currency)}. Dashes mean unavailable.</caption><thead><tr><th scope="col">${state.view === "daily" ? "Date / entity" : "Entity"}</th>${cols.map((x) => `<th scope="col">${x[1]}</th>`).join("")}</tr></thead><tbody>${data.entities.map((r) => `<tr><th scope="row">${esc(r.date ? r.date + " / " : "")}${esc(r.name || r.id)}<small>${esc(r.id)}</small></th>${cols.map(([k]) => `<td>${fmt(r[k])}</td>`).join("")}</tr>`).join("") || '<tr><td colspan="12">No saved delivery rows in this selection. Sync or import a CSV to establish coverage.</td></tr>'}</tbody></table></div>
+      <div class="tkm-cards">${["spend", "impressions", "clicks", "leads", "cpl"].map((k) => `<article><span>${esc(cols.find((x) => x[0] === k)[1])}</span><strong>${['spend','cpl'].includes(k)?currencyMoney(totals?.[k],currency):fmt(totals?.[k])}</strong></article>`).join("")}</div>
+      <div class="tkm-scroll"><table><caption>${state.view === "daily" ? "Daily entity metrics" : "Entity totals for selected dates"} · ${esc(currency)}. Dashes mean unavailable.</caption><thead><tr><th scope="col">${state.view === "daily" ? "Date / entity" : "Entity"}</th>${cols.map((x) => `<th scope="col">${x[1]}</th>`).join("")}</tr></thead><tbody>${data.entities.map((r) => `<tr><th scope="row">${esc(r.date ? r.date + " / " : "")}${esc(r.name || r.id)}<small>${esc(r.id)}</small></th>${cols.map(([k]) => `<td>${['spend','cpc','cpm','cpl'].includes(k)?currencyMoney(r[k],currency):fmt(r[k])}</td>`).join("")}</tr>`).join("") || '<tr><td colspan="12">No saved delivery rows in this selection. Sync or import a CSV to establish coverage.</td></tr>'}</tbody></table></div>
       <div class="tkm-pages"><button data-action="previous" ${data.page === 0 ? "disabled" : ""}>Previous</button><span>Page ${data.page + 1} · ${data.total} rows</span><button data-action="next" ${(data.page + 1) * data.limit >= data.total ? "disabled" : ""}>Next</button></div>
-      <section class="tkm-attribution"><h3>Ad leads → sales</h3><p>${data.attribution.linkedLeads} opportunities matched to an exact ad ID · ${data.attribution.unknownLeads} without an ad ID, out of ${data.attribution.cohortLeads} received in this period.</p><p>${esc(data.attribution.basis)}</p><ul>${data.attribution.byAd.map((a) => `<li>Ad ${esc(a.adId)}: ${a.leads} leads (${a.metaLeadMatches} matched from Meta, ${a.manualLinks} manually linked) → ${a.won} currently won · saved quote value ${esc(data.account.currency)} ${fmt(a.wonQuotedValue)}</li>`).join("") || "<li>No leads with exact ad IDs yet. Meta lead records will be matched automatically when that ID is present.</li>"}</ul></section>
+      <section class="tkm-attribution"><h3>Ad leads → sales</h3><p>${data.attribution.linkedLeads} opportunities matched to an exact ad ID · ${data.attribution.unknownLeads} without an ad ID, out of ${data.attribution.cohortLeads} received in this period.</p><p>${esc(data.attribution.basis)}</p><ul>${data.attribution.byAd.map((a) => `<li>Ad ${esc(a.adId)}: ${a.leads} leads (${a.metaLeadMatches} matched from Meta, ${a.manualLinks} manually linked) → ${a.won} currently won · saved quote value ${currencyMoney(a.wonQuotedValue,data.account.currency)}</li>`).join("") || "<li>No leads with exact ad IDs yet. Meta lead records will be matched automatically when that ID is present.</li>"}</ul></section>
       <ul class="tkm-notes">${data.notes.map((n) => `<li>${esc(n)}</li>`).join("")}</ul>`;
   }
   async function load() {

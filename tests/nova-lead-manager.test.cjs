@@ -66,28 +66,14 @@ function statusFixture() {
   };
 }
 
-test('production lead manager separates completed and paid from confirmed and open', () => {
-  const f = statusFixture();
-  const ids = () => [...f.host.innerHTML.matchAll(/data-nlm-record="(\d+)"/g)].map(m => Number(m[1]));
-  f.manager.render();
-  assert.deepEqual(ids(), [0]);
-  f.scope('won');
-  assert.deepEqual(ids(), [1,2]);
-  assert.match(f.host.innerHTML, /class="nlm-tag stage">Confirmed</);
-  f.scope('completed');
-  assert.deepEqual(ids(), [3,4]);
-  assert.equal((f.host.innerHTML.match(/class="nlm-tag stage">Completed</g) || []).length, 2);
-  assert.doesNotMatch(f.host.innerHTML, /class="nlm-tag stage">Confirmed</);
-  assert.match(f.host.innerHTML, /data-nlm-stage="3" disabled/);
-  assert.doesNotMatch(f.host.innerHTML, /nlm-follow overdue/);
-  f.scope('lost');
-  assert.deepEqual(ids(), [5,6]);
-  f.scope('all');
-  assert.deepEqual(ids(), [0,1,2,3,4,5,6]);
-  assert.deepEqual(f.records.map(r => r.stage), ['new','scheduled','won','completed','paid','cancelled','lost']);
-  assert.deepEqual(f.records.slice(3,5).map(r => require('../sales-metrics.js').won(r)), [true,true]);
-  f.manager.reset(); f.manager.render();
-  assert.deepEqual(ids(), [0]);
+test('lead manager is a new-enquiry inbox and stage changes move records out without deleting them',()=>{
+ const f=statusFixture(),ids=()=>[...f.host.innerHTML.matchAll(/data-nlm-record="(\d+)"/g)].map(m=>Number(m[1]));
+ f.manager.render();assert.deepEqual(ids(),[0]);
+ f.scope('all');assert.deepEqual(ids(),[0]);
+ f.records[0].stage='contacted';f.manager.render();assert.deepEqual(ids(),[]);
+ assert.equal(f.records.length,7);assert.equal(f.records[0].stage,'contacted');
+ assert.doesNotMatch(f.host.innerHTML,/data-nlm-scope="won"/);
+ f.records[0].stage='new';f.manager.render();assert.deepEqual(ids(),[0]);
 });
 
 test('lead cards show received date and exact Auckland time from the original submission', () => {
@@ -130,7 +116,7 @@ test('saved Meta services are available to Pipeline and quote details through th
 });
 
 
-test('new leads older than 72 hours stay under All while contacted leads remain active',()=>{
+test('new leads older than 72 hours stay under All while contacted leads belong only in pipeline',()=>{
  const f=statusFixture(),now=Date.now();
  f.records.splice(0,f.records.length,
   {id:1,name:'Recent new',stage:'new',createdAt:now-2*86400000},
@@ -138,8 +124,8 @@ test('new leads older than 72 hours stay under All while contacted leads remain 
   {id:3,name:'Older contacted',stage:'contacted',createdAt:now-10*86400000},
   {id:4,name:'Unknown date',stage:'new'});
  const ids=()=>[...f.host.innerHTML.matchAll(/data-nlm-record="(\d+)"/g)].map(m=>Number(m[1])).sort();
- f.manager.render();assert.deepEqual(ids(),[1,3,4]);
+ f.manager.render();assert.deepEqual(ids(),[1,4]);
  f.scope('new');assert.deepEqual(ids(),[1,4]);
- f.scope('all');assert.deepEqual(ids(),[1,2,3,4]);
+ f.scope('all');assert.deepEqual(ids(),[1,2,4]);
  assert.equal(f.records[1].stage,'new');
 });

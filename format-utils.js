@@ -36,5 +36,12 @@ window.TK_FORMAT = (function(){
     var time=h12+':'+String(m).padStart(2,'0')+' '+ap;
     return {date:date,time:time,full:date+', '+time};
   }
-  return {address:address,submitted:submitted};
+  // Display only: preserve stored cents and quote calculations.
+  function money(value){
+    var amount=Number(value==null?0:value);
+    if(!Number.isFinite(amount))return 'Unavailable';
+    var rounded=Math.round((Math.abs(amount)+Number.EPSILON)*10)/10;
+    return (amount<0&&rounded!==0?'-':'')+'NZ$'+rounded.toLocaleString('en-NZ',{minimumFractionDigits:1,maximumFractionDigits:1});
+  }
+  return {address:address,submitted:submitted,money:money};
 })();

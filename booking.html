@@ -12,7 +12,7 @@
 <meta name="referrer" content="strict-origin-when-cross-origin">
 <script src="config.js?v=20261017a"></script>
 <script src="pricing-engine.js?v=20261021a"></script>
-<script src="format-utils.js?v=20261017a"></script>
+<script src="format-utils.js?v=20261102b"></script>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>Get an instant wash quote — Turnkey</title>
 <meta name="theme-color" content="#2e9486">
@@ -1613,8 +1613,8 @@ function renderList(){
     const v=SERVICES[a.svc];
     return `<div class="area-item">
       <span class="area-sw" style="background:${v.hex}"></span>
-      <div class="area-info"><div class="area-svc">${v.label}${a.storeys&&a.storeys>1?' ('+STOREY_TYPES[a.storeys].label+')':''}</div><div class="area-size">${a.size} ${v.unit} × $${effectiveRate(a).toFixed(2)}/${v.unit}</div></div>
-      <div class="area-price">~$${Math.round(a.size*effectiveRate(a)).toLocaleString()}</div>
+      <div class="area-info"><div class="area-svc">${v.label}${a.storeys&&a.storeys>1?' ('+STOREY_TYPES[a.storeys].label+')':''}</div><div class="area-size">${a.size} ${v.unit} × ${TK_FORMAT.money(effectiveRate(a))}/${v.unit}</div></div>
+      <div class="area-price">~${TK_FORMAT.money(a.size*effectiveRate(a))}</div>
       <button class="area-rm" onclick="removeArea(${a.id})">×</button>
     </div>`;
   }).join('');
@@ -1637,13 +1637,13 @@ function updateEstimate(){
   // per-area breakdown
   document.getElementById('est-breakdown').innerHTML=areas.map(a=>{
     const v=SERVICES[a.svc];const price=Math.round(a.size*effectiveRate(a));
-    return `<div class="est-line"><span class="est-line-l"><span class="est-dot" style="background:${v.hex}"></span>${v.label}${a.storeys&&a.storeys>1?' ('+STOREY_TYPES[a.storeys].label+')':''}</span><span class="est-line-v">$${price.toLocaleString()}</span></div>`;
+    return `<div class="est-line"><span class="est-line-l"><span class="est-dot" style="background:${v.hex}"></span>${v.label}${a.storeys&&a.storeys>1?' ('+STOREY_TYPES[a.storeys].label+')':''}</span><span class="est-line-v">${TK_FORMAT.money(price)}</span></div>`;
   }).join('');
-  document.getElementById('est-total').textContent='$'+base.toLocaleString();
+  document.getElementById('est-total').textContent=TK_FORMAT.money(base);
   // present as a RANGE, with a sensible minimum call-out fee
   const min=Math.max(120,Math.round(base*0.85/5)*5);
   const max=Math.max(min+40,Math.round(base*1.15/5)*5);
-  document.getElementById('est-range').textContent=`$${min.toLocaleString()}–$${max.toLocaleString()}`;
+  document.getElementById('est-range').textContent=`${TK_FORMAT.money(min)}–${TK_FORMAT.money(max)}`;
   updateStep(2);
 }
 function updateHint(){
@@ -1972,9 +1972,9 @@ function showSuccess(p){
     // Priced rows already list every requested service with its own price —
     // a second plain "services requested" list right above would just
     // repeat the same names with no new information.
-    const rows=p.areas.map(a=>`<div class="rrow"><span class="rk">${a.label} · ${a.size}${a.unit}</span><span>$${(a.price||0).toLocaleString()}</span></div>`).join('');
+    const rows=p.areas.map(a=>`<div class="rrow"><span class="rk">${a.label} · ${a.size}${a.unit}</span><span>${TK_FORMAT.money(a.price||0)}</span></div>`).join('');
     document.getElementById('recap').innerHTML=rows+
-      `<div class="rrow"><span class="rk">Estimated range</span><span style="font-weight:600">$${p.estimateRange.min.toLocaleString()}–$${p.estimateRange.max.toLocaleString()}</span></div>`+
+      `<div class="rrow"><span class="rk">Estimated range</span><span style="font-weight:600">${TK_FORMAT.money(p.estimateRange.min)}–${TK_FORMAT.money(p.estimateRange.max)}</span></div>`+
       windowsRow+addrRow+contactRow;
     document.getElementById('success-msg').textContent=`Thanks ${p.customer.name.split(' ')[0]||''}! Your mapped areas are on their way. We'll send a firm quote ${p.customer.timing==='As soon as possible'?'shortly':'soon'}.`;
   }else{

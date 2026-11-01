@@ -209,10 +209,10 @@ export function quotePdf({ reference, business, customer, snapshot, mode = "appr
     "Property: " + (customer.address || ""),
     "",
     ...approvedLines(snapshot, { mode }).map(
-      (x) => `${x.name}    $${x.displayed_amount}`,
+      (x) => `${x.name}    NZ$${Number(x.displayed_amount).toFixed(1)}`,
     ),
     "",
-    (mode === "quote" ? "Quoted customer total: $" : "Approved customer total: $") + Number(snapshot.amount).toFixed(2),
+    (mode === "quote" ? "Quoted customer total: NZ$" : "Approved customer total: NZ$") + Number(snapshot.amount).toFixed(1),
     snapshot.details?.gstRegistered ? "Includes GST (15%)." : "No GST charged.",
     "",
     ...String(snapshot.details?.publicTerms || "").split("\n"),

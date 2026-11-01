@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <script src="config.js?v=20261017a"></script>
 <script src="pricing-engine.js?v=20261021a"></script>
-<script src="format-utils.js?v=20261017a"></script>
+<script src="format-utils.js?v=20261102b"></script>
 <script src="map-snapshot.js?v=20261017a"></script>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>Your quote</title>
@@ -163,7 +163,7 @@ const STATE_ICONS={
   search:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><line x1="20" y1="20" x2="15.3" y2="15.3"/></svg>',
   warn:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l9.5 16.5H2.5z"/><line x1="12" y1="10" x2="12" y2="14.5"/><circle cx="12" cy="17.3" r="0.6" fill="currentColor" stroke="none"/></svg>'
 };
-function money(n){const v=Math.round(n||0);return (v<0?'-$':'$')+Math.abs(v).toLocaleString('en-NZ');}
+function money(n){return TK_FORMAT.money(n);}
 function fmtDur(min){if(!min)return '';const h=Math.floor(min/60),m=Math.round(min%60);return h?(h+'h'+(m?' '+m+'m':'')):(m+'m');}
 function fmtDate(iso){try{return new Date(iso).toLocaleDateString('en-NZ',{day:'numeric',month:'short',year:'numeric'});}catch(e){return '';}}
 function getToken(){try{return new URL(location.href).searchParams.get('t')||'';}catch(e){return '';}}
@@ -402,7 +402,7 @@ function pubPriceBreakdown(q){
     const note=(svc.usesRoofType&&s.roofType&&TK_PRICING.ROOF_TYPES[s.roofType])?TK_PRICING.ROOF_TYPES[s.roofType].label
       :(s.svc==='housewash'&&s.storeys&&TK_PRICING.STOREY_TYPES[s.storeys])?TK_PRICING.STOREY_TYPES[s.storeys].label
       :(s.svc==='fence'&&s.sides&&TK_PRICING.FENCE_SIDES[s.sides])?TK_PRICING.FENCE_SIDES[s.sides].label:'';
-    const sub=s.fixedPrice!=null?'Fixed price':(s.qty+' '+svc.unit+' × $'+TK_PRICING.effectiveRate(s).toFixed(2)+'/'+svc.unit+(note?' · '+note:''));
+    const sub=s.fixedPrice!=null?'Fixed price':(s.qty+' '+svc.unit+' × '+TK_FORMAT.money(TK_PRICING.effectiveRate(s))+'/'+svc.unit+(note?' · '+note:''));
     return `<div class="svc-row"><span class="n">${svc.label}<span class="note">${sub}</span></span><span class="amt">${money(TK_PRICING.lineTotal(s))}</span></div>`;
   }).join('')||'<div class="svc-row"><span class="n">Service details</span><span class="q">as discussed</span></div>';
   const gstSplit=TK_PRICING.gstFromInclusive(q.amount);
