@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 process.env.EMAIL_TOKEN_KEY ||= "sales-integration-test-only-key";
-const { installSalesPlatform } = await import("./salesPlatform.js");
+const { installSalesPlatform, serviceM8PricingSnapshot } = await import("./salesPlatform.js");
 const { encryptToken } = await import("./crypto.js");
 const SM = await import("./salesTransfer.js");
 const id = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
@@ -536,7 +536,9 @@ test('remote status readback preserves sales and quote state', async () => {
   const {worker}=setup(db,async url=>response(url.includes('jobactivity') || url.includes('jobmaterial') ? [] : url.includes('jobpayment')?[{amount:'40'},{amount:'75'}]:{status:'Completed',active:1,invoice_sent:1,payment_received:1,total_invoice_amount:'115'}));
   await worker.refreshRemote('A',id(3));
   assert.equal(JSON.stringify([db.tables.jobs,db.tables.quotes]),before);
-  assert.deepEqual(db.tables.external_object_mappings[0].snapshot,{status:'Completed',booking:null,schedulePermissionMissing:false,completed:true,active:true,invoiceSent:true,paymentReceived:true,invoicedTotal:115,collectedTotal:115});
+  const {pricing,...state}=db.tables.external_object_mappings[0].snapshot;
+  assert.equal(pricing.total,115);
+  assert.deepEqual(state,{status:'Completed',booking:null,schedulePermissionMissing:false,completed:true,active:true,invoiceSent:true,paymentReceived:true,invoicedTotal:115,collectedTotal:115});
 });
 test('ServiceM8 scheduled activity syncs booking and status to its linked TurnKey job', async () => {
   const db=database({
@@ -565,7 +567,7 @@ test('schedule permission failures preserve the last confirmed booking during st
     business_id:'A',connection_generation:id(2),object_type:'job',external_uuid:id(3),local_id:id(4),snapshot:{booking:previous}
   }]});let localSync;
   db.rpc=async(name,args)=>{assert.equal(name,'sync_servicem8_job_state');localSync=args;return {data:null,error:null};};
-  const {worker}=setup(db,async url=>url.includes('/jobactivity.json?')?response({},403):url.includes('/jobpayment.json?')?response([]):response({status:'Work Order',active:1}));
+  const {worker}=setup(db,async url=>url.includes('/jobactivity.json?')?response({},403):url.includes('/jobpayment.json?')||url.includes('/jobmaterial.json?')?response([]):response({status:'Work Order',active:1}));
   await worker.refreshRemote('A',id(3));
   assert.equal(localSync.p_schedule_permission_missing,true);
   assert.deepEqual(localSync.p_booking,previous);
@@ -639,7 +641,7 @@ function seedFixture({ extraJobs = [], extraActivities = [], tables = {}, failEv
     jobmaterial: [{job_uuid:id(31),name:'House wash',quantity:'1'},{job_uuid:id(31),name:'Window clean',quantity:'8'}],
     staff: [{uuid:id(32),first:'Jordan',last:'Lee',email:'jordan@example.test'}],
   };
-  const calls = [], saved = [], stateSyncs = [];
+  const calls = [], saved = [], stateSyncs = [], vendor = {timezone_name:'Pacific/Auckland'};
   const subscriptions = initialSubscriptions.map(object => ({object,unique_id:`turnkey-${id(2)}-${object}`,active:true,
     callback_url:'https://backend.example/api/servicem8/webhook/'+'e'.repeat(64)}));
   db.rpc = async (name, args) => {
@@ -665,7 +667,7 @@ function seedFixture({ extraJobs = [], extraActivities = [], tables = {}, failEv
       return response({});
     }
     if (url.includes('/webhook_subscriptions?status=all')) return subscriptionResponse ? subscriptionResponse() : response(subscriptions);
-    if (url.endsWith('/vendor.json')) return response({timezone_name:'Pacific/Auckland'});
+    if (url.endsWith('/vendor.json')) return response(vendor);
     const resource = new URL(url).pathname.split('/').at(-1).replace('.json','');
     assert.ok(Object.hasOwn(resources, resource), 'no per-record provider calls: ' + url);
     if (resource === rateLimited) return response({},429);
@@ -679,7 +681,7 @@ function seedFixture({ extraJobs = [], extraActivities = [], tables = {}, failEv
     assert.equal(cursor, '-1');
     return response(resources[resource]);
   });
-  return { ...tools, db, connection, resources, calls, saved, stateSyncs, subscriptions, retryWrites: () => { failEvent = false; } };
+  return { ...tools, db, connection, resources, calls, saved, stateSyncs, subscriptions, vendor, retryWrites: () => { failEvent = false; } };
 }
 test('dispatch seed returns 202 without provider IO, dedupes v3, and imports once in the worker', async () => {
   const f = seedFixture();
@@ -806,7 +808,7 @@ test('deleted ServiceM8 activity removes its calendar booking and clears the lin
   const {worker}=setup(db,async url=>{
     if(url.endsWith('/jobactivity/'+id(45)+'.json'))return response({},404);
     if(url.endsWith('/job/'+id(47)+'.json'))return response({status:'Work Order',active:1});
-    if(url.includes('/jobactivity.json?')||url.includes('/jobpayment.json?'))return response([]);
+    if(url.includes('/jobactivity.json?')||url.includes('/jobpayment.json?')||url.includes('/jobmaterial.json?'))return response([]);
     return response({});
   });
   await worker.tick();
@@ -909,7 +911,7 @@ const remoteJobMap=()=>({business_id:'A',connection_generation:id(2),object_type
 test('OAuth refresh uses timestamp-equivalent leases and preserves both rotated tokens',async()=>{
   const db=database({servicem8_connections:[oauthConnection()],external_object_mappings:[remoteJobMap()]});
   db.fail=(table,op)=>{const row=db.tables.servicem8_connections[0];if(table==='servicem8_connections'&&op==='select'&&row?.lease_until)row.lease_until=row.lease_until.replace(/Z$/,'+00:00');return false;};
-  const {worker}=setup(db,async url=>response(url.includes('jobpayment') || url.includes('jobactivity') ? []:{status:'Work Order'}),{oauthProvider:{refreshAccessToken:async()=>({access_token:'new-access',refresh_token:'new-refresh',expires_in:3600})}});
+  const {worker}=setup(db,async url=>response(url.includes('jobpayment') || url.includes('jobactivity') || url.includes('jobmaterial') ? []:{status:'Work Order'}),{oauthProvider:{refreshAccessToken:async()=>({access_token:'new-access',refresh_token:'new-refresh',expires_in:3600})}});
   await worker.refreshRemote('A',id(3));
   const {decryptToken}=await import('./crypto.js');
   assert.equal(decryptToken(db.tables.servicem8_connections[0].refresh_token_enc),'new-refresh');
@@ -1047,6 +1049,7 @@ function quoteHandoffFixture() {
   };
   return {db,jobId,quoteId,version,snapshot,objects,calls,pdfs,...setup(db,fetchImpl)};
 }
+const commercialState = value => JSON.stringify(value,(key,item)=>key==='serviceM8Pricing'?undefined:item);
 const handoffRequest=(jobId,extra={})=>({...owner,body:{jobId,...extra}});
 
 test('queueing a handoff wakes the worker immediately instead of waiting for its poll, without blocking the request',async()=>{
@@ -1067,7 +1070,7 @@ test('queueing a handoff wakes the worker immediately instead of waiting for its
 });
 
 test('explicit quote mode queues an immutable saved version, delivers Quote lines/PDF and repeats without duplicates',async()=>{
-  const f=quoteHandoffFixture(),before=JSON.stringify([f.db.tables.jobs,f.db.tables.quotes]);
+  const f=quoteHandoffFixture(),before=commercialState([f.db.tables.jobs,f.db.tables.quotes]);
   let res=await f.route('POST','/api/sales/servicem8/handoff',handoffRequest(f.jobId,{mode:'quote'}));
   assert.equal(res.statusCode,202);const task=structuredClone(f.db.tables.integration_tasks[0]);
   assert.equal(task.payload.mode,'quote');assert.equal(task.payload.versionId,f.version.id);
@@ -1080,7 +1083,7 @@ test('explicit quote mode queues an immutable saved version, delivers Quote line
   assert.equal(f.calls.filter(c=>c.path==='/job.json'&&c.method==='POST').length,1);
   assert.equal(f.calls.filter(c=>c.path==='/jobmaterial.json'&&c.method==='POST').length,1);
   assert.equal(f.pdfs.length,1);assert.match(f.pdfs[0],/DRAFT QUOTE/);assert.doesNotMatch(f.pdfs[0],/APPROVED|Approved/);
-  assert.equal(JSON.stringify([f.db.tables.jobs,f.db.tables.quotes]),before);
+  assert.equal(commercialState([f.db.tables.jobs,f.db.tables.quotes]),before);
 });
 
 test('approved handoff promotes SAME draft job and preserves Completed on repeated delivery',async()=>{
@@ -1165,7 +1168,7 @@ test('legacy approved handoff requires explicit review, captures server snapshot
   let res=await f.route('POST','/api/sales/servicem8/handoff',handoffRequest(f.jobId));
   assert.equal(res.statusCode,409);assert.equal(res.body.code,"LEGACY_REVIEW_REQUIRED");assert.match(res.body.error,/reviewLegacy: true/);
   assert.equal(f.db.tables.integration_tasks,undefined);
-  const before=JSON.stringify([f.db.tables.quotes,f.db.tables.jobs,f.db.tables.quote_versions]);
+  const before=commercialState([f.db.tables.quotes,f.db.tables.jobs,f.db.tables.quote_versions]);
   res=await f.route('POST','/api/sales/servicem8/handoff',handoffRequest(f.jobId,{reviewLegacy:true,snapshot:{amount:1}}));
   assert.equal(res.statusCode,202);const task=structuredClone(f.db.tables.integration_tasks[0]);
   assert.equal(task.payload.snapshot.amount,115);assert.equal(task.payload.snapshot.provenance,'legacy-reviewed');
@@ -1177,7 +1180,7 @@ test('legacy approved handoff requires explicit review, captures server snapshot
   let claimed=false;f.db.rpc=async()=>({data:claimed?[]:(claimed=true,[f.db.tables.integration_tasks[0]])});
   await f.worker.tick();assert.equal(f.db.tables.integration_tasks[0].state,'succeeded');
   assert.equal([...f.objects.entries()].find(([p])=>p.startsWith('/job/'))[1].status,'Work Order');
-  assert.equal(JSON.stringify([f.db.tables.quotes,f.db.tables.jobs,f.db.tables.quote_versions]),before);
+  assert.equal(commercialState([f.db.tables.quotes,f.db.tables.jobs,f.db.tables.quote_versions]),before);
 });
 
 test('completed job with no quote row at all requires review, creates one quote from the recorded total and never retries silently',async()=>{
@@ -1488,7 +1491,7 @@ test('explicit resumed or unsuccessful webhook clears only its completed summary
         {business_id:'A',source:'servicem8',external_id:id(952),details:{jobUuid:id(951),status:'Completed'}}]});
     claimMock(db); const claim=db.rpc,writes=[];
     db.rpc=async(name,args)=>name==='claim_integration_task'?claim(name,args):(writes.push({name,args}),{data:null});
-    const {worker}=setup(db,async url=>url.includes('/jobactivity.json?')?response([]):response({uuid:id(951),status}));
+    const {worker}=setup(db,async url=>url.includes('/jobactivity.json?')||url.includes('/jobmaterial.json?')?response([]):response({uuid:id(951),status}));
     await worker.tick(); assert.equal(task.state,'succeeded');
     assert.equal(db.tables.external_object_mappings.length,2);
     assert.ok(db.tables.external_object_mappings.every(row=>row.business_id==='B'||row.connection_generation===id(99)));
@@ -1519,7 +1522,7 @@ test('snapshot creates real booked customer/job once, stores safe service reques
   assert.equal(customer.address,'29 Selwyn Cres');assert.equal(customer.business_id,'A');
   assert.deepEqual(job.details.services,[]);
   assert.deepEqual(job.details.requestedServices,[{name:'House wash',service_id:null},{name:'Window clean',service_id:null}]);
-  assert.deepEqual(job.details.serviceM8LineItems[0],{name:'House wash',quantity:'1',amount:'115',price:'100'});
+  assert.deepEqual(job.details.serviceM8LineItems[0],{name:'House wash',quantity:1,unitPrice:100,lineTotal:100});
   const counts=[f.db.tables.jobs.length,f.db.tables.customers.length];
   await f.worker.scheduleReconciliation();
   const recurring=f.db.tables.integration_tasks.find(row=>row.payload.recurring);recurring.next_attempt_at=new Date(0).toISOString();
@@ -1634,4 +1637,55 @@ test('periodic full snapshot retires explicitly cancelled/rescheduled bookings w
   const broken=seedFixture({rateLimited:'jobactivity',tables:{calendar_events:[event(2707,31)]}});
   await broken.worker.scheduleReconciliation();await broken.worker.tick();
   assert.equal(broken.db.tables.integration_tasks[0].state,'failed');assert.equal(broken.saved.length,0,'failed full schedule fetch never deletes events');
+});
+
+test('documented selling prices distinguish zero/missing/discount and never use costs or invent GST',()=>{
+  const pricing=serviceM8PricingSnapshot({uuid:id(3101),total_invoice_amount:'0'},[
+    {name:'House wash',quantity:'2',price:'100',displayed_amount:'115',displayed_amount_is_tax_inclusive:'1',cost:'7'},
+    {name:'Discount',quantity:'1',price:'-10'},
+    {name:'Free service',quantity:'0',price:'0'},
+    {name:'Unknown',quantity:'',price:null,amount:'900',billableprice:'900',cost:'800',displayed_cost:'920'},
+    {name:'Inclusive only',quantity:'1',displayed_amount:'115',displayed_amount_is_tax_inclusive:'1'},
+    {name:'No GST',quantity:'1.5',displayed_amount:'20',displayed_amount_is_tax_inclusive:'0'},
+    {name:'Deleted',quantity:'1',price:'999',active:0},
+  ],{currency:'NZD',updatedAt:'2026-11-01T00:00:00Z'});
+  assert.deepEqual(pricing.items.map(row=>[row.quantity,row.unitPrice,row.lineTotal]),[[2,100,200],[1,-10,-10],[0,0,0],[null,null,null],[1,null,null],[1.5,20,30]]);
+  assert.equal(pricing.total,0);assert.equal(pricing.currency,'NZD');assert.equal(pricing.taxLabel,'Tax basis not specified');
+  assert.equal(pricing.lineTaxLabel,'Line prices exclude tax');
+  assert.doesNotMatch(JSON.stringify(pricing.items),/cost|billableprice|900|800|920/);
+  for(const total of [undefined,null,'','NaN',Infinity])assert.equal(serviceM8PricingSnapshot({total_invoice_amount:total},[]).total,null);
+  assert.equal(serviceM8PricingSnapshot({},[],{currency:'unknown'}).currency,null);
+});
+test('seed saves accepted-job display pricing before historical writes without touching original financial fields',async()=>{
+  const f=seedFixture({failEvent:true});f.vendor.currency='NZD';f.resources.job[0].total_invoice_amount='690';
+  f.resources.jobmaterial[0].price='300';f.resources.jobmaterial[0].quantity='2';f.resources.jobmaterial[0].cost='50';
+  const local={id:id(3201),business_id:'A',quote_id:id(3202),status:'scheduled',details:{total:575,services:[{svc:'Wash',priceSnapshot:575}],notes:'keep'}};
+  const quote={id:id(3202),business_id:'A',status:'accepted',amount:575};
+  f.db.tables.jobs.push(local);f.db.tables.quotes=[quote];
+  f.db.tables.external_object_mappings.push({business_id:'A',connection_generation:id(2),object_type:'job',local_id:local.id,external_uuid:id(31)});
+  const original=structuredClone({services:local.details.services,total:local.details.total,quote});
+  await f.route('POST','/api/job-calendar/servicem8/sync',owner);await f.worker.tick();
+  assert.equal(f.db.tables.integration_tasks[0].state,'failed','historical event storage is deliberately unavailable');
+  assert.equal(local.details.serviceM8Pricing.total,690);assert.equal(local.details.serviceM8Pricing.currency,'NZD');
+  assert.equal(local.details.serviceM8Pricing.items[0].lineTotal,600);
+  assert.deepEqual({services:local.details.services,total:local.details.total,quote},original);
+  assert.equal(local.details.notes,'keep');assert.equal(f.calls.length,8,'batch resource calls remain constant');
+});
+test('refresh updates price display with a compare-and-swap while preserving concurrent notes and accepted totals',async()=>{
+  const local={id:id(3301),business_id:'A',quote_id:id(3302),status:'scheduled',updated_at:'2026-11-01T00:00:00Z',details:{total:575,services:[{svc:'Wash',priceSnapshot:575}],notes:'old'}};
+  const db=database({servicem8_connections:[privateConnection()],jobs:[local],quotes:[{id:id(3302),business_id:'A',status:'accepted',amount:575}],
+    external_object_mappings:[{business_id:'A',connection_generation:id(2),object_type:'job',local_id:local.id,external_uuid:id(3303)}]});
+  let changed=false,materialCalls=0;
+  db.fail=(table,op,value)=>{if(!changed&&table==='jobs'&&op==='update'&&value.details?.serviceM8Pricing){changed=true;local.updated_at='2026-11-01T00:00:01Z';local.details.notes='concurrent note';}return false;};
+  const {worker}=setup(db,async url=>{
+    if(url.includes('/jobmaterial.json?')){materialCalls++;return response([{name:'Roof wash',quantity:'2',price:'100',cost:'1'}]);}
+    if(url.includes('/jobactivity.json?'))return response([{uuid:id(3304),activity_was_scheduled:1,active:1,start_date:'2026-11-04 09:00:00',end_date:'2026-11-04 10:00:00'}]);
+    if(url.includes('/jobpayment.json?'))return response([]);
+    if(url.endsWith('/vendor.json'))return response({currency:'NZD',timezone_name:'Pacific/Auckland'});
+    return response({uuid:id(3303),status:'Work Order',total_invoice_amount:'230'});
+  });
+  await worker.refreshRemote('A',id(3303));
+  assert.equal(materialCalls,1);assert.equal(local.details.serviceM8Pricing.total,230);assert.equal(local.details.serviceM8Pricing.items[0].lineTotal,200);
+  assert.equal(local.details.serviceM8Pricing.currency,'NZD');assert.equal(local.details.notes,'concurrent note');
+  assert.equal(local.details.total,575);assert.equal(db.tables.quotes[0].amount,575);assert.deepEqual(local.details.services,[{svc:'Wash',priceSnapshot:575}]);
 });

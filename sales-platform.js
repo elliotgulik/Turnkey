@@ -375,6 +375,8 @@
     return `<span class="sale-state" data-sale-state="${esc(uiStage(r))}">${esc(stageLabel(r))}</span>${operational ? `<span class="sale-state sale-state-operation">${operational}</span>` : ""}`;
   }
   function servicesLabel(r) {
+    const upstream=window.TK_SM8_PRICING?.snapshot(r);
+    if(upstream?.items?.length)return upstream.items.map(x=>x.name).filter(Boolean).join(', ');
     return (typeof getRequestedServices === 'function' ? getRequestedServices(r) : (r.requestedServices || [])).map((x) => x.name || x).join(", ") ||
       (r.services || []).map((x) => SERVICES[x.svc]?.label || x.svc).join(", ") || "Services to confirm";
   }
@@ -438,8 +440,8 @@
     const age = M.leadTime(r), value = window.TK_LEADS.value(r), grade = window.TK_LEADS.grade(r);
     return `<article class="sale-card sale-opportunity" draggable="${uiStage(r) !== 'completed'}" data-record="${esc(r.id)}" aria-label="${esc(r.name || 'Unnamed enquiry')}">
       <div class="sale-state-row">${stageBadge(r)}</div>
-      <div class="sale-card-top">${recordHeading(r)}<div class="sale-card-value"><strong>${value == null ? 'Not estimated' : esc(money(value))}</strong><small>${r.total > 0 ? 'Quote incl. GST' : 'Estimated value'}</small></div></div>
-      <p class="sale-card-address">${esc(r.address || "Property address needed")}</p><p class="sale-card-services">${esc(servicesLabel(r))}</p>
+      <div class="sale-card-top">${recordHeading(r)}<div class="sale-card-value"><strong>${esc(window.TK_SM8_PRICING?.total(r,value == null?'Not estimated':money(value))||(value == null?'Not estimated':money(value)))}</strong><small>${esc(window.TK_SM8_PRICING?.label(r,r.total>0?'Quote incl. GST':'Estimated value')||(r.total>0?'Quote incl. GST':'Estimated value'))}</small></div></div>
+      <p class="sale-card-address">${esc(r.address || "Property address needed")}</p>${window.TK_LEAD_REQUEST?.render(r)||''}${window.TK_SM8_PRICING?.render(r,{compact:true})||(!window.TK_LEAD_REQUEST?.requests(r)?.length?`<p class="sale-card-services">${esc(servicesLabel(r))}</p>`:'')}
       <div class="sale-tags"><span>${esc(r.source || "Manual")}</span><span title="${esc(grade.description)}">${esc(grade.label)}</span><span>${age ? Math.max(0, Math.floor((Date.now() - age) / 86400000)) + "d old" : "Age unknown"}</span></div>
       <div class="sale-card-owner">${esc(r.salespersonName || "Unassigned salesperson")}</div>${followupLabel(r)}
       ${nextButton(r)}${recordActions(r)}<div class="sale-card-stage">${stageControl(r)}</div></article>`;
@@ -471,7 +473,7 @@
     renderLeads();
   };
   function leadsTable(rs) {
-    return `<div class="sale-table-wrap sale-leads-table-wrap"><table class="sale-table sale-leads-table"><caption class="sale-sr-only">Sales opportunities and next actions</caption><thead><tr>${['Customer / property', 'Stage / source', 'Value incl. GST', 'Next step', 'Actions'].map(t => `<th scope="col">${t}</th>`).join('')}</tr></thead><tbody>${rs.map(r => `<tr data-record="${esc(r.id)}"><td data-label="Customer / property">${recordHeading(r)}<p>${esc(r.address || 'Property address needed')}</p><small>${esc(servicesLabel(r))}</small></td><td data-label="Stage / source"><div class="sale-state-row">${stageBadge(r)}</div><p>${esc(r.source || 'Manual')} · ${esc(r.salespersonName || 'Unassigned')}</p>${stageControl(r)}</td><td data-label="Value incl. GST"><strong>${window.TK_LEADS.value(r) == null ? 'Not estimated' : esc(money(window.TK_LEADS.value(r)))}</strong><p>${r.total > 0 ? 'Saved quote' : 'Estimate'}</p></td><td data-label="Next step">${followupLabel(r)}${nextButton(r)}</td><td data-label="Actions">${recordActions(r)}</td></tr>`).join('')}</tbody></table></div>`;
+    return `<div class="sale-table-wrap sale-leads-table-wrap"><table class="sale-table sale-leads-table"><caption class="sale-sr-only">Sales opportunities and next actions</caption><thead><tr>${['Customer / property', 'Stage / source', 'Value', 'Next step', 'Actions'].map(t => `<th scope="col">${t}</th>`).join('')}</tr></thead><tbody>${rs.map(r => `<tr data-record="${esc(r.id)}"><td data-label="Customer / property">${recordHeading(r)}<p>${esc(r.address || 'Property address needed')}</p><small>${esc(servicesLabel(r))}</small>${window.TK_LEAD_REQUEST?.render(r)||''}</td><td data-label="Stage / source"><div class="sale-state-row">${stageBadge(r)}</div><p>${esc(r.source || 'Manual')} · ${esc(r.salespersonName || 'Unassigned')}</p>${stageControl(r)}</td><td data-label="Value"><strong>${esc(window.TK_SM8_PRICING?.total(r,window.TK_LEADS.value(r)==null?'Not estimated':money(window.TK_LEADS.value(r)))||(window.TK_LEADS.value(r)==null?'Not estimated':money(window.TK_LEADS.value(r))))}</strong><p>${esc(window.TK_SM8_PRICING?.label(r,r.total>0?'Saved quote':'Estimate')||(r.total>0?'Saved quote':'Estimate'))}</p>${window.TK_SM8_PRICING?.render(r,{compact:true})||''}</td><td data-label="Next step">${followupLabel(r)}${nextButton(r)}</td><td data-label="Actions">${recordActions(r)}</td></tr>`).join('')}</tbody></table></div>`;
   }
   function renderLeads() {
     let rs = records.filter(r => inScope(r, stageFilter || 'open'));
@@ -568,8 +570,8 @@
       <section class="sale-panel" id="sale-customer">${customerInfo(r)}</section>
       <section class="sale-panel" id="sale-plan"><span class="sale-eyebrow">SALES PLAN</span><h3 tabindex="-1">Owner, follow-up &amp; notes</h3>${stageControl(r)}<p class="sale-muted">Contact and quote stages also update after a successful send. Confirming a sale requires a saved, complete quote.</p>
       <div class="sale-form-pair">${field('Estimated opportunity value', `<input id="sale-opportunity" type="number" min="0" step="0.01" value="${esc(r.opportunityValue || 0)}">`)}${field('Salesperson', `<select id="sale-assignee">${options([['', 'Unassigned'], ...staff.map(x => [x.id, x.name || x.email])], r.assignedSalespersonId || '')}</select>`)}</div>${field('Next follow-up', `<input id="sale-followup" type="datetime-local" value="${followupTime(r) == null ? '' : esc(localDateTime(r.nextFollowUpAt))}">`)}${followupLabel(r)}${field('Sales notes', `<textarea id="sale-notes" rows="4" placeholder="What did you agree? What should happen next?">${esc(r.salesNotes || r.jobNotes || '')}</textarea>`)}${button('Save sales details', 'save-details', r.id)}</section></div>
-      <div><section class="sale-panel" id="sale-quote"><span class="sale-eyebrow">QUOTE</span><h3>Quote &amp; profitability</h3><p class="sale-quote-services">${esc(servicesLabel(r))}</p>${table(['Metric', 'Value'], [
-        ['Customer quote (incl. GST)', money(r.total || 0)],
+      <div>${window.TK_LEAD_REQUEST?.render(r)||''}${window.TK_SM8_PRICING?.render(r)||''}<section class="sale-panel" id="sale-quote"><span class="sale-eyebrow">QUOTE</span><h3>Quote &amp; profitability</h3><p class="sale-quote-services">${esc(servicesLabel(r))}</p>${table(['Metric', 'Value'], [
+        ['Original TurnKey quote (incl. GST)', r.quoteId||r.total>0?money(r.total||0):'No TurnKey quote saved'],
         ['Estimated delivery costs', moneySafe(r.estimatedCost)],
         ['Estimated margin', r.estimatedMarginPct == null ? 'Unavailable' : r.estimatedMarginPct + '%'],
         ['Quote sent', dates(r.quoteSentAt)], ['Sale won', dates(M.winTime(r))]

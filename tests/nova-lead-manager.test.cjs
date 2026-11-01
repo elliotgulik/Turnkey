@@ -12,6 +12,7 @@ function manager() {
     localStorage: { getItem() { return null; }, setItem() {} },
     window: { TK_LEADS: { value() { return null; } }, TK_PIPELINE: { key(r) { return r.stage; } } },
   };
+  context.window.TK_LEAD_ANSWERS = require('../lead-answer-utils.js');
   vm.runInNewContext(fs.readFileSync('nova-lead-manager.js', 'utf8'), context);
   return context.window.TK_NOVA_LEAD_MANAGER;
 }
@@ -34,6 +35,7 @@ test('service area preferences are isolated by TurnKey business ID', () => {
     localStorage: { getItem(k) { return store.get(k) ?? null; }, setItem(k,v) { store.set(k,v); } },
     window: { TK_LEADS: { value() { return null; } }, TK_PIPELINE: { key(r) { return r.stage; } } },
   };
+  context.window.TK_LEAD_ANSWERS = require('../lead-answer-utils.js');
   vm.runInNewContext(fs.readFileSync('nova-lead-manager.js', 'utf8'), context);
   context.window.TK_NOVA_LEAD_MANAGER.setConfig({ suburbs: ['Whangaparaoa'], postcodes: ['0932'] });
   assert.equal(context.window.TK_NOVA_LEAD_MANAGER.grade({ address: '2 Test Road, Whangaparaoa, Auckland', services: ['House wash'] }).grade, 'B');
@@ -56,6 +58,7 @@ function statusFixture() {
     localStorage: { getItem() { return null; }, setItem() {} },
     window: { TK_PIPELINE: require('../pipeline-model.js') },
   };
+  context.window.TK_LEAD_ANSWERS = require('../lead-answer-utils.js');
   vm.runInNewContext(fs.readFileSync('nova-lead-manager.js', 'utf8'), context);
   const manager = context.window.TK_NOVA_LEAD_MANAGER;
   return { host, records, manager,
@@ -104,7 +107,7 @@ test('lead cards show received date and exact Auckland time from the original su
 test('Meta poll answers stay separate from services and encoded questions are not split at commas', () => {
   const leadManager = manager();
   const record = {source:'Meta',notes:'residential_or_commercial: residential\nurgency: within_the_next_2_weeks\nlist_cleaning_services_below_(house,_roof,_windows_[outside_or_inside?]): house_wash, roof_treatment, windows_outside · Submitted via online quote tool'};
-  assert.deepEqual(Array.from(leadManager.services(record)), ['house wash','roof treatment','windows outside']);
+  assert.deepEqual(Array.from(leadManager.services(record)), ['house wash, roof treatment, windows outside']);
   const answers = Array.from(leadManager.formAnswers(record), x=>({kind:x.kind,label:x.label,answer:x.answer}));
   assert.deepEqual(answers.slice(0,2), [
     {kind:'property',label:'Property type',answer:'residential'},
@@ -117,11 +120,11 @@ test('Meta poll answers stay separate from services and encoded questions are no
 test('saved Meta services are available to Pipeline and quote details through the shared accessor', () => {
   const source=fs.readFileSync('index.html','utf8');
   const start=source.indexOf('function extractServicesFromNotes(notes){');
-  const end=source.indexOf('// The one accessor',start);
-  const context={labelToServiceId:()=>null};
+  const end=source.indexOf('// Saved structured selections',start);
+  const context={labelToServiceId:()=>null,window:{TK_LEAD_ANSWERS:require('../lead-answer-utils.js')}};
   vm.runInNewContext(source.slice(start,end),context);
   const notes='residential_or_commercial: residential\nlist_cleaning_services_below_(house,_roof,_windows_[outside_or_inside?],_driveway,_patio,_deck,_fence,_solar_panels: House,windows · Submitted via online quote tool';
-  assert.deepEqual(Array.from(context.extractServicesFromNotes(notes),x=>x.name),['House','windows']);
-  assert.deepEqual(Array.from(manager().services({notes:'Follow up: tomorrow',jobNotes:notes})),['House','windows']);
+  assert.deepEqual(Array.from(context.extractServicesFromNotes(notes),x=>x.name),['House,windows']);
+  assert.deepEqual(Array.from(manager().services({notes:'Follow up: tomorrow',jobNotes:notes})),['House,windows']);
   assert.deepEqual(Array.from(manager().services({source:'Wix',notes:'Please call me tomorrow'})),[]);
 });

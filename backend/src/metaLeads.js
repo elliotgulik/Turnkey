@@ -1,4 +1,6 @@
 import crypto from "node:crypto";
+import { createRequire } from "node:module";
+const leadAnswers = createRequire(import.meta.url)("../../lead-answer-utils.js");
 import { validateLeadPayload } from "./leadValidation.js";
 
 export class MetaWebhookError extends Error {
@@ -73,8 +75,9 @@ export function normalizeMetaLead(leadData, businessId, { historical = false, no
   const first = key => fields[key]?.[0] || "";
   const name = first("full_name") || [first("first_name"), first("last_name")].filter(Boolean).join(" ") || "Meta lead";
   const contactFields = new Set(["full_name", "first_name", "last_name", "email", "phone_number", "phone", "street_address", "city"]);
-  const serviceFields = new Set(["requestedservices", "requestedservice", "services", "service", "servicesrequired", "servicerequired", "selectservicesrequired", "whatservicesdoyourequire", "whatservicesdoyouneed"]);
-  const requestedServices = [];
+  const requestedServices = leadAnswers.servicesFromFields(Object.fromEntries(
+    Object.entries(fields).filter(([key]) => !contactFields.has(key))
+  )).slice(0, 100).map(value => value.slice(0, 500));
   let notes = "";
   for (const [key, values] of Object.entries(fields)) {
     if (contactFields.has(key)) continue;
@@ -84,8 +87,7 @@ export function normalizeMetaLead(leadData, businessId, { historical = false, no
       const line = `${key}: ${values.map(value => value.slice(0, 4000)).join(", ")}`;
       notes += `${notes ? "\n" : ""}${line}`.slice(0, 4000 - notes.length);
     }
-    if (serviceFields.has(key.replace(/[^a-z0-9]/g, "")) || /^listcleaningservices/.test(key.replace(/[^a-z0-9]/g, "")))
-      requestedServices.push(...values.slice(0, 100 - requestedServices.length).map(value => value.slice(0, 500)));
+
   }
   const payload = {
     business_id: businessId,

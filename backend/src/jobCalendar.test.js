@@ -652,3 +652,17 @@ test('unschedule is owner/manager only and returns filtered details with Google 
   assert.equal(res.body.job.details.googleEventId, 'keep')
   assert.match(res.body.googleWarning, /remains unchanged/)
 })
+
+test('calendar exposes only safe ServiceM8 pricing contract for local jobs, dispatch events and completed summaries',async()=>{
+ const h=setup();
+ const pricing={items:[{name:'House wash',quantity:0,unitPrice:0,lineTotal:0,cost:500},{name:'Discount',quantity:1,unitPrice:-10,lineTotal:-10,displayed_cost:500}],
+  total:0,currency:'NZD',lineTaxLabel:'Line prices exclude tax',taxLabel:'Tax basis not specified',updatedAt:'2026-11-01T00:00:00Z',jobUuid:id(3501),margin:99,secret:'hidden'};
+ h.tables.jobs[0].details={serviceM8Pricing:pricing,total:575,cost:99};
+ h.tables.servicem8_connections=[{business_id:BIZ,generation:id(3502)}];
+ h.tables.calendar_events=[{id:id(3503),business_id:BIZ,source:'servicem8',external_id:id(3504),start_time:'2026-02-02T00:00:00Z',end_time:'2026-02-02T01:00:00Z',details:{pricing,jobUuid:id(3501)}}];
+ h.tables.external_object_mappings=[{business_id:BIZ,connection_generation:id(3502),object_type:'completed_job',local_id:'servicem8:'+id(3501),external_uuid:id(3501),snapshot:{pricing,status:'Completed'}}];
+ const res=await h.run('get','/api/job-calendar/range',{query:{from:'2026-02-01T00:00:00Z',to:'2026-02-08T00:00:00Z'}});
+ assert.equal(res.statusCode,200);
+ const snapshots=[res.body.jobs.find(row=>row.id===job).details.serviceM8Pricing,res.body.events[0].details.pricing,res.body.completedEvents[0].details.pricing];
+ for(const snapshot of snapshots){assert.equal(snapshot.total,0);assert.equal(snapshot.items[0].unitPrice,0);assert.equal(snapshot.items[1].lineTotal,-10);assert.equal(snapshot.currency,'NZD');assert.doesNotMatch(JSON.stringify(snapshot),/cost|margin|hidden|secret/);}
+});

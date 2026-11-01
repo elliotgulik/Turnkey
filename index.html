@@ -1384,7 +1384,7 @@
   .sales-filter-card[hidden]{display:none!important}
 
 </style>
-<link rel="stylesheet" href="sales-platform.css?v=20261018c">
+<link rel="stylesheet" href="sales-platform.css?v=20261101f">
 <link rel="stylesheet" href="nova-lead-manager.css?v=20261101d">
 <link rel="stylesheet" href="quote-workspace.css?v=20261017a">
 <link rel="stylesheet" href="conversations.css?v=20261020a">
@@ -10859,36 +10859,18 @@ function normalizeReqSvc(x){
   const name=String(x||'').replace(/_/g,' ').trim();
   return{name,service_id:labelToServiceId(name)};
 }
-// Migration for leads created before requestedServices existed at all —
-// those only ever got a "Services requested: A, B, C." sentence prepended
-// to notes (see booking.html buildPayload's notesPrefix). Parses that exact
-// sentence back out. Never mutates or removes anything from notes itself —
-// this only reads it to reconstruct structured data alongside it.
+// Read original incoming requests without treating the question choices as answers.
 function extractServicesFromNotes(notes){
-  const text=String(notes||'').split(/\s*·\s*Submitted via online quote tool/)[0];
-  const answers=[];
-  for(const line of text.split(/\n/)){
-    const at=line.indexOf(':');if(at<0)continue;
-    const key=line.slice(0,at).toLowerCase().replace(/[^a-z0-9]/g,'');
-    if(!/(?:services|requestedservice|selectservice)/.test(key))continue;
-    let answer=line.slice(at+1).trim();
-    if(key==='servicesrequested')answer=answer.replace(/\.\s*$/,'');
-    answers.push(...answer.split(/[,;\n]+/).map(x=>x.replace(/_/g,' ').replace(/\s+/g,' ').trim()).filter(Boolean));
-  }
+  const answers=window.TK_LEAD_ANSWERS?.servicesFromNotes(String(notes||''))||[];
   return [...new Set(answers)].map(name=>({name,service_id:labelToServiceId(name)}));
 }
-// The one accessor everything else should call — never read
-// r.requestedServices directly. Self-heals old records the first time
-// they're viewed: if the field is empty but notes contain the legacy
-// sentence, extracts it and backfills the real field in memory so it
-// behaves as a normal field from then on (persisted the next time this
-// record saves normally, same as any other in-memory edit — no separate
-// migration pass or forced write needed).
+// Saved structured selections remain available when no written request was supplied.
 function getRequestedServices(r){
-  if(r.requestedServices&&r.requestedServices.length)return r.requestedServices.map(normalizeReqSvc);
-  const extracted=extractServicesFromNotes([r.notes,r.jobNotes].filter(Boolean).join('\n'));
-  if(extracted.length)r.requestedServices=extracted;
-  return extracted;
+  const saved=Array.isArray(r.requestedServices)?r.requestedServices.map(normalizeReqSvc):[];
+  const extracted=extractServicesFromNotes(r.notes);
+  if(!extracted.length){const reader=window.TK_LEAD_ANSWERS;const explicit=String(r.jobNotes||'').split(/\r?\n/).filter(line=>reader?.isServiceField(line.split(':')[0]));extracted.push(...extractServicesFromNotes(explicit.join('\n')));}
+  if(extracted.length){r.requestedServices=extracted;return extracted;}
+  return saved;
 }
 
 /* ===== Live intake: accept quote requests from the customer booking widget ===== */
@@ -11037,22 +11019,25 @@ async function retryPendingPhotos(){
 <script src="pipeline-model.js?v=20261018e"></script>
 <script src="lead-priority.js?v=20261017a"></script>
 <script src="meta-import.js?v=20261020a"></script>
-<script src="sales-platform.js?v=20261101d"></script>
+<script src="lead-answer-utils.js?v=20261101f"></script>
+<script src="lead-request-view.js?v=20261101f"></script>
+<script src="servicem8-pricing-view.js?v=20261101f"></script>
+<script src="sales-platform.js?v=20261101f"></script>
 <script type="module" src="measurement-import.js?v=20261017a"></script>
 <script src="quote-workspace.js?v=20261017a"></script>
 <script src="conversations.js?v=20261020a"></script>
 <script src="conversations-bridge.js?v=20261020a"></script>
 <script src="servicem8-import.js?v=20261017a"></script>
 <script src="marketing-analytics.js?v=20261025b"></script>
-<footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a> · <span id="tk-app-version">v20261101d</span></footer>
+<footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a> · <span id="tk-app-version">v20261101f</span></footer>
 <script src="extension-quote-link.js?v=20261022a"></script>
 <script src="job-workspace.js?v=20261031a"></script>
-<script src="job-calendar.js?v=20261101d"></script>
-<script src="operations-workspace.js?v=20261031b"></script>
+<script src="job-calendar.js?v=20261101f"></script>
+<script src="operations-workspace.js?v=20261101f"></script>
 <script src="operations-bridge.js?v=20261018c"></script>
 <script src="workspace-controls.js?v=20261019a"></script>
 <script src="settings-experience.js?v=20261019d"></script>
 <script src="workspace-experience.js?v=20261019b"></script>
-<script src="nova-lead-manager.js?v=20261101d"></script>
+<script src="nova-lead-manager.js?v=20261101f"></script>
 </body>
 </html>

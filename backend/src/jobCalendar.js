@@ -35,9 +35,23 @@ const CALENDAR_DETAIL_KEYS = [
   'calendarStartAt', 'calendarEndAt', 'scheduledStartMin', 'scheduledDurationMin',
   'assignedStaffIds', 'calendarTeamLabel', 'calendarNotes', 'calendarGoogleSync', 'googleEventId',
   'calendarGoogleSyncState', 'calendarGoogleSyncError', 'calendarGoogleSyncedAt',
-  'serviceM8Booking', 'serviceM8Status'
+  'serviceM8Booking', 'serviceM8Status', 'serviceM8Pricing'
 ]
-const SERVICE_M8_EVENT_KEYS = ['jobUuid','personName', 'companyName', 'email', 'phone', 'address', 'services', 'lineItems', 'assignedStaff','assignedStaffIds', 'staffAssigned', 'status']
+const SERVICE_M8_EVENT_KEYS = ['jobUuid','personName', 'companyName', 'email', 'phone', 'address', 'services', 'lineItems', 'assignedStaff','assignedStaffIds', 'staffAssigned', 'status', 'pricing']
+function filterServiceM8Pricing(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const number = input => typeof input === 'number' && Number.isFinite(input) ? input : null
+  return {
+    items: (Array.isArray(value.items) ? value.items : []).slice(0, 1000).map(item => ({
+      name: String(item?.name || '').slice(0, 200), quantity: number(item?.quantity),
+      unitPrice: number(item?.unitPrice), lineTotal: number(item?.lineTotal),
+    })).filter(item => item.name),
+    total: number(value.total), currency: typeof value.currency === 'string' && /^[A-Z]{3}$/.test(value.currency) ? value.currency : null,
+    lineTaxLabel: String(value.lineTaxLabel || '').slice(0, 100), taxLabel: String(value.taxLabel || '').slice(0, 100),
+    updatedAt: typeof value.updatedAt === 'string' && Number.isFinite(Date.parse(value.updatedAt)) ? value.updatedAt : null,
+    jobUuid: uuid(value.jobUuid) ? value.jobUuid : null,
+  }
+}
 function filterServiceM8CalendarDetails(value) {
   const input = value && typeof value === 'object' && !Array.isArray(value) ? value : {}
   const output = Object.fromEntries(SERVICE_M8_EVENT_KEYS.filter(key => input[key] != null).map(key => [key, input[key]]))
@@ -47,6 +61,7 @@ function filterServiceM8CalendarDetails(value) {
   })).filter(item => item.name) : []
   output.assignedStaff = Array.isArray(output.assignedStaff) ? output.assignedStaff.slice(0, 20).map(x => String(x).slice(0, 120)) : []
   output.assignedStaffIds = Array.isArray(output.assignedStaffIds) ? output.assignedStaffIds.filter(x => /^servicem8:[0-9a-f-]{36}$/i.test(String(x))).slice(0,20) : []
+  if (input.pricing != null) output.pricing = filterServiceM8Pricing(input.pricing)
   output.staffAssigned = output.staffAssigned === true
   for (const key of ['jobUuid','personName', 'companyName', 'email', 'phone', 'address', 'status']) {
     if (output[key] != null) output[key] = String(output[key]).slice(0, key === 'address' ? 500 : 254)
@@ -56,7 +71,7 @@ function filterServiceM8CalendarDetails(value) {
 function filterCalendarDetails(details) {
   const out = {}
   if (!details || typeof details !== 'object') return out
-  for (const k of CALENDAR_DETAIL_KEYS) if (Object.prototype.hasOwnProperty.call(details, k)) out[k] = details[k]
+  for (const k of CALENDAR_DETAIL_KEYS) if (Object.prototype.hasOwnProperty.call(details, k)) out[k] = k === 'serviceM8Pricing' ? filterServiceM8Pricing(details[k]) : details[k]
   return out
 }
 

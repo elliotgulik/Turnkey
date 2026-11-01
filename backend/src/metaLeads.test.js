@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
-import { ingestMetaWebhook } from "./metaLeads.js";
+import { normalizeMetaLead, ingestMetaWebhook } from "./metaLeads.js";
 
 const SECRET = "meta-test-secret";
 const payloadFor = (...ids) => ({
@@ -247,4 +247,16 @@ test('long Meta service question names retain actual answers as requested servic
   });
   assert.deepEqual(saved.requestedServices,['House','outside_windows']);
   assert.match(saved.customer.notes,/House, outside_windows/);
+});
+
+
+test('written Meta requests survive commas, line breaks and custom message aliases', () => {
+  for (const name of ['what_would_you_like_cleaned', 'message', 'job_details']) {
+    const answer = 'Please wash the house, windows and garage outside.\n2 levels; call after 10:30.';
+    const payload = normalizeMetaLead({id:'written',field_data:[{name,values:[answer]}]}, 'business-a');
+    assert.deepEqual(payload.requestedServices, [answer]);
+    assert.match(payload.customer.notes, /2 levels; call after 10:30/);
+    assert.equal(payload.business_id, 'business-a');
+  }
+  assert.deepEqual(normalizeMetaLead({id:'empty',field_data:[{name:'list_cleaning_services_(house,_roof)',values:['']},{name:'urgency',values:['next_week']}]},'business-a').requestedServices, []);
 });

@@ -510,3 +510,10 @@ main {
 .btn.quote-launch-btn:hover{background:#085f54;border-color:#085f54;box-shadow:0 3px 9px #0b766725}
 .btn.quote-launch-btn:focus-visible{outline:3px solid #4ba99c;outline-offset:3px}
 .quote-launch-btn svg{flex:none}
+
+/* Upstream services remain legible on job cards, tables and narrow screens. */
+.tk-sm8-pricing{margin:14px 0;padding:14px;border:1px solid var(--line,#dbe5e8);border-radius:10px;background:var(--surface-2,#f5f8f8);font-size:13px;line-height:1.5;min-width:0}
+.tk-sm8-pricing-heading{display:flex;flex-wrap:wrap;gap:5px 12px;justify-content:space-between}.tk-sm8-pricing-heading small,.tk-sm8-pricing-note,.tk-sm8-pricing li small,.tk-sm8-pricing-total small{display:block;font-size:11px;font-weight:400;color:var(--ink-soft,#53636b)}
+.tk-sm8-pricing ul{list-style:none;margin:9px 0;padding:0;display:grid;gap:7px}.tk-sm8-pricing li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;padding:5px 0;border-bottom:1px solid var(--line,#dbe5e8)}.tk-sm8-pricing li span{overflow-wrap:anywhere}.tk-sm8-pricing li>strong{text-align:right;font-size:12px}.tk-sm8-pricing-total{display:flex;justify-content:space-between;gap:12px;align-items:baseline}.tk-sm8-pricing.compact{padding:10px;margin:9px 0;font-size:12px}.tk-sm8-pricing.compact .tk-sm8-pricing-heading strong{font-size:11px;letter-spacing:.02em}.tk-sm8-pricing-note{margin:4px 0}
+
+.tk-lead-request{margin:10px 0;padding:10px 12px;border-left:3px solid var(--accent,var(--teal,#138278));background:var(--surface-2,#f5f8f8);border-radius:0 8px 8px 0;font-size:13px;line-height:1.55;min-width:0}.tk-lead-request>strong{font-size:11px;color:var(--ink-soft,#53636b)}.tk-lead-request p{margin:4px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--ink,#182c35)}

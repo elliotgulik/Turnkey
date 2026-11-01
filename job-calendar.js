@@ -874,6 +874,11 @@
     };
   }
 
+  function renderServiceM8Pricing(record) {
+    // Display the upstream snapshot verbatim; TurnKey rates never fill gaps.
+    return record ? root.TK_SM8_PRICING?.render?.(record, { compact: false }) || '' : '';
+  }
+
   function openServiceM8Detail(ev) {
     const details = ev.details || {};
     const localJob = details.jobUuid && state.jobs.find((job) => serviceM8JobId(job) === details.jobUuid);
@@ -887,6 +892,7 @@
     } else if (weather?.type === 'historical') {
       weatherHtml = `<div class="tkjc-weather-summary historical"><strong>Historical average · ${esc(weather.month)}</strong><span>${esc(weather.avgHighTemp)}°C average high · rain on ${esc(weather.rainDayPct)}% of days</span><small>Planning guide only — not a forecast for this date.</small></div>`;
     }
+    const pricingHtml = renderServiceM8Pricing(ev) || renderServiceM8Pricing(localJob);
     const contactName = details.personName || details.companyName || ev.title || 'ServiceM8 booking';
     const lineItems = details.lineItems?.length
       ? details.lineItems.map(item => `<li>${esc(item.name)}${item.quantity ? ` <span>× ${esc(item.quantity)}</span>` : ''}</li>`).join('')
@@ -897,7 +903,7 @@
       <div class="tkjc-dispatch-grid">
         <section><h4>Job address</h4><p>${details.address ? esc(details.address) : 'No address supplied by ServiceM8'}</p></section>
         <section><h4>Contact</h4><p>${details.email ? `<a href="mailto:${esc(details.email)}">${esc(details.email)}</a>` : 'No email on file'}<br>${details.phone ? `<a href="tel:${esc(details.phone.replace(/[^+\d]/g, ''))}">${esc(details.phone)}</a>` : 'No phone on file'}</p></section>
-        <section><h4>Services</h4>${lineItems ? `<ul>${lineItems}</ul>` : '<p>No service line items returned.</p>'}</section>
+        ${pricingHtml || `<section><h4>Services</h4>${lineItems ? `<ul>${lineItems}</ul>` : '<p>No service line items returned.</p>'}<p class="tkjc-detail-muted">ServiceM8 prices unavailable.</p></section>`}
         <section><h4>Assigned team</h4><p>${details.assignedStaff?.length ? details.assignedStaff.map(esc).join(', ') : details.staffAssigned ? 'Assigned in ServiceM8 (staff name unavailable — reconnect with staff read access).' : 'ServiceM8 has no assigned staff for this booking.'}</p></section>
         <section class="tkjc-dispatch-weather"><h4>Weather for job day</h4>${weatherHtml}</section>
       </div>
@@ -977,6 +983,7 @@
       <div class="tkjc-dialog" role="dialog" aria-modal="true" aria-labelledby="tkjc-booking-title">
         <h3 id="tkjc-booking-title">${job ? esc(jobTitle(job)) : 'Book a job'}</h3>
         ${job?.details?.serviceM8Booking ? '<p>This booking is managed in ServiceM8 and synced to TurnKey. Change its date or crew in ServiceM8.</p>' : ''}
+        ${job && (serviceM8JobId(job) || job.details?.serviceM8Booking) ? renderServiceM8Pricing(job) || '<p class="tkjc-detail-muted">ServiceM8 prices unavailable.</p>' : ''}
         ${!job ? `<label>Job<select data-tkjc-field="jobId" ${readOnly ? 'disabled' : ''}>
             <option value="">— choose a job —</option>
             ${unscheduledOptions.map((j) => `<option value="${esc(j.id)}">${esc(jobTitle(j))}${(j.customer || {}).address ? ' — ' + esc(j.customer.address) : ''}</option>`).join('')}

@@ -47,6 +47,7 @@ const { chromium } = require('playwright'),
     await page.route('**/*', (r) => (r.request().url().startsWith(base) ? r.continue() : r.abort()));
     await page.goto(base + '/tests/fixtures/job-calendar.html');
     await page.addStyleTag({ path: path.resolve('job-calendar.css') });
+    await page.addScriptTag({ path: path.resolve('servicem8-pricing-view.js') });
     if(process.env.TURNKEY_CALENDAR_SDK)await page.addScriptTag({path:process.env.TURNKEY_CALENDAR_SDK});
 
     await page.evaluate(() => {
@@ -214,13 +215,19 @@ const { chromium } = require('playwright'),
     await page.evaluate(async () => {
       const dispatch = fixture.events.find(e => e.id === 'sm8-booking');
       dispatch.details.jobUuid = 'sm8-local-match';
+      dispatch.details.pricing = {items:[
+        {name:'House wash <actual>',quantity:3,unitPrice:50,lineTotal:131.75},
+        {name:'Free inspection',quantity:1,unitPrice:0,lineTotal:0},
+        {name:'Roof price unknown',quantity:2,unitPrice:25,lineTotal:null}
+      ],total:777.23,currency:'NZD',taxLabel:'GST inclusive',lineTaxLabel:'Lines exclude GST',updatedAt:'2026-07-14T00:00:00Z'};
       fixture.events.push({...structuredClone(dispatch),id:'sm8-second-day',external_id:'activity-2',
         start_time:'2026-07-21T01:00:00.000Z',end_time:'2026-07-21T02:00:00.000Z'});
       fixture.events.push({...structuredClone(dispatch),id:'sm8-second-staff',external_id:'activity-3',
         details:{...structuredClone(dispatch.details),assignedStaff:['Jordan Lee','Second crew member'],assignedStaffIds:['servicem8:remote-1','servicem8:remote-2']}});
       fixture.staff.push({id:'servicem8:remote-2',name:'Second crew member',source:'servicem8',role:'servicem8',readOnly:true});
       const local = {id:'local-import',status:'scheduled',scheduled_date:'2026-07-20',customer:{name:'Imported local job'},
-        details:{serviceM8JobUuid:'sm8-local-match',serviceM8Booking:{startAt:dispatch.start_time,endAt:dispatch.end_time}}};
+        details:{serviceM8JobUuid:'sm8-local-match',serviceM8Booking:{startAt:dispatch.start_time,endAt:dispatch.end_time},
+          pricing:{...structuredClone(dispatch.details.pricing),total:222.22}}};
       fixture.jobs.push(local,{...structuredClone(local),id:'unmatched-import',customer:{name:'Unmatched imported job'},
         details:{...structuredClone(local.details),serviceM8JobUuid:'sm8-no-dispatch'}});
       window.records = [{id:'record-ui-id',jobId:'local-import',customerId:'customer-id'}];
@@ -247,11 +254,52 @@ const { chromium } = require('playwright'),
     await openDispatch();
     assert.equal(await page.locator('#tkjc-event-overlay input, #tkjc-event-overlay select').count(), 0, 'remote booking dates stay read-only');
     assert.match(await page.locator('#tkjc-event-overlay').innerText(), /Jordan Lee/);
+    const upstreamPanel = page.locator('#tkjc-event-overlay .tk-sm8-pricing');
+    assert.equal(await upstreamPanel.count(), 1, 'pricing panel replaces the old service-name list');
+    const pricingText = await upstreamPanel.innerText();
+    assert.match(pricingText, /House wash <actual>/);
+    assert.match(pricingText, /Qty 3.*50\.00 each/);
+    assert.match(pricingText, /131\.75/);
+    assert.match(pricingText, /777\.23/);
+    assert.match(pricingText, /GST inclusive/);
+    assert.match(pricingText, /Lines exclude GST/);
+    assert.match(pricingText, /Updated/);
+    assert.match(await upstreamPanel.locator('li').nth(1).innerText(), /0\.00/);
+    assert.match(await upstreamPanel.locator('li').nth(2).innerText(), /Price unavailable/);
+    assert.equal(await upstreamPanel.locator('actual').count(), 0, 'service names are escaped by the shared helper');
     await page.click('[data-tkjc="open-record"]');
     assert.equal(await page.evaluate(() => openedRecord), 'record-ui-id', 'openDetail receives the app record id, not job id');
     await openDispatch();
     await page.click('[data-tkjc="open-customer"]');
     assert.equal(await page.evaluate(() => openedCustomer), 'record-ui-id', 'customer profile expects the app record id');
+    // Linked local booking uses its own supplied snapshot, including a
+    // top-level record snapshot. Unknown totals are never reconstructed.
+    await page.locator('[data-tkjc-job="local-import"]').click();
+    assert.match(await page.locator('#tkjc-booking-overlay .tk-sm8-pricing').innerText(), /222\.22/);
+    assert.equal(await page.locator('#tkjc-booking-overlay [data-tkjc-field="date"]').isDisabled(), true);
+    assert.equal(await page.locator('#tkjc-booking-overlay [data-tkjc="save"]').count(), 0);
+    await page.click('#tkjc-booking-overlay [data-tkjc="cancel"]');
+    await page.evaluate(async () => {
+      fixture.jobs.find(j => j.id === 'local-import').serviceM8Pricing = {items:[{name:'Unknown-priced work',quantity:2,unitPrice:25,lineTotal:null}],total:null,currency:'NZD'};
+      fixture.events.filter(e => e.source === 'servicem8').forEach(e => {e.details.pricing = {items:[],total:null,currency:'NZD'};});
+      await TK_JOB_CALENDAR.refresh();
+    });
+    await page.locator('[data-tkjc-job="local-import"]').click();
+    assert.match(await page.locator('#tkjc-booking-overlay .tk-sm8-pricing').innerText(), /Price unavailable/);
+    assert.equal(await page.locator('#tkjc-booking-overlay .tk-sm8-pricing-total strong').innerText(), 'Unavailable');
+    await page.click('#tkjc-booking-overlay [data-tkjc="cancel"]');
+    await openDispatch();
+    assert.match(await page.locator('#tkjc-event-overlay .tk-sm8-pricing').innerText(), /has not supplied itemised prices/);
+    assert.equal(await page.locator('#tkjc-event-overlay .tk-sm8-pricing-total strong').innerText(), 'Unavailable');
+    await page.click('#tkjc-event-overlay [data-tkjc="close"]');
+    // A snapshot absent from an event may still be available on its linked job.
+    await page.evaluate(async () => {
+      fixture.events.filter(e => e.source === 'servicem8').forEach(e => {delete e.details.pricing;});
+      await TK_JOB_CALENDAR.refresh();
+    });
+    await openDispatch();
+    assert.match(await page.locator('#tkjc-event-overlay .tk-sm8-pricing').innerText(), /Unknown-priced work/);
+    await page.click('#tkjc-event-overlay [data-tkjc="close"]');
     await page.evaluate(() => {window.records = [];window.openedRecord = null;});
     await openDispatch();
     await page.click('[data-tkjc="open-record"]');
@@ -266,6 +314,7 @@ const { chromium } = require('playwright'),
     });
     await openDispatch();
     assert.equal(await page.locator('[data-tkjc="open-record"], [data-tkjc="open-customer"]').count(), 0, 'unmatched dispatch has no local record actions');
+    assert.match(await page.locator('#tkjc-event-overlay').innerText(), /ServiceM8 prices unavailable/);
     await page.click('#tkjc-event-overlay [data-tkjc="close"]');
 
     /* ===== 2. mobile More sheet gets a Calendar row ===== */

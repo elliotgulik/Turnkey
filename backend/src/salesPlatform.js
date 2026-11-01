@@ -23,6 +23,11 @@ const fail = (message, status = 400) =>
 // Canonical hashing survives JSONB key ordering. Approval metadata is not quote content.
 const canonical = (v) => JSON.stringify(v, (_, value) => value && typeof value === "object" && !Array.isArray(value)
   ? Object.fromEntries(Object.keys(value).sort().map(k => [k, value[k]])) : value);
+const quoteDetails = value => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const { serviceM8Pricing, ...details } = value;
+  return details;
+};
 const pick = (value, keys) => Object.fromEntries(keys.map(key => [key, value?.[key]]));
 const zoneParts = (date, timeZone) => Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
   timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
@@ -72,7 +77,33 @@ async function serviceM8OptionalList(listRemote, businessId, resource, filter, g
     throw error;
   }
 }
-async function serviceM8DispatchDetails({ call, listRemote, businessId, job, activity, generation, cache }) {
+// JobMaterial.price is the documented ex-tax SELLING unit price. Neither
+// cost/displayed_cost nor a guessed GST rate may enter this display snapshot.
+const serviceM8Number = value => {
+  if (typeof value !== "number" && typeof value !== "string") return null;
+  if (typeof value === "string" && !/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(value.trim())) return null;
+  const number = Number(value);
+  return Number.isFinite(number) && Math.abs(number) <= 1e12 ? number : null;
+};
+export function serviceM8PricingSnapshot(job, materials, { currency, updatedAt = new Date().toISOString() } = {}) {
+  const items = (Array.isArray(materials) ? materials : []).filter(item => item &&
+    (item.active == null || [1, "1", true].includes(item.active))).sort((a, b) =>
+      (serviceM8Number(a.sort_order) ?? 0) - (serviceM8Number(b.sort_order) ?? 0)).map(item => {
+    const quantity = serviceM8Number(item.quantity);
+    const price = serviceM8Number(item.price);
+    // A displayed amount can substitute only when explicitly ex-tax. Mixed
+    // inclusive/exclusive line amounts would make a single tax label misleading.
+    const exclusive = [false, 0, "0", "false"].includes(item.displayed_amount_is_tax_inclusive);
+    const unitPrice = price ?? (exclusive ? serviceM8Number(item.displayed_amount) : null);
+    const product = quantity !== null && unitPrice !== null ? quantity * unitPrice : null;
+    return { name: String(item.name || "").trim().slice(0, 200), quantity, unitPrice,
+      lineTotal: product !== null && Number.isFinite(product) ? Number(product.toPrecision(15)) : null };
+  }).filter(item => item.name);
+  return { items, total: serviceM8Number(job.total_invoice_amount),
+    currency: typeof currency === "string" && /^[A-Z]{3}$/.test(currency) ? currency : null,
+    lineTaxLabel: "Line prices exclude tax", taxLabel: "Tax basis not specified", updatedAt, jobUuid: SM.uuid(job.uuid) ? job.uuid : null };
+}
+async function serviceM8DispatchDetails({ call, listRemote, businessId, job, activity, generation, cache, vendor }) {
   const staffIds = [...new Set([activity.staff_uuid, job.staff_uuid, job.assigned_staff_uuid].filter(SM.uuid))];
   const [company, contacts, materials, assignedStaff] = await Promise.all([
     cache ? cache.company.get(job.company_uuid) : serviceM8OptionalRecord(call, businessId, "company", job.company_uuid, generation),
@@ -95,6 +126,7 @@ async function serviceM8DispatchDetails({ call, listRemote, businessId, job, act
   const staffNames = assignedStaff.map(staff => [staff?.first, staff?.last].filter(Boolean).join(" ").trim()).filter(Boolean);
   const services = serviceNames.length ? serviceNames.map(item => item.name) :
     String(job.job_description || job.job_name || "").split(/\r?\n/).map(line => line.trim()).filter(Boolean).slice(0, 20);
+  const pricing = serviceM8PricingSnapshot(job, materials, { currency: (cache?.vendor || vendor)?.currency });
   return {
     personName: personName.slice(0, 160),
     jobUuid: String(job.uuid || activity.job_uuid || "").slice(0, 80),
@@ -104,8 +136,8 @@ async function serviceM8DispatchDetails({ call, listRemote, businessId, job, act
     address: [job.job_address, job.job_suburb, job.job_postcode].filter(Boolean).join(", ").slice(0, 500),
     services,
     lineItems: serviceNames,
-    serviceM8LineItems: materials.map(item => ({ name: String(item.name || "").slice(0, 200), quantity: item.quantity ?? null,
-      amount: item.amount ?? null, price: item.price ?? null })),
+    serviceM8LineItems: pricing.items,
+    pricing,
     assignedStaffIds: staffIds.map(id => "servicem8:" + id),
     assignedStaff: [...new Set(staffNames)].map(name => name.slice(0, 120)),
     staffAssigned: staffIds.length > 0,
@@ -868,7 +900,7 @@ export function installSalesPlatform(
           ...(typeof job.details?.gstRegistered !== "boolean" ? { missingFields: ["gstRegistered"] } : {}) });
       if (!version) throw fail("Save the quote to create a version before transferring.", 409);
       if (mode === "quote" && (Number(version.snapshot.amount) !== Number(q.amount) ||
-          canonical(version.snapshot.details) !== canonical(job.details)))
+          canonical(quoteDetails(version.snapshot.details)) !== canonical(quoteDetails(job.details))))
         throw fail("Saved quote version is out of date. Save the quote again.", 409);
       SM.approvedLines(version.snapshot, { mode });
       await enqueue(req.businessId, "handoff", [job.id, c.generation, mode, version.fingerprint].join(":"),
@@ -1016,7 +1048,7 @@ export function installSalesPlatform(
         return res.type("text").send(req.body.challenge);
       }
       if (
-        !["job", "jobpayment", "jobactivity"].includes(req.body.object) ||
+        !["job", "jobpayment", "jobactivity", "jobmaterial"].includes(req.body.object) ||
         !Array.isArray(req.body.entry) ||
         req.body.entry.length !== 1
       )
@@ -1151,9 +1183,9 @@ export function installSalesPlatform(
           s.customer?.id !== job.customer_id || s.customer?.business_id !== task.business_id ||
           s.business?.id !== task.business_id || !s.customer?.name || !s.business?.name ||
           (typeof job.details?.gstRegistered === "boolean"
-            ? s.gstProvenance !== "saved-quote" || canonical(s.details) !== canonical(job.details)
+            ? s.gstProvenance !== "saved-quote" || canonical(quoteDetails(s.details)) !== canonical(quoteDetails(job.details))
             : s.gstProvenance !== "explicit-review" || typeof s.details?.gstRegistered !== "boolean" ||
-              canonical(s.details) !== canonical({ ...job.details, gstRegistered: s.details.gstRegistered })) ||
+              canonical(quoteDetails(s.details)) !== canonical(quoteDetails({ ...job.details, gstRegistered: s.details.gstRegistered }))) ||
           contentFingerprint(s) !== task.payload.fingerprint ||
           SM.hash(canonical(s)) !== task.payload.snapshotHash)
         throw fail("Legacy review no longer matches the accepted quote. Review its current amount and services again.", 409);
@@ -1439,7 +1471,7 @@ export function installSalesPlatform(
       }
       return groups;
     };
-    const cache = { company: new Map(companies.map(row => [row.uuid, row])),
+    const cache = { vendor, company: new Map(companies.map(row => [row.uuid, row])),
       staff: new Map(staff.map(row => [row.uuid, row])), contacts: grouped(contacts, "company_uuid"), materials: grouped(materials, "job_uuid") };
     for (const row of staff) {
       await checkpoint();
@@ -1450,6 +1482,8 @@ export function installSalesPlatform(
         synced_at: new Date().toISOString() }, { onConflict: "business_id,connection_generation,object_type,local_id" }));
     }
     const byJob = grouped(activities, "job_uuid");
+    // Local profiles/pricing must not wait behind historical event writes.
+    await reconcileJobs(businessId, c, jobs, checkpoint, { byJob, timeZone, cache });
     for (const job of jobs) {
       await checkpoint();
       if (!SM.uuid(job.uuid)) continue;
@@ -1460,8 +1494,9 @@ export function installSalesPlatform(
       for (const event of previous || []) {
         await checkpoint();
         if (job.status === "Completed") {
-          if (event.details?.status !== "Completed") await unwrap(db.from("calendar_events")
-            .update({ details: { ...(event.details || {}), status: "Completed" } }).eq("business_id", businessId)
+          await unwrap(db.from("calendar_events")
+            .update({ details: { ...(event.details || {}), status: "Completed",
+              pricing: serviceM8PricingSnapshot(job, cache.materials.get(job.uuid) || [], { currency: vendor?.currency }) } }).eq("business_id", businessId)
             .eq("source", "servicem8").eq("external_id", event.external_id));
         } else if (["Work Order", "Quote", "Unsuccessful", "Cancelled", "Canceled"].includes(job.status) &&
             event.details?.status !== "Completed" && !activeIds.has(event.external_id)) {
@@ -1471,7 +1506,7 @@ export function installSalesPlatform(
         }
       }
     }
-    await reconcileJobs(businessId, c, jobs, checkpoint, { byJob, timeZone, cache });
+
     await checkpoint(true);
     // All event, directory and reconciliation writes must succeed before stamping.
     const saved = await unwrap(db.from("servicem8_connections").update({ last_sync_at: new Date().toISOString(),
@@ -1566,6 +1601,7 @@ export function installSalesPlatform(
         p_schedule_permission_missing: job.status === "Completed" }));
       const profile = detailByJob.get(job.uuid) || await serviceM8DispatchDetails({ call, listRemote, businessId, job,
         activity: {}, generation: c.generation, cache });
+      await saveServiceM8Pricing(businessId, localId, profile.pricing);
       const mapping = { business_id: businessId, connection_generation: c.generation, object_type: "job", local_id: localId,
         external_uuid: job.uuid, snapshot: { ...snapshot, profile, serviceM8LineItems: profile.serviceM8LineItems,
           status: job.status, completed: job.status === "Completed",
@@ -1652,7 +1688,23 @@ export function installSalesPlatform(
     }
     return clearCompleted;
   }
-  async function persistDispatch(businessId, c, job, activities, timeZone, cache, checkpoint = async () => {}) {
+  async function saveServiceM8Pricing(businessId, localId, pricing) {
+    if (!SM.uuid(localId)) return;
+    // Optimistic compare-and-swap keeps concurrent browser notes/quote edits.
+    // Only the backend-owned display key is added; original services/total and
+    // accepted quote/version rows are never rewritten by pricing sync.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const row = await unwrap(db.from("jobs").select("id,details,updated_at").eq("business_id", businessId).eq("id", localId).maybeSingle());
+      if (!row) return;
+      let update = db.from("jobs").update({ details: { ...(row.details || {}), serviceM8Pricing: pricing } })
+        .eq("business_id", businessId).eq("id", localId);
+      if (row.updated_at) update = update.eq("updated_at", row.updated_at);
+      const saved = await unwrap(update.select("id"));
+      if (saved.length) return;
+    }
+    throw fail("Job changed while ServiceM8 prices were being saved. Background sync will retry.", 409);
+  }
+  async function persistDispatch(businessId, c, job, activities, timeZone, cache, checkpoint = async () => {}, refresh) {
     const completed = job.status === "Completed";
     if (!completed && (job.status !== "Work Order" || (job.active != null && Number(job.active) !== 1))) return new Set();
     const saved = new Set(), lookups = new Map();
@@ -1661,7 +1713,8 @@ export function installSalesPlatform(
       return lookups.get(key);
     };
     const detailCall = (business, path, options) => memo(path, () => call(business, path, options));
-    const detailList = (business, path, generation) => memo(path, () => listRemote(business, path, generation));
+    const detailList = (business, path, generation) => refresh && path.startsWith("/jobmaterial.json")
+      ? Promise.resolve(refresh.materials) : memo(path, () => listRemote(business, path, generation));
     for (const activity of activities) {
       if (!SM.uuid(activity.uuid) || !["1", 1, true].includes(activity.activity_was_scheduled)) continue;
       if (!completed && activity.active != null && !["1", 1, true].includes(activity.active)) continue;
@@ -1674,7 +1727,7 @@ export function installSalesPlatform(
       // invent a historical booking date; use a valid completion/edit instant.
       const parse = value => serviceM8WallClock(/^\d{4}-\d{2}-\d{2}$/.test(String(value || "")) ? value + " 00:00:00" : value, timeZone);
       const start = parse(job.completion_date) || parse(job.edit_date);
-      const details = await serviceM8DispatchDetails({ call: detailCall, listRemote: detailList, businessId, job, activity: {}, generation: c.generation, cache });
+      const details = await serviceM8DispatchDetails({ call: detailCall, listRemote: detailList, businessId, job, activity: {}, generation: c.generation, cache, vendor: refresh?.vendor });
       await unwrap(db.from("external_object_mappings").upsert({ business_id: businessId, connection_generation: c.generation,
         object_type: "completed_job", local_id: "servicem8:" + job.uuid, external_uuid: job.uuid,
         snapshot: { ...details, source: "completed_summary", completedAt: start?.toISOString() || null }, synced_at: new Date().toISOString() },
@@ -1684,7 +1737,7 @@ export function installSalesPlatform(
     return saved;
     async function save(activity, start, end, externalId, source, cachedDetails) {
       await checkpoint();
-      const details = cachedDetails || await serviceM8DispatchDetails({ call: detailCall, listRemote: detailList, businessId, job, activity, generation: c.generation, cache });
+      const details = cachedDetails || await serviceM8DispatchDetails({ call: detailCall, listRemote: detailList, businessId, job, activity, generation: c.generation, cache, vendor: refresh?.vendor });
       details.source = source;
       const title = [details.personName, job.job_description || job.job_name].filter(Boolean).join(" · ");
       await unwrap(db.rpc("sync_servicem8_dispatch_event", { p_business_id: businessId, p_external_id: externalId,
@@ -1719,17 +1772,19 @@ export function installSalesPlatform(
       if (error.status !== 403) throw error;
       dispatchPermissionMissing = true;
     }
+    const materials = await serviceM8OptionalList(listRemote, businessId, "jobmaterial", `job_uuid eq '${id}' and active eq 1`, c.generation);
+    let vendor = null;
     if (!dispatchPermissionMissing || job.status === "Completed") {
       const needsDispatch = dispatchActivities.length || (job.status === "Completed" && (job.completion_date || job.edit_date));
-      const vendor = needsDispatch ? serviceM8Record((await call(businessId, "/vendor.json", { generation: c.generation })).data) : null;
+      vendor = needsDispatch ? serviceM8Record((await call(businessId, "/vendor.json", { generation: c.generation })).data) : null;
       timeZone = vendor?.timezone_name || "UTC";
-      const activeIds = await persistDispatch(businessId, c, job, dispatchActivities, timeZone);
+      const activeIds = await persistDispatch(businessId, c, job, dispatchActivities, timeZone, undefined, undefined, { materials, vendor });
       const existing = await unwrap(db.from("calendar_events").select("external_id,details").eq("business_id", businessId)
         .eq("source", "servicem8").filter("details->>jobUuid", "eq", id));
       for (const event of existing || []) {
         if (clearCompleted && event.external_id === "completed:" + id) continue;
         if (job.status === "Completed") {
-          await unwrap(db.from("calendar_events").update({ details: { ...(event.details || {}), status: "Completed" } })
+          await unwrap(db.from("calendar_events").update({ details: { ...(event.details || {}), status: "Completed", pricing: serviceM8PricingSnapshot(job, materials, { currency: vendor?.currency }) } })
             .eq("business_id", businessId).eq("source", "servicem8").eq("external_id", event.external_id));
         } else if (event.details?.status !== "Completed" && !activeIds.has(event.external_id)) {
           await unwrap(db.rpc("sync_servicem8_dispatch_event", { p_business_id: businessId, p_external_id: event.external_id, p_event: null }));
@@ -1743,6 +1798,8 @@ export function installSalesPlatform(
       map = links.get(job.uuid) || null;
     }
     if (!map) return;
+    const pricing = serviceM8PricingSnapshot(job, materials, { currency: vendor?.currency });
+    await saveServiceM8Pricing(businessId, map.local_id, pricing);
     let booking = null;
     let schedulePermissionMissing = dispatchPermissionMissing;
     try {
@@ -1774,6 +1831,7 @@ export function installSalesPlatform(
     }
     const snapshot = {
       ...(map.snapshot || {}),
+      pricing,
       status: job.status,
       booking,
       schedulePermissionMissing,
@@ -1887,7 +1945,17 @@ export function installSalesPlatform(
               });
           } else if (task.kind === "webhook") {
             let id = task.payload.uuid;
-            if (task.payload.object === "jobpayment") {
+            if (task.payload.object === "jobmaterial") {
+              try {
+                const material = serviceM8Record((await call(task.business_id, "/jobmaterial/" + id + ".json")).data);
+                id = material?.job_uuid;
+              } catch (error) {
+                if (error.status !== 404) throw error;
+                // A deleted material has no parent in the payload. The durable
+                // 15-minute full snapshot removes it from all pricing displays.
+                id = null;
+              }
+            } else if (task.payload.object === "jobpayment") {
               const pay = (
                 await call(task.business_id, "/jobpayment/" + id + ".json")
               ).data;
@@ -1916,7 +1984,7 @@ export function installSalesPlatform(
                 id = activity.job_uuid || null;
               }
             }
-            if (id) await refreshRemote(task.business_id, id, { allowUnmappedDispatch: ["job", "jobactivity", "jobpayment"].includes(task.payload.object) });
+            if (id) await refreshRemote(task.business_id, id, { allowUnmappedDispatch: ["job", "jobactivity", "jobpayment", "jobmaterial"].includes(task.payload.object) });
           } else throw fail("Unknown integration task.");
           await unwrap(
             db
