@@ -38,8 +38,8 @@
   function hasServiceWords(answer) {
     // Inspect the ANSWER only. A question may enumerate every possible service.
     const text = answer.replace(/_/g, ' ');
-    const action = /\b(?:wash(?:ing)?|clean(?:ing|ed)?|treat(?:ment|ing)?|clear(?:ing)?|water\s*blast(?:ing)?|pressure\s*wash(?:ing)?)\b/i;
-    const property = /\b(?:house|home|exterior|roof|windows?|gutters?|driveways?|patios?|decks?|fences?|pavers?|concrete|solar\s+panels?|spiders?)\b/i;
+    const action = /\b(?:wash(?:ing)?|clean(?:ing|ed)?|treat(?:ment|ing)?|clear(?:ing)?|quote|quoting|blast(?:ing)?|remov(?:e|al|ing)|water\s*blast(?:ing)?|pressure\s*wash(?:ing)?)\b/i;
+    const property = /\b(?:house|home|exterior|roof|windows?|gutters?|driveways?|patios?|decks?|fences?|pavers?|concrete|solar\s+panels?|spiders?|moss|mould|mold|balustrades?)\b/i;
     return (action.test(text) && property.test(text)) || /\b(?:pressure\s*wash(?:ing)?|water\s*blast(?:ing)?)\b/i.test(text);
   }
   function answerRow(key, value) {

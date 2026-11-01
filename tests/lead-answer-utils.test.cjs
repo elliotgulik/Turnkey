@@ -122,3 +122,11 @@ test('standalone exact booking provenance is hidden without rewriting written an
   ]);
   assert.deepEqual(U.servicesFromFields({service:answer}), [answer]);
 });
+
+
+test('written Wix requests for window quotes or moss removal remain readable whole answers',()=>{
+  const reader=require('../lead-answer-utils.js');
+  for(const answer of ['Hi, house would be lower floor only. interested in quote on both window options, would like glass balustrade included.', 'Moss removal on roof please']){
+    assert.deepEqual(reader.servicesFromNotes(answer+' · Submitted via online quote tool'),[answer]);
+  }
+});

@@ -14,7 +14,7 @@
       .map(x=>typeof x==='string'?x:x?.name||x?.label).filter(x=>typeof x==='string'&&x.trim()).map(x=>x.trim()))];
   }
   function render(r){const answers=requests(r);if(!answers.length)return '';
-    return `<section class="tk-lead-request" aria-label="Customer requested services"><strong>Customer requested</strong>${answers.map(answer=>`<p>${esc(answer)}</p>`).join('')}</section>`;
+    return `<section class="tk-lead-request" aria-label="Customer requested services"><strong>Customer requested</strong>${answers.map(answer=>`<p>${esc(answer.replace(/_/g,' '))}</p>`).join('')}</section>`;
   }
   root.TK_LEAD_REQUEST={requests,render};
   if(typeof module!=='undefined'&&module.exports)module.exports=root.TK_LEAD_REQUEST;
