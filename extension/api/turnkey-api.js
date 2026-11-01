@@ -192,21 +192,41 @@ export class TurnKeyClient {
   }
 
   async _salesBackend(path, businessId, options = {}) {
-    const profile=await this.getProfile();
-    if(profile.business_id!==businessId)throw new Error('The extension is signed in to a different business. Reconnect before transferring this quote.');
+    const profile=await (path.startsWith('/api/pricing-learning/')?this.getRequiredProfile():this.getProfile());
+    if(profile.business_id!==businessId)throw new Error('The extension is signed in to a different business. Reconnect before continuing.');
     if(!this.cfg.backendUrl)throw new Error('TurnKey backend is not configured. Your quote is still saved.');
     if(typeof chrome!=='undefined'&&chrome.permissions){
       const granted=await chrome.permissions.contains({origins:[new URL(this.cfg.backendUrl).origin+'/*']});
-      if(!granted)throw new Error('Open the TurnKey extension icon and click Enable ServiceM8 transfers, then retry here.');
+      if(!granted)throw new Error('Open the TurnKey extension icon and enable backend access for quote learning and ServiceM8, then retry here.');
     }
     await this._ensureFreshSession();
+    options.signal?.throwIfAborted();
     const res=await fetch(this.cfg.backendUrl.replace(/\/$/,'')+path,{
-      ...options,headers:{Authorization:'Bearer '+this.session.accessToken,'Content-Type':'application/json'},signal:AbortSignal.timeout(30000)
+      ...options,headers:{Authorization:'Bearer '+this.session.accessToken,'Content-Type':'application/json'},signal:options.signal||AbortSignal.timeout(30000)
     });
     const text=await res.text();let body={};
-    try{body=text.trim()?JSON.parse(text):{}}catch{throw new Error('Could not read the transfer response. Your quote remains saved; retry safely.');}
-    if(!res.ok)throw new Error(body.error||'Could not transfer the quote. Your TurnKey draft is still saved.');
+    try{body=text.trim()?JSON.parse(text):{}}catch{throw new Error('Could not read the backend response. Your quote remains saved; retry safely.');}
+    if(!res.ok)throw new Error(body.error||'Backend request failed. Your TurnKey draft is still saved.');
     return body;
+  }
+
+  async _pricingLearningBackend(path,businessId,options={},deadlineMs=1500){
+    const controller=new AbortController();let timer;
+    try {
+      return await Promise.race([
+        this._salesBackend(path,businessId,{...options,signal:controller.signal}),
+        new Promise((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(new Error('Quote learning timed out. Continue with base pricing or retry learning for your saved quote.'));},deadlineMs);})
+      ]);
+    }finally{clearTimeout(timer);}
+  }
+
+  async getPricingLearningState(businessId){
+    return this._pricingLearningBackend('/api/pricing-learning/state',businessId);
+  }
+
+  async submitPricingLearning(businessId,payload){
+    if(!payload?.quoteKey||!payload?.jobId||!Array.isArray(payload.lines))throw new Error('Missing saved quote learning context.');
+    return this._pricingLearningBackend('/api/pricing-learning/observations',businessId,{method:'POST',body:JSON.stringify(payload)},2500);
   }
 
   async sendQuoteToServiceM8(businessId,jobId){

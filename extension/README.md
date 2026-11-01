@@ -1,3 +1,13 @@
+## Version 0.2.9: editable service prices and quote learning
+
+Edit the final GST-inclusive dollar amount for each service independently. The customer total is their exact sum. Manual prices survive access, height, travel and margin changes. Entering a quote total requires **Distribute entered total across services**; this explicitly replaces line prices. **Discard entered total** keeps them, and service/all-service reset buttons restore recommendations.
+
+Each service shows configured pricing, its target-margin floor, base, learned dollar adjustment, recommendation, comparable quote count and confidence. Choose an optional override reason; unexplained edits and discounts do not train prices. Verified quantity corrections require an explicit measurement reason and **Apply verified quantity**. Learned measurement hints never change quantities or geometry automatically.
+
+Learning uses the connected business’s authenticated backend. Open the extension popup and **Enable quote learning & ServiceM8** if backend access has not yet been granted. If learning is unavailable, base pricing and manual edits still work. Learning is submitted after the quote is saved; a failed submission shows a warning and a safe retry button on the saved-quote screen. Manage learning settings and resets in TurnKey.
+
+Build the downloadable ZIP with `node extension/scripts/pack.cjs`; this refreshes all vendored engines from the root source and writes `extension/dist/turnkey-earth-extension-0.2.9.zip`. Unzip, load the folder containing `manifest.json`, and refresh Earth and TurnKey. Main publishes the download in the site's assets.
+
 ## Version 0.2.8: quote levels and access settings
 
 Instant Quote lets you set house levels per house-wash line and site access difficulty for the whole job. Both feed the recommended price and internal labour estimate, and are saved on the TurnKey draft. Itemised prices and internal expenses are separated into clearer sections. An unresolved address is labelled **Location pin**; the pin remains on the map.
@@ -27,7 +37,7 @@ After creating a quote, choose **Send to ServiceM8** to queue the saved draft fo
 - **2D:** drag a numbered corner. Click or drag a **+** handle to insert a corner between existing points.
 - **Either view:** choose **Insert point** and an edge, then click its new position; or choose a corner and **Move corner**, then click the correct position. **Delete corner** and **Undo** also work.
 - **3D:** move/insert points by clicking the loaded surface, so each edited point gets a real map coordinate and elevation. Roof surfaces use outline-only rendering; no filled sheet or extruded walls span the property.
-- **Instant Quote:** the initial price uses the recommended target-margin price. Edit **Final customer price** or the quote's **Target gross margin**, or click **Use recommended price** again. Labour, chemicals, estimated travel/fuel, equipment, consumables and overheads appear separately with expected profit/margin. Internal costs do not appear on the customer quote.
+- **Instant Quote:** the initial price uses the recommended target-margin price. Edit each **Final service price** or the quote’s **Target gross margin**, or reset services to their recommended prices. An entered total needs the explicit Distribute action. Labour, chemicals, estimated travel/fuel, equipment, consumables and overheads appear separately with expected profit/margin. Internal costs do not appear on the customer quote.
 - Travel uses an editable **round-trip kilometre estimate**, not a live route calculation. Costs are estimates from your business pricing settings, not actual job expenses.
 - A successful empty database response no longer produces a false failed-save error. A failed activity note is reported separately from an already saved quote.
 
@@ -328,9 +338,9 @@ creation flow; they are not a database transaction.
 Closed traces retain area and perimeter; each selected service chooses its
 own unit, and Reuse outline adds another independently priced service.
 Windows use an explicit manual whole-pane count (or an already saved pane
-count), never a geographic measurement. Item prices are the saved
-`instantPricing().lines[].fixedPrice`, allocated in integer cents from
-cost-model weights; manual total adjustments are included in those items.
+count), never a geographic measurement. Item prices are the saved service `fixedPrice` amounts. Each row has its own
+manual price; an explicit total distribution uses integer-cent largest-remainder
+allocation. Learning recommendations include each service’s target-margin floor.
 The extension preserves fractional-dollar totals. The root pricing
 engine's `quoteTotal()` still rounds to whole dollars and must be handled
 by the parent if CRM quote editing must preserve cents as well.

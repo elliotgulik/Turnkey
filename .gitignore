@@ -22,3 +22,6 @@ backend/node_modules/
 .artifacts/
 supabase/.temp/
 .netlify-dist/
+
+# Reproducible extension package output; published copies live in assets/
+extension/dist/

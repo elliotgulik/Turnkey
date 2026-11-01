@@ -1,5 +1,5 @@
 import { TurnKeyApi } from '../../api/client-bridge.js';
-import { instantPricing } from './quote-pricing.js';
+import { learningPricing, allocatePrices, observationLines, REASONS } from './quote-learning.js';
 import { measurementQuantity, measurementForService } from './measurements.js';
 import { renderCustomerContext, requestedServices } from './customer-context.js';
 // Instant Quote panel (build brief §9-§12) — turns the measurements list
@@ -31,7 +31,11 @@ export function renderQuotePanel(container, ctx, actions) {
   // was already resolved once, when the measurement was finished (see
   // app.js's guessServiceForCategory()) — reused here rather than
   // re-guessing, so the service shown here always matches what's stored.
+  const quoteKey=crypto.randomUUID();
+  let nextKey=0, pendingTotal=null, totalError='';
+  const key=()=>`earth-${nextKey++}`;
   const lineState = ctx.measurements.map((m) => ({
+    lineKey:key(),
     measurementId: m.id,
     include: true,
     svc: m.service || Object.keys(SERVICES)[0],
@@ -40,14 +44,14 @@ export function renderQuotePanel(container, ctx, actions) {
     categoryLabel: m.categoryLabel,
     storeys: Number(m.storeys) || Number(ctx.boundJob?.details?.services?.find(line => line.svc === (m.service || Object.keys(SERVICES)[0]))?.storeys) || 1
   }));
-  let customPrice=null, localMargin=ctx.TK_COST.targetMargin(ctx.TK_COST.COST_INPUTS.targetMargin), travelKm=ctx.TK_COST.COST_INPUTS.avgKm;
+  let localMargin=ctx.TK_COST.targetMargin(ctx.TK_COST.COST_INPUTS.targetMargin), travelKm=ctx.TK_COST.COST_INPUTS.avgKm;
   const estimatedAt=new Date().toISOString();
   let access=ctx.boundJob?.details?.assumptions?.access || 'standard';
-  const priceModel=()=>instantPricing(ctx.TK_PRICING,ctx.TK_COST,computeLines(),{targetMargin:localMargin,price:customPrice,travelKm,estimatedAt,access});
+  const priceModel=(ignoreManual=false)=>learningPricing(ctx.TK_PRICING,ctx.TK_COST,computeLines().map(l=>ignoreManual?{...l,manualPrice:undefined}:l),{targetMargin:localMargin,travelKm,estimatedAt,access,engine:ctx.TK_PRICE_LEARNING,learningState:ctx.learningState,businessId:ctx.business?.id});
   const savedWindows = ctx.boundJob?.details?.services?.find(line => line.svc === 'windows');
   const paneCount = Number.isInteger(savedWindows?.qty) && savedWindows.qty > 0 ? savedWindows.qty : 0;
   const wantsWindows = ctx.manualWindows || requestedServices(ctx.boundCustomer || {},ctx.boundJob).some(service => service.service_id === 'windows');
-  const extraLines = wantsWindows ? [{include:true,svc:'windows',qty:paneCount}] : []; // ad-hoc services not tied to a drawn measurement
+  const extraLines = wantsWindows ? [{lineKey:key(),include:true,svc:'windows',qty:paneCount}] : []; // ad-hoc services not tied to a drawn measurement
   // When this tab was opened from an existing customer's "Build quote"
   // button (see app.js's loadBoundCustomerContext()), the quote is for
   // THAT customer and nothing else — no re-picking, no "new customer" path.
@@ -55,10 +59,37 @@ export function renderQuotePanel(container, ctx, actions) {
   let selectedCustomer = ctx.boundCustomer ? { ...ctx.boundCustomer } : null; // {id,name} | null = "new customer"
   let newCustomer = { name: '', phone: '', email: '' };
 
+  const activeRows=()=>lineState.concat(extraLines).filter(l=>l.include);
+  const rawQuantity=l=>l.measurementId?measurementQuantity(ctx.measurements.find(m=>m.id===l.measurementId),SERVICES[l.svc]):l.qty;
   function computeLines() {
-    const included = lineState.filter(l => l.include).map(l => ({svc:l.svc, qty:measurementQuantity(ctx.measurements.find(m => m.id === l.measurementId), SERVICES[l.svc]), ...(l.svc==='housewash'?{storeys:Number(l.storeys)||1}:{})}));
-    const extras = extraLines.filter(l => l.include).map(l => ({svc:l.svc, qty:l.qty, ...(l.svc==='housewash'?{storeys:Number(l.storeys)||1}:{})}));
-    return included.concat(extras);
+    return activeRows().map(l=>({lineKey:l.lineKey,svc:l.svc,qty:l.appliedQuantity??rawQuantity(l),originalQuantity:l.originalQuantity??rawQuantity(l),manualPrice:l.manualPrice,reason:l.reason,verifiedQuantity:l.verifiedQuantity,measurementReason:l.measurementReason,...(l.svc==='housewash'?{storeys:Number(l.storeys)||1}:{})}));
+  }
+  function changeService(line,svc) {
+    line.svc=svc;
+    // A different unit/service needs its own quantity verification and reason.
+    delete line.appliedQuantity;delete line.originalQuantity;delete line.verifiedQuantity;delete line.measurementReason;delete line.reason;
+    if(svc==='housewash'&&!line.storeys)line.storeys=1;
+  }
+  function priceCard(l,i,model) {
+    const rec=model.recommendations[i],row=activeRows()[i];
+    const hint=Number(rec.measurement?.suggestedQuantity);
+    const hasHint=ctx.learningState?.settings?.enabled!==false&&Number(rec.measurement?.sampleCount)>=Math.max(5,ctx.learningState?.settings?.minSamples||5)&&Math.abs((rec.measurement?.factor||1)-1)>.00001;
+    return `<section class="tk-learning-line" data-service-price="${escapeHtml(l.svc)}">
+      <div class="tk-price-line"><span>${escapeHtml(SERVICES[l.svc]?.label||l.svc)} · ${l.qty} ${escapeHtml(SERVICES[l.svc]?.unit)}${l.svc==='housewash'?' · '+Number(l.storeys||1)+' storey':''}</span><strong>${money(l.fixedPrice)}</strong></div>
+      <p class="tk-modal-sub">Configured ${money(rec.configuredPrice)} · Target margin floor ${money(rec.marginFloor)}<br>Base ${money(rec.baselinePrice)} → Learned adjustment ${rec.learnedAdjustment<0?'−':'+'}${money(Math.abs(rec.learnedAdjustment))} → Recommended ${money(rec.recommendedPrice)}</p>
+      <p class="tk-modal-sub">${escapeHtml(rec.explanation||'Base price shown until enough eligible quotes are available (default: 5 distinct quotes).')} · ${Number(rec.sampleCount)||0} quotes · Confidence: ${escapeHtml(rec.confidence??'insufficient')}</p>
+      <label class="tk-price-line">Final service price (GST inclusive dollars)<input class="tk-qty-input" style="width:120px" aria-label="Final service price for ${escapeHtml(SERVICES[l.svc]?.label)}" data-line-price="${escapeHtml(l.lineKey)}" type="number" min="0" step="0.01" value="${row.manualPrice==null?l.fixedPrice:Number.isFinite(row.manualPrice)?row.manualPrice:''}"></label>
+      <button type="button" class="tk-link-btn" data-reset-line="${escapeHtml(l.lineKey)}" ${row.manualPrice==null?'hidden':''}>Reset this service to recommended</button>
+      <p class="tk-error" role="status" data-line-floor-warning ${l.fixedPrice+0.001<rec.marginFloor?'':'hidden'}>This service price is below its target margin floor. You can save this manual price.</p>
+      <label class="tk-quote-field">Optional override reason<select class="tk-select" aria-label="Override reason" data-line-reason="${escapeHtml(l.lineKey)}"><option value="">No explanation — excluded from training</option>${Object.entries(REASONS).map(([value,label])=>`<option value="${value}" ${row.reason===value?'selected':''}>${label}</option>`).join('')}</select></label>
+      <p class="tk-modal-sub">Discounts never train pricing. Pricing corrections and explained difficult access can train matching contexts.</p>
+      <div class="tk-measurement-correction"><p class="tk-modal-sub">Original quantity: ${escapeHtml(row.originalQuantity??rawQuantity(row))} ${escapeHtml(SERVICES[l.svc]?.unit)}. Applying a verified quantity changes this service quantity and price only; it does not move the outline or change the geometry.</p>
+      ${hasHint&&Number.isFinite(hint)&&hint>0?`<p class="tk-modal-sub">Learned measurement hint: ${hint.toFixed(2)} ${escapeHtml(SERVICES[l.svc]?.unit)} (${Number(rec.measurement.sampleCount)||0} quotes). Review before applying.</p><button type="button" class="tk-link-btn" data-measure-hint="${escapeHtml(l.lineKey)}" data-hint="${hint}">Use hint as verified input</button>`:''}
+      <label class="tk-quote-field">Verified quantity<input class="tk-qty-input" data-verified="${escapeHtml(l.lineKey)}" aria-label="Verified quantity" type="number" min="0.01" step="${SERVICES[l.svc]?.unit==='panes'?'1':'0.01'}" value="${escapeHtml(row.verifiedDraft??row.verifiedQuantity??'')}"></label>
+      <label class="tk-quote-field">Measurement reason<select class="tk-select" data-measure-reason="${escapeHtml(l.lineKey)}" aria-label="Measurement reason"><option value="">Choose how quantity was verified</option>${Object.entries({verified_measurement:'Verified measurement',manual_measurement:'Manual measurement',site_measurement:'Measured on site',measurement_correction:'Measurement correction'}).map(([value,label])=>`<option value="${value}" ${(row.measurementDraft??row.measurementReason)===value?'selected':''}>${label}</option>`).join('')}</select></label>
+      <button type="button" class="tk-link-btn" data-apply-quantity="${escapeHtml(l.lineKey)}">Apply verified quantity</button>
+      ${row.measurementError?`<p class="tk-error" role="alert">${escapeHtml(row.measurementError)}</p>`:''}</div>
+    </section>`;
   }
 
   // Offer only services with an available quantity for this outline.
@@ -76,7 +107,7 @@ export function renderQuotePanel(container, ctx, actions) {
   function paint() {
     const lines = computeLines();
     let model, pricingError='';
-    try{model=priceModel();}catch(error){pricingError=error.message;model={total:0,exGst:0,gst:0,breakdown:null};}
+    try{model=priceModel();}catch(error){pricingError=error.message;try{model=priceModel(true);}catch{model={total:0,exGst:0,gst:0,breakdown:null};}}
     const {total,exGst=0,gst=0,breakdown:bd}=model;
 
     container.innerHTML = `
@@ -146,8 +177,10 @@ export function renderQuotePanel(container, ctx, actions) {
             <div class="tk-price-block">
               <section class="tk-quote-assumptions" aria-label="Site access settings"><div><h4>Property &amp; access</h4><p>Adjust for building height and conditions at this property.</p></div><label class="tk-quote-field">Access difficulty<select class="tk-select" data-access aria-label="Access difficulty"><option value="easy" ${access==='easy'?'selected':''}>Easy · open, ground-level access</option><option value="standard" ${access==='standard'?'selected':''}>Standard · typical access</option><option value="hard" ${access==='hard'?'selected':''}>Difficult · steep, tight or high access</option></select></label></section>
               <div class="tk-section-label">Itemised service prices</div>
-              <div data-role="itemised-prices">${(model.lines || []).map(l => `<div class="tk-price-line" data-service-price="${escapeHtml(l.svc)}"><span>${escapeHtml(SERVICES[l.svc]?.label || l.svc)} · ${l.qty} ${escapeHtml(SERVICES[l.svc]?.unit)}${l.svc==='housewash'?' · '+Number(l.storeys||1)+' storey':''}</span><strong>${money(l.fixedPrice)}</strong></div>`).join('')}</div>
-              ${customPrice !== null && bd ? `<p class="tk-modal-sub" data-price-adjustment>Manual total adjustment: ${money(total - bd.recommended)} from recommended ${money(bd.recommended)}. Included in the itemised prices above.</p>` : ''}
+              <p class="tk-modal-sub" role="status">${escapeHtml(ctx.learningWarning||(!ctx.TK_PRICE_LEARNING||!ctx.learningState?'Learning unavailable. Base recommendations and manual service prices remain available.':'Learning uses only your signed-in business. Manage settings and resets in TurnKey.'))}</p>
+              ${model.engineError?`<p class="tk-error" role="status">${escapeHtml(model.engineError)}</p>`:''}
+              <div data-role="itemised-prices">${(model.lines||[]).map((l,i)=>priceCard(l,i,model)).join('')}</div>
+              ${totalError?`<p class="tk-error" role="alert">${escapeHtml(totalError)}</p>`:''}
               <div class="tk-section-label">Internal delivery estimate</div>
               <p class="tk-modal-sub">Based on your business’s saved cost settings. Travel is an estimate, not a live route calculation.</p>
               ${bd ? [ ['Labour + setup ('+bd.labourHrs.toFixed(1)+' hours × '+ctx.TK_COST.COST_INPUTS.crew+' crew)',bd.wageCost],['Materials / chemicals',bd.unsetChemicals?.length?null:bd.chem],['Travel / fuel',bd.fuelCost],['Equipment',bd.equipmentCost],['Consumables',bd.consumablesCost],['Allocated overheads',bd.overheadCost],['Total estimated costs (ex GST)',bd.costUnrounded] ].map(([label,value])=>`<div class="tk-price-line"><span>${label}</span><strong>${value===null?'Incomplete':money(value)}</strong></div>`).join('') : ''}
@@ -155,15 +188,18 @@ export function renderQuotePanel(container, ctx, actions) {
               <label class="tk-price-line">Round-trip travel estimate (km) <input class="tk-qty-input" aria-label="Round-trip travel estimate in km" data-travel type="number" min="0" step="0.1" value="${travelKm}"></label>
               <label class="tk-price-line">Target gross margin (%) <input class="tk-qty-input" aria-label="Target gross margin" data-margin type="number" min="0" max="99" step="1" value="${Math.round(localMargin*100)}"></label>
               <div class="tk-price-line"><span>Recommended customer price${ctx.TK_COST.COST_INPUTS.gstRegistered?' (incl GST)':''}</span><strong data-recommended>${money(bd?.recommended||0)}</strong></div>
-              <label class="tk-price-line">Final customer price${ctx.TK_COST.COST_INPUTS.gstRegistered?' (incl GST)':''} <input class="tk-qty-input" style="width:120px" aria-label="Final customer price" data-price type="number" min="1" step="0.01" value="${total}"></label>
-              <button type="button" class="tk-link-btn" data-use-recommended>Use recommended price</button>
+              <label class="tk-price-line">Final customer price${ctx.TK_COST.COST_INPUTS.gstRegistered?' (incl GST)':''} <input class="tk-qty-input" style="width:120px" aria-label="Final customer price" data-price type="number" min="1" step="0.01" value="${pendingTotal??total}"></label>
+              <button type="button" class="tk-link-btn" data-discard-total>Discard entered total (keep service prices)</button>
+              <button type="button" class="tk-link-btn" data-distribute-total>Distribute entered total across services (replaces manual line prices)</button>
+              <p class="tk-modal-sub" data-price-adjustment>The total saves as the exact sum of service prices. An entered total takes effect only when you choose Distribute.</p>
+              <button type="button" class="tk-link-btn" data-use-recommended>Reset all services to recommended price</button>
               <div class="tk-price-line"><span>Expected gross profit</span><strong data-profit>${money(model.profit||0)}</strong></div>
               <div class="tk-price-line"><span>Expected gross margin</span><strong data-margin-result>${(model.marginPct||0).toFixed(1)}%</strong></div>
-              ${bd&&model.marginPct+0.01<localMargin*100?'<p role="status" class="tk-error">This price is below your target gross margin.</p>':''}
-              <div class="tk-price-line"><span>Subtotal${ctx.TK_COST.COST_INPUTS.gstRegistered?' (ex GST)':''}</span><span>${money(exGst)}</span></div>
-              <div class="tk-price-line"><span>${ctx.TK_COST.COST_INPUTS.gstRegistered?'GST':'GST (not registered)'}</span><span>${money(gst)}</span></div>
-              <div class="tk-price-total"><span>Final customer total</span><span>${money(total)}</span></div>
-              ${pricingError?`<p class="tk-error" role="alert">${escapeHtml(pricingError)}</p>`:''}
+              <p role="status" class="tk-error" data-total-floor-warning ${bd&&model.marginPct+0.01<localMargin*100?'':'hidden'}>This price is below your target gross margin.</p>
+              <div class="tk-price-line"><span>Subtotal${ctx.TK_COST.COST_INPUTS.gstRegistered?' (ex GST)':''}</span><span data-subtotal>${money(exGst)}</span></div>
+              <div class="tk-price-line"><span>${ctx.TK_COST.COST_INPUTS.gstRegistered?'GST':'GST (not registered)'}</span><span data-gst>${money(gst)}</span></div>
+              <div class="tk-price-total"><span>Final customer total</span><span data-final-total>${money(total)}</span></div>
+              <p class="tk-error" role="alert" data-pricing-error ${pricingError?'':'hidden'}>${escapeHtml(pricingError)}</p>
               <p class="tk-modal-sub">Margin uses revenue excluding GST. These are estimated costs, not actual job expenses. Your internal costs stay off the customer quote.</p>
             </div>
           </div>
@@ -174,13 +210,61 @@ export function renderQuotePanel(container, ctx, actions) {
         </div>
       </div>`;
 
-    container.querySelector('[data-price]').addEventListener('change',e=>{customPrice=e.target.value===''?NaN:Number(e.target.value);paint();});
+    const rowFor=key=>activeRows().find(l=>l.lineKey===key);
+    // Never replace a price input or Create button on input/blur. In-place
+    // updates preserve decimal typing/caret and the pending click target.
+    function updateServicePrice(input) {
+      rowFor(input.dataset.linePrice).manualPrice=input.value===''?NaN:Number(input.value);
+      pendingTotal=null;
+      let model,error='';
+      try{model=priceModel();}catch(e){error=e.message;}
+      const errorEl=container.querySelector('[data-pricing-error]');errorEl.textContent=error;errorEl.hidden=!error;
+      container.querySelector('[data-create]').disabled=!!error||!computeLines().length;
+      input.closest('[data-service-price]').querySelector('[data-reset-line]').hidden=false;
+      if(!model)return;
+      container.querySelectorAll('[data-service-price]').forEach((card,i)=>{
+        card.querySelector('strong').textContent=money(model.lines[i].fixedPrice);
+        card.querySelector('[data-line-floor-warning]').hidden=model.lines[i].fixedPrice+0.001>=model.recommendations[i].marginFloor;
+      });
+      container.querySelector('[data-price]').value=model.total;
+      container.querySelector('[data-final-total]').textContent=money(model.total);
+      container.querySelector('[data-subtotal]').textContent=money(model.exGst);
+      container.querySelector('[data-gst]').textContent=money(model.gst);
+      container.querySelector('[data-profit]').textContent=money(model.profit);
+      container.querySelector('[data-margin-result]').textContent=model.marginPct.toFixed(1)+'%';
+      container.querySelector('[data-total-floor-warning]').hidden=model.marginPct+0.01>=localMargin*100;
+    }
+    container.querySelectorAll('[data-line-price]').forEach(input=>{
+      input.addEventListener('input',()=>updateServicePrice(input));
+      input.addEventListener('change',()=>updateServicePrice(input));
+    });
+    container.querySelectorAll('[data-reset-line]').forEach(button=>button.addEventListener('click',()=>{const row=rowFor(button.dataset.resetLine);delete row.manualPrice;delete row.reason;pendingTotal=null;paint();}));
+    container.querySelectorAll('[data-line-reason]').forEach(input=>input.addEventListener('change',()=>{rowFor(input.dataset.lineReason).reason=input.value;}));
+    container.querySelectorAll('[data-verified]').forEach(input=>input.addEventListener('input',()=>{rowFor(input.dataset.verified).verifiedDraft=input.value;}));
+    container.querySelectorAll('[data-measure-reason]').forEach(input=>input.addEventListener('change',()=>{rowFor(input.dataset.measureReason).measurementDraft=input.value;}));
+    container.querySelectorAll('[data-measure-hint]').forEach(button=>button.addEventListener('click',()=>{rowFor(button.dataset.measureHint).verifiedDraft=button.dataset.hint;paint();}));
+    container.querySelectorAll('[data-apply-quantity]').forEach(button=>button.addEventListener('click',()=>{
+      const row=rowFor(button.dataset.applyQuantity),value=Number(row.verifiedDraft),reason=(row.measurementDraft||'').trim();
+      if(!Number.isFinite(value)||value<=0||(SERVICES[row.svc]?.unit==='panes'&&!Number.isInteger(value))||!reason){row.measurementError='Enter a positive verified quantity (whole panes for windows) and a measurement reason, then Apply.';paint();return;}
+      row.originalQuantity??=rawQuantity(row);row.appliedQuantity=value;row.verifiedQuantity=value;row.measurementReason=reason;row.reason='measurement_correction';delete row.measurementError;pendingTotal=null;paint();
+    }));
+    container.querySelector('[data-price]').addEventListener('input',e=>{pendingTotal=e.target.value;});
+    container.querySelector('[data-discard-total]').addEventListener('click',()=>{pendingTotal=null;totalError='';paint();});
+    container.querySelector('[data-distribute-total]').addEventListener('click',()=>{
+      try {
+        const total=Number(pendingTotal),model=priceModel();
+        if(!pendingTotal||!Number.isFinite(total)||total<1)throw Error('Enter a positive total before distributing.');
+        const amounts=allocatePrices(total,model.lines.map(l=>l.fixedPrice));
+        activeRows().forEach((row,i)=>{row.manualPrice=amounts[i];row.reason='';});pendingTotal=null;totalError='';
+      }catch(error){totalError=error.message;}
+      paint();
+    });
     container.querySelector('[data-margin]').addEventListener('change',e=>{const value=Number(e.target.value)/100;if(Number.isFinite(value)&&value>=0&&value<1)localMargin=value;paint();});
     container.querySelector('[data-travel]').addEventListener('change',e=>{const value=Number(e.target.value);if(Number.isFinite(value)&&value>=0)travelKm=value;paint();});
-    container.querySelector('[data-access]').addEventListener('change',e=>{access=e.target.value;customPrice=null;paint();});
-    container.querySelectorAll('[data-storeys]').forEach(select=>select.addEventListener('change',()=>{lineState[Number(select.dataset.storeys)].storeys=Number(select.value);customPrice=null;paint();}));
-    container.querySelectorAll('[data-extra-storeys]').forEach(select=>select.addEventListener('change',()=>{extraLines[Number(select.dataset.extraStoreys)].storeys=Number(select.value);customPrice=null;paint();}));
-    container.querySelector('[data-use-recommended]').addEventListener('click',()=>{customPrice=null;paint();});
+    container.querySelector('[data-access]').addEventListener('change',e=>{access=e.target.value;paint();});
+    container.querySelectorAll('[data-storeys]').forEach(select=>select.addEventListener('change',()=>{lineState[Number(select.dataset.storeys)].storeys=Number(select.value);paint();}));
+    container.querySelectorAll('[data-extra-storeys]').forEach(select=>select.addEventListener('change',()=>{extraLines[Number(select.dataset.extraStoreys)].storeys=Number(select.value);paint();}));
+    container.querySelector('[data-use-recommended]').addEventListener('click',()=>{lineState.concat(extraLines).forEach(row=>{delete row.manualPrice;delete row.reason;});pendingTotal=null;totalError='';paint();});
     container.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', () => actions.onCancel()));
     container.querySelectorAll('[data-line]').forEach((cb) =>
       cb.addEventListener('change', () => {
@@ -190,7 +274,7 @@ export function renderQuotePanel(container, ctx, actions) {
     );
     container.querySelectorAll('[data-line-svc]').forEach((sel) =>
       sel.addEventListener('change', () => {
-        const line=lineState[+sel.getAttribute('data-line-svc')];line.svc = sel.value;if(line.svc==='housewash'&&!line.storeys)line.storeys=1;customPrice=null;
+        const line=lineState[+sel.getAttribute('data-line-svc')];changeService(line,sel.value);
         paint();
       })
     );
@@ -202,13 +286,13 @@ export function renderQuotePanel(container, ctx, actions) {
     );
     container.querySelectorAll('[data-extra-svc]').forEach((sel) =>
       sel.addEventListener('change', () => {
-        const line=extraLines[+sel.getAttribute('data-extra-svc')];line.svc = sel.value;if(line.svc==='housewash'&&!line.storeys)line.storeys=1;customPrice=null;
+        const line=extraLines[+sel.getAttribute('data-extra-svc')];changeService(line,sel.value);
         paint();
       })
     );
     container.querySelectorAll('[data-extra-qty]').forEach((inp) =>
       inp.addEventListener('change', () => {
-        extraLines[+inp.getAttribute('data-extra-qty')].qty = parseFloat(inp.value) || 0;
+        const row=extraLines[+inp.getAttribute('data-extra-qty')];row.qty=parseFloat(inp.value)||0;delete row.appliedQuantity;delete row.originalQuantity;delete row.verifiedQuantity;delete row.measurementReason;
         paint();
       })
     );
@@ -216,16 +300,16 @@ export function renderQuotePanel(container, ctx, actions) {
       const original = lineState[+button.getAttribute('data-reuse')];
       const measurement = ctx.measurements.find(m => m.id === original.measurementId);
       const next = Object.keys(SERVICES).find(key => key !== original.svc && measurementQuantity(measurement, SERVICES[key]) !== null);
-      lineState.push({...original, svc:next || original.svc, include:true});
+      lineState.push({lineKey:key(),measurementId:original.measurementId,categoryLabel:original.categoryLabel,storeys:original.storeys,svc:next||original.svc,include:true});
       paint();
     }));
-    const addManual = svc => { extraLines.push({include:true,svc,qty:0}); paint(); };
+    const addManual = svc => { extraLines.push({lineKey:key(),include:true,svc,qty:0}); paint(); };
     container.querySelector('[data-add-windows]').addEventListener('click', () => addManual('windows'));
     container.querySelectorAll('[data-add-request]').forEach(button => button.addEventListener('click', () => addManual(button.getAttribute('data-add-request'))));
     const addExtraBtn = container.querySelector('[data-add-extra]');
     if (addExtraBtn)
       addExtraBtn.addEventListener('click', () => {
-        extraLines.push({ include: true, svc: Object.keys(SERVICES)[0], qty: 0 });
+        extraLines.push({ lineKey:key(), include: true, svc: Object.keys(SERVICES)[0], qty: 0 });
         paint();
       });
 
@@ -260,6 +344,7 @@ export function renderQuotePanel(container, ctx, actions) {
     if (clearCustomerBtn) clearCustomerBtn.addEventListener('click', () => { selectedCustomer = null; paint(); });
 
     container.querySelector('[data-create]').addEventListener('click', async () => {
+      if(pendingTotal!==null){totalError='Distribute the entered total or discard it before saving.';paint();return;}
       if (!selectedCustomer && !newCustomer.name.trim()) {
         container.querySelector('[data-new="name"]').focus();
         return;
@@ -271,6 +356,7 @@ export function renderQuotePanel(container, ctx, actions) {
         const finalModel=priceModel();
         const finalLines=finalModel.lines, finalTotal=finalModel.total;
         await actions.onCreateQuote({
+          quoteLearning:{quoteKey,lines:observationLines(finalModel,computeLines(),ctx.TK_PRICING),context:{source:'earth-extension',modelVersion:ctx.learningState?.modelVersion||1,estimatedDurationMin:finalModel.breakdown.totalTimeMin,estimatedCost:finalModel.breakdown.costUnrounded,travelKm,targetMargin:localMargin,gstRegistered:ctx.TK_COST.COST_INPUTS.gstRegistered,originalQuantities:Object.fromEntries(computeLines().map(l=>[l.lineKey,l.originalQuantity]))}},
           customer: selectedCustomer || newCustomer,
           isNewCustomer: !selectedCustomer,
           address: ctx.address,
@@ -300,13 +386,15 @@ export function renderQuotePanel(container, ctx, actions) {
 }
 
 /** The post-creation "QUOTE CREATED" screen (build brief §12). */
-export function renderQuoteCreated(container, { address, total, lines, SERVICES, openUrl, publicUrl, warning }, actions) {
+export function renderQuoteCreated(container, { address, total, lines, SERVICES, openUrl, publicUrl, warning, learningWarning }, actions) {
   container.innerHTML = `
     <div class="tk-modal-backdrop">
       <div class="tk-modal tk-quote-created">
         <div class="tk-created-badge">✓</div>
         <h3>Quote Created</h3>
         ${warning ? `<p role="status" class="tk-modal-sub">${escapeHtml(warning)}</p>` : ''}
+        <p class="tk-error" role="status" data-learning-status>${escapeHtml(learningWarning||'')}</p>
+        <button type="button" class="tk-btn" data-retry-learning ${learningWarning?'':'hidden'}>Retry saving learning</button>
         <p class="tk-modal-sub">${escapeHtml(address)}</p>
         <div class="tk-created-total">${money(total)}</div>
         <div class="tk-created-lines">
@@ -325,6 +413,12 @@ export function renderQuoteCreated(container, { address, total, lines, SERVICES,
         <button type="button" class="tk-link-btn" data-done>Done</button>
       </div>
     </div>`;
+  container.querySelector('[data-retry-learning]').addEventListener('click',async e=>{
+    const button=e.target,status=container.querySelector('[data-learning-status]');button.disabled=true;
+    try{await actions.onRetryLearning();status.textContent='Learning saved. Your quote remains saved.';button.hidden=true;}
+    catch(error){status.textContent='Your quote is saved. Learning was not saved: '+error.message;}
+    finally{button.disabled=false;}
+  });
   container.querySelector('[data-open]').addEventListener('click', async () => {
     try { await TurnKeyApi.openTurnKey(openUrl); }
     catch(error) { container.querySelector('[data-transfer-status]').textContent=error.message; }

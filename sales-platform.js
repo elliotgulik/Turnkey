@@ -1448,6 +1448,7 @@
       loadConnection();
   });
   window.TK_SALES_PLATFORM = {
+    request: api,
     moveStage: async (id, key) => move(record(id), key),
     transferQuote: async (id) => {
       const r=record(id);

@@ -81,7 +81,7 @@ function renderConnected() {
     </div>
     <div class="tk-divider"></div>
     <button class="tk-btn tk-btn-accent" id="open">Open TurnKey</button>
-    ${backendPermission ? '<button class="tk-btn" id="enable-transfers">Enable ServiceM8 transfers</button><p class="tk-hint" id="transfer-permission-status" role="status"></p>' : ''}
+    ${backendPermission ? '<button class="tk-btn" id="enable-transfers">Enable quote learning &amp; ServiceM8</button><p class="tk-hint" id="transfer-permission-status" role="status"></p>' : ''}
     <button class="tk-btn" id="refresh-account" ${busy ? 'disabled' : ''}>${busy ? 'Refreshing…' : 'Refresh from open TurnKey tab'}</button>
     ${error ? `<div class="tk-error" role="alert">${escapeHtml(error)}</div>` : ''}
     <button class="tk-btn tk-btn-danger" id="disconnect">Disconnect</button>
@@ -99,7 +99,7 @@ function renderConnected() {
       const pattern = originPattern(data.config.backendUrl);
       if (!pattern) throw new Error('The TurnKey backend address is invalid.');
       const granted = await chrome.permissions.request({ origins: [pattern] });
-      status.textContent = granted ? 'Backend connection enabled. Use Send to ServiceM8 after creating a quote.' : 'Permission was not granted; your TurnKey quotes remain saved.';
+      status.textContent = granted ? 'Backend connection enabled for quote learning and ServiceM8. Reopen your quote to load learning.' : 'Permission was not granted; your TurnKey quotes remain saved.';
     } catch {
       status.textContent = 'Could not enable the backend connection. Try again.';
     }

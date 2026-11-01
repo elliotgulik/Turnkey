@@ -209,3 +209,11 @@
 .tk-toolbar {max-height:calc(100vh - 104px); display:flex; flex-direction:column;}
 .tk-toolbar-body {overflow-y:auto;}
 .tk-toolbar[hidden] {display:none;}
+
+/* Internal quote-learning controls are scoped to the Earth shadow root. */
+.tk-learning-line { padding: 12px; margin: 10px 0; border: 1px solid var(--tk-border, #cbd5e1); border-radius: 9px; }
+.tk-learning-line .tk-quote-field { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
+.tk-learning-line .tk-modal-sub { line-height: 1.5; }
+.tk-measurement-correction { border-top: 1px solid var(--tk-border, #cbd5e1); margin-top: 10px; padding-top: 8px; }
+.tk-learning-line .tk-select { max-width: 100%; }
+.tk-root [hidden] { display: none !important; }

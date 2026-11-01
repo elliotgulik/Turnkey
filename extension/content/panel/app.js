@@ -4,6 +4,7 @@ import { mountToolbar } from './toolbar.js';
 import { renderQuotePanel, renderQuoteCreated } from './quote.js';
 import { createQuoteDraft } from './quote-create.js';
 import { configureCosts } from './quote-pricing.js';
+import { observationSubmission } from './quote-learning.js';
 import { captureVisibleTab, renderScreenshotPreview } from './screenshot.js';
 
 // `kind` matches extension/geometry.js's own vocabulary exactly
@@ -99,6 +100,8 @@ export async function init(shadowRoot) {
   const TK_PRICING = window.TK_PRICING;
   await import(chrome.runtime.getURL('vendor/cost-engine.js'));
   const TK_COST=window.TK_COST;
+  let TK_PRICE_LEARNING=null;
+  try{await import(chrome.runtime.getURL('vendor/pricing-learning-engine.js'));TK_PRICE_LEARNING=window.TK_PRICE_LEARNING;}catch{/* Optional until packaged; base/manual pricing remains available. */}
   if (!TK_PRICING) {
     toast(root, 'TurnKey pricing engine failed to load — try reloading the page.', 'error');
     return;
@@ -354,11 +357,20 @@ export async function init(shadowRoot) {
     if (state.business && state.business.pricing_config && state.business.pricing_config.rates) {
       applyRateOverrides(state.business.pricing_config.rates);
     }
+    // Fresh on every open. No cross-business cache; generation also rejects
+    // late responses after switching away and back to the same business.
+    let learningState=null,learningWarning='';
+    try {
+      const result=await TurnKeyApi.getPricingLearningState(businessId);
+      if(result?.modelVersion!==1||!Array.isArray(result.observations)||!result.settings)throw Error('Unsupported quote learning state.');
+      learningState=result;
+    }catch(error){learningWarning='Learning unavailable: '+error.message+' Base recommendations and manual service prices remain available.';}
+    if(generation!==connectionGeneration||state.profile?.business_id!==businessId)return;
     const binding = state.boundCustomer ? Object.freeze({businessId, customerId:state.boundCustomer.id, jobId:state.boundJob?.id || null, quoteId:state.boundJob?.quote_id || null, recordId:state.boundRecordId}) : null;
     state.quoteCreateProgress = null; // fresh quote-panel session — any earlier partial create attempt is unrelated
     renderQuotePanel(
       modalLayer,
-      { measurements: state.measurements, address: state.address, TK_PRICING, TK_COST, business: state.business, boundCustomer: state.boundCustomer, boundJob: state.boundJob, manualWindows },
+      { measurements: state.measurements, address: state.address, TK_PRICING, TK_COST, business: state.business, boundCustomer: state.boundCustomer, boundJob: state.boundJob, manualWindows, TK_PRICE_LEARNING, learningState, learningWarning },
       {
         onCancel: closeModal,
         onSearchCustomer: async (query) => {
@@ -399,6 +411,13 @@ export async function init(shadowRoot) {
     const progress = state.quoteCreateProgress || (state.quoteCreateProgress = {});
     const { quote, job, warning } = await createQuoteDraft(TurnKeyApi, progress, { businessId, payload, binding, screenshotDataUrl: state.screenshotDataUrl });
     if (generation !== connectionGeneration || !state.session || state.profile?.business_id !== businessId) return;
+    let learningWarning='',retryLearning=async()=>{};
+    if(payload.quoteLearning){
+      retryLearning=observationSubmission(TurnKeyApi,businessId,quote,job,payload.quoteLearning,()=>generation===connectionGeneration&&!!state.session&&state.profile?.business_id===businessId);
+      try{await retryLearning();}
+      catch(error){learningWarning='Your quote is saved. Learning was not saved: '+error.message+' Retry below; this will not create another quote.';}
+    }
+    if(generation!==connectionGeneration||!state.session||state.profile?.business_id!==businessId)return;
     state.quoteCreateProgress = null; // this intent fully succeeded — a future quote starts a clean one
 
     const publicUrl = state.config.siteUrl + '/quote.html?t=' + quote.public_token;
@@ -408,8 +427,9 @@ export async function init(shadowRoot) {
     const openUrl = state.config.siteUrl + '/index.html?open=pipeline&job=' + encodeURIComponent(job.id);
     renderQuoteCreated(
       modalLayer,
-      { address: payload.address, total: payload.total, lines: payload.lines, SERVICES, openUrl, publicUrl, warning },
+      { address: payload.address, total: payload.total, lines: payload.lines, SERVICES, openUrl, publicUrl, warning, learningWarning },
       {
+        onRetryLearning: retryLearning,
         onSendServiceM8: () => TurnKeyApi.sendQuoteToServiceM8(businessId,job.id),
         onCheckServiceM8: () => TurnKeyApi.serviceM8TransferStatus(businessId,job.id),
         onDone: () => {

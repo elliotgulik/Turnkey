@@ -35,6 +35,8 @@ export const TurnKeyApi = {
       else reject(new Error(res.error || 'Could not connect to TurnKey.'));
     });
   }),
+  getPricingLearningState: businessId => call('getPricingLearningState', businessId),
+  submitPricingLearning: (businessId, payload) => call('submitPricingLearning', businessId, payload),
   getProfile: () => call('getProfile'),
   getBusiness: (businessId) => call('getBusiness', businessId),
   listCustomers: (businessId) => call('listCustomers', businessId),

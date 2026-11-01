@@ -10,6 +10,7 @@ function setup(business='A',owner='A'){
   // needs document.addEventListener to exist — a no-op stub is enough here,
   // since this test file only exercises the earlier job-import IIFE.
   document:{addEventListener:()=>{}}};
+ ctx.window.location=new URL(ctx.location.href);
  vm.runInNewContext(fs.readFileSync('extension-quote-link.js','utf8'),ctx);
  return {ctx,events,opened,messages,urls};
 }

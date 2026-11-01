@@ -1,10 +1,3 @@
-// VENDORED FILE — byte-for-byte copy of /pricing-engine.js at the repo root.
-// The Chrome extension can't load that file directly (it isn't served to
-// earth.google.com), so this copy ships inside the extension bundle instead.
-// If pricing-engine.js changes, re-copy it here (`cp pricing-engine.js
-// extension/vendor/pricing-engine.js`, then re-apply this header) so the
-// extension never prices a quote differently than the CRM does.
-//
 // TurnKey shared pricing engine — the single source of truth for service
 // rates, multipliers and line-total math. Loaded by index.html (internal
 // quote builder + PDF/email/customer-profile renderers), booking.html (the
@@ -78,7 +71,8 @@ window.TK_PRICING = (function(){
   const STOREY_TYPES = {
     1:{label:'Single storey', mult:1.0},
     2:{label:'Two storey',    mult:1.2},
-    3:{label:'Three storey',  mult:1.44}
+    3:{label:'Three storey',  mult:1.44},
+    4:{label:'Four storey',   mult:1.73}
   };
   // Fence pricing default assumes one face washed. "2 sides" (both faces of
   // a boundary fence — common when a customer owns/can access both) simply
@@ -135,8 +129,9 @@ window.TK_PRICING = (function(){
   // PDF, invoice and public quote page — one formula, so the split always
   // adds back up to the same total shown everywhere else.
   function gstFromInclusive(total){
-    const gst=Math.round((total||0)-(total||0)/1.15);
-    return {exGst:(total||0)-gst, gst};
+    const amount=Number.isFinite(Number(total))?Math.round(Number(total)*100)/100:0;
+    const gst=Math.round((amount-amount/1.15)*100)/100;
+    return {exGst:Math.round((amount-gst)*100)/100, gst};
   }
   // Applies a business's saved rate overrides (Settings → Pricing) onto the
   // shared table — call once per page load after fetching pricing_config.

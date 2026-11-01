@@ -5,6 +5,7 @@ import { installMarketingRoutes } from './marketingRoutes.js'
 import { installJobWork } from './jobWork.js'
 import { installJobCalendar } from './jobCalendar.js'
 import { installExtensionTransfers } from './extensionTransfers.js'
+import { createPricingLearningRouter } from './pricingLearning.js'
 import dotenv from 'dotenv'
 dotenv.config()
 
@@ -1368,6 +1369,7 @@ installMarketingRoutes(app,{db:authClient,requireBusiness,getMetaRetrievalToken:
 installJobWork(app,{db:authClient,requireBusiness})
 installJobCalendar(app,{db:authClient,requireBusiness,getGoogleCalendarToken,googleConfigured:googleCalendar.isConfigured})
 installExtensionTransfers(app,{db:authClient,requireBusiness})
+app.use('/api/pricing-learning',createPricingLearningRouter({db:authClient,requireBusiness}))
 
 // ServiceM8 integration — all routes/logic in servicem8Routes.js,
 // servicem8Sync.js, servicem8Webhooks.js and providers/servicem8.js;
