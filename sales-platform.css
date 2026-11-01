@@ -517,3 +517,12 @@ main {
 .tk-sm8-pricing ul{list-style:none;margin:9px 0;padding:0;display:grid;gap:7px}.tk-sm8-pricing li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;padding:5px 0;border-bottom:1px solid var(--line,#dbe5e8)}.tk-sm8-pricing li span{overflow-wrap:anywhere}.tk-sm8-pricing li>strong{text-align:right;font-size:12px}.tk-sm8-pricing-total{display:flex;justify-content:space-between;gap:12px;align-items:baseline}.tk-sm8-pricing.compact{padding:10px;margin:9px 0;font-size:12px}.tk-sm8-pricing.compact .tk-sm8-pricing-heading strong{font-size:11px;letter-spacing:.02em}.tk-sm8-pricing-note{margin:4px 0}
 
 .tk-lead-request{margin:10px 0;padding:10px 12px;border-left:3px solid var(--accent,var(--teal,#138278));background:var(--surface-2,#f5f8f8);border-radius:0 8px 8px 0;font-size:13px;line-height:1.55;min-width:0}.tk-lead-request>strong{font-size:11px;color:var(--ink-soft,#53636b)}.tk-lead-request p{margin:4px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--ink,#182c35)}
+/* Keep long currency labels from squeezing service names into a zero-width track. */
+.tk-sm8-pricing li{grid-template-columns:minmax(0,2fr) minmax(0,1fr)}
+.tk-sm8-pricing li>div,.tk-sm8-pricing li>strong,.tk-sm8-pricing-total>span,.tk-sm8-pricing-total>strong{min-width:0;white-space:normal;word-break:normal;overflow-wrap:break-word}
+.tk-sm8-pricing li span{display:block;word-break:normal;overflow-wrap:break-word}
+.tk-sm8-pricing.compact li{grid-template-columns:minmax(0,1fr);gap:3px}
+.tk-sm8-pricing.compact li>strong{text-align:left}
+.tk-sm8-pricing.compact .tk-sm8-pricing-total{display:grid;grid-template-columns:minmax(0,1fr);gap:4px}
+.sale-card-top{flex-wrap:wrap}.sale-card-top>b{min-width:0;overflow-wrap:break-word}.sale-card-top>span{white-space:normal;overflow-wrap:break-word;max-width:100%}
+@media(max-width:600px){.tk-sm8-pricing li{grid-template-columns:minmax(0,1fr);gap:3px}.tk-sm8-pricing li>strong{text-align:left}.tk-sm8-pricing-total{display:grid;grid-template-columns:minmax(0,1fr);gap:4px}}

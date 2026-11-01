@@ -106,6 +106,19 @@ const assert = require('node:assert/strict');
       assert.match(await leads.locator('.nlm-detail').innerText(),/ServiceM8 services & prices/);
       await leads.locator('.nlm-close').click();
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
+      // Unknown currency creates long price labels; names must keep usable width.
+      await page.evaluate(() => {
+        records[1].serviceM8Pricing.currency=null;
+        records[1].serviceM8Pricing.items[0].name='Window cleaning on exterior only';
+        render();switchView('pipeline');
+      });
+      const pipelineCard=page.locator('#view-pipeline .sale-card[data-record="2"]');
+      const sizing=await pipelineCard.locator('.tk-sm8-pricing li>div').first().evaluate(el=>({width:el.getBoundingClientRect().width,height:el.getBoundingClientRect().height,overflow:el.scrollWidth>el.clientWidth+1}));
+      assert(sizing.width>=120,`Service name collapsed to ${sizing.width}px at viewport ${width}`);
+      assert(sizing.height<180,`Service name stacked vertically (${sizing.height}px)`);
+      assert.equal(sizing.overflow,false);
+      const priceBox=await pipelineCard.locator('.tk-sm8-pricing').evaluate(el=>({width:el.clientWidth,scroll:el.scrollWidth}));
+      assert(priceBox.scroll<=priceBox.width+1,'Pricing must fit inside the card');
       assert.deepEqual(errors, []);
       await context.close();
       console.log(`PASS production Nova Leads Manager at ${width}px`);
