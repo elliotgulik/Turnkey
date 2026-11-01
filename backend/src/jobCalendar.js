@@ -1,4 +1,5 @@
 import crypto from 'node:crypto'
+import { staffDirectory, mappedStaff } from './staffDirectory.js'
 
 /* =========================================================================
    Job Calendar: booking jobs onto a real calendar (date + time, not just a
@@ -207,6 +208,18 @@ export function installJobCalendar(app, { db, requireBusiness, getGoogleCalendar
     return Array.isArray(ids) && ids.includes(userId)
   }
 
+  // Shared people picker: authenticated, tenant-scoped, no integration credentials.
+  app.get('/api/job-calendar/staff', requireBusiness, wrap(async(req,res)=>{
+    const privileged=isPrivileged(await role(req));
+    const locals=await fetchAllPaged(()=>db.from('users').select('id,name,email,role').eq('business_id',req.businessId));
+    if(!privileged)return res.json({staff:locals.filter(u=>u.id===req.userId)});
+    const [connection,remote]=await Promise.all([
+      unwrap(db.from('servicem8_connections').select('generation').eq('business_id',req.businessId).maybeSingle()),
+      fetchAllPaged(()=>db.from('external_object_mappings').select('local_id,external_uuid,snapshot,connection_generation').eq('business_id',req.businessId).eq('object_type','staff'),1000,'local_id')
+    ]);
+    res.json({staff:staffDirectory(locals,mappedStaff(remote,connection?.generation))});
+  }));
+
   /* ========================= GET /range ========================= */
   app.get('/api/job-calendar/range', requireBusiness, wrap(async (req, res) => {
     const r = await role(req)
@@ -260,9 +273,7 @@ export function installJobCalendar(app, { db, requireBusiness, getGoogleCalendar
       details: {...filterCalendarDetails(j.details),...(remoteJobByLocal.has(j.id)?{serviceM8JobUuid:remoteJobByLocal.get(j.id)}:{})}
     }))
 
-    const staff = privileged ? staffRows.concat(remoteStaffRows.filter(row => row.connection_generation===sm8?.generation).map(row=>({
-      id:'servicem8:'+row.external_uuid,name:String(row.snapshot?.name||'ServiceM8 staff').slice(0,160),email:String(row.snapshot?.email||'').slice(0,254),role:'servicem8',source:'servicem8',readOnly:true,
-    }))) : staffRows.filter((u) => u.id === req.userId)
+    const staff = privileged ? staffDirectory(staffRows,mappedStaff(remoteStaffRows,sm8?.generation)) : staffRows.filter((u) => u.id === req.userId)
 
     // Overlap, not "starts inside the range" — a multi-day block/event that
     // started before `from` but is still ongoing into the requested window

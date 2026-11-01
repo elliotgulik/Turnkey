@@ -44,6 +44,29 @@
     oldAuth = handleAuthedSession,
     oldSettings = openSettings,
     originalCustomerProfile = openCustomerProfile;
+  let people=[],peopleKey='',peopleLoadedAt=0,peoplePending=null;
+  const peopleScope=()=>String(typeof currentBusinessId!=='undefined'?currentBusinessId||'':'')+':'+String(typeof currentUserId!=='undefined'?currentUserId||'':'')+':'+String(typeof businessSessionVersion!=='undefined'?businessSessionVersion:0);
+  function salespeople(){return peopleKey===peopleScope()?people:[];}
+  async function loadPeople(force=false){
+    if(typeof currentBusinessId==='undefined'||!currentBusinessId||typeof currentUserId==='undefined'||!currentUserId)return [];
+    const key=peopleScope();if(peopleKey!==key){peopleKey=key;people=[];peopleLoadedAt=0;peoplePending=null;}
+    if(peoplePending)return peoplePending;
+    if(!force&&Date.now()-peopleLoadedAt<300000)return people;
+    peoplePending=(async()=>{try{const data=await api('/api/job-calendar/staff');if(key!==peopleScope()||peopleKey!==key)return [];people=Array.isArray(data.staff)?data.staff:[];peopleLoadedAt=Date.now();render();return people;}
+      catch(e){if(key===peopleScope()){peopleLoadedAt=Date.now();toast('Could not load staff: '+e.message);}return [];}
+      finally{if(peopleKey===key)peoplePending=null;}})();return peoplePending;
+  }
+  function salespersonOptions(r){const list=salespeople();return options([['','Unassigned'],...list.map(x=>[x.id,x.name]),...(r.assignedSalespersonId&&!list.some(x=>x.id===r.assignedSalespersonId)?[[r.assignedSalespersonId,r.salespersonName||'Previously assigned staff']]:[])],r.assignedSalespersonId||'');}
+  function salespersonControl(r){void loadPeople();const allowed=typeof currentUserRole!=='undefined'&&['owner','manager'].includes(currentUserRole);return `<label class="sale-person-control"><span>Salesperson</span><select data-sale-assignee="${esc(r.id)}" aria-label="Salesperson for ${esc(r.name||'lead')}" ${allowed&&salespeople().length?'':'disabled'}>${salespersonOptions(r)}</select></label>`;}
+  async function assignSalesperson(id,staffId){
+    const r=record(id),person=salespeople().find(x=>x.id===staffId),key=peopleScope();
+    if(!r||typeof currentUserRole==='undefined'||!['owner','manager'].includes(currentUserRole))throw Error('Only an owner or manager can assign salespeople.');
+    if(staffId&&!person)throw Error('Choose staff from this business.');
+    const previous={assignedSalespersonId:r.assignedSalespersonId,salespersonName:r.salespersonName};
+    r.assignedSalespersonId=staffId||null;r.salespersonName=person?.name||null;
+    try{await syncRecordToSupabase(r);if(key!==peopleScope())return;saveState();render();toast('Salesperson updated.');}
+    catch(e){if(key===peopleScope()){Object.assign(r,previous);render();}throw e;}
+  }
   const record = (id) => records.find((r) => String(r.id) === String(id));
   const button = (text, action, id = "", extra = "") =>
     `<button type="button" class="btn ${['quote-home','quote'].includes(action)?'accent quote-launch-btn':'ghost sm'}" data-sale-action="${action}" data-id="${esc(id)}" ${extra}>${['quote-home','quote'].includes(action)?'<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18M5 6.5h14M5 17.5h14"/></svg>':''}<span>${esc(text)}</span></button>`;
@@ -390,6 +413,10 @@
     if (!r.address) return { action: "customer-edit", label: "Add property address", note: "Confirm the property address before opening Earth to quote." };
     return { action: "quote", label: "Build quote", note: "Open the property in Earth to measure and prepare a quote." };
   }
+  let followupScope='due';
+  function followupRows(scope=followupScope){const now=Date.now(),end=new Date();end.setHours(23,59,59,999);return records.filter(isOpen).filter(r=>{const at=followupTime(r);return scope==='all'||scope==='due'&&at!==null&&at<now||scope==='today'&&at!==null&&at>=now&&at<=end.getTime()||scope==='upcoming'&&at!==null&&at>end.getTime()||scope==='unscheduled'&&at===null;}).sort((a,b)=>(followupTime(a)??Infinity)-(followupTime(b)??Infinity));}
+  function openFollowups(){const rows=followupRows();modal('Follow-ups',`<p>Plan the next contact, email your customer, or mark a follow-up done. Customer emails are sent only when you press Send.</p><div class="sale-scope-tabs">${[['due','Overdue'],['today','Today'],['upcoming','Upcoming'],['unscheduled','Needs a date'],['all','All open']].map(([key,label])=>button(label+' ('+followupRows(key).length+')','followup-scope',key,`aria-pressed="${followupScope===key}"`)).join('')}</div><div class="sale-followup-queue">${rows.map(r=>`<article class="sale-followup-row"><div><button type="button" class="sale-customer-link" data-sale-action="followup-record" data-id="${esc(r.id)}">${esc(r.name||'Customer')}</button><p>${esc(r.address||'')} · ${esc(r.salespersonName||'Unassigned')}</p>${followupLabel(r)}<small>${r.clientResponded?'Customer responded — review their reply':r.quoteSentAt?'Quote sent · awaiting response':'Awaiting next contact'}</small></div><div class="sale-followup-actions"><label class="sale-field"><span>Next follow-up</span><input type="datetime-local" data-followup-date="${esc(r.id)}" value="${followupTime(r)===null?'':esc(localDateTime(r.nextFollowUpAt))}"></label><div class="sale-actions">${r.email?button('Email','followup-email',r.id):''}${r.phone?`<a class="btn ghost sm" href="tel:${esc(String(r.phone).replace(/[^+\d]/g,''))}">Call</a>`:''}${button('Tomorrow','followup-tomorrow',r.id)}${button('In 3 days','followup-three',r.id)}${button('Done','followup-done',r.id)}</div></div></article>`).join('')||empty('No follow-ups in this group.')}</div>`);}
+  async function saveFollowup(r,date,label){if(!r||!isOpen(r))throw Error('Only open opportunities need sales follow-ups.');const previous={nextFollowUpAt:r.nextFollowUpAt,salesHistory:r.salesHistory};r.nextFollowUpAt=date;r.salesHistory=[...(r.salesHistory||[]),{at:Date.now(),label}];try{await syncRecordToSupabase(r);saveState();render();openFollowups();toast('Follow-up updated.');}catch(e){Object.assign(r,previous);throw e;}}
   function followupLabel(r) {
     if (!isOpen(r)) return "";
     const t = followupTime(r);
@@ -443,7 +470,7 @@
       <div class="sale-card-top">${recordHeading(r)}<div class="sale-card-value"><strong>${esc(window.TK_SM8_PRICING?.total(r,value == null?'Not estimated':money(value))||(value == null?'Not estimated':money(value)))}</strong><small>${esc(window.TK_SM8_PRICING?.label(r,r.total>0?'Quote incl. GST':'Estimated value')||(r.total>0?'Quote incl. GST':'Estimated value'))}</small></div></div>
       <p class="sale-card-address">${esc(r.address || "Property address needed")}</p>${window.TK_LEAD_REQUEST?.render(r)||''}${window.TK_SM8_PRICING?.render(r,{compact:true})||(!window.TK_LEAD_REQUEST?.requests(r)?.length?`<p class="sale-card-services">${esc(servicesLabel(r))}</p>`:'')}
       <div class="sale-tags"><span>${esc(r.source || "Manual")}</span><span title="${esc(grade.description)}">${esc(grade.label)}</span><span>${age ? Math.max(0, Math.floor((Date.now() - age) / 86400000)) + "d old" : "Age unknown"}</span></div>
-      <div class="sale-card-owner">${esc(r.salespersonName || "Unassigned salesperson")}</div>${followupLabel(r)}
+      ${salespersonControl(r)}${followupLabel(r)}
       ${nextButton(r)}${recordActions(r)}<div class="sale-card-stage">${stageControl(r)}</div></article>`;
   }
   function resultBar(count, total, filtered, action, context) {
@@ -460,7 +487,7 @@
     let list = pipelineRecords.filter(r => pipelineScope === 'all' ? !['completed','lost'].includes(uiStage(r)) : inScope(r, pipelineScope));
     if (pipelineSearch.trim()) list = list.filter(r => [r.name, r.address, r.email, r.phone, r.source].join(' ').toLowerCase().includes(pipelineSearch.trim().toLowerCase()));
     if (pipelineDueOnly) list = list.filter(isOverdue);
-    document.getElementById('view-pipeline').innerHTML = header('Sales pipeline', 'See where every opportunity stands and give each customer a clear next step.', button('+ New lead', 'new') + button('Build a quote', 'quote-home') + button('Pipeline settings', 'stages')) +
+    document.getElementById('view-pipeline').innerHTML = header('Sales pipeline', 'See where every opportunity stands and give each customer a clear next step.', button('+ New lead', 'new') + button('Build a quote', 'quote-home') + button('Follow-ups', 'followups') + button('Activity & replies', 'activity') + button('Pipeline settings', 'stages')) +
       `<div class="sale-pipeline-toolbar">${scopeButtons('pipeline-scope', pipelineScope, [['all', 'All active', pipelineRecords.filter(r=>!['completed','lost'].includes(uiStage(r))).length], ['open', 'Open opportunities', pipelineRecords.filter(isOpen).length], ['won', 'Quote confirmed', records.filter(r => uiStage(r) === 'won').length]])}<details class="sale-past-jobs"><summary>${pipelineScope==='completed'?'Completed':pipelineScope==='lost'?'Cancelled':'Past jobs'} <span>${pipelineRecords.filter(r=>['completed','lost'].includes(uiStage(r))).length}</span><span aria-hidden="true">⌄</span></summary><div class="sale-past-menu">${scopeButtons('pipeline-scope',pipelineScope,[['completed','Completed',pipelineRecords.filter(r=>uiStage(r)==='completed').length],['lost','Cancelled',pipelineRecords.filter(r=>uiStage(r)==='lost').length]])}</div></details>
       ${field('Search pipeline', `<input id="pipeline-search" type="search" value="${esc(pipelineSearch)}" placeholder="Customer, address or source">`)}<label class="sale-check"><input type="checkbox" id="pipeline-due" ${pipelineDueOnly ? 'checked' : ''}> Follow-ups overdue</label></div>` +
       resultBar(list.length, pipelineRecords.length, pipelineScope !== 'all' || pipelineSearch || pipelineDueOnly, 'pipeline-reset', pipelineDueOnly ? 'Overdue follow-ups' : pipelineScope === 'all' ? 'Active stages' : pipelineScope === 'open' ? 'Open opportunities' : uiStages().find(s => s.key === pipelineScope)?.label || pipelineScope) +
@@ -570,7 +597,7 @@
       <div class="sale-detail-layout"><div>
       <section class="sale-panel" id="sale-customer">${customerInfo(r)}</section>
       <section class="sale-panel" id="sale-plan"><span class="sale-eyebrow">SALES PLAN</span><h3 tabindex="-1">Owner, follow-up &amp; notes</h3>${stageControl(r)}<p class="sale-muted">Contact and quote stages also update after a successful send. Confirming a sale requires a saved, complete quote.</p>
-      <div class="sale-form-pair">${field('Estimated opportunity value', `<input id="sale-opportunity" type="number" min="0" step="0.01" value="${esc(r.opportunityValue || 0)}">`)}${field('Salesperson', `<select id="sale-assignee">${options([['', 'Unassigned'], ...staff.map(x => [x.id, x.name || x.email])], r.assignedSalespersonId || '')}</select>`)}</div>${field('Next follow-up', `<input id="sale-followup" type="datetime-local" value="${followupTime(r) == null ? '' : esc(localDateTime(r.nextFollowUpAt))}">`)}${followupLabel(r)}${field('Sales notes', `<textarea id="sale-notes" rows="4" placeholder="What did you agree? What should happen next?">${esc(r.salesNotes || r.jobNotes || '')}</textarea>`)}${button('Save sales details', 'save-details', r.id)}</section></div>
+      <div class="sale-form-pair">${field('Estimated opportunity value', `<input id="sale-opportunity" type="number" min="0" step="0.01" value="${esc(r.opportunityValue || 0)}">`)}${field('Salesperson', `<select id="sale-assignee">${salespersonOptions(r)}</select>`)}</div>${field('Next follow-up', `<input id="sale-followup" type="datetime-local" value="${followupTime(r) == null ? '' : esc(localDateTime(r.nextFollowUpAt))}">`)}${followupLabel(r)}${field('Sales notes', `<textarea id="sale-notes" rows="4" placeholder="What did you agree? What should happen next?">${esc(r.salesNotes || r.jobNotes || '')}</textarea>`)}${button('Save sales details', 'save-details', r.id)}</section></div>
       <div>${window.TK_LEAD_REQUEST?.render(r)||''}${window.TK_SM8_PRICING?.render(r)||''}<section class="sale-panel" id="sale-quote"><span class="sale-eyebrow">QUOTE</span><h3>Quote &amp; profitability</h3><p class="sale-quote-services">${esc(servicesLabel(r))}</p>${table(['Metric', 'Value'], [
         ['Original TurnKey quote (incl. GST)', r.quoteId||r.total>0?money(r.total||0):'No TurnKey quote saved'],
         ['Estimated delivery costs', moneySafe(r.estimatedCost)],
@@ -680,6 +707,7 @@
     toast(e.message);
   }
   async function loadSales() {
+    void loadPeople();
     if (!sb || !currentBusinessId) return;
     const biz = currentBusinessId;
     const results = await Promise.all([
@@ -985,6 +1013,10 @@
     }
   });
   document.addEventListener("change", async (e) => {
+    if(e.target.hasAttribute('data-followup-date')){try{const value=e.target.value;if(!value||!Number.isFinite(Date.parse(value)))throw Error('Choose a valid follow-up date.');await saveFollowup(record(e.target.dataset.followupDate),new Date(value).toISOString(),'Follow-up scheduled');}catch(err){toast(err.message);}return;}
+
+    if(e.target.hasAttribute('data-sale-assignee')){const control=e.target;control.disabled=true;try{await assignSalesperson(control.dataset.saleAssignee,control.value);}catch(err){toast(err.message);}finally{if(control.isConnected)control.disabled=false;}return;}
+
     if(e.target.id==='pipeline-due'){pipelineDueOnly=e.target.checked;render();return;}
     if(e.target.id==='sale-leads-due'){leadsDueOnly=e.target.checked;renderLeads();return;}
 
@@ -1042,6 +1074,12 @@
     const a = b.dataset.saleAction,
       r = record(b.dataset.id);
     try {
+      if(a==='followups'){followupScope='due';openFollowups();return;}
+      if(a==='followup-scope'){followupScope=b.dataset.id;openFollowups();return;}
+      if(a==='activity'){openNotificationCentre();return;}
+      if(a==='followup-record'){document.getElementById('sales-dialog')?.close();openDetail(r.id);return;}
+      if(a==='followup-email'){document.getElementById('sales-dialog')?.close();openComposeModal({to:r.email||'',subject:r.quoteSentAt?'Following up on your quote':'Your enquiry',customerId:r.customerId,jobId:r.jobId,opportunityId:String(r.id)});return;}
+      if(['followup-tomorrow','followup-three','followup-done'].includes(a)){let date=null;if(a!=='followup-done'){const next=new Date();next.setDate(next.getDate()+(a==='followup-three'?3:1));next.setHours(9,0,0,0);date=next.toISOString();}await saveFollowup(r,date,a==='followup-done'?'Follow-up completed':'Follow-up rescheduled');return;}
       if(a==='pipeline-reset'){pipelineScope='all';pipelineSearch='';pipelineDueOnly=false;render();document.getElementById('pipeline-search')?.focus();return;}
       if(a==='leads-reset'){search='';sourceFilter='';stageFilter='';leadSort='newest';leadsDueOnly=false;renderLeads();document.getElementById('sale-search')?.focus();return;}
       if(a==='leads-layout'){leadLayout=b.dataset.id==='table'?'table':'cards';renderLeads();document.querySelector(`#view-leads [data-sale-action="leads-layout"][data-id="${leadLayout}"]`)?.focus();return;}
@@ -1111,7 +1149,7 @@
         r.assignedSalespersonId =
           document.getElementById("sale-assignee").value || null;
         r.salespersonName =
-          staff.find((x) => x.id === r.assignedSalespersonId)?.name || null;
+          salespeople().find((x) => x.id === r.assignedSalespersonId)?.name || null;
         const v = document.getElementById("sale-followup").value;
         r.nextFollowUpAt = v ? new Date(v).toISOString() : null;
         r.salesNotes = document
@@ -1449,6 +1487,7 @@
       loadConnection();
   });
   window.TK_SALES_PLATFORM = {
+    loadPeople, salespeople, salespersonControl, assignSalesperson, openFollowups, followupRows,
     request: api,
     moveStage: async (id, key) => move(record(id), key),
     transferQuote: async (id) => {

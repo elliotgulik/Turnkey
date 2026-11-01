@@ -1503,7 +1503,7 @@ export function installSalesPlatform(
       if (!SM.uuid(row.uuid)) continue;
       await unwrap(db.from("external_object_mappings").upsert({ business_id: businessId, connection_generation: c.generation,
         object_type: "staff", local_id: "servicem8:" + row.uuid, external_uuid: row.uuid,
-        snapshot: { name: [row.first, row.last].filter(Boolean).join(" ").trim().slice(0, 160), email: String(row.email || "").slice(0, 254) },
+        snapshot: { ...(row.active!=null?{active:row.active}:{}), ...(row.hide_from_schedule!=null?{hideFromSchedule:row.hide_from_schedule}:{}), name: [row.first, row.last].filter(Boolean).join(" ").trim().slice(0, 160), email: String(row.email || "").slice(0, 254) },
         synced_at: new Date().toISOString() }, { onConflict: "business_id,connection_generation,object_type,local_id" }));
     }
     const byJob = grouped(activities, "job_uuid");
@@ -1960,13 +1960,16 @@ export function installSalesPlatform(
           else if (task.kind === "refresh_job")
             await refreshRemote(task.business_id, task.payload.uuid);
           else if (task.kind === "reminder") {
-            if (sendNotification)
+            const job=await unwrap(db.from('jobs').select('id,status,details').eq('business_id',task.business_id).eq('id',task.payload.jobId).maybeSingle());
+            const due=job?.details?.nextFollowUpAt;
+            const current=job&&!['won','scheduled','completed','paid','cancelled','lost'].includes(job.status)&&due&&Date.parse(due)<=Date.now()&&task.dedupe_key===job.id+':'+due;
+            if (sendNotification&&current)
               await sendNotification(db, {
                 business_id: task.business_id,
-                type: "general",
+                type: "sales_followup_due",
                 title: "Sales follow-up due",
                 message: task.payload.message,
-                url: "/index.html?open=dashboard",
+                url: "/index.html?open=pipeline",
               });
           } else if (task.kind === "webhook") {
             let id = task.payload.uuid;
@@ -2096,7 +2099,7 @@ export function installSalesPlatform(
           j.id + ":" + j.details.nextFollowUpAt,
           {
             message:
-              "An opportunity has an overdue sales follow-up. Open Leads to review it.",
+              (j.details.name || "A customer") + " has an overdue follow-up. Open the Follow-ups queue to review it.",
             jobId: j.id,
           },
         );

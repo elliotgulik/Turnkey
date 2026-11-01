@@ -666,3 +666,17 @@ test('calendar exposes only safe ServiceM8 pricing contract for local jobs, disp
  const snapshots=[res.body.jobs.find(row=>row.id===job).details.serviceM8Pricing,res.body.events[0].details.pricing,res.body.completedEvents[0].details.pricing];
  for(const snapshot of snapshots){assert.equal(snapshot.total,0);assert.equal(snapshot.items[0].unitPrice,0);assert.equal(snapshot.items[1].lineTotal,-10);assert.equal(snapshot.currency,'NZD');assert.doesNotMatch(JSON.stringify(snapshot),/cost|margin|hidden|secret/);}
 });
+
+test('GET /staff uses named ServiceM8 staff, merges local logins, excludes apps and scopes tenants',async()=>{
+ const h=setup(),generation=id(81),remote=id(82);
+ h.tables.users[0].name=h.tables.users[0].email;
+ h.tables.servicem8_connections=[{business_id:BIZ,generation}];
+ h.tables.external_object_mappings=[
+ {business_id:BIZ,connection_generation:generation,object_type:'staff',external_uuid:remote,local_id:'servicem8:'+remote,snapshot:{name:'Elliot Gulik',email:'owner@biz.test'}},
+ {business_id:BIZ,connection_generation:generation,object_type:'staff',external_uuid:id(83),local_id:'servicem8:'+id(83),snapshot:{name:'Zapier'}},
+ {business_id:OTHER_BIZ,connection_generation:generation,object_type:'staff',external_uuid:id(84),local_id:'servicem8:'+id(84),snapshot:{name:'Other Business'}}];
+ const result=await h.run('get','/api/job-calendar/staff',{userId:owner});assert.equal(result.statusCode,200);
+ const person=result.body.staff.find(u=>u.id===owner);assert.equal(person.name,'Elliot Gulik');assert.ok(person.aliases.includes('servicem8:'+remote));
+ assert.ok(!result.body.staff.some(u=>['Zapier','Other Business'].includes(u.name)));
+ const technician=await h.run('get','/api/job-calendar/staff',{userId:tech});assert.deepEqual(technician.body.staff.map(u=>u.id),[tech]);
+});

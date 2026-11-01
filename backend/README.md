@@ -144,3 +144,13 @@ network or hosting outages can delay updates. Available ServiceM8 webhooks
 trigger earlier updates; incomplete webhook coverage is reported separately.
 Disable only this wake-up with
 `select cron.unschedule('turnkey-servicem8-background-wakeup');`.
+
+### Staff, follow-ups and reply alerts
+
+`GET /api/job-calendar/staff` is authenticated and business-scoped. Owners/managers receive the named staff directory, merging exact unique ServiceM8 email/name matches into local booking identities. Calendar aliases retain both IDs; integration accounts are excluded. Employees without a TurnKey login remain visible for sales assignment and ServiceM8 booking filters; this does not create login accounts.
+
+The Follow-ups queue saves dates and completion history in existing job details. Existing durable reminder tasks are checked against the current saved due date before alerting, so cancelled or rescheduled reminders are suppressed.
+
+Connected Gmail accounts are checked server-side every 90 seconds while Render is running, using the same sync implementation as the manual button. Only newly stored, recent customer emails create `customer_reply` notifications, targeted to the mailbox owner. Gmail result pages are all read before advancing the cursor; uniqueness on `(account_id, provider_message_id)` prevents duplicate imports/alerts. Public quote acceptance, decline and question notifications retain their existing flow. No customer email is sent by this polling worker.
+
+No migrations or new credentials are required. Deploy the backend and frontend together. This release needs live verification with a real connected mailbox and a real customer reply. Web push still depends on configured OneSignal credentials and browser permission; in-app notifications do not.

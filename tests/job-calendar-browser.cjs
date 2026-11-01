@@ -47,6 +47,7 @@ const { chromium } = require('playwright'),
     await page.route('**/*', (r) => (r.request().url().startsWith(base) ? r.continue() : r.abort()));
     await page.goto(base + '/tests/fixtures/job-calendar.html');
     await page.addStyleTag({ path: path.resolve('job-calendar.css') });
+    await page.addStyleTag({ path: path.resolve('mobile-experience.css') });
     await page.addScriptTag({ path: path.resolve('servicem8-pricing-view.js') });
     if(process.env.TURNKEY_CALENDAR_SDK)await page.addScriptTag({path:process.env.TURNKEY_CALENDAR_SDK});
 
@@ -256,15 +257,16 @@ const { chromium } = require('playwright'),
     assert.match(await page.locator('#tkjc-event-overlay').innerText(), /Jordan Lee/);
     const upstreamPanel = page.locator('#tkjc-event-overlay .tk-sm8-pricing');
     assert.equal(await upstreamPanel.count(), 1, 'pricing panel replaces the old service-name list');
+    await upstreamPanel.locator('summary').click();
     const pricingText = await upstreamPanel.innerText();
     assert.match(pricingText, /House wash <actual>/);
-    assert.match(pricingText, /Qty 3.*50\.00 each/);
-    assert.match(pricingText, /131\.75/);
-    assert.match(pricingText, /777\.23/);
+    assert.match(pricingText, /Qty 3.*50\.0 each/);
+    assert.match(pricingText, /131\.8/);
+    assert.match(pricingText, /777\.2/);
     assert.match(pricingText, /GST inclusive/);
     assert.match(pricingText, /Lines exclude GST/);
     assert.match(pricingText, /Updated/);
-    assert.match(await upstreamPanel.locator('li').nth(1).innerText(), /0\.00/);
+    assert.match(await upstreamPanel.locator('li').nth(1).innerText(), /0\.0/);
     assert.match(await upstreamPanel.locator('li').nth(2).innerText(), /Price unavailable/);
     assert.equal(await upstreamPanel.locator('actual').count(), 0, 'service names are escaped by the shared helper');
     await page.click('[data-tkjc="open-record"]');
@@ -275,7 +277,7 @@ const { chromium } = require('playwright'),
     // Linked local booking uses its own supplied snapshot, including a
     // top-level record snapshot. Unknown totals are never reconstructed.
     await page.locator('[data-tkjc-job="local-import"]').click();
-    assert.match(await page.locator('#tkjc-booking-overlay .tk-sm8-pricing').innerText(), /222\.22/);
+    assert.match(await page.locator('#tkjc-booking-overlay .tk-sm8-pricing').innerText(), /222\.2/);
     assert.equal(await page.locator('#tkjc-booking-overlay [data-tkjc-field="date"]').isDisabled(), true);
     assert.equal(await page.locator('#tkjc-booking-overlay [data-tkjc="save"]').count(), 0);
     await page.click('#tkjc-booking-overlay [data-tkjc="cancel"]');
@@ -285,10 +287,12 @@ const { chromium } = require('playwright'),
       await TK_JOB_CALENDAR.refresh();
     });
     await page.locator('[data-tkjc-job="local-import"]').click();
+    await page.locator('#tkjc-booking-overlay .tk-sm8-pricing summary').click();
     assert.match(await page.locator('#tkjc-booking-overlay .tk-sm8-pricing').innerText(), /Price unavailable/);
     assert.equal(await page.locator('#tkjc-booking-overlay .tk-sm8-pricing-total strong').innerText(), 'Unavailable');
     await page.click('#tkjc-booking-overlay [data-tkjc="cancel"]');
     await openDispatch();
+    await page.locator('#tkjc-event-overlay .tk-sm8-pricing summary').click();
     assert.match(await page.locator('#tkjc-event-overlay .tk-sm8-pricing').innerText(), /has not supplied itemised prices/);
     assert.equal(await page.locator('#tkjc-event-overlay .tk-sm8-pricing-total strong').innerText(), 'Unavailable');
     await page.click('#tkjc-event-overlay [data-tkjc="close"]');
@@ -298,6 +302,7 @@ const { chromium } = require('playwright'),
       await TK_JOB_CALENDAR.refresh();
     });
     await openDispatch();
+    await page.locator('#tkjc-event-overlay .tk-sm8-pricing summary').click();
     assert.match(await page.locator('#tkjc-event-overlay .tk-sm8-pricing').innerText(), /Unknown-priced work/);
     await page.click('#tkjc-event-overlay [data-tkjc="close"]');
     await page.evaluate(() => {window.records = [];window.openedRecord = null;});
@@ -797,6 +802,13 @@ const { chromium } = require('playwright'),
     await page.waitForFunction(() => pollReads === 4);
     assert.equal(await page.evaluate(() => importCalls), 1);
 
+    await page.setViewportSize({width:390,height:844});
+    await page.locator('[data-tkjc-section="schedule"]').click();
+    assert.equal(await page.locator('[data-tkjc="next"]').evaluate(el=>el.getBoundingClientRect().height>=44),true);
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true);
+    const mobileTitle=await page.locator('.tkjc-title').innerText();
+    await page.locator('[data-tkjc="next"]').click();
+    await page.waitForFunction(previous=>document.querySelector('.tkjc-title').textContent!==previous,mobileTitle);
     assert.deepEqual(errors, []);
     await page.close();
     console.log('Job calendar UI passed');

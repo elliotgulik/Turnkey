@@ -166,7 +166,7 @@
   const findEvent = (id) => state.events.find((e) => String(e.id) === String(id));
 
   function findBlock(id) { return state.blocks.find((b) => String(b.id) === String(id)) || null; }
-  function findStaff(id) { return state.staff.find((s) => String(s.id) === String(id)) || null; }
+  function findStaff(id) { return state.staff.find((s) => String(s.id) === String(id) || (s.aliases||[]).includes(String(id))) || null; }
 
   /* ===================== load ===================== */
   const rangeDataKeys = ['jobs', 'events', 'completedEvents', 'blocks'];
@@ -520,7 +520,8 @@
   function matchesStaffFilter(staffIds) {
     if (!state.staffFilter.size) return true;
     if (!staffIds.length) return state.staffFilter.has('unassigned');
-    return staffIds.some((id) => state.staffFilter.has(id));
+    const selected=new Set([...state.staffFilter].flatMap(id=>[id,...(findStaff(id)?.aliases||[])]));
+    return staffIds.some((id) => selected.has(id));
   }
 
   // Honest booking window: a real start/end if we have one, otherwise the

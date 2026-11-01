@@ -13,6 +13,8 @@ fs.rmSync(target, { recursive: true, force: true });
 fs.mkdirSync(target, { recursive: true });
 const assets = [
   "index.html",
+  "mobile-experience.css",
+  "mobile-experience.js",
   "session-flow.js",
   "workspace-controls.js",
   "workspace-experience.js",

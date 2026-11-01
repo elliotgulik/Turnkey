@@ -1385,7 +1385,7 @@
 
 </style>
 <link rel="stylesheet" href="pricing-learning.css?v=20261101h">
-<link rel="stylesheet" href="sales-platform.css?v=20261102d">
+<link rel="stylesheet" href="sales-platform.css?v=20261102g">
 <link rel="stylesheet" href="nova-lead-manager.css?v=20261102e">
 <link rel="stylesheet" href="quote-workspace.css?v=20261017a">
 <link rel="stylesheet" href="conversations.css?v=20261020a">
@@ -1396,6 +1396,7 @@
 <link rel="stylesheet" href="job-calendar.css?v=20261031c">
 <link rel="stylesheet" href="operations-workspace.css?v=20261018c">
 <link rel="stylesheet" href="workspace-experience.css?v=20261022a">
+<link rel="stylesheet" href="mobile-experience.css?v=20261102h">
 </head>
 <body data-session-checking>
 <div id="workspace-loading" class="ux-boot" role="status" aria-live="polite"><img src="icon-192.png" width="48" height="48" alt="TurnKey"><h1>Opening your workspace</h1><p id="workspace-loading-message">Restoring your secure session…</p><button class="btn ghost" id="workspace-retry" hidden onclick="retryWorkspaceSession()">Try again</button></div>
@@ -1471,6 +1472,7 @@
       <input type="file" id="import-file" accept=".json,application/json" style="display:none" onchange="importData(this)">
       <input type="file" id="photo-upload-input" accept="image/*" style="display:none" onchange="onPhotoChosen(this)">
       <input type="file" id="quote-attach-input" accept="image/*,application/pdf" style="display:none" onchange="onQuoteAttachChosen(this)">
+      <button class="sidebar-settings" onclick="openNotificationCentre()"><span class="nav-ico" data-icon="inbox"></span><span>Activity &amp; replies</span><span class="count" id="activity-alert-count" hidden>0</span></button>
       <button class="sidebar-settings" id="lead-alert-button" data-nlm="notifications" aria-label="New lead notifications"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M10 21h4"/></svg><span>New lead alerts</span><span class="count" id="lead-alert-count" hidden>0</span></button>
       <button class="sidebar-settings" onclick="openSettings()"><span class="nav-ico" data-icon="settings"></span>Settings</button>
     </div>
@@ -2728,11 +2730,13 @@ async function enablePushNotifications(btn){
    complete history even for a user who's never turned push on. ===== */
 let notificationCentre={items:[],unread:0};
 async function loadNotificationCentre(){
-  if(!sb||!currentBusinessId)return;
-  const {data,error}=await sb.from('notifications').select('*').eq('business_id',currentBusinessId).order('created_at',{ascending:false}).limit(50);
+  if(!sb||!currentBusinessId||!currentUserId)return;
+  const biz=currentBusinessId,user=currentUserId,version=businessSessionVersion;
+  const {data,error}=await sb.from('notifications').select('*').eq('business_id',biz).or('user_id.is.null,user_id.eq.'+user).gte('created_at',new Date(Date.now()-3*86400000).toISOString()).order('created_at',{ascending:false}).limit(100);
+  if(biz!==currentBusinessId||user!==currentUserId||version!==businessSessionVersion)return;
   if(error){console.error('Load notifications failed',error);return;}
   notificationCentre.items=data||[];
-  notificationCentre.unread=notificationCentre.items.filter(n=>!n.read).length;
+  notificationCentre.unread=notificationCentre.items.filter(n=>!n.read).length;updateNotificationBadges();
   if(document.getElementById('view-dashboard').classList.contains('active'))renderDashboard();
   subscribeNotificationsRealtime();
 }
@@ -2744,9 +2748,9 @@ function subscribeNotificationsRealtime(){
   if(notificationsRealtimeChannel||!sb||!currentBusinessId)return;
   notificationsRealtimeChannel=sb.channel('notifications-'+currentBusinessId)
     .on('postgres_changes',{event:'INSERT',schema:'public',table:'notifications',filter:'business_id=eq.'+currentBusinessId},(payload)=>{
-      if(!payload||!payload.new)return;
+      if(!payload||!payload.new||payload.new.business_id!==currentBusinessId||payload.new.user_id&&payload.new.user_id!==currentUserId)return;
       notificationCentre.items.unshift(payload.new);
-      notificationCentre.unread++;
+      notificationCentre.unread++;updateNotificationBadges();
       if(document.getElementById('view-dashboard').classList.contains('active'))renderDashboard();
       if(document.getElementById('notif-overlay').classList.contains('open'))renderNotificationList();
     })
@@ -2760,17 +2764,20 @@ function subscribeNotificationsRealtime(){
 // without building a new one, so this is the honest, currently-achievable
 // scope: the right page, not (yet) the right record within it.
 function notificationTypeToView(type){
+  if(['customer_reply','email_received'].includes(type))return 'inbox';
   if(type==='job_booked')return 'calendar';
   return 'pipeline';
 }
+function updateNotificationBadges(){const el=document.getElementById('activity-alert-count');if(el){const count=notificationCentre.items.filter(n=>!n.read&&Date.now()-Date.parse(n.created_at)<3*86400000).length;el.textContent=String(count);el.hidden=count===0;}}
 function openNotificationCentre(){renderNotificationList();openModal('notif-overlay');}
 function renderNotificationList(){
+  updateNotificationBadges();
   const el=document.getElementById('notif-list');if(!el)return;
-  const items=notificationCentre.items;
+  const items=notificationCentre.items.filter(n=>Date.now()-Date.parse(n.created_at)<3*86400000);
   el.innerHTML=items.length?items.map(n=>`
     <div class="notif-row ${n.read?'':'unread'}" onclick="clickNotification('${n.id}')">
       <div class="notif-dot"></div>
-      <div class="notif-body"><div class="notif-title">${n.title}</div><div class="notif-msg">${n.message}</div><div class="notif-when">${timeAgo(new Date(n.created_at).getTime())}</div></div>
+      <div class="notif-body"><div class="notif-title">${escapeHtmlSafe(n.title)}</div><div class="notif-msg">${escapeHtmlSafe(n.message)}</div><div class="notif-when">${timeAgo(new Date(n.created_at).getTime())}</div></div>
     </div>`).join(''):'<div class="empty-state" style="padding:20px"><div class="sm">No notifications yet.</div></div>';
 }
 async function clickNotification(id){
@@ -2782,6 +2789,7 @@ async function clickNotification(id){
     if(document.getElementById('view-dashboard').classList.contains('active'))renderDashboard();
   }
   closeModal('notif-overlay');
+  if(n.type==='sales_followup_due'){window.TK_SALES_PLATFORM?.openFollowups();return;}
   switchView(notificationTypeToView(n.type));
 }
 async function markAllNotificationsRead(){
@@ -8888,6 +8896,7 @@ async function syncEmail(){
   try{
     const res=await fetch(`${url}/api/email/sync`,{method:'POST',headers:{Authorization:'Bearer '+session.access_token}});
     const j=await res.json();
+    if(res.ok&&j.imported){void loadNotificationCentre();}
     if(res.ok&&j.imported)toast(j.imported+' new email'+(j.imported!==1?'s':'')+' synced');
     if(res.ok&&document.getElementById('view-inbox')?.classList.contains('active'))renderInbox();
   }catch(e){console.error('Email sync failed',e);}
@@ -11025,7 +11034,7 @@ async function retryPendingPhotos(){
 <script src="lead-answer-utils.js?v=20261101g"></script>
 <script src="lead-request-view.js?v=20261101g"></script>
 <script src="servicem8-pricing-view.js?v=20261102d"></script>
-<script src="sales-platform.js?v=20261102d"></script>
+<script src="sales-platform.js?v=20261102g"></script>
 <script type="module" src="measurement-import.js?v=20261017a"></script>
 <script src="pricing-learning-engine.js?v=20261101h"></script>
 <script src="quote-workspace.js?v=20261017a"></script>
@@ -11033,16 +11042,17 @@ async function retryPendingPhotos(){
 <script src="conversations-bridge.js?v=20261020a"></script>
 <script src="servicem8-import.js?v=20261017a"></script>
 <script src="marketing-analytics.js?v=20261102b"></script>
-<footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a> · <span id="tk-app-version">v20261102e</span></footer>
+<footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a> · <span id="tk-app-version">v20261102h</span></footer>
 <script src="extension-quote-link.js?v=20261102b"></script>
 <script src="job-workspace.js?v=20261031a"></script>
-<script src="job-calendar.js?v=20261101f"></script>
+<script src="job-calendar.js?v=20261102g"></script>
 <script src="operations-workspace.js?v=20261102b"></script>
 <script src="operations-bridge.js?v=20261018c"></script>
 <script src="workspace-controls.js?v=20261019a"></script>
 <script src="settings-experience.js?v=20261019d"></script>
 <script src="workspace-experience.js?v=20261019b"></script>
-<script src="nova-lead-manager.js?v=20261102e"></script>
+<script src="nova-lead-manager.js?v=20261102g"></script>
 <script src="pricing-learning-ui.js?v=20261101h"></script>
+<script src="mobile-experience.js?v=20261102h"></script>
 </body>
 </html>

@@ -1,6 +1,7 @@
 import { createServiceM8Router } from './servicem8Routes.js'
 import { installSalesPlatform } from './salesPlatform.js'
 import { installConversations } from './conversationsRoutes.js'
+import { installEmailSync } from './emailSync.js'
 import { installMarketingRoutes } from './marketingRoutes.js'
 import { installJobWork } from './jobWork.js'
 import { installJobCalendar } from './jobCalendar.js'
@@ -770,57 +771,6 @@ app.post('/api/email/send', requireBusiness, async (req, res) => {
   }
 })
 
-app.post('/api/email/sync', requireBusiness, async (req, res) => {
-  try {
-    const auth = await getValidAccessToken(req.businessId, req.userId, 'gmail')
-    if (!auth) return res.status(400).json({ error: 'Connect your Gmail account first (Connections)' })
-
-    const sinceUnix = auth.account.last_sync_at
-      ? Math.floor(new Date(auth.account.last_sync_at).getTime() / 1000)
-      : Math.floor(Date.now() / 1000) - 30 * 24 * 3600 // first sync: last 30 days
-    const ids = await gmail.listMessageIds(auth.accessToken, { afterUnix: sinceUnix })
-
-    let imported = 0
-    for (const id of ids) {
-      const { data: existing } = await authClient.from('emails').select('id')
-        .eq('account_id', auth.account.id).eq('provider_message_id', id).maybeSingle()
-      if (existing) continue
-
-      const msg = await gmail.getMessage(auth.accessToken, id)
-      const direction = msg.isSentByUs ? 'sent' : 'received'
-      const counterpart = direction === 'sent' ? msg.to : msg.from
-      const addrMatch = counterpart.match(/<([^>]+)>/)
-      const addr = (addrMatch ? addrMatch[1] : counterpart).trim().toLowerCase()
-      const { data: cust } = addr
-        ? await authClient.from('customers').select('id').eq('business_id', req.businessId).ilike('email', escLike(addr)).maybeSingle()
-        : { data: null }
-
-      const { error: insErr } = await authClient.from('emails').insert({
-        business_id: req.businessId, account_id: auth.account.id, customer_id: cust?.id || null,
-        provider_message_id: msg.id, thread_id: msg.threadId, direction,
-        from_address: msg.from, to_addresses: msg.to, subject: msg.subject,
-        snippet: msg.snippet, body_html: msg.bodyHtml || null, body_text: msg.bodyText || null,
-        sent_at: msg.date ? new Date(msg.date).toISOString() : new Date().toISOString()
-      })
-      if (!insErr) {
-        imported++
-        if (cust?.id) {
-          await authClient.from('activity_log').insert({
-            business_id: req.businessId, customer_id: cust.id,
-            type: direction === 'sent' ? 'email_sent' : 'email_received',
-            summary: (direction === 'sent' ? 'Email sent: ' : 'Email received: ') + (msg.subject || '(no subject)')
-          })
-        }
-      }
-    }
-    await authClient.from('email_accounts').update({ last_sync_at: new Date().toISOString() }).eq('id', auth.account.id)
-    res.json({ ok: true, imported })
-  } catch (err) {
-    console.error('POST /api/email/sync', err)
-    if (err.code === 'AUTH_EXPIRED') return res.status(401).json({ error: 'Gmail connection expired — please reconnect in Connections' })
-    res.status(500).json({ error: 'Sync failed' })
-  }
-})
 
 /* =====================================================================
    CALENDAR — Google Calendar (OAuth, same signState()/encryptToken()
@@ -1360,6 +1310,7 @@ app.post('/api/ai/marketing', requireBusiness, async (req, res) => {
 
 installSalesPlatform(app,{db:authClient,requireBusiness,sendNotification})
 installConversations(app,{db:authClient,requireBusiness,getValidAccessToken})
+installEmailSync(app,{db:authClient,requireBusiness,getValidAccessToken,gmail,sendNotification})
 installMarketingRoutes(app,{db:authClient,requireBusiness,getMetaRetrievalToken:async(businessId)=>{
   const {data,error}=await authClient.from('lead_sources').select('token_enc').eq('business_id',businessId).eq('provider','meta').maybeSingle()
   if(error)throw error

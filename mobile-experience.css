@@ -1,0 +1,63 @@
+/* Mobile workflow improvements; desktop layout and existing tab icons stay intact. */
+@media(max-width:760px){
+ html{scroll-padding-bottom:90px;}
+ body{overscroll-behavior-y:none;}
+ .app main{min-width:0;padding-bottom:calc(90px + env(safe-area-inset-bottom,0px));}
+ .app :is(button,.btn,.ux-select-trigger){min-height:44px;touch-action:manipulation;}
+ .app :is(input:not([type=checkbox]):not([type=radio]),select,textarea),dialog :is(input,select,textarea),.overlay :is(input,select,textarea){font-size:16px!important;max-width:100%;}
+ .app :is(.sale-head,.view-head,.nlm-header){gap:12px;}
+ .app :is(.sale-actions,.nlm-header-actions){flex-wrap:wrap;gap:8px;}
+ .sale-head>.sale-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:100%;}
+ .sale-head>.sale-actions .btn{width:100%;min-height:44px!important;font-size:13px;}
+ .sale-head>.sale-actions .quote-launch-btn{grid-column:1/-1;}
+ .bottom-nav{padding-bottom:env(safe-area-inset-bottom,0px);}
+ .bottom-nav button{min-height:56px;}
+ .tk-keyboard-open .bottom-nav{display:none!important;}
+ .overlay{padding:8px;align-items:flex-end;max-height:var(--tk-visual-height,100dvh);}
+ .overlay .modal{width:100%;max-width:100%;max-height:calc(var(--tk-visual-height,100dvh) - 16px);display:flex;flex-direction:column;border-radius:18px;overflow:hidden;}
+ .overlay .modal-head,.overlay .modal-foot{flex:none;padding:15px;}
+ .overlay .modal-body{min-height:0;overflow:auto;overscroll-behavior:contain;padding:15px;}
+ #sales-dialog{width:calc(100% - 16px);max-width:none;max-height:calc(var(--tk-visual-height,100dvh) - 16px);margin:auto;padding:16px;overscroll-behavior:contain;}
+ .sale-dialog-head{position:sticky;top:-16px;z-index:3;background:var(--surface,#fff);padding:12px 0;gap:12px;}
+ .sale-dialog-head h2{font-size:20px;}
+ .sale-dialog-head .btn{min-height:44px;}
+ .sale-followup-queue{max-height:none;overflow:visible;}
+ .sale-followup-row{padding:13px;}
+ .sale-followup-actions .sale-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));}
+ .sale-followup-actions .btn{min-height:44px;}
+ #view-pipeline .sale-kanban{grid-template-columns:repeat(var(--pipeline-columns,3),calc(100vw - 48px));overflow-x:auto;scroll-snap-type:x proximity;overscroll-behavior-x:contain;}
+ #view-pipeline .sale-column{min-width:0;scroll-snap-align:start;}
+ .sale-stage-jump{overflow-x:auto;flex-wrap:nowrap;scrollbar-width:thin;}
+ .sale-stage-jump .btn{flex:none;}
+ .sale-pipeline-toolbar .sale-scope-tabs{width:100%;}
+ .sale-past-jobs{margin-left:auto;}
+ .nlm-header-actions{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr));width:100%;}
+ .nlm-header-actions>.btn{min-height:44px!important;font-size:13px;white-space:normal;justify-content:center;}
+ .nlm-card{padding:15px;}
+ .nlm-card-side{min-width:0;}
+ .nlm-card-side .sale-person-control,.nlm-stage-select{width:100%;}
+ .nlm-contact-line{overflow-wrap:anywhere;}
+ .nlm-scopes{display:flex;overflow-x:auto;flex-wrap:nowrap;}
+ .nlm-scopes button{flex:none;}
+ .nlm-detail{width:100%;max-height:calc(var(--tk-visual-height,100dvh) - 16px);}
+ .nlm-detail-scroll{overscroll-behavior:contain;}
+ #tkjc-staff-filter{display:flex;flex-wrap:nowrap;overflow-x:auto;padding-bottom:7px;scrollbar-width:thin;}
+ #tkjc-staff-filter .tkjc-chip{flex:none;min-height:44px;}
+ .tkjc-nav{width:100%;flex-wrap:wrap;}
+ .tkjc-views{width:100%;overflow-x:auto;}
+ .tkjc-views button{flex:1;white-space:nowrap;}
+ .tkjc-completed-row{grid-template-columns:minmax(0,1fr);gap:6px;}
+ .tkjc-nav button,.tkjc-views button{min-height:44px;min-width:44px;}
+ .tkjc-title{font-size:14px;white-space:normal;}
+ .tkjc-day{min-width:0;}
+ .cv-tabs{flex-wrap:nowrap;overflow-x:auto;}
+ .cv-tabs button{flex:none;min-height:44px;}
+ .cv-composer{padding:15px;}
+ .cv-compose-footer{position:sticky;bottom:0;background:var(--surface,#fff);padding:12px 0 calc(10px + env(safe-area-inset-bottom,0px));z-index:2;}
+ .cv-compose-actions{gap:8px;}
+ .cv-compose-actions button{min-height:44px;}
+ .cv-message{overflow-wrap:anywhere;}
+ .ux-select-panel{max-width:calc(100vw - 16px)!important;}
+ .ux-select-option{min-height:44px;padding-block:12px;}
+ .nlm-alert-row{min-height:66px;}
+}

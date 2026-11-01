@@ -79,19 +79,25 @@ function extractBody(payload) {
 }
 
 export async function listMessageIds(accessToken, { afterUnix } = {}) {
-  const params = new URLSearchParams({ maxResults: '25' })
-  if (afterUnix) params.set('q', `after:${afterUnix}`)
-  const res = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?${params}`, {
-    headers: { Authorization: `Bearer ${accessToken}` }
-  })
-  if (res.status === 401) { const e = new Error('Gmail auth expired'); e.code = 'AUTH_EXPIRED'; throw e }
-  if (!res.ok) throw new Error('Gmail list failed: ' + await res.text())
-  const data = await res.json()
-  return (data.messages || []).map(m => m.id)
+  const ids = new Set(), seenPages = new Set(); let pageToken = '';
+  do {
+    const params = new URLSearchParams({ maxResults: '100' });
+    if (afterUnix) params.set('q', `after:${afterUnix}`);
+    if (pageToken) params.set('pageToken', pageToken);
+    const res = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?${params}`, {headers:{Authorization:`Bearer ${accessToken}`},signal:AbortSignal.timeout(20000)});
+    if(res.status===401){const error=Error('Gmail auth expired');error.code='AUTH_EXPIRED';throw error;}
+    if(!res.ok)throw Error('Gmail list failed');
+    const data=await res.json();for(const row of data.messages||[])if(row.id)ids.add(row.id);
+    pageToken=data.nextPageToken||'';
+    if(pageToken&&seenPages.has(pageToken))throw Error('Gmail returned a repeated page token');
+    if(pageToken)seenPages.add(pageToken);
+  }while(pageToken);
+  return [...ids];
 }
 
 export async function getMessage(accessToken, id) {
   const res = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=full`, {
+    signal: AbortSignal.timeout(20000),
     headers: { Authorization: `Bearer ${accessToken}` }
   })
   if (!res.ok) throw new Error('Gmail get message failed: ' + await res.text())

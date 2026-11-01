@@ -1757,3 +1757,12 @@ test('corrected contacts during approval retain the approved PDF and promote the
  assert.equal(f.calls.filter(c=>c.path==='/job.json'&&c.method==='POST').length,1);
  assert([...f.objects.entries()].filter(([p])=>p.startsWith('/jobcontact/')).every(([,row])=>row.email==='approved@example.test'));
 });
+
+test('follow-up reminders only notify for the current overdue schedule, never after completion or rescheduling',async()=>{
+ const due=new Date(Date.now()-3600000).toISOString();
+ for(const [status,currentDue,expected] of [['quoted',due,1],['quoted',null,0],['quoted',new Date(Date.now()+86400000).toISOString(),0],['completed',due,0],['cancelled',due,0]]){
+  const job={id:id(91),business_id:'A',status,details:{nextFollowUpAt:currentDue}},task={id:id(92),business_id:'A',kind:'reminder',dedupe_key:job.id+':'+due,payload:{jobId:job.id,message:'Customer follow-up'}};
+  const db=database({jobs:[job],integration_tasks:[task]});claimMock(db);const alerts=[];
+  const {worker}=setup(db,undefined,{sendNotification:async(_,alert)=>alerts.push(alert)});await worker.tick();assert.equal(alerts.length,expected);assert.equal(task.state,'succeeded');
+ }
+});

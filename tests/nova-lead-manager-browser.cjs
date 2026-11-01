@@ -24,7 +24,7 @@ const assert = require('node:assert/strict');
     const base = 'http://127.0.0.1:' + server.address().port;
     const cached = path.join(os.homedir(), 'Library/Caches/ms-playwright/chromium-1228/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing');
     browser = await chromium.launch({ headless:true, ...(fs.existsSync(chromium.executablePath()) ? {} : { executablePath:cached }) });
-    for (const width of [1440,390]) {
+    for (const width of [1440,390,360]) {
       const context = await browser.newContext({ viewport:{width,height:980}, serviceWorkers:'block' });
       const page = await context.newPage();
       page.setDefaultTimeout(5000);
@@ -36,10 +36,15 @@ const assert = require('node:assert/strict');
         if (url.startsWith(base) && new URL(url).pathname !== '/config.js') return route.continue();
         return route.fulfill({ contentType:'text/javascript', body:url.startsWith(base) ? 'window.TURNKEY_CONFIG={};' : '' });
       });
+      await page.route('**/api/job-calendar/staff',route=>route.fulfill({json:{staff:[{id:'servicem8:elliot',name:'Elliot Gulik',source:'servicem8',readOnly:true},{id:'servicem8:luca',name:'Luca Anderson',source:'servicem8',readOnly:true}]}}));
       await page.goto(base);
       await page.waitForFunction(() => window.TK_NOVA_LEAD_MANAGER && window.TK_SALES_PLATFORM);
       await page.evaluate(() => {
         const now = Date.now();
+        backendUrl=()=>location.origin;currentBusinessId='test-business';currentUserId='test-owner';currentUserRole='owner';
+        window.TK_CURRENT_SESSION={user:{id:currentUserId},access_token:'fake-test-token',expires_at:Math.floor(Date.now()/1000)+3600};
+        syncRecordToSupabase=async(r)=>{window.lastAssigned=r.assignedSalespersonId;};
+
         records = ['new','scheduled','won','completed','paid','cancelled','lost'].map((stage,i) => newRecord({
           id:i+1, stage, name:`Customer ${i+1}`, source:'ServiceM8', total:100,
           createdAt:now, address:'18 Kowhai Road, Auckland', wonAt:now,
@@ -54,6 +59,24 @@ const assert = require('node:assert/strict');
       const scope = key => leads.locator(`[data-nlm-scope="${key}"]`);
       assert.equal(await leads.locator('h2').innerText(), 'Lead Manager');
       assert.deepEqual(await ids(), [1]);
+      await page.waitForFunction(()=>!document.querySelector('#view-leads [data-sale-assignee="1"]').disabled);
+      const assignee=leads.locator('[data-sale-assignee="1"]');
+      assert.match(await assignee.innerText(),/Elliot Gulik/);
+      await assignee.selectOption('servicem8:luca');
+      await page.waitForFunction(()=>records[0].salespersonName==='Luca Anderson'&&window.lastAssigned==='servicem8:luca');
+      assert.equal(await page.evaluate(()=>records[0].stage),'new');
+      await page.evaluate(()=>{records[0].nextFollowUpAt=new Date(Date.now()-3600000).toISOString();});
+      await leads.locator('[data-sale-action="followups"]').click();
+      assert.match(await page.locator('#sales-dialog').innerText(),/Customer 1/);
+      await page.locator('#sales-dialog [data-sale-action="followup-tomorrow"]').click();
+      await page.waitForFunction(()=>Date.parse(records[0].nextFollowUpAt)>Date.now());
+      await page.locator('#sales-dialog [data-sale-action="followup-scope"][data-id="all"]').click();
+      await page.locator('#sales-dialog [data-sale-action="followup-done"]').click();
+      await page.waitForFunction(()=>records[0].nextFollowUpAt===null);
+      assert.equal(await page.evaluate(()=>records[0].stage),'new');
+      await page.locator('#sales-dialog [data-sale-action="dialog-close"]').click();
+
+
       assert.equal(await page.locator('#cnt-leads').innerText(),'1');
       await page.locator(width>760?'#lead-alert-button':'#view-leads [data-nlm="notifications"]').click();
       assert.match(await page.locator('#lead-alert-list').innerText(),/Customer 1/);
@@ -108,6 +131,7 @@ const assert = require('node:assert/strict');
       const pipelineCard=page.locator('#view-pipeline .sale-card[data-record="2"]');
       await pipelineCard.locator('.tk-sm8-pricing summary').click();
       const sizing=await pipelineCard.locator('.tk-sm8-pricing li>div').first().evaluate(el=>({width:el.getBoundingClientRect().width,height:el.getBoundingClientRect().height,overflow:el.scrollWidth>el.clientWidth+1}));
+
       assert(sizing.width>=120,`Service name collapsed to ${sizing.width}px at viewport ${width}`);
       assert(sizing.height<180,`Service name stacked vertically (${sizing.height}px)`);
       assert.equal(sizing.overflow,false);
