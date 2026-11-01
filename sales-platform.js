@@ -455,14 +455,15 @@
   render = function () {
     if (typeof saveState === "function") saveState();
     document.getElementById("cnt-leads").textContent = records.filter(r => r.stage === 'new').length;
-    const scopeStages = uiStages().filter(s => pipelineScope === 'all' || (pipelineScope === 'open' ? !['won', 'lost', 'completed'].includes(s.key) : s.key === pipelineScope));
-    let list = records.filter(r => inScope(r, pipelineScope));
+    const pipelineRecords = records.filter(r => uiStage(r) !== 'new');
+    const scopeStages = uiStages().filter(s => s.key !== 'new').filter(s => pipelineScope === 'all' || (pipelineScope === 'open' ? !['won', 'lost', 'completed'].includes(s.key) : s.key === pipelineScope));
+    let list = pipelineRecords.filter(r => inScope(r, pipelineScope));
     if (pipelineSearch.trim()) list = list.filter(r => [r.name, r.address, r.email, r.phone, r.source].join(' ').toLowerCase().includes(pipelineSearch.trim().toLowerCase()));
     if (pipelineDueOnly) list = list.filter(isOverdue);
     document.getElementById('view-pipeline').innerHTML = header('Sales pipeline', 'See where every opportunity stands and give each customer a clear next step.', button('+ New lead', 'new') + button('Build a quote', 'quote-home') + button('Pipeline settings', 'stages')) +
-      `<div class="sale-pipeline-toolbar">${scopeButtons('pipeline-scope', pipelineScope, [['all', 'All', records.length], ['open', 'Open opportunities', records.filter(isOpen).length], ['won', 'Quote confirmed', records.filter(r => uiStage(r) === 'won').length], ['completed', 'Completed', records.filter(r => uiStage(r) === 'completed').length], ['lost', 'Cancelled', records.filter(r => P.key(r) === 'lost').length]])}
+      `<div class="sale-pipeline-toolbar">${scopeButtons('pipeline-scope', pipelineScope, [['all', 'All', pipelineRecords.length], ['open', 'Open opportunities', pipelineRecords.filter(isOpen).length], ['won', 'Quote confirmed', records.filter(r => uiStage(r) === 'won').length], ['completed', 'Completed', records.filter(r => uiStage(r) === 'completed').length], ['lost', 'Cancelled', records.filter(r => P.key(r) === 'lost').length]])}
       ${field('Search pipeline', `<input id="pipeline-search" type="search" value="${esc(pipelineSearch)}" placeholder="Customer, address or source">`)}<label class="sale-check"><input type="checkbox" id="pipeline-due" ${pipelineDueOnly ? 'checked' : ''}> Follow-ups overdue</label></div>` +
-      resultBar(list.length, records.length, pipelineScope !== 'all' || pipelineSearch || pipelineDueOnly, 'pipeline-reset', pipelineDueOnly ? 'Overdue follow-ups' : pipelineScope === 'all' ? 'All stages' : pipelineScope === 'open' ? 'Open opportunities' : uiStages().find(s => s.key === pipelineScope)?.label || pipelineScope) +
+      resultBar(list.length, pipelineRecords.length, pipelineScope !== 'all' || pipelineSearch || pipelineDueOnly, 'pipeline-reset', pipelineDueOnly ? 'Overdue follow-ups' : pipelineScope === 'all' ? 'All stages' : pipelineScope === 'open' ? 'Open opportunities' : uiStages().find(s => s.key === pipelineScope)?.label || pipelineScope) +
       `<nav class="sale-stage-jump" aria-label="Jump to stage">${scopeStages.map(s => `<button class="btn ghost sm" data-sale-action="pipeline-jump" data-id="${s.key}">${esc(s.label)} · ${list.filter(r => uiStage(r) === s.key).length}</button>`).join('')}</nav><p class="sale-board-hint">Open a customer name for details. Move an opportunity with its Sales stage menu or drag it to a stage.</p>` +
       (!list.length ? `<div class="sale-no-results">${empty('No matching opportunities. Reset filters to see your pipeline.')}${button('Reset filters', 'pipeline-reset')}</div>` : '') +
       `<div class="sale-kanban" style="--pipeline-columns:${scopeStages.length}">${scopeStages.map(s => {

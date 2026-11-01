@@ -128,3 +128,18 @@ test('saved Meta services are available to Pipeline and quote details through th
   assert.deepEqual(Array.from(manager().services({notes:'Follow up: tomorrow',jobNotes:notes})),['House,windows']);
   assert.deepEqual(Array.from(manager().services({source:'Wix',notes:'Please call me tomorrow'})),[]);
 });
+
+
+test('new leads older than 72 hours stay under All while contacted leads remain active',()=>{
+ const f=statusFixture(),now=Date.now();
+ f.records.splice(0,f.records.length,
+  {id:1,name:'Recent new',stage:'new',createdAt:now-2*86400000},
+  {id:2,name:'Older new',stage:'new',requestSubmittedAt:now-4*86400000,createdAt:now},
+  {id:3,name:'Older contacted',stage:'contacted',createdAt:now-10*86400000},
+  {id:4,name:'Unknown date',stage:'new'});
+ const ids=()=>[...f.host.innerHTML.matchAll(/data-nlm-record="(\d+)"/g)].map(m=>Number(m[1])).sort();
+ f.manager.render();assert.deepEqual(ids(),[1,3,4]);
+ f.scope('new');assert.deepEqual(ids(),[1,4]);
+ f.scope('all');assert.deepEqual(ids(),[1,2,3,4]);
+ assert.equal(f.records[1].stage,'new');
+});

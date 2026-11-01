@@ -88,6 +88,8 @@ const assert = require('node:assert/strict');
       assert.deepEqual(await page.evaluate(() => records.slice(3,5).map(r => TK_METRICS.won(r))), [true,true]);
       await page.evaluate(() => switchView('pipeline'));
       assert.equal(await page.locator('#view-pipeline h2').innerText(), 'Sales pipeline');
+      assert.equal(await page.locator('#view-pipeline #pipeline-new').count(),0);
+      assert.equal(await page.locator('#view-pipeline .sale-card[data-record="1"]').count(),0);
       await page.evaluate(() => switchView('sales'));
       assert.equal(await page.locator('#view-sales h2').innerText(), 'Analytics');
       await page.evaluate(() => {
