@@ -54,7 +54,7 @@ function statusFixture() {
   const context = {
     records, money: n => '$' + n, currentBusinessId: 'test',
     render() {}, switchView() {}, handleAuthedSession() {}, openMoreSheet() {},
-    document: { activeElement: null, addEventListener(k, fn) { handlers[k] = fn; }, querySelector() { return null; }, getElementById() { return host; } },
+    document: { activeElement: null, addEventListener(k, fn) { handlers[k] = fn; }, querySelector() { return null; }, getElementById(id) { return id === 'view-leads' ? host : null; } },
     localStorage: { getItem() { return null; }, setItem() {} },
     window: { TK_PIPELINE: require('../pipeline-model.js') },
   };
@@ -128,4 +128,18 @@ test('new leads older than 72 hours stay under All while contacted leads belong 
  f.scope('new');assert.deepEqual(ids(),[1,4]);
  f.scope('all');assert.deepEqual(ids(),[1,2,4]);
  assert.equal(f.records[1].stage,'new');
+});
+
+test('lead alerts include only unresponded new enquiries younger than three days',()=>{
+ const f=statusFixture(),now=Date.now();f.records.splice(0,f.records.length,
+ {id:1,stage:'new',createdAt:now-1000},
+ {id:2,stage:'new',createdAt:now-3*86400000},
+ {id:3,stage:'new',createdAt:now-1000,firstResponseAt:now},
+ {id:4,stage:'contacted',createdAt:now-1000},
+ {id:5,stage:'new'},
+ {id:6,stage:'new',createdAt:now,requestSubmittedAt:now-5*86400000},
+ {id:7,stage:'new',createdAt:now-1000,quoteSentAt:now});
+ assert.deepEqual(Array.from(f.manager.pendingLeads(now),r=>r.id),[1]);
+ assert.equal(f.manager.pendingLeads(now+3*86400000).length,0);
+ assert.equal(f.records.length,7);
 });

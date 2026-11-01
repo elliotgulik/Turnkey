@@ -454,7 +454,7 @@
   }
   render = function () {
     if (typeof saveState === "function") saveState();
-    document.getElementById("cnt-leads").textContent = records.filter(r => r.stage === 'new').length;
+    document.getElementById("cnt-leads").textContent = window.TK_NOVA_LEAD_MANAGER?.pendingLeads().length || 0;
     const pipelineRecords = records.filter(r => uiStage(r) !== 'new');
     const scopeStages = uiStages().filter(s => s.key !== 'new').filter(s => (pipelineScope === 'all' ? !['completed','lost'].includes(s.key) : false) || (pipelineScope === 'open' ? !['won', 'lost', 'completed'].includes(s.key) : s.key === pipelineScope));
     let list = pipelineRecords.filter(r => pipelineScope === 'all' ? !['completed','lost'].includes(uiStage(r)) : inScope(r, pipelineScope));

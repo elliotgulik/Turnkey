@@ -14,3 +14,5 @@ test('names and upstream labels are escaped and calendar snapshots use the same 
  const r={details:{pricing:{...pricing,items:[{name:'<script>unsafe</script>',lineTotal:20}],taxLabel:'<unsafe>'}}};
  const html=view.render(r,{compact:true});assert.match(html,/&lt;script&gt;/);assert.ok(!html.includes('<script>'));assert.match(html,/&lt;unsafe&gt;/);assert.match(html,/compact/);
 });
+
+test('services start collapsed with the total visible in the expandable summary',()=>{const html=view.render({serviceM8Pricing:pricing});assert.match(html,/^<details /);assert.doesNotMatch(html,/<details[^>]*\sopen(?:[\s=>])/);assert.match(html,/<summary[^>]*>[\s\S]*NZ\$437\.0[\s\S]*<\/summary>/);});

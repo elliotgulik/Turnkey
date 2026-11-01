@@ -536,3 +536,10 @@ main {
 .sale-past-menu{position:absolute;right:0;top:calc(100% + 6px);z-index:20;min-width:210px;padding:8px;background:var(--sale-panel,#fff);border:1px solid var(--sale-border,#dce3e8);border-radius:12px;box-shadow:0 10px 30px #12232f20;}
 .sale-past-menu .sale-scope-tabs{display:flex;flex-direction:column;gap:4px;}
 .sale-past-menu .btn{justify-content:space-between;text-align:left;width:100%;}
+
+.tk-sm8-pricing>summary{cursor:pointer;list-style:none;align-items:center;gap:8px;}
+.tk-sm8-pricing>summary::-webkit-details-marker{display:none;}
+.tk-sm8-summary-total{font-weight:700;margin-left:auto;white-space:nowrap;}
+.tk-sm8-chevron{transition:transform .15s;}
+.tk-sm8-pricing[open] .tk-sm8-chevron{transform:rotate(180deg);}
+.tk-sm8-pricing>summary:focus-visible{outline:2px solid var(--teal,#138574);outline-offset:4px;border-radius:4px;}

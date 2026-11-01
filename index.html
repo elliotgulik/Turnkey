@@ -1385,8 +1385,8 @@
 
 </style>
 <link rel="stylesheet" href="pricing-learning.css?v=20261101h">
-<link rel="stylesheet" href="sales-platform.css?v=20261102c">
-<link rel="stylesheet" href="nova-lead-manager.css?v=20261101d">
+<link rel="stylesheet" href="sales-platform.css?v=20261102d">
+<link rel="stylesheet" href="nova-lead-manager.css?v=20261102d">
 <link rel="stylesheet" href="quote-workspace.css?v=20261017a">
 <link rel="stylesheet" href="conversations.css?v=20261020a">
 <link rel="stylesheet" href="marketing-analytics.css?v=20261025b">
@@ -1471,6 +1471,7 @@
       <input type="file" id="import-file" accept=".json,application/json" style="display:none" onchange="importData(this)">
       <input type="file" id="photo-upload-input" accept="image/*" style="display:none" onchange="onPhotoChosen(this)">
       <input type="file" id="quote-attach-input" accept="image/*,application/pdf" style="display:none" onchange="onQuoteAttachChosen(this)">
+      <button class="sidebar-settings" id="lead-alert-button" data-nlm="notifications" aria-label="New lead notifications"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M10 21h4"/></svg><span>New lead alerts</span><span class="count" id="lead-alert-count" hidden>0</span></button>
       <button class="sidebar-settings" onclick="openSettings()"><span class="nav-ico" data-icon="settings"></span>Settings</button>
     </div>
   </nav>
@@ -1794,6 +1795,7 @@
   <div class="modal-foot"><button class="btn ghost" onclick="closeModal('payment-overlay')">Cancel</button><button class="btn primary" onclick="confirmRecordPayment()">Record payment</button></div>
 </div></div>
 
+<div class="overlay" id="lead-alert-overlay"><div class="modal"><div class="modal-head"><div><h3>New lead alerts</h3><p>Unresponded enquiries from the last three days. Alerts disappear after contact or three days; customer records are kept.</p></div><button class="x" aria-label="Close" onclick="closeModal('lead-alert-overlay')">×</button></div><div class="modal-body" id="lead-alert-list"></div></div></div>
 <div class="overlay" id="notif-overlay"><div class="modal">
   <div class="modal-head"><div><h3>Notifications</h3><p>New enquiries, quote activity, payments — everything TurnKey has alerted you to.</p></div><button class="x" aria-label="Close" onclick="closeModal('notif-overlay')">×</button></div>
   <div class="modal-body"><div id="notif-list"></div></div>
@@ -11022,8 +11024,8 @@ async function retryPendingPhotos(){
 <script src="meta-import.js?v=20261020a"></script>
 <script src="lead-answer-utils.js?v=20261101g"></script>
 <script src="lead-request-view.js?v=20261101g"></script>
-<script src="servicem8-pricing-view.js?v=20261102b"></script>
-<script src="sales-platform.js?v=20261102c"></script>
+<script src="servicem8-pricing-view.js?v=20261102d"></script>
+<script src="sales-platform.js?v=20261102d"></script>
 <script type="module" src="measurement-import.js?v=20261017a"></script>
 <script src="pricing-learning-engine.js?v=20261101h"></script>
 <script src="quote-workspace.js?v=20261017a"></script>
@@ -11031,7 +11033,7 @@ async function retryPendingPhotos(){
 <script src="conversations-bridge.js?v=20261020a"></script>
 <script src="servicem8-import.js?v=20261017a"></script>
 <script src="marketing-analytics.js?v=20261102b"></script>
-<footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a> · <span id="tk-app-version">v20261102c</span></footer>
+<footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a> · <span id="tk-app-version">v20261102d</span></footer>
 <script src="extension-quote-link.js?v=20261102b"></script>
 <script src="job-workspace.js?v=20261031a"></script>
 <script src="job-calendar.js?v=20261101f"></script>
@@ -11040,7 +11042,7 @@ async function retryPendingPhotos(){
 <script src="workspace-controls.js?v=20261019a"></script>
 <script src="settings-experience.js?v=20261019d"></script>
 <script src="workspace-experience.js?v=20261019b"></script>
-<script src="nova-lead-manager.js?v=20261102b"></script>
+<script src="nova-lead-manager.js?v=20261102d"></script>
 <script src="pricing-learning-ui.js?v=20261101h"></script>
 </body>
 </html>
