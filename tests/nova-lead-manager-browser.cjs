@@ -57,11 +57,14 @@ const assert = require('node:assert/strict');
       assert.equal(await page.locator('#cnt-leads').innerText(),'1');
       await page.locator(width>760?'#lead-alert-button':'#view-leads [data-nlm="notifications"]').click();
       assert.match(await page.locator('#lead-alert-list').innerText(),/Customer 1/);
-      await page.locator('#lead-alert-overlay .x').click();
-      await page.evaluate(()=>{records[0].firstResponseAt=Date.now();render();});
+      await page.locator('#lead-alert-list [data-nlm="alert"]').click();
       assert.notEqual(await page.locator('#cnt-leads').getAttribute('hidden'),null);
-      await page.evaluate(()=>{delete records[0].firstResponseAt;render();});
-
+      assert.equal(await leads.locator('.nlm-detail').count(),1);
+      await leads.locator('.nlm-close').click();
+      await page.locator('#view-leads [data-nlm="notifications"]').click();
+      assert.match(await page.locator('#lead-alert-list .read').innerText(),/Read/);
+      await page.locator('#lead-alert-overlay .x').click();
+      assert.equal(await page.evaluate(()=>records[0].stage),'new');
       for(const key of ['open','all'])assert.equal(await scope(key).locator('span').innerText(),'1');
       await scope('all').click();assert.deepEqual(await ids(),[1]);
       await page.evaluate(()=>{records[0].stage='contacted';render();});

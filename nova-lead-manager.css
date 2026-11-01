@@ -64,3 +64,8 @@
 .nlm-alert-row span,.nlm-alert-row small{font-size:12px;color:var(--ink-soft,#53636b);}
 #lead-alert-button{display:flex;align-items:center;gap:9px;}
 #lead-alert-button .count{margin-left:auto;}
+
+.nlm-alert-row strong{display:flex;align-items:center;justify-content:space-between;gap:12px;}
+.nlm-alert-row.unread{border-left:3px solid var(--teal,#138574);}
+.nlm-alert-row.read{opacity:.7;}
+.nlm-alert-read-state{font-size:11px;font-weight:500;}
