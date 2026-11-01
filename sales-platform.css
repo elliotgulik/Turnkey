@@ -526,3 +526,13 @@ main {
 .tk-sm8-pricing.compact .tk-sm8-pricing-total{display:grid;grid-template-columns:minmax(0,1fr);gap:4px}
 .sale-card-top{flex-wrap:wrap}.sale-card-top>b{min-width:0;overflow-wrap:break-word}.sale-card-top>span{white-space:normal;overflow-wrap:break-word;max-width:100%}
 @media(max-width:600px){.tk-sm8-pricing li{grid-template-columns:minmax(0,1fr);gap:3px}.tk-sm8-pricing li>strong{text-align:left}.tk-sm8-pricing-total{display:grid;grid-template-columns:minmax(0,1fr);gap:4px}}
+
+/* Completed and cancelled records remain accessible without crowding active work. */
+.sale-past-jobs{position:relative;align-self:center;flex:none;}
+.sale-past-jobs summary{display:flex;align-items:center;gap:9px;list-style:none;cursor:pointer;padding:10px 14px;border:1px solid var(--sale-border,#dce3e8);border-radius:10px;background:var(--sale-panel,#fff);font-size:14px;font-weight:600;color:inherit;}
+.sale-past-jobs summary::-webkit-details-marker{display:none;}
+.sale-past-jobs summary:focus-visible{outline:2px solid var(--accent,#128774);outline-offset:3px;}
+.sale-past-jobs summary span:first-of-type{opacity:.65;}
+.sale-past-menu{position:absolute;right:0;top:calc(100% + 6px);z-index:20;min-width:210px;padding:8px;background:var(--sale-panel,#fff);border:1px solid var(--sale-border,#dce3e8);border-radius:12px;box-shadow:0 10px 30px #12232f20;}
+.sale-past-menu .sale-scope-tabs{display:flex;flex-direction:column;gap:4px;}
+.sale-past-menu .btn{justify-content:space-between;text-align:left;width:100%;}
