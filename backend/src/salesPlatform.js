@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { syncHandoffContacts } from "./handoffContacts.js";
 import { createRequire } from "node:module";
 import { encryptToken, decryptToken } from "./crypto.js";
 import * as SM from "./salesTransfer.js";
@@ -165,6 +166,10 @@ const contentFingerprint = (s) => {
       "primary_color", "font_style", "header_style", "gst_number", "tax_number", "nzbn"]),
   }));
 };
+// Operational name/email/phone corrections can be refreshed without repricing.
+// Property address and customer identity remain part of the immutable boundary.
+const handoffContentBasis = snapshot => contentFingerprint({ ...snapshot,
+  customer: pick(snapshot.customer, ["id", "business_id", "address"]) });
 const publicVersion = (v) => {
   const s = v.snapshot || {}, d = s.details || {};
   return { id: v.id, fingerprint: v.fingerprint, createdAt: v.created_at,
@@ -903,7 +908,11 @@ export function installSalesPlatform(
           canonical(quoteDetails(version.snapshot.details)) !== canonical(quoteDetails(job.details))))
         throw fail("Saved quote version is out of date. Save the quote again.", 409);
       SM.approvedLines(version.snapshot, { mode });
-      await enqueue(req.businessId, "handoff", [job.id, c.generation, mode, version.fingerprint].join(":"),
+      const contact = await unwrap(db.from("customers").select("id,name,email,phone,address,suburb")
+        .eq("business_id", req.businessId).eq("id", job.customer_id).maybeSingle());
+      if (!contact?.name) throw fail("Save the customer's contact information before transferring.", 409);
+      const contactFingerprint = SM.hash(canonical(contact));
+      await enqueue(req.businessId, "handoff", [job.id, c.generation, mode, version.fingerprint, contactFingerprint].join(":"),
         { jobId: job.id, mode, generation: c.generation, quoteId: q.id, versionId: version.id,
           fingerprint: version.fingerprint, snapshot: version.snapshot,
           ...(legacy ? { reviewLegacy: true, snapshotHash: SM.hash(canonical(version.snapshot)) } : {}) });
@@ -1208,11 +1217,24 @@ export function installSalesPlatform(
           .eq("id", job.customer_id)
           .single(),
       );
+    // Operational contacts use the current owned profile; quote/PDF pricing keeps
+    // its immutable version. Correcting an email must not alter an accepted total.
+    const contactCustomer = await unwrap(db.from("customers").select("*")
+      .eq("business_id", task.business_id).eq("id", job.customer_id).maybeSingle());
+    if (!contactCustomer?.name) throw fail("Customer contact profile is missing from this business.", 409);
     const lines = SM.approvedLines(snapshot, { mode });
     const fingerprint = contentFingerprint(snapshot);
     const jobMap = await mapping(c, "job", job.id);
     const priorFingerprint = jobMap.snapshot?.handoffFingerprint;
-    if (priorFingerprint && priorFingerprint !== fingerprint)
+    const contentBasis = handoffContentBasis(snapshot);
+    let priorBasis = jobMap.snapshot?.handoffContentBasis;
+    if (priorFingerprint && !priorBasis) {
+      const history = await unwrap(db.from("quote_versions").select("snapshot").eq("business_id", task.business_id)
+        .eq("quote_id", q.id).order("created_at", { ascending: false }).limit(1000));
+      const original = history.find(row => contentFingerprint(row.snapshot) === priorFingerprint);
+      if (original) priorBasis = handoffContentBasis(original.snapshot);
+    }
+    if (priorFingerprint && priorFingerprint !== fingerprint && priorBasis !== contentBasis)
       throw fail("Quote content changed after transfer began. Reconcile the existing ServiceM8 quote before retrying.", 409);
     if (mode === "quote" && jobMap.synced_at && !priorFingerprint)
       throw fail("Existing legacy ServiceM8 job requires review before draft handoff.", 409);
@@ -1221,13 +1243,15 @@ export function installSalesPlatform(
     await unwrap(db.from("external_object_mappings").upsert({ business_id: task.business_id,
       connection_generation: c.generation, object_type: "handoff_content", local_id: String(job.id),
       external_uuid: SM.stableUuid("turnkey", c.generation, "handoff_content", job.id),
-      snapshot: { fingerprint } },
+      snapshot: { fingerprint, handoffContentBasis: contentBasis } },
       { onConflict: "business_id,connection_generation,object_type,local_id", ignoreDuplicates: true }));
     const reservation = await mapping(c, "handoff_content", job.id);
-    if (reservation.snapshot?.fingerprint !== fingerprint)
+    if (reservation.snapshot?.fingerprint !== fingerprint &&
+        !(priorFingerprint && priorBasis === contentBasis &&
+          (!reservation.snapshot?.handoffContentBasis || reservation.snapshot.handoffContentBasis === contentBasis)))
       throw fail("Quote content changed after transfer began. Reconcile the existing ServiceM8 quote before retrying.", 409);
     await unwrap(db.from("external_object_mappings").update({ snapshot: { ...jobMap.snapshot,
-      handoffFingerprint: fingerprint, handoffMode: mode } })
+      handoffFingerprint: fingerprint, handoffContentBasis: contentBasis, handoffMode: mode } })
       .eq("business_id", task.business_id).eq("connection_generation", c.generation)
       .eq("object_type", "job").eq("local_id", String(job.id)));
     const taxes = (
@@ -1259,6 +1283,7 @@ export function installSalesPlatform(
       const m = await ensure(c, "company", customer.id, {
         name: args.name.slice(0, 100),
         address: args.address || "",
+        billing_address: args.address || "",
       });
       return { recordUuid: m.external_uuid };
     };
@@ -1340,15 +1365,15 @@ export function installSalesPlatform(
       await call(task.business_id, remotePath, { generation: c.generation, method: "POST", body: { status: "Work Order" } });
     else if (mode === "quote" && remoteJob.status !== "Quote")
       throw fail("ServiceM8 job has progressed beyond Quote. Review it in ServiceM8.", 409);
-    const name = customer.name.split(" ");
-    await ensure(c, "companycontact", customer.id, {
-      company_uuid: core.companyUuid,
-      first: name.shift() || customer.name,
-      last: name.join(" "),
-      email: customer.email || "",
-      phone: customer.phone || "",
-      is_primary_contact: "1",
-      type: "JOB",
+    await syncHandoffContacts({ companyUuid: core.companyUuid, jobUuid: core.jobUuid, customer: contactCustomer,
+      request: (path, options = {}) => call(task.business_id, path, { ...options, generation: c.generation }),
+      mapping: (type, localId) => mapping(c, type, localId),
+      adopt: (type, localId, externalUuid) => unwrap(db.from("external_object_mappings")
+        .update({ external_uuid: externalUuid }).eq("business_id", task.business_id)
+        .eq("connection_generation", c.generation).eq("object_type", type).eq("local_id", String(localId))),
+      markSynced: (type, localId) => unwrap(db.from("external_object_mappings")
+        .update({ synced_at: new Date().toISOString() }).eq("business_id", task.business_id)
+        .eq("connection_generation", c.generation).eq("object_type", type).eq("local_id", String(localId)))
     });
     for (let i = 0; i < lines.length; i++)
       await ensure(c, "jobmaterial", q.id + ":" + i, {

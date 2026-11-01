@@ -422,12 +422,17 @@ test("complete transfer resumes after attachment DB failure without duplicate re
     const path = url.slice(SM.API.length);
     if (path === "/taxrate.json")
       return response([{ uuid: id(14), active: 1, amount: 15 }]);
+    if (/^\/(companycontact|jobcontact)\.json\?/.test(path)) return response([]);
     if (path.startsWith("/jobpayment.json?") || path.startsWith("/jobactivity.json?")) return response([]);
     if (opts.method === "POST") {
       const body =
         opts.body instanceof FormData
           ? { uuid: opts.body.get("uuid"), active: 1 }
           : JSON.parse(opts.body);
+      if (/^\/(company|companycontact|jobcontact|job)\/.+\.json$/.test(path)) {
+        assert.ok(objects.has(path), "update must reference an existing remote record");
+        Object.assign(objects.get(path), body); return response({});
+      }
       const key = path.replace(".json", "/" + body.uuid + ".json");
       assert.equal(
         objects.has(key),
@@ -448,12 +453,15 @@ test("complete transfer resumes after attachment DB failure without duplicate re
     "/attachment.json",
     "/company.json",
     "/companycontact.json",
+    "/companycontact.json",
     "/job.json",
+    "/jobcontact.json",
+    "/jobcontact.json",
     "/jobmaterial.json",
   ]);
   assert.equal(
     db.tables.external_object_mappings.filter((r) => r.synced_at).length,
-    5,
+    8,
   );
 });
 test("legacy integration routes are blocked before unsafe handlers", async () => {
@@ -1026,11 +1034,12 @@ function quoteHandoffFixture() {
   const db=database({users:ownerRows,servicem8_connections:[privateConnection()],
     jobs:[{id:jobId,business_id:'A',quote_id:quoteId,customer_id:customerId,status:'followup',details:structuredClone(snapshot.details)}],
     quotes:[{id:quoteId,business_id:'A',status:'sent',amount:115}],quote_versions:[version],
-    customers:[snapshot.customer],businesses:[snapshot.business]});
+    customers:[structuredClone(snapshot.customer)],businesses:[structuredClone(snapshot.business)]});
   const objects=new Map(), calls=[], pdfs=[];
   const fetchImpl=async(url,opts)=>{
     const path=url.slice(SM.API.length); calls.push({path,method:opts.method});
     if(path==='/taxrate.json')return response([{uuid:id(104),active:1,amount:15}]);
+    if(/^\/(companycontact|jobcontact)\.json\?/.test(path))return response([]);
     if(path.startsWith('/jobpayment.json?') || path.startsWith('/jobactivity.json?'))return response([]);
     if(opts.method==='POST'){
       if(opts.body instanceof FormData){
@@ -1039,7 +1048,7 @@ function quoteHandoffFixture() {
         assert.ok(!objects.has(key)); objects.set(key,{active:1}); return response({});
       }
       const body=JSON.parse(opts.body);
-      if(/^\/job\/.+\.json$/.test(path)){
+      if(/^\/(company|companycontact|jobcontact|job)\/.+\.json$/.test(path)){
         assert.ok(objects.has(path));Object.assign(objects.get(path),body);return response({});
       }
       const key=path.replace('.json','/'+body.uuid+'.json');
@@ -1316,7 +1325,7 @@ test('draft-to-approved commercial, terms, geometry and public identity changes 
     terms:s=>{s.details.publicTerms='Changed scope and terms';},
     geometry:s=>{s.details.areaPolys[0].points[0].x=5;},
     geoGeometry:s=>{s.details.areaPolys[0].geoPts[0].lat=-37.0001;},
-    contact:s=>{s.customer.email='changed@example.test';},
+    customerIdentity:s=>{s.customer.id=id(999);},
     address:s=>{s.customer.address='Different property';},
     branding:s=>{s.business.name='Changed business';},
     notes:s=>{s.details.salesNotes='Different delivered notes';},
@@ -1688,4 +1697,63 @@ test('refresh updates price display with a compare-and-swap while preserving con
   assert.equal(materialCalls,1);assert.equal(local.details.serviceM8Pricing.total,230);assert.equal(local.details.serviceM8Pricing.items[0].lineTotal,200);
   assert.equal(local.details.serviceM8Pricing.currency,'NZD');assert.equal(local.details.notes,'concurrent note');
   assert.equal(local.details.total,575);assert.equal(db.tables.quotes[0].amount,575);assert.deepEqual(local.details.services,[{svc:'Wash',priceSnapshot:575}]);
+});
+
+test('handoff copies current owned contact details to job and billing contacts without repricing the saved quote',async()=>{
+ const f=quoteHandoffFixture(),customer=f.db.tables.customers[0];
+ customer.name='Current Customer';customer.email='correct@example.test';customer.phone='+64 21 123 4567';customer.address='10 Current Road';customer.suburb='Takapuna';
+ const frozen=JSON.stringify(f.version.snapshot);
+ assert.equal((await f.route('POST','/api/sales/servicem8/handoff',handoffRequest(f.jobId,{mode:'quote'}))).statusCode,202);
+ await f.worker.transfer(structuredClone(f.db.tables.integration_tasks[0]));
+ for(const type of ['JOB','BILLING']){
+  const contact=[...f.objects.entries()].find(([path,row])=>path.startsWith('/jobcontact/')&&row.type===type)?.[1];
+  assert(contact,`Missing ${type} contact`);assert.equal(contact.email,'correct@example.test');assert.equal(contact.phone,'+64 21 123 4567');assert.equal(contact.mobile,'+64 21 123 4567');assert.equal(contact.first,'Current');assert.equal(contact.last,'Customer');
+ }
+ assert.equal(JSON.stringify(f.version.snapshot),frozen);
+ customer.email='changed@example.test';
+ const queued=f.db.tables.integration_tasks.length;
+ assert.equal((await f.route('POST','/api/sales/servicem8/handoff',handoffRequest(f.jobId,{mode:'quote'}))).statusCode,202);
+ assert.equal(f.db.tables.integration_tasks.length,queued+1);
+ const creates=f.calls.filter(c=>c.method==='POST'&&c.path==='/jobcontact.json').length;
+ await f.worker.transfer(structuredClone(f.db.tables.integration_tasks.at(-1)));
+ assert.equal(f.calls.filter(c=>c.method==='POST'&&c.path==='/jobcontact.json').length,creates);
+ assert([...f.objects.entries()].filter(([p])=>p.startsWith('/jobcontact/')).every(([,row])=>row.email==='changed@example.test'));
+ assert.equal(JSON.stringify(f.version.snapshot),frozen);
+});
+
+test('handoff refuses a missing or foreign contact profile before any external write',async()=>{
+ const f=quoteHandoffFixture();f.db.tables.customers[0].business_id='B';
+ const result=await f.route('POST','/api/sales/servicem8/handoff',handoffRequest(f.jobId,{mode:'quote'}));
+ assert.equal(result.statusCode,409);assert.equal(f.calls.length,0);
+});
+
+test('a contact-only quote revision refreshes contacts while changed commercial terms still stay fenced',async()=>{
+ const f=quoteHandoffFixture();
+ await f.route('POST','/api/sales/servicem8/handoff',handoffRequest(f.jobId,{mode:'quote'}));
+ await f.worker.transfer(structuredClone(f.db.tables.integration_tasks[0]));
+ const next=structuredClone(f.version);next.id=id(501);next.fingerprint='contact-revision';next.created_at='2026-11-01T00:00:00Z';next.snapshot.customer.name='Corrected Name';next.snapshot.customer.email='corrected@example.test';
+ f.db.tables.quote_versions.push(next);f.db.tables.customers[0].name='Corrected Name';f.db.tables.customers[0].email='corrected@example.test';
+ assert.equal((await f.route('POST','/api/sales/servicem8/handoff',handoffRequest(f.jobId,{mode:'quote'}))).statusCode,202);
+ await f.worker.transfer(structuredClone(f.db.tables.integration_tasks.at(-1)));
+ assert.equal(f.calls.filter(c=>c.path==='/job.json'&&c.method==='POST').length,1);
+ assert.equal(f.calls.filter(c=>c.path==='/jobmaterial.json'&&c.method==='POST').length,1);
+ assert([...f.objects.entries()].filter(([p])=>p.startsWith('/jobcontact/')).every(([,row])=>row.email==='corrected@example.test'));
+ const changed=structuredClone(next);changed.id=id(502);changed.fingerprint='price-changed';changed.created_at='2026-11-01T01:00:00Z';changed.snapshot.amount=230;changed.snapshot.details.services[0].priceSnapshot=230;
+ f.db.tables.quotes[0].amount=230;f.db.tables.jobs[0].details=structuredClone(changed.snapshot.details);f.db.tables.quote_versions.push(changed);
+ await f.route('POST','/api/sales/servicem8/handoff',handoffRequest(f.jobId,{mode:'quote'}));
+ await assert.rejects(f.worker.transfer(structuredClone(f.db.tables.integration_tasks.at(-1))),/Reconcile/);
+});
+
+test('corrected contacts during approval retain the approved PDF and promote the existing job once',async()=>{
+ const f=quoteHandoffFixture();
+ await f.route('POST','/api/sales/servicem8/handoff',handoffRequest(f.jobId,{mode:'quote'}));
+ await f.worker.transfer(structuredClone(f.db.tables.integration_tasks[0]));
+ const accepted=structuredClone(f.snapshot);accepted.accepted=true;accepted.customer.email='approved@example.test';
+ f.db.tables.customers[0].email='approved@example.test';f.db.tables.jobs[0].status='scheduled';f.db.tables.quotes[0].status='accepted';
+ f.db.tables.quote_versions.push({...f.version,id:id(503),fingerprint:'approved-contact-revision',created_at:'2026-11-01T02:00:00Z',snapshot:accepted});
+ await f.worker.transfer({business_id:'A',payload:{jobId:f.jobId}});
+ assert.equal([...f.objects.entries()].find(([p])=>p.startsWith('/job/'))[1].status,'Work Order');
+ assert.equal(f.pdfs.length,2);assert.match(f.pdfs[1],/APPROVED QUOTE/);
+ assert.equal(f.calls.filter(c=>c.path==='/job.json'&&c.method==='POST').length,1);
+ assert([...f.objects.entries()].filter(([p])=>p.startsWith('/jobcontact/')).every(([,row])=>row.email==='approved@example.test'));
 });

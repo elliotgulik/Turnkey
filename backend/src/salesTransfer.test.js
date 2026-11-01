@@ -52,7 +52,7 @@ test('PDF paginates long terms and outline legends without losing valid areas',(
 
 test('shared OAuth scopes include job promotion permission exactly once',()=>{
   const scopes=SCOPES.split(' ');
-  for(const scope of ['read_jobs','create_jobs','manage_jobs'])assert.equal(scopes.filter(s=>s===scope).length,1);
+  for(const scope of ['read_jobs','create_jobs','manage_jobs','read_job_contacts','manage_job_contacts'])assert.equal(scopes.filter(s=>s===scope).length,1);
 });
 test('Earth fixed-price services transfer as separate named items preserving adjusted total and GST',()=>{
   const s={amount:345,details:{gstRegistered:true,services:[{svc:'driveway',qty:40,fixedPrice:115},{svc:'deck',label:'Deck cleaning',qty:20,fixedPrice:230}]}};
