@@ -328,9 +328,63 @@
     return composeDocument(sendDocCtx.mode, sendDocCtx.recordId, overrides);
   });
   global.sendComposeModal = guarded(() => compose({ to: document.getElementById('cmp-to')?.value || '', subject: document.getElementById('cmp-subject')?.value || '', bodyText: document.getElementById('cmp-body')?.value || '', attachments: [] }));
+  async function openCustomerHistory(id) {
+    const start = scope(), r = recordFor(id);
+    const opening = global.openCustomerProfile(r.id);
+    const selected = () => typeof customerProfileCtx !== 'undefined' && customerProfileCtx?.recordId === r.id;
+    if (selected()) cpSwitchTab('conversations');
+    await opening; assertScope(start);
+    if (selected() && cpActiveTab === 'overview') cpSwitchTab('conversations');
+  }
+  // Use the inbox's own folder, paging and thread controls, including sent-only
+  // threads and threads older than its first page. No Gmail sync is triggered.
+  async function openHistoryThread(start, key) {
+    assertScope(start);
+    if (typeof closeCustomerProfile === 'function') closeCustomerProfile();
+    document.querySelector('.nlm-record-panel [data-nlm="close"]')?.click();
+    showInbox(); await renderer({force:true}); assertScope(start);
+    root.querySelector('[data-cv-action="clear-search"]')?.click();
+    root.querySelector('[data-cv-action="folder"][data-folder="all"]')?.click();
+    const settle = async predicate => {
+      const until = Date.now() + 10000;
+      while (!predicate()) {
+        assertScope(start);
+        if (Date.now() > until) throw Error('Could not open the conversation. Retry from Conversations.');
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+      assertScope(start);
+    };
+    await settle(() => root.querySelector('[data-folder="all"]')?.getAttribute('aria-current') === 'page');
+    const find = () => [...root.querySelectorAll('[data-cv-action="thread"]')].find(b => b.dataset.key === key);
+    while (!find()) {
+      const more = root.querySelector('[data-cv-action="more"]');
+      if (!more || more.disabled) throw Error('This conversation is no longer available in your mailbox.');
+      const count = root.querySelectorAll('[data-cv-action="thread"]').length;
+      more.click();
+      await settle(() => !root.querySelector('[data-cv-action="more"]')?.disabled);
+      if (!find() && root.querySelectorAll('[data-cv-action="thread"]').length === count) throw Error('Could not load this conversation. Retry from Conversations.');
+    }
+    assertScope(start); find().click();
+  }
+  function addCustomerHistory(host, r) {
+    if (!host || host.querySelector('[data-customer-conversations]')) return;
+    const section = document.createElement('details'); section.className = 'panel'; section.dataset.customerConversations = String(r.id);
+    const title = document.createElement('summary'); title.textContent = 'Conversations';
+    const body = document.createElement('div');
+    section.append(title, body); host.append(section);
+    section.addEventListener('toggle', () => {
+      if (section.open) void renderCustomerHistory(body, {customerId:r.customerId,email:r.email,name:r.name,recordId:r.id});
+    });
+  }
+  // Nova is loaded after this bridge and replaces its panel on every render.
+  new MutationObserver(() => {
+    const panel = document.querySelector('.nlm-record-panel');
+    const id = panel?.querySelector('[data-nlm="edit-contact"]')?.dataset.id;
+    if (id) { try { addCustomerHistory(panel.querySelector('.nlm-detail-scroll'), recordFor(id)); } catch { /* not an active business */ } }
+  }).observe(document.getElementById('view-leads') || document.body, {childList:true,subtree:true});
   // Read-only profile integration. Query within the active business; exact
   // address matching covers synced messages whose customer_id is not populated.
-  async function renderCustomerHistory(host, { customerId, email = '', name = '' } = {}) {
+  async function renderCustomerHistory(host, { customerId, email = '', name = '', recordId } = {}) {
     if (!host) return;
     for (const old of historyHosts) if (!old.isConnected) historyHosts.delete(old);
     historyHosts.add(host);
@@ -339,6 +393,8 @@
     host.textContent = 'Loading conversations…';
     try {
       const start = scope();
+      const r = recordId == null ? null : recordFor(recordId);
+      if (r) { customerId = r.customerId; email = r.email || ''; name = r.name || ''; }
       if (!customerId && !email.trim()) { host.textContent = 'No customer email or linked conversations.'; return; }
       const owned = await start.client.from('email_accounts').select('id')
         .eq('business_id', start.businessId).eq('user_id', start.userId).eq('provider', 'gmail').maybeSingle();
@@ -358,6 +414,15 @@
       const keys = new Set(matching.map(m => m.account_id + ':' + (m.thread_id || m.id)));
       const related = rows.filter(m => keys.has(m.account_id + ':' + (m.thread_id || m.id)));
       host.replaceChildren();
+      if (r && email) {
+        const composeButton = document.createElement('button'); composeButton.type = 'button'; composeButton.className = 'btn ghost sm'; composeButton.textContent = 'Compose email';
+        composeButton.addEventListener('click', () => { void guarded(async () => {
+          assertScope(start); const selected = recordFor(r.id);
+          if (typeof closeCustomerProfile === 'function') closeCustomerProfile();
+          document.querySelector('.nlm-record-panel [data-nlm="close"]')?.click();
+          return compose({to:selected.email,opportunityId:String(selected.id)});
+        })(); }); host.append(composeButton);
+      }
       const intro = document.createElement('p'); intro.textContent = (name ? name + ' · ' : '') + 'Recent synced conversations' + (rows.length === 500 ? ' (latest 500 mailbox messages)' : '') + '. Sync in Conversations to check for new replies.'; host.append(intro);
       if (!related.length) { const empty = document.createElement('p'); empty.textContent = 'No synced conversations for this customer.'; host.append(empty); }
       for (const m of related) {
@@ -365,7 +430,9 @@
         heading.textContent = [m.subject || '(no subject)', m.direction === 'sent' ? 'Sent' : 'Received', m.sent_at ? new Date(m.sent_at).toLocaleString() : 'Date unavailable'].join(' · ');
         const text = m.body_text || m.snippet || 'No plain-text preview available.';
         body.className = 'cv-body'; body.textContent = [m.from_address, 'To: ' + (m.to_addresses || ''), '', text].join('\n');
-        item.append(heading, body); host.append(item);
+        const open = document.createElement('button'); open.type = 'button'; open.className = 'btn ghost sm'; open.textContent = 'Open in Conversations';
+        open.addEventListener('click', () => { void guarded(() => openHistoryThread(start, m.account_id + ':' + (m.thread_id || m.id)))(); });
+        item.append(heading, body, open); host.append(item);
       }
       return { count: related.length, limited: rows.length === 500 };
     } catch (error) { if (live()) host.textContent = 'Conversations could not load. Reopen this customer after checking your session and connection.'; }
@@ -402,7 +469,7 @@
     const save = global.saveTemplate; global.saveTemplate = async function (...args) { const result = await save.apply(this, args); if (document.getElementById('doc-preview-overlay')?.classList.contains('open')) await global.openDocPreview(docPreview.mode, docPreview.recordId); return result; };
   }
   if (typeof global.renderEmailBodyHtml === 'function') global.renderEmailBodyHtml = global.TK_CONVERSATIONS.renderEmailHtml;
-  global.TK_CONVERSATIONS_BRIDGE = { render: renderer, reset, compose: guarded(compose), composeDocument: guarded(composeDocument), listQuotes, renderCustomerHistory };
+  global.TK_CONVERSATIONS_BRIDGE = { render: renderer, reset, compose: guarded(compose), composeDocument: guarded(composeDocument), listQuotes, renderCustomerHistory, openCustomerHistory: guarded(openCustomerHistory) };
   // Install before extension-quote-link.js: an Earth return opens this same
   // detail view, so saved quotes have a clear next action immediately.
   if (typeof global.openDetail === 'function') {
@@ -411,6 +478,7 @@
       const result = originalDetail.apply(this, arguments);
       let r; try { r = recordFor(id); } catch { return result; }
       const host = document.getElementById('view-detail');
+      addCustomerHistory(host?.querySelector('#sale-customer'), r);
       if (!host || !r.services?.length || !(r.total > 0)) return result;
       host.querySelector('.qf-workflow')?.remove();
       const won = typeof isWon === 'function' && isWon(r), cancelled = global.TK_PIPELINE.key(r) === 'lost';

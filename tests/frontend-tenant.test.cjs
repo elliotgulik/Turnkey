@@ -106,3 +106,20 @@ test('intake returns its actual record, prevents redelivery and preserves same-t
  assert.notStrictEqual(a,b);assert.equal(ctx.records.length,2);assert.equal(a.id,b.id,'UI ids cannot be intake identity');
  assert.equal(ctx.ingestQuoteRequest({...payload,business_id:'B'}),undefined);
 });
+
+test('bulk autosave leaves incomplete profiles untouched and reports genuine save failures',async()=>{
+ const calls=[],notices=[];
+ const ctx=context({records:[{id:1,name:'Customer details unavailable',_customerMissing:true},{id:2,name:'Valid Customer'},{id:3,name:'Failing Customer'}],
+ syncRecordToSupabase:async r=>{calls.push(r.id);if(r.id===3)throw Error('Database unavailable');},toast:m=>notices.push(m),console:{error(){}}});
+ vm.runInContext(section('async function syncAllToSupabase(){','// Serialize saves'),ctx);
+ await ctx.syncAllToSupabase();assert.deepEqual(calls,[2,3]);assert.equal(notices.length,1);assert.match(notices[0],/Failing Customer/);
+});
+
+test('confirmed contact repair clears the incomplete flag without changing the linked job',async()=>{
+ const fields={'cp-name':'Recovered Name','cp-phone':'0210000000','cp-email':'customer@example.test','cp-address':'1 Example Road','cp-suburb':'Auckland','cp-source':'Manual'},filters=[];
+ const ctx=context({customerProfileCtx:{customerId:'original-customer'},records:[{id:1,customerId:'original-customer',jobId:'original-job',_customerMissing:true}],
+ document:{getElementById:id=>({value:fields[id]})},saveState(){},renderCustomerProfile(){},
+ sb:{from(){return {update(){return this},eq(k,v){filters.push([k,v]);return this},select(){return this},single:async()=>({data:{id:'original-customer'},error:null})}}}});
+ vm.runInContext(section('async function saveCustomerContact(btn){','async function saveCustomerNotes'),ctx);
+ await ctx.saveCustomerContact();assert.equal(ctx.records[0]._customerMissing,false);assert.equal(ctx.records[0].name,'Recovered Name');assert.equal(ctx.records[0].jobId,'original-job');assert.ok(filters.some(([k,v])=>k==='business_id'&&v==='A'));
+});

@@ -415,7 +415,35 @@
   }
   function followupsOff(r){return r.followupsDisabled===true||!!r.customerId&&records.some(x=>x.customerId===r.customerId&&x.followupsDisabled===true);}
   function followupControl(r){if(!r)return '';return `<label class="sale-check sale-followup-preference"><input type="checkbox" data-customer-followups="${esc(r.id)}" ${followupsOff(r)?'checked':''}><span>Follow-ups off for this customer</span></label><small class="sale-muted">Automatic follow-up emails are paused for everyone. Manual emails remain available.</small>`;}
-  async function setFollowupsDisabled(id,disabled){const r=record(id),biz=currentBusinessId,version=businessSessionVersion,client=(typeof sb!=='undefined'?sb:null)||window.TK_SUPABASE_CLIENT;if(!r||!client||!biz)throw Error('Sign in to save this preference.');if(!r.customerId)await syncRecordToSupabase(r);if(biz!==currentBusinessId||version!==businessSessionVersion)throw Error('Business session changed.');if(!r.customerId)throw Error('Save this customer first.');const {data,error}=await client.from('customers').update({followups_disabled:!!disabled}).eq('business_id',biz).eq('id',r.customerId).select('id,followups_disabled').single();if(error)throw error;if(biz!==currentBusinessId||version!==businessSessionVersion)return;for(const item of records)if(item.customerId===data.id)item.followupsDisabled=data.followups_disabled;saveState();render();if(typeof customerProfileCtx!=='undefined'&&customerProfileCtx?.customerId===data.id)renderCustomerProfile();toast(disabled?'Follow-ups turned off for this customer.':'Follow-up reminders enabled. Automatic emails remain paused.');}
+  async function setFollowupsDisabled(id,disabled){
+    const r=record(id),biz=currentBusinessId,version=businessSessionVersion,client=(typeof sb!=='undefined'?sb:null)||window.TK_SUPABASE_CLIENT;
+    if(!r||!client||!biz)throw Error('Sign in to save this preference.');
+    if(!r.customerId)await syncRecordToSupabase(r);
+    if(biz!==currentBusinessId||version!==businessSessionVersion)throw Error('Business session changed.');
+    if(!r.customerId)throw Error('Save this customer first.');
+    const controller=new AbortController();let timer;
+    try{
+      let query=client.from('customers').update({followups_disabled:!!disabled}).eq('business_id',biz).eq('id',r.customerId).select('id,followups_disabled').single();
+      if(typeof query.abortSignal==='function')query=query.abortSignal(controller.signal);
+      const {data,error}=await Promise.race([query,new Promise((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(Error('Could not confirm the save. Reload this customer before retrying.'));},20000);})]);
+      if(error)throw error;
+      if(biz!==currentBusinessId||version!==businessSessionVersion)return;
+      if(!data||data.id!==r.customerId||data.followups_disabled!==!!disabled)throw Error('The preference was not saved. Reload this customer and retry.');
+      for(const item of records)if(item.customerId===data.id)item.followupsDisabled=data.followups_disabled;
+      saveState();render();
+      // Refresh the detail controls without rebuilding its editable notes or
+      // other unsaved fields. Lead Manager's render updates its open panel.
+      document.querySelectorAll('[data-customer-followups]').forEach(control=>{
+        const linked=record(control.dataset.customerFollowups);if(linked?.customerId===data.id)control.checked=data.followups_disabled;
+      });
+      if(activeId!=null&&record(activeId)?.customerId===data.id){
+        const date=document.getElementById('sale-followup');if(date)date.disabled=data.followups_disabled;
+        const label=document.querySelector('#sale-plan .sale-followup');if(label)label.outerHTML=followupLabel(record(activeId));
+      }
+      if(typeof customerProfileCtx!=='undefined'&&customerProfileCtx?.customerId===data.id)renderCustomerProfile();
+      toast(disabled?'Follow-ups turned off for this customer.':'Follow-up reminders enabled. Automatic emails remain paused.');
+    }finally{clearTimeout(timer);}
+  }
   let followupScope='due';
   function followupRows(scope=followupScope){const now=Date.now(),end=new Date();end.setHours(23,59,59,999);return records.filter(isOpen).filter(r=>!followupsOff(r)).filter(r=>{const at=followupTime(r);return scope==='all'||scope==='due'&&at!==null&&at<now||scope==='today'&&at!==null&&at>=now&&at<=end.getTime()||scope==='upcoming'&&at!==null&&at>end.getTime()||scope==='unscheduled'&&at===null;}).sort((a,b)=>(followupTime(a)??Infinity)-(followupTime(b)??Infinity));}
   function openFollowups(){const rows=followupRows();modal('Follow-ups',`<p>Plan the next contact, email your customer, or mark a follow-up done. Customer emails are sent only when you press Send.</p><div class="sale-scope-tabs">${[['due','Overdue'],['today','Today'],['upcoming','Upcoming'],['unscheduled','Needs a date'],['all','All open']].map(([key,label])=>button(label+' ('+followupRows(key).length+')','followup-scope',key,`aria-pressed="${followupScope===key}"`)).join('')}</div><div class="sale-followup-queue">${rows.map(r=>`<article class="sale-followup-row"><div><button type="button" class="sale-customer-link" data-sale-action="followup-record" data-id="${esc(r.id)}">${esc(r.name||'Customer')}</button><p>${esc(r.address||'')} · ${esc(r.salespersonName||'Unassigned')}</p>${followupLabel(r)}<small>${r.clientResponded?'Customer responded — review their reply':r.quoteSentAt?'Quote sent · awaiting response':'Awaiting next contact'}</small></div><div class="sale-followup-actions"><label class="sale-field"><span>Next follow-up</span><input type="datetime-local" data-followup-date="${esc(r.id)}" value="${followupTime(r)===null?'':esc(localDateTime(r.nextFollowUpAt))}"></label><div class="sale-actions">${r.email?button('Email','followup-email',r.id):''}${r.phone?`<a class="btn ghost sm" href="tel:${esc(String(r.phone).replace(/[^+\d]/g,''))}">Call</a>`:''}${button('Tomorrow','followup-tomorrow',r.id)}${button('In 3 days','followup-three',r.id)}${button('Done','followup-done',r.id)}</div></div></article>`).join('')||empty('No follow-ups in this group.')}</div>`);}
@@ -449,7 +477,7 @@
     return `<button type="button" class="sale-record-open" data-sale-action="detail" data-id="${esc(r.id)}" aria-label="Open ${esc(r.name || 'Unnamed enquiry')}">${esc(r.name || "Unnamed enquiry")}</button>`;
   }
   function customerInfo(r) {
-    return `<div class="sale-section-head"><div><span class="sale-eyebrow">CUSTOMER</span><h3>Contact &amp; property</h3></div>${button('Edit customer details', 'customer-edit', r.id)}</div><dl class="sale-dl"><dt>Name</dt><dd>${esc(r.name || 'Not set')}</dd><dt>Email</dt><dd>${r.email ? `<a href="mailto:${esc(r.email)}">${esc(r.email)}</a>` : 'Not set — add an email to send quotes'}</dd><dt>Phone</dt><dd>${r.phone ? `<a href="tel:${esc(r.phone.replace(/[^+\d]/g, ''))}">${esc(r.phone)}</a>` : 'Not set — add a phone number'}</dd><dt>Property</dt><dd>${esc([r.address, r.suburb].filter(Boolean).join(', ') || 'Not set — add the property to quote in Earth')}</dd><dt>Received</dt><dd>${esc(dates(M.leadTime(r)))}</dd><dt>Lead source</dt><dd>${esc(r.source || 'Manual')}</dd></dl><div class="sale-actions">${contactActions(r)}${button('Contact customer', 'contact', r.id)}${button('Conversations', 'inbox')}</div><p class="sale-muted">Customer details are shared across this customer's opportunities. Sales notes below belong to this opportunity.</p>`;
+    return `${r._customerMissing?'<p class="sale-warning" role="status">Customer details need repair. Use Edit customer details to add the missing name; this job is excluded from automatic saving until repaired.</p>':''}<div class="sale-section-head"><div><span class="sale-eyebrow">CUSTOMER</span><h3>Contact &amp; property</h3></div>${button('Edit customer details', 'customer-edit', r.id)}</div><dl class="sale-dl"><dt>Name</dt><dd>${esc(r.name || 'Not set')}</dd><dt>Email</dt><dd>${r.email ? `<a href="mailto:${esc(r.email)}">${esc(r.email)}</a>` : 'Not set — add an email to send quotes'}</dd><dt>Phone</dt><dd>${r.phone ? `<a href="tel:${esc(r.phone.replace(/[^+\d]/g, ''))}">${esc(r.phone)}</a>` : 'Not set — add a phone number'}</dd><dt>Property</dt><dd>${esc([r.address, r.suburb].filter(Boolean).join(', ') || 'Not set — add the property to quote in Earth')}</dd><dt>Received</dt><dd>${esc(dates(M.leadTime(r)))}</dd><dt>Lead source</dt><dd>${esc(r.source || 'Manual')}</dd></dl><div class="sale-actions">${contactActions(r)}${button('Contact customer', 'contact', r.id)}${button('Conversations', 'customer-conversations', r.id)}</div><p class="sale-muted">Customer details are shared across this customer's opportunities. Sales notes below belong to this opportunity.</p>`;
   }
   function detailNextActions(r) {
     return `${P.key(r) === 'won' ? button('Open jobs & invoices', 'nav', 'operations') : P.key(r) === 'lost' ? button('View sales history', 'history', r.id) : stepButton(r)}${button('Set follow-up / add notes', 'sales-plan', r.id)}`;
@@ -599,7 +627,7 @@
       <div class="sale-detail-layout"><div>
       <section class="sale-panel" id="sale-customer">${customerInfo(r)}</section>${window.TK_LEAD_REQUEST?.renderAnswers(r)||''}
       <section class="sale-panel" id="sale-plan"><span class="sale-eyebrow">SALES PLAN</span><h3 tabindex="-1">Owner, follow-up &amp; notes</h3>${followupControl(r)}${stageControl(r)}<p class="sale-muted">Contact and quote stages also update after a successful send. Confirming a sale requires a saved, complete quote.</p>
-      <div class="sale-form-pair">${field('Estimated opportunity value', `<input id="sale-opportunity" type="number" min="0" step="0.01" value="${esc(r.opportunityValue || 0)}">`)}${field('Salesperson', `<select id="sale-assignee">${salespersonOptions(r)}</select>`)}</div>${field('Next follow-up', `<input id="sale-followup" type="datetime-local" value="${followupTime(r) == null ? '' : esc(localDateTime(r.nextFollowUpAt))}">`)}${followupLabel(r)}${field('Sales notes', `<textarea id="sale-notes" rows="4" placeholder="What did you agree? What should happen next?">${esc(r.salesNotes || r.jobNotes || '')}</textarea>`)}${button('Save sales details', 'save-details', r.id)}</section></div>
+      <div class="sale-form-pair">${field('Estimated opportunity value', `<input id="sale-opportunity" type="number" min="0" step="0.01" value="${esc(r.opportunityValue || 0)}">`)}${field('Salesperson', `<select id="sale-assignee">${salespersonOptions(r)}</select>`)}</div>${field('Next follow-up', `<input id="sale-followup" type="datetime-local" ${followupsOff(r)?'disabled':''} value="${followupTime(r) == null ? '' : esc(localDateTime(r.nextFollowUpAt))}">`)}${followupLabel(r)}${field('Sales notes', `<textarea id="sale-notes" rows="4" placeholder="What did you agree? What should happen next?">${esc(r.salesNotes || r.jobNotes || '')}</textarea>`)}${button('Save sales details', 'save-details', r.id)}</section></div>
       <div>${window.TK_LEAD_REQUEST?.render(r)||''}${window.TK_SM8_PRICING?.render(r)||''}<section class="sale-panel" id="sale-quote"><span class="sale-eyebrow">QUOTE</span><h3>Quote &amp; profitability</h3><p class="sale-quote-services">${esc(servicesLabel(r))}</p>${table(['Metric', 'Value'], [
         ['Original TurnKey quote (incl. GST)', r.quoteId||r.total>0?money(r.total||0):'No TurnKey quote saved'],
         ['Estimated delivery costs', moneySafe(r.estimatedCost)],
@@ -1145,6 +1173,7 @@
       if (a === "quote-select") { document.getElementById('sales-dialog')?.close(); await buildEarthQuote(r.id); }
       if (a === "edit-quote") openQuoteModal(r.id);
       if (a === "inbox") switchView("inbox");
+      if(a === "customer-conversations") await window.TK_CONVERSATIONS_BRIDGE?.openCustomerHistory?.(r.id);
       if (a === "detail") openDetail(r.id);
       if (a === "connections") openConnections();
       if (a === "quote") {

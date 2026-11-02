@@ -89,8 +89,15 @@ const assert = require('node:assert/strict');
       await leads.locator('[data-customer-followups="1"]').check();
       await page.waitForFunction(()=>records[0].followupsDisabled===true&&records[1].followupsDisabled===true);
       assert.equal(await page.evaluate(()=>TK_SALES_PLATFORM.followupRows('all').some(r=>r.id===1)),false);
+      assert.match(await leads.locator('.nlm-followup-summary').innerText(),/Follow-ups are off/);
+      assert.equal(await leads.locator('[data-nlm="follow"]').count(),0);
+      assert.equal(await leads.locator('[data-nlm-record="1"] .nlm-row-overdue').count(),0);
+      await leads.locator('.nlm-close').click();
+      await leads.locator('.nlm-name').first().click();
+      assert.equal(await leads.locator('[data-customer-followups="1"]').isChecked(),true,'Preference survives reopening customer');
       await leads.locator('[data-customer-followups="1"]').uncheck();
       await page.waitForFunction(()=>records[0].followupsDisabled===false&&records[1].followupsDisabled===false);
+      assert.equal(await leads.locator('[data-nlm="follow"]').count(),1);
       await leads.locator('.nlm-close').click();
 
 

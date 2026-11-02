@@ -5914,7 +5914,7 @@ async function openCustomerProfile(recordId){
     if(biz!==currentBusinessId||user!==currentUserId||version!==businessSessionVersion)return;
     const customerId=r.customerId;
     const ctx=customerProfileCtx?.customerId===customerId?customerProfileCtx:{customerId,quotes:[],attachments:[],activity:[]};
-    customerProfileCtx=ctx;renderCustomerProfile();
+    ctx.recordId=r.id;customerProfileCtx=ctx;renderCustomerProfile();
     if(!sb||!customerId)return;
     const responses=await Promise.all([
       sb.from('quotes').select('*').eq('business_id',biz).eq('lead_id',customerId).order('created_at',{ascending:false}),
@@ -5945,7 +5945,7 @@ function cpPropertyImageHtml(c,jobs){
 }
 function renderCustomerProfile(){
   const ctx=customerProfileCtx;if(!ctx)return;
-  const jobs=records.filter(r=>r.customerId===ctx.customerId);
+  const jobs=records.filter(r=>ctx.customerId?r.customerId===ctx.customerId:r.id===ctx.recordId);
   if(!jobs.length){document.getElementById('customer-body').innerHTML='<div class="empty-state"><div class="sm">This customer could not be loaded.</div></div>';return;}
   const c=jobs[0];
   const lifetimeValue=jobs.filter(isPaid).reduce((s,r)=>s+(r.total||0),0);
@@ -6019,7 +6019,7 @@ function renderCustomerProfile(){
     <div class="panel" style="margin-bottom:14px"><h4>Contact &amp; property</h4>
       ${window.TK_SALES_PLATFORM?.followupControl?.(jobs[0])||''}
       ${cpPropertyImageHtml(c,jobs)}
-      <div class="field"><label>Name</label><input id="cp-name" value="${c.name.replace(/"/g,'&quot;')}"></div>
+      <div class="field"><label>Name</label><input id="cp-name" value="${(c._customerMissing?'':c.name).replace(/"/g,'&quot;')}"></div>
       <div class="field-row"><div class="field"><label>Phone</label><input id="cp-phone" value="${(c.phone||'').replace(/"/g,'&quot;')}"></div><div class="field"><label>Email</label><input id="cp-email" value="${(c.email||'').replace(/"/g,'&quot;')}"></div></div>
       <div class="field"><label>Address</label><input id="cp-address" value="${(c.address||'').replace(/"/g,'&quot;')}"></div>
       <div class="field"><label>Suburb</label><input id="cp-suburb" value="${(c.suburb||'').replace(/"/g,'&quot;')}"></div>
@@ -6103,11 +6103,16 @@ function renderCustomerProfile(){
     ${tabContent}`;
 
   if(cpActiveTab==='photos')iwLoadCustomerPhotos();
-  if(cpActiveTab==='conversations')void window.TK_CONVERSATIONS_BRIDGE?.renderCustomerHistory?.(document.getElementById('cp-conversations'),{customerId:ctx.customerId,email:c.email,name:c.name});
+  if(cpActiveTab==='conversations'){
+    const host=document.getElementById('cp-conversations');
+    if(window.TK_CONVERSATIONS_BRIDGE)void window.TK_CONVERSATIONS_BRIDGE.renderCustomerHistory(host,{customerId:ctx.customerId,email:c.email,name:c.name,recordId:c.id});
+    else host.textContent='Conversations is unavailable. Reload TurnKey and retry.';
+  }
 
 }
 async function saveCustomerContact(btn){
   const ctx=customerProfileCtx;if(!ctx||!sb)return;
+  const biz=currentBusinessId,version=businessSessionVersion;
   const payload={
     name:document.getElementById('cp-name').value.trim(),
     phone:document.getElementById('cp-phone').value.trim(),
@@ -6118,10 +6123,12 @@ async function saveCustomerContact(btn){
   };
   if(!payload.name){toast('Name is required');return;}
   if(btn){if(btn.disabled)return;btn.disabled=true;btn.textContent='Saving…';} // guards against a double-click firing two concurrent writes
-  const {error}=await sb.from('customers').update(payload).eq('id',ctx.customerId);
+  const {data,error}=await sb.from('customers').update(payload).eq('id',ctx.customerId).eq('business_id',biz).select('id').single();
   if(btn){btn.disabled=false;btn.textContent='Save';}
+  if(biz!==currentBusinessId||version!==businessSessionVersion)return;
   if(error){console.error('Save customer failed',error);toast('Could not save: '+error.message);return;}
-  records.filter(r=>r.customerId===ctx.customerId).forEach(r=>Object.assign(r,payload));
+  if(data?.id!==ctx.customerId){toast('Could not confirm the customer save. Reload and try again.');return;}
+  records.filter(r=>r.customerId===ctx.customerId).forEach(r=>Object.assign(r,payload,{_customerMissing:false}));
   saveState();render();renderAll();renderCustomerProfile();
   toast('Contact details saved ✓');
 }
@@ -10542,6 +10549,9 @@ async function syncAllToSupabase(){
   const failed=[];
   for(const r of [...records]){
     if(biz!==currentBusinessId||version!==businessSessionVersion)return;
+    // Incomplete historical profiles need a contact repair, not repeated
+    // automatic writes or a misleading connection-error toast.
+    if(r._customerMissing||!String(r.name||'').trim())continue;
     try{await syncRecordToSupabase(r);}
     catch(e){console.error('Supabase sync failed for record',r.id,e);failed.push(r.name||'a record');}
   }
@@ -11060,16 +11070,16 @@ async function retryPendingPhotos(){
 <script src="lead-request-view.js?v=20261102-wix-answers"></script>
 <script src="servicem8-pricing-view.js?v=20261102d"></script>
 <script src="lead-identity.js?v=20261103b"></script>
-<script src="sales-platform.js?v=20261103b"></script>
+<script src="sales-platform.js?v=20261103c"></script>
 <script type="module" src="measurement-import.js?v=20261017a"></script>
 <script src="pricing-learning-engine.js?v=20261102k"></script>
 <script src="quote-workspace.js?v=20261017a"></script>
 <script src="workspace-cache.js?v=20261102j"></script>
 <script src="conversations.js?v=20261103a"></script>
-<script src="conversations-bridge.js?v=20261103a"></script>
+<script src="conversations-bridge.js?v=20261103c"></script>
 <script src="servicem8-import.js?v=20261017a"></script>
 <script src="marketing-analytics.js?v=20261102b"></script>
-<footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a> · <span id="tk-app-version">v20261103b</span></footer>
+<footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a> · <span id="tk-app-version">v20261103c</span></footer>
 <script src="extension-quote-link.js?v=20261102k"></script>
 <script src="job-workspace.js?v=20261031a"></script>
 <script src="job-calendar.js?v=20261103b"></script>
@@ -11078,7 +11088,7 @@ async function retryPendingPhotos(){
 <script src="workspace-controls.js?v=20261019a"></script>
 <script src="settings-experience.js?v=20261103a"></script>
 <script src="workspace-experience.js?v=20261019b"></script>
-<script src="nova-lead-manager.js?v=20261102-wix-answers"></script>
+<script src="nova-lead-manager.js?v=20261103c"></script>
 <script src="pricing-learning-ui.js?v=20261102k"></script>
 <script src="mobile-experience.js?v=20261102h"></script>
 <script src="workspace-help.js?v=20261102a"></script>
