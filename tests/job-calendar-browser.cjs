@@ -809,6 +809,18 @@ const { chromium } = require('playwright'),
     const mobileTitle=await page.locator('.tkjc-title').innerText();
     await page.locator('[data-tkjc="next"]').click();
     await page.waitForFunction(previous=>document.querySelector('.tkjc-title').textContent!==previous,mobileTitle);
+    await page.addScriptTag({path:path.resolve('workspace-cache.js')});
+    await page.evaluate(async()=>{
+      const options={cache:true,getBusinessId:()=> 'persistent-calendar',getUserId:()=>fixture.userId,request:async path=>path.startsWith('/range')?{...rangeData('Cached customer booking'),completedEvents:[],google:{connected:true},servicem8:{connected:true,seededAt:'2026-07-01'}}:{queued:false}};
+      TK_JOB_CALENDAR.configure(options);await window.renderCalendar();
+      window.cachedRead=null;
+      TK_JOB_CALENDAR.configure({...options,request:path=>path.startsWith('/range')?new Promise(resolve=>{window.cachedRead=resolve;}):Promise.resolve({queued:false})});
+      window.renderCalendar();
+    });
+    assert.match(await page.locator('#tkjc-sidebar-list').innerText(),/Cached customer booking/);
+    assert.equal(await page.locator('#tkjc-load-status').isVisible(),false);
+    await page.evaluate(()=>cachedRead({...rangeData('Updated customer booking'),completedEvents:[],google:{connected:true},servicem8:{connected:true,seededAt:'2026-07-01'}}));
+    await page.waitForFunction(()=>document.getElementById('tkjc-sidebar-list').textContent.includes('Updated customer booking'));
     assert.deepEqual(errors, []);
     await page.close();
     console.log('Job calendar UI passed');

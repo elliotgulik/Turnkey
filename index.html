@@ -2753,6 +2753,7 @@ function subscribeNotificationsRealtime(){
       if(!payload||!payload.new||payload.new.business_id!==currentBusinessId||payload.new.user_id&&payload.new.user_id!==currentUserId)return;
       notificationCentre.items.unshift(payload.new);
       notificationCentre.unread++;updateNotificationBadges();
+      if(payload.new.type==='customer_reply'&&document.getElementById('view-inbox')?.classList.contains('active'))void window.TK_CONVERSATIONS_BRIDGE?.render({force:true});
       if(document.getElementById('view-dashboard').classList.contains('active'))renderDashboard();
       if(document.getElementById('notif-overlay').classList.contains('open'))renderNotificationList();
     })
@@ -10809,7 +10810,7 @@ if(sb){
     window.TK_CURRENT_SESSION=event==='SIGNED_OUT'?null:session;
     if(event==='PASSWORD_RECOVERY'){authRecoveryActive=true;appSessionGate.reset();++businessSessionVersion;businessStateReady=false;showPasswordRecovery();return;}
     if(!authRecoveryActive&&(event==='SIGNED_IN'||event==='INITIAL_SESSION')&&session)void appSessionGate.start(session).catch(()=>{if(!businessStateReady){showAuth();setAuthMsg('Could not load your workspace. Please try again.');}});
-    if(event==='SIGNED_OUT'){appSessionGate.reset();++businessSessionVersion;businessStateReady=false;clearTimeout(supabaseSyncTimer);goals=[];goalSeq=1;seq=1;followSeq=1;window.TK_SALES_PLATFORM?.reset();unsubscribeRealtime();stopLastSeenHeartbeat();records=[];currentBusinessId=null;currentUserId=null;currentUserRole='owner';staff=[];pendingInvites=[];render();renderAll();showAuth();}
+    if(event==='SIGNED_OUT'){window.TK_WORKSPACE_CACHE?.clearAll();appSessionGate.reset();++businessSessionVersion;businessStateReady=false;clearTimeout(supabaseSyncTimer);goals=[];goalSeq=1;seq=1;followSeq=1;window.TK_SALES_PLATFORM?.reset();unsubscribeRealtime();stopLastSeenHeartbeat();records=[];currentBusinessId=null;currentUserId=null;currentUserRole='owner';staff=[];pendingInvites=[];render();renderAll();showAuth();}
   });
 }else{
   showAuth();
@@ -11034,14 +11035,15 @@ async function retryPendingPhotos(){
 <script type="module" src="measurement-import.js?v=20261017a"></script>
 <script src="pricing-learning-engine.js?v=20261101h"></script>
 <script src="quote-workspace.js?v=20261017a"></script>
-<script src="conversations.js?v=20261020a"></script>
+<script src="workspace-cache.js?v=20261102j"></script>
+<script src="conversations.js?v=20261102j"></script>
 <script src="conversations-bridge.js?v=20261020a"></script>
 <script src="servicem8-import.js?v=20261017a"></script>
 <script src="marketing-analytics.js?v=20261102b"></script>
-<footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a> · <span id="tk-app-version">v20261102i</span></footer>
+<footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a> · <span id="tk-app-version">v20261102j</span></footer>
 <script src="extension-quote-link.js?v=20261102b"></script>
 <script src="job-workspace.js?v=20261031a"></script>
-<script src="job-calendar.js?v=20261102g"></script>
+<script src="job-calendar.js?v=20261102j"></script>
 <script src="operations-workspace.js?v=20261102b"></script>
 <script src="operations-bridge.js?v=20261018c"></script>
 <script src="workspace-controls.js?v=20261019a"></script>

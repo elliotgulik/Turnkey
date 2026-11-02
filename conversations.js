@@ -34,7 +34,7 @@
     template.content.querySelectorAll('p,div,tr,li,h1,h2,h3').forEach(n => n.append('\n'));
     return template.content.textContent.trim() || message.snippet || '';
   }
-  function mount({ root, request, onConnect = () => {}, onCount = () => {}, listQuotes = () => [], buildQuoteAttachment, buildDocumentAttachment, beforeSend = () => {}, onDocument = () => {}, onSent = () => {} }) {
+  function mount({ root, request, onConnect = () => {}, onCount = () => {}, listQuotes = () => [], buildQuoteAttachment, buildDocumentAttachment, beforeSend = () => {}, onDocument = () => {}, onSent = () => {}, initialSnapshot = null, onSnapshot = () => {} }) {
     if (!root || typeof request !== 'function') throw Error('Conversations requires a root and authenticated request function');
     let messages = [], stars = [], drafts = [], account = null, folder = 'inbox', selected = null;
     let quoteFiles = null, quoteChoices = [], query = '', loaded = false;
@@ -47,7 +47,8 @@
     const dateLabel = value => Number.isNaN(new Date(value).getTime()) ? 'Date unavailable' : new Date(value).toLocaleString();
     let lastDocument = null;
     let composer = null, notice = '', pending = false, sending = false, destroyed = false, timer, hasMore = false, loading = false;
-    let saveQueue = Promise.resolve();
+    let saveQueue = Promise.resolve(), refreshPending=null,refreshDirty=false,lastLoadedAt=0,draftsLoaded=false;
+    const saved=initialSnapshot?.data;if(saved&&Array.isArray(saved.messages)&&Array.isArray(saved.stars)){messages=saved.messages;stars=saved.stars;account=saved.account||null;hasMore=!!saved.hasMore;loaded=true;lastLoadedAt=initialSnapshot.savedAt||0;}
     const api = (path, method = 'GET', body) => request('/api/conversations' + path, { method, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
     const button = (label, action, extra = '') => `<button type="button" data-cv-action="${action}" ${extra}>${label}</button>`;
     const activeDrafts = () => drafts.filter(d => d.status !== 'sent');
@@ -85,6 +86,7 @@
       const info = folders.find(([id]) => id === folder);
       root.dataset.cvReading = thread ? 'true' : 'false';
       const heading = `<header class="cv-folder-heading"><div><h3>${info[1]} <span>${count}</span></h3><p>${q ? 'Matching ' + (folder === 'drafts' ? 'drafts' : 'synced conversations') + ' in this folder' : info[2]}</p></div></header>`;
+      if(folder==='drafts'&&!draftsLoaded)return heading+'<p class="cv-sync-hint">Loading saved drafts…</p>';
       if (folder === 'drafts') return heading + `<div class="cv-drafts">${saved.map(d => button(`<div><b>${esc(d.payload.subject || '(no subject)')}</b><span>${esc(d.payload.to || 'Add a recipient')} · ${esc(d.payload.bodyText?.slice(0, 120) || 'Continue writing your email')}</span></div><small>${esc(d.status === 'draft' ? 'Draft' : 'Delivery ' + d.status + ' — check Sent')}</small>`, 'draft', `data-id="${esc(d.id)}"`)).join('') || emptyHtml()}</div>`;
       return heading + `<div class="cv-layout"><aside class="cv-list" aria-label="Conversations">${filtered.map(g => `<div class="cv-row ${g.key === selected ? 'selected' : ''}">${button(g.starred ? '★' : '☆', 'star', `data-id="${esc(g.last.id)}" aria-label="${g.starred ? 'Unstar' : 'Star'} conversation" aria-pressed="${g.starred}"`)}${button(`<b>${esc(g.last.direction === 'sent' ? g.last.to_addresses : g.last.from_address)}</b><strong>${esc(g.last.subject || '(no subject)')}</strong><span>${esc(g.last.snippet || messageText(g.last).slice(0, 140))}</span><small>${esc(dateLabel(g.last.sent_at))}${g.messages.length > 1 ? ' · ' + g.messages.length + ' messages' : ''}</small>`, 'thread', `data-key="${esc(g.key)}" aria-current="${g.key === selected ? 'true' : 'false'}"`)}</div>`).join('') || emptyHtml()}${hasMore ? button(loading ? 'Loading older messages…' : 'Load older messages', 'more', loading || pending ? 'disabled' : '') : ''}<p class="cv-sync-hint">Search and folders cover synced messages.${hasMore ? ' Load older messages to search further back.' : ''}</p></aside><section class="cv-thread" aria-label="Selected conversation">${thread ? `${button('Back to ' + info[1].toLowerCase(), 'back', 'class="cv-back"')}<header class="cv-thread-heading"><h3 tabindex="-1">${esc(thread.last.subject || '(no subject)')}</h3><p>${thread.messages.length} message${thread.messages.length === 1 ? '' : 's'} in this conversation</p></header>${thread.messages.map(m => `<article class="cv-message ${m.direction === 'sent' ? 'sent' : 'received'}"><header><b>${esc(m.from_address)}</b><time>${esc(dateLabel(m.sent_at))}</time></header><p>To: ${esc(m.to_addresses)} <span class="cv-direction">${m.direction === 'sent' ? 'Sent' : 'Received'}</span></p><div class="cv-body">${esc(messageText(m))}</div></article>`).join('')}${button('Reply', 'reply', pending ? 'disabled' : 'class="cv-primary"')}` : '<div class="cv-empty cv-reading-empty"><h4>Your customer conversations</h4><p>Select an email to read the full conversation and reply. Start a new email with Compose.</p></div>'}</section></div>`;
     }
@@ -114,13 +116,17 @@
         <div class="cv-quote-picker" ${quoteFiles ? '' : 'hidden'}>${quoteFiles ? '<header><h4>Choose a quote to attach</h4>' + button('Close quote picker', 'quotes') + '</header><h4>Opportunity quotes</h4>' + (quoteChoices.map(q => button(esc(q.label), 'opportunity-quote', `data-id="${esc(q.id)}" ${locked ? 'disabled' : ''}`)).join('') || '<p>No opportunity quotes available.</p>') + '<h4>Uploaded quote PDFs</h4>' + (quoteFiles.map(f => button(esc(f.filename), 'quote', `data-id="${esc(f.id)}" data-filename="${esc(f.filename)}" ${locked ? 'disabled' : ''}`)).join('') || '<p>No uploaded quote PDFs. You can attach a file above.</p>') : ''}</div>
         <footer class="cv-compose-footer"><p class="cv-save-state" role="status" aria-live="polite">${esc(composer.status !== 'draft' ? 'Delivery is ' + composer.status + '. Check Sent or sync before creating another email.' : composer.dirty ? 'Unsaved changes' : 'Draft saved')}</p>${!account ? '<p>Connect Gmail in Connections to send this draft.</p>' : ''}<div class="cv-compose-actions">${button('Save draft', 'save', locked ? 'disabled' : '')}${button('Discard', 'discard', pending || composer.status === 'sending' ? 'disabled' : '')}<button type="submit" class="cv-primary" ${locked || pending || preparing || !!composer.documentError || !account ? 'disabled' : ''}>${sending ? 'Sending…' : preparing ? 'Preparing PDF…' : 'Send email'}</button></div></footer></form></section>`;
     }
-    async function refresh() {
-      loading = true; draw();
-      try {
-        const [mail, saved] = await Promise.all([api('/messages'), api('/drafts')]);
-        if (destroyed) return;
-        loaded = true; account = mail.account; messages = mail.messages; stars = mail.stars; hasMore = mail.hasMore; drafts = saved.drafts;
-      } finally { loading = false; draw(); }
+    function refresh({force=true}={}) {
+      if(refreshPending){if(force)refreshDirty=true;return refreshPending;}
+      if(!force&&loaded&&Date.now()-lastLoadedAt<30000&&draftsLoaded)return Promise.resolve();
+      loading=!loaded;if(loading)draw();
+      refreshPending=(async()=>{try{do{refreshDirty=false;
+        const [mail,saved]=await Promise.all([api('/messages'),api('/drafts')]);if(destroyed)return;
+        loaded=true;draftsLoaded=true;account=mail.account;messages=mail.messages;stars=mail.stars;hasMore=mail.hasMore;drafts=saved.drafts;lastLoadedAt=Date.now();
+        // Draft contents/attachments are always loaded from the server, never restored stale.
+        onSnapshot({account:account?{id:account.id,email_address:account.email_address,provider:account.provider}:null,messages:messages.slice(0,100),stars,hasMore:!!hasMore||messages.length>100});
+        }while(refreshDirty&&!destroyed);
+      }finally{loading=false;refreshPending=null;draw();}})();return refreshPending;
     }
     function persist() {
       if (!composer || composer.status !== 'draft') return saveQueue;
@@ -347,11 +353,13 @@
           const now = getContext();
           return now.client === context.client && now.businessId === context.businessId && now.userId === context.userId && activeKey === key && epoch === generation;
         };
-        view = mount({ root, onConnect, onCount, listQuotes, buildQuoteAttachment, buildDocumentAttachment, beforeSend, onDocument, onSent, request: async (path, options = {}) => {
+        view = mount({ root, onConnect, onCount, listQuotes, buildQuoteAttachment, buildDocumentAttachment, beforeSend, onDocument, onSent, initialSnapshot:global.TK_WORKSPACE_CACHE?.read(context,'inbox'),onSnapshot:data=>{if(sameContext())global.TK_WORKSPACE_CACHE?.write(context,'inbox',data);},request: async (path, options = {}) => {
           if (!sameContext()) throw Error('Your session changed. Reopen Conversations.');
           if (!context.backendUrl) throw Error('Connect your TurnKey backend first.');
-          const { data, error } = await context.client.auth.getSession();
-          if (error || !data?.session || data.session.user.id !== context.userId || !sameContext()) throw Error('Please sign in again.');
+          const cached=global.TK_CURRENT_SESSION;
+          const validCached=cached?.user?.id===context.userId&&typeof cached.access_token==='string'&&cached.access_token&&Number.isFinite(cached.expires_at)&&cached.expires_at*1000>Date.now()+30000;
+          const {data,error}=validCached?{data:{session:cached},error:null}:await context.client.auth.getSession();
+          if(error||!data?.session||data.session.user.id!==context.userId||!sameContext())throw Error('Please sign in again.');
           const response = await fetchImpl(context.backendUrl.replace(/\/$/, '') + path, {
             ...options, credentials: 'omit', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + data.session.access_token }
           });
@@ -364,13 +372,16 @@
       }
       return false;
     }
-    async function render() {
+    async function render({force=false}={}) {
       await ensureView();
       if (!view) return;
-      try { await view.refresh(); } catch (e) {
+      try { await view.refresh({force}); } catch (e) {
         const notice = root.querySelector('.cv-notice'); if (notice && view) { notice.textContent = e.message; notice.hidden = false; }
       }
     }
+    const poll=()=>{if(view&&root.classList.contains('active')&&!global.document?.hidden)void render().catch(()=>{});};
+    global.addEventListener?.('focus',poll);
+    global.setInterval?.(poll,30000);
     render.reset = reset;
     render.completeDocumentPreparation = (...args) => view?.completeDocumentPreparation(...args);
     render.compose = async payload => {

@@ -170,6 +170,12 @@
 
   /* ===================== load ===================== */
   const rangeDataKeys = ['jobs', 'events', 'completedEvents', 'blocks'];
+  const persistentCache=()=>!config.request||config.cache===true?root.TK_WORKSPACE_CACHE:null;
+  const cacheScope=scope=>({businessId:scope.biz,userId:scope.user});
+  const displayKeys=[...rangeDataKeys,'staff','google','servicem8'];
+  const calendarCacheName=range=>'calendar:'+String(config.getRole?config.getRole():(typeof currentUserRole!=='undefined'?currentUserRole:'unknown'))+':'+range;
+  function persistCalendar(owner,scope){if(!owner.loaded||!owner.dataRange)return;const cache=persistentCache();cache?.write(cacheScope(scope),calendarCacheName(owner.dataRange),Object.fromEntries(displayKeys.map(key=>[key,owner[key]])));cache?.write(cacheScope(scope),'calendar-view',{view:owner.view,section:owner.section,anchor:owner.anchor.toISOString()});}
+
   function rememberRange(owner) {
     if (!owner.dataRange) return;
     owner.snapshots.delete(owner.dataRange);
@@ -183,6 +189,7 @@
     const bizKey = scope.biz + ':' + scope.user;
     if (!state || state.bizKey !== bizKey || state.version !== scope.version) {
       state = freshState(); state.bizKey = bizKey; state.version = scope.version; destroyFc();
+      const remembered=persistentCache()?.read(cacheScope(scope),'calendar-view')?.data;if(remembered&&['month','week','day'].includes(remembered.view)&&Number.isFinite(Date.parse(remembered.anchor))){state.view=remembered.view;state.anchor=new Date(remembered.anchor);state.section=remembered.section==='completed'?'completed':'schedule';}
       clearTimeout(realtimeTimer);
       if (realtimeChannel) { try { calendarClient()?.removeChannel?.(realtimeChannel); } catch (_) {} }
       realtimeChannel = null; realtimeKey = ''; realtimeConnected = false;
@@ -194,8 +201,9 @@
     const key = fromISO + ':' + toISO;
     if (key !== owner.dataRange) {
       rememberRange(owner);
-      const saved = owner.snapshots.get(key);
-      if (saved) { Object.assign(owner, saved); owner.dataRange = key; }
+      const persisted=persistentCache()?.read(cacheScope(scope),calendarCacheName(key));
+      const saved = owner.snapshots.get(key)||persisted?.data;
+      if(saved&&rangeDataKeys.every(field=>Array.isArray(saved[field]))){Object.assign(owner,saved);owner.dataRange=key;owner.loaded=true;owner.myUserId=scope.user;}
     }
     owner.range = { fromISO, toISO };
     const pending = owner.pending.get(key);
@@ -207,7 +215,7 @@
       renderBody();
       return pending.promise;
     }
-    if (cached && owner.attemptedRange === key) {
+    if (cached && owner.attemptedRange === key && Date.now()-lastReadAt<60000) {
       renderBody();
       fcInstance?.updateSize();
       return Promise.resolve();
@@ -242,6 +250,7 @@
               owner.loaded = true;
               owner.dataRange = key;
               owner.loadError = '';
+              persistCalendar(owner,scope);
             }
           } catch (e) {
             if (current() && !e?.stale) owner.loadError = e.message || 'Could not load the calendar';
@@ -445,7 +454,8 @@
     if (clear) clear.hidden = !state.search.trim() && !state.staffFilter.size;
     const statusEl = document.getElementById('tkjc-load-status');
     if (statusEl) {
-      statusEl.hidden = !state.loading && !state.loadError;
+      const savedRange=state.loaded&&state.dataRange===state.range.fromISO+':'+state.range.toISO;
+      statusEl.hidden = (!state.loading || savedRange) && !state.loadError;
       statusEl.innerHTML = state.loading ? (state.loaded ? 'Refreshing bookings… Saved bookings remain visible.' : 'Loading calendar bookings…') : state.loadError ? `${esc(state.loadError)}${state.loaded ? ' Showing saved bookings; this range may be incomplete.' : ''} <button type="button" class="btn ghost sm" aria-label="Retry loading calendar">Retry</button>` : '';
       statusEl.querySelector('button')?.addEventListener('click', () => load());
     }
