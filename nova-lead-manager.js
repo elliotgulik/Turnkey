@@ -33,6 +33,8 @@
   function readableAnswer(value){return String(value??'').replace(/_/g,' ').replace(/\s+/g,' ').trim().replace(/^[,;\s]+|[,;\s]+$/g,'');}
   function formAnswers(r){
     const reader=window.TK_LEAD_ANSWERS;
+    const submitted=reader?.answersFromSubmission?.(r.formAnswers)||[];
+    if(submitted.length)return submitted.map(row=>({kind:row.kind==='service'?'services':/urgency|how.soon|timing/i.test(row.label)?'timing':'other',label:row.label,answer:row.answer}));
     const rows=reader?.answersFromNotes(String(r.notes||''))||[];
     if(!rows.some(row=>row.kind==='service')&&reader){
       const explicit=String(r.jobNotes||'').split(/\r?\n/).filter(line=>reader.isServiceField(line.split(':')[0]));
@@ -41,6 +43,8 @@
     return rows.map(row=>({kind:row.kind==='service'?'services':/residential.or.commercial|property.type/i.test(row.label)?'property':/urgency|how.soon|preferred.timing/i.test(row.label)?'timing':'other',label:row.kind==='service'?'Customer request':/residential.or.commercial|property.type/i.test(row.label)?'Property type':/urgency|how.soon/i.test(row.label)?'Preferred timing':row.label,answer:readableAnswer(row.answer)}));
   }
   function services(r){
+    // Explicit Wix selections stay separate from the customer's longer message.
+    if(Array.isArray(r.formAnswers)&&r.formAnswers.length&&Array.isArray(r.requestedServices)&&r.requestedServices.length)return [...new Set(r.requestedServices.map(x=>readableAnswer(typeof x==='string'?x:x?.name||x?.label)).filter(Boolean))];
     const written=formAnswers(r).filter(x=>x.kind==='services').map(x=>x.answer);
     if(written.length)return [...new Set(written)];
     const items=[...(Array.isArray(r.requestedServices)?r.requestedServices:[]),...(Array.isArray(r.services)?r.services:[])];

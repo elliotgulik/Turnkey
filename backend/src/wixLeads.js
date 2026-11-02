@@ -41,6 +41,35 @@ function answerValues(value, depth=0) {
   return text(answer.label)?[text(answer.label)]:[];
 }
 const serviceKeys = new Set(['requestedservices','requestedservice','servicesrequested','services','service','servicesrequired','servicerequired','selectservice','selectservices','selectservicesrequired','whatservicesdoyourequire','whatservicesdoyouneed','whatwouldyoulikecleaned']);
+// Flat Automation payloads mix answers with routing/transport metadata. Only
+// recognized questions are answers there; labelled containers can carry custom questions.
+const flatAnswerKeys = new Set([...serviceKeys, ...[
+  'name','fullName','contactName','Your name','firstName','lastName','email','emailAddress',
+  'phone','phoneNumber','Mobile number','address','streetAddress','Property address',
+  'Select an Address','Job Address','message','notes','comment','comments','Enquiry message',
+  'How can we help','Tell us about your job','Leave us a message...', 'urgency','timing',
+  'How soon do you need this done?','When do you need this done?','When would you like this done?',
+  "How'd you find us",'How did you find us','Select Window Cleaning Type','Cleaning Frequency',
+  'consent','Marketing consent','Email consent','SMS consent','Privacy consent','Terms and conditions',
+].map(labelKey)]);
+const internalAnswerKey = key => /token|secret|authorization|apikey/.test(key) ||
+  /^(id|internalid|businessid|contactid|submissionid|externalid|metadata|options|choices|offeredchoices|formid|formname|createdat|updatedat)$/.test(key);
+function submittedValues(value, depth=0) {
+  if(depth>5)return [];
+  if(typeof value==='boolean')return [value?'Checked':'Unchecked'];
+  if(typeof value==='number'&&Number.isFinite(value))return [String(value)];
+  if(Array.isArray(value))return value.slice(0,100).flatMap(item=>Array.isArray(item)?[]:submittedValues(item,depth+1)).slice(0,100);
+  if(typeof value==='string')return text(value)?[text(value)]:[];
+  const answer=object(value);
+  if(answer.selected===false||answer.checked===false)return [];
+  if('values' in answer)return submittedValues(answer.values,depth+1);
+  if('value' in answer){
+    if(typeof answer.value==='boolean')return text(answer.label)?(answer.value?[text(answer.label)]:[]):submittedValues(answer.value,depth+1);
+    return text(answer.label)?[text(answer.label)]:submittedValues(answer.value,depth+1);
+  }
+  if('answer' in answer)return submittedValues(answer.answer,depth+1);
+  return text(answer.label)?[text(answer.label)]:[];
+}
 function wixEvent(body) {
   const b=object(body),data=Object.keys(object(b.data)).length?object(b.data):b;
   const wrappers=[],seen=new Set();
@@ -52,11 +81,12 @@ function wixEvent(body) {
   visit(data);visit(b);
   const submission=wrappers.find(wrapper=>Object.keys(object(wrapper.submission)).length)?.submission||{};
   const contact=wrappers.map(wrapper=>object(wrapper.contact)).find(value=>Object.keys(value).length)||{};
-  const labels=Object.create(null);
+  const labels=Object.create(null),formAnswers=[];
   // Native Forms/Automations use labelled arrays or maps under these containers.
   let remaining=100;
   for(const wrapper of wrappers){
-    for(const container of ['submissions','fields','answers']){
+    for(const container of Object.keys(wrapper).filter(key=>['submissions','fields','answers'].includes(key))){
+      if(remaining<=0)break;
       const fields=wrapper[container];
       const entries=Array.isArray(fields)?fields.slice(0,remaining):Object.entries(object(fields)).slice(0,remaining).map(([key,value])=>{
         const field=object(value);
@@ -64,13 +94,33 @@ function wixEvent(body) {
       });
       for(const field of entries){
         remaining--;
+        const label=text(field?.label||field?.name||field?.key);
         const key=labelKey(field?.label||field?.name||field?.key);
-        const values=answerValues(field?.value??field?.values??field?.answer);
+        const raw=field?.value??field?.values??field?.answer;
+        const values=answerValues(raw);
         if(key&&key.length<=120&&values.length)labels[key]=[...(labels[key]||[]),...values].slice(0,100);
+        const answers=submittedValues(raw);
+        if(key&&key.length<=120&&!internalAnswerKey(key)&&answers.length)formAnswers.push({label,answer:answers.join(', ').slice(0,4000)});
       }
     }
   }
-  return {b,data,submission,contact,labels,wrappers};
+  for(const wrapper of new Set([...wrappers,contact])){
+    for(const [label,value] of Object.entries(wrapper).slice(0,100)){
+      if(remaining<=0)break;
+      const key=labelKey(label);
+      if((!flatAnswerKeys.has(key)&&!/^(iagree|consent|subscribe|acceptterms)/.test(key))||internalAnswerKey(key))continue;
+      const answers=submittedValues(value);
+      if(!answers.length)continue;
+      remaining--;
+      formAnswers.push({label,answer:answers.join(', ').slice(0,4000)});
+    }
+  }
+  const person=object(contact.name);
+  if(!formAnswers.some(({label})=>['name','fullname','contactname','firstname','lastname'].includes(labelKey(label)))){
+    const fullName=[text(person.first),text(person.last)].filter(Boolean).join(' ');
+    if(fullName&&remaining>0)formAnswers.push({label:'Full name',answer:fullName});
+  }
+  return {b,data,submission,contact,labels,wrappers,formAnswers};
 }
 export function mapWixPayload(body) {
   const {contact,labels,wrappers}=wixEvent(body);
@@ -95,7 +145,7 @@ export function mapWixPayload(body) {
     name,
     email:field('email','emailAddress','email_address','Email address')||undefined,
     phone:field('phone','phoneNumber','phone_number','Phone number','Mobile number')||undefined,
-    address:field('address','streetAddress','street_address','Property address','Select an Address')||text(address.formatted)||text(address.formattedAddress)||[text(address.addressLine1),text(address.city),text(address.subdivision),text(address.postalCode)].filter(Boolean).join(', ')||undefined,
+    address:field('address','streetAddress','street_address','Property address','Select an Address','Job Address')||text(address.formatted)||text(address.formattedAddress)||[text(address.addressLine1),text(address.city),text(address.subdivision),text(address.postalCode)].filter(Boolean).join(', ')||undefined,
     notes:field('message','notes','comment','comments','Enquiry message','How can we help','Tell us about your job','Leave us a message...')||undefined,
     // ingestQuoteRequest reads c.timing when composing the saved lead notes.
     ...(timing?{timing}:{}),
@@ -114,6 +164,13 @@ function wixRequestedServices(body){
         if(services.length>=100)return services;
       }
     }
+  }
+  if(!services.length){
+    const {formAnswers}=wixEvent(body);
+    const windowType=formAnswers.find(({label})=>labelKey(label)==='selectwindowcleaningtype')?.answer;
+    const windowServices={both:'Window Clean (Inside & Outside)',outsideonly:'Window Clean (Outside Only)',insideonly:'Window Clean (Inside Only)'};
+    const service=windowServices[labelKey(windowType)];
+    if(service)services.push(service);
   }
   return services;
 }
@@ -169,6 +226,7 @@ export async function handleWixLead({ token, body, lookupSource, addLead }) {
     source: 'wix',
     urgency: customer.timing || '',
     requestedServices: wixRequestedServices(body),
+    formAnswers: wixEvent(body).formAnswers,
     external_id: extractExternalId(body),
     submittedAt: Date.now()
   }

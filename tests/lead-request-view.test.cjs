@@ -23,3 +23,9 @@ test('customer text is escaped without changing its meaning or quote amounts',()
   const html=view.render({notes:'services: <img src=x onerror=alert(1)> & windows'});
   assert.match(html,/&lt;img/);assert.doesNotMatch(html,/<img/);assert.match(html,/&amp;/);
 });
+
+test('Wix selected services take precedence over message prose and all form answers render safely',()=>{
+  const r={source:'Wix',requestedServices:['House Clean','Roof Treatment'],notes:'Please clean my house and inspect the roof',formAnswers:[{label:'Message',answer:'Please clean my house and inspect the roof'},{label:'Job Address',answer:'7 Example Place'},{label:'Cleaning Frequency',answer:'Every 4 Months'},{label:'Custom answer',answer:'<script>bad</script>'}]};
+  assert.deepEqual(Array.from(view.requests(r)),['House Clean','Roof Treatment']);
+  const html=view.renderAnswers(r);assert.match(html,/Every 4 Months/);assert.match(html,/7 Example Place/);assert.match(html,/&lt;script&gt;/);assert.doesNotMatch(html,/<script>/);
+});

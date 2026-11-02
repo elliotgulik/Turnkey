@@ -84,7 +84,19 @@
     flush();
     return entries;
   }
+  // Already-normalized submission answers retain their original labels. Unlike
+  // legacy notes, a Message is context, not a replacement for Select Services.
+  function answersFromSubmission(fields) {
+    if (!Array.isArray(fields)) return [];
+    return fields.slice(0,100).flatMap(field => {
+      if (!field || typeof field.label !== 'string') return [];
+      const label=field.label.trim().slice(0,300);
+      const value=typeof field.answer==='boolean' ? (field.answer?'Checked':'Unchecked') : field.answer;
+      const answer=scalar(value).slice(0,4000);
+      return label && answer ? [{label,answer,kind:isServiceField(label)?'service':'context'}] : [];
+    });
+  }
   const servicesFromNotes = notes => answersFromNotes(notes).filter(row => row.kind === 'service').map(row => row.answer);
   const servicesFromFields = fields => answersFromFields(fields).filter(row => row.kind === 'service').map(row => row.answer);
-  return { answersFromNotes, answersFromFields, servicesFromNotes, servicesFromFields, humanizeLabel, isServiceField };
+  return { answersFromNotes, answersFromFields, answersFromSubmission, servicesFromNotes, servicesFromFields, humanizeLabel, isServiceField };
 });

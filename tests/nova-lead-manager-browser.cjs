@@ -249,6 +249,23 @@ const assert = require('node:assert/strict');
       await scope('all').click();
       assert.equal(await leads.locator('[data-nlm-record="51"] .nlm-new:visible').count(),1);
       assert.equal(await leads.locator('[data-nlm-record="52"] .nlm-new:visible').count(),0);
+      // End-to-end intake -> saved record -> drawer, full detail and profile.
+      await page.evaluate(()=>{
+        ensureRecordSynced=async()=>{};logActivity=()=>{};sendLifecycleEmail=()=>{};notifyOwner=()=>{};
+        ingestQuoteRequest({source:'wix',external_id:'wix-form-fixture',historicalImport:true,submittedAt:Date.now(),customer:{name:'Wix Form Fixture',email:'fixture@example.test',address:'7 Fixture Road, Grey Lynn, Auckland 1021, New Zealand',notes:'Please wash the house and inspect the roof.'},requestedServices:['House Clean','Roof Treatment'],formAnswers:[{label:'Select Services',answer:'House Clean, Roof Treatment'},{label:'Select an Address',answer:'7 Fixture Road, Grey Lynn, Auckland 1021, New Zealand'},{label:'Message',answer:'Please wash the house and inspect the roof.'},{label:'Cleaning Frequency',answer:'Every 4 Months'},{label:'I agree to the',answer:'Checked'}]});
+        const r=records.find(r=>r.externalId==='wix-form-fixture');r.customerId='fixture-customer';
+        window.wixFixtureId=r.id;
+        if(r.formAnswers.length!==5)throw Error('Form answers dropped at intake');
+        if(getRequestedServices(r).map(x=>x.name).join(',')!=='House Clean,Roof Treatment')throw Error('Selected services replaced by prose');
+        switchView('leads');
+      });
+      await leads.getByRole('button',{name:'Wix Form Fixture',exact:true}).click();
+      assert.match(await leads.locator('.nlm-detail').innerText(),/Every 4 Months/);
+      assert.match(await leads.locator('.nlm-detail').innerText(),/Checked/);
+      await leads.locator('.nlm-close').click();
+      await page.evaluate(()=>openDetail(window.wixFixtureId));
+      assert.match(await page.locator('#view-detail .tk-form-submission').innerText(),/Grey Lynn/);
+      assert.match(await page.locator('#view-detail .tk-form-submission').innerText(),/Every 4 Months/);
       assert.deepEqual(errors, []);
       await context.close();
       console.log(`PASS production Nova Leads Manager at ${width}px`);

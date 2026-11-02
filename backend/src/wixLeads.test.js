@@ -437,3 +437,159 @@ test('urgency contract prefers explicit urgency and retains customer timing for 
     assert.equal(saved.customer.source, 'Wix');
   }
 });
+
+// Synthetic versions of the residential, window-only and flat Automation forms.
+// Assert the actual addLead contract: a correct mapper alone cannot prevent loss.
+describe('complete Wix form answers reach storage', () => {
+  const residential = [
+    { label: 'Full name', answer: 'Alex Fixture' },
+    { label: 'Email', answer: 'alex@example.test' },
+    { label: 'Phone', answer: '0210000000' },
+    { label: 'Job Address', answer: '10 Example Street' },
+    { label: 'Select Services', answer: 'House Clean, Driveway Clean' },
+    { label: 'Message', answer: 'Please include the rear path.' },
+    { label: "How'd you find us", answer: 'Neighbour' },
+    { label: 'I agree to the privacy policy', answer: 'Checked' },
+    { label: 'Marketing consent', answer: 'Unchecked' },
+  ];
+  const windowOnly = [
+    { label: 'Full name', answer: 'Sam Fixture' },
+    { label: 'Email', answer: 'sam@example.test' },
+    { label: 'Phone', answer: '0210000001' },
+    { label: 'Job Address', answer: '20 Example Street' },
+    { label: 'Select Window Cleaning Type', answer: 'Both' },
+    { label: 'Cleaning Frequency', answer: 'Every 4 Months' },
+    { label: 'Message', answer: 'Please call before arriving.' },
+    { label: "How'd you find us", answer: 'Search' },
+    { label: 'Email consent', answer: 'Checked' },
+    { label: 'SMS consent', answer: 'Unchecked' },
+  ];
+  const raw = answer => answer === 'Checked' ? true : answer === 'Unchecked' ? false : answer;
+  const cases = [
+    {
+      title: 'residential labelled submissions array', expected: residential,
+      body: { data: { submissionId: 'residential-fixture', submissions: residential.map(({ label, answer }) => ({
+        label, value: label === 'Select Services' ? ['House Clean', 'Driveway Clean'] : raw(answer),
+        options: ['OFFERED-ONLY'], metadata: { debug: 'PRIVATE-METADATA' },
+      })) } }, services: ['House Clean', 'Driveway Clean'],
+    },
+    {
+      title: 'window-only labelled field map in known wrappers', expected: windowOnly,
+      body: { payload: { data: { submission: { submissionId: 'window-fixture', fields: Object.fromEntries(windowOnly.map(({ label, answer }, i) => [
+        `field-${i}`, { label, answer: raw(answer), options: ['OFFERED-ONLY'] },
+      ])) } } } }, services: ['Window Clean (Inside & Outside)'],
+    },
+    {
+      title: 'flat labelled Automation answers', expected: windowOnly,
+      body: { data: { ...Object.fromEntries(windowOnly.map(({ label, answer }) => [label, raw(answer)])),
+        token: 'PRIVATE-TOKEN', business_id: 'spoofed-tenant', submissionId: 'flat-fixture',
+        metadata: { services: ['PRIVATE-METADATA'] }, options: ['OFFERED-ONLY'],
+        internalId: 'PRIVATE-ID', arbitraryMetadata: 'PRIVATE-ARBITRARY',
+      } }, services: ['Window Clean (Inside & Outside)'],
+    },
+  ];
+  for (const { title, body, expected, services } of cases) {
+    test(title, async () => {
+      let saved;
+      const result = await handleWixLead({ token: 'fixture-token', body,
+        lookupSource: async hash => { assert.equal(hash, hashWixToken('fixture-token')); return { business_id: 'fixture-tenant' }; },
+        addLead: async payload => { saved = payload; return { id: 'saved-fixture' }; } });
+      assert.equal(result.status, 200);
+      assert.deepEqual(saved.formAnswers, expected);
+      assert.deepEqual(saved.requestedServices, services);
+      assert.equal(saved.customer.address, expected.find(({ label }) => label === 'Job Address').answer);
+      assert.equal(saved.customer.notes, expected.find(({ label }) => label === 'Message').answer);
+      assert.equal(saved.business_id, 'fixture-tenant');
+      assert.ok(saved.external_id.endsWith('fixture'));
+      assert.doesNotMatch(JSON.stringify(saved.formAnswers), /PRIVATE-|OFFERED-ONLY/);
+    });
+  }
+});
+
+test('window-only service inference handles each type and never overrides explicit services', async () => {
+  for (const [type, expected] of [
+    ['Both', 'Window Clean (Inside & Outside)'],
+    ['Outside Only', 'Window Clean (Outside Only)'],
+    ['Inside Only', 'Window Clean (Inside Only)'],
+  ]) {
+    for (const explicit of [false, true]) {
+      const body = { answers: {
+        'Full name': { value: 'Taylor Fixture' },
+        'Select Window Cleaning Type': { value: type, options: ['OFFERED-ONLY'] },
+        ...(explicit ? { 'Select Services': { values: ['House Clean', 'Roof Treatment'] } } : {}),
+      } };
+      const result = await handleWixLead({ token: 'fixture', body,
+        lookupSource: async () => ({ business_id: 'fixture-tenant' }),
+        addLead: async payload => {
+          assert.deepEqual(payload.requestedServices, explicit ? ['House Clean', 'Roof Treatment'] : [expected]);
+          assert.equal(payload.formAnswers[1].answer, type);
+          return { id: 'saved' };
+        } });
+      assert.equal(result.status, 200);
+    }
+  }
+});
+
+test('custom labelled answers preserve order and booleans without traversing options or metadata', async () => {
+  const fields = [
+    { label: 'Full name', value: 'Morgan Fixture' },
+    { label: 'Custom question?', value: { value: 'Submitted answer' }, options: ['OFFERED-ONLY'] },
+    { label: 'Consent one', answer: { value: false } },
+    { label: 'Consent two', values: true },
+    { label: 'Number of floors', value: 2 },
+    { label: 'Options only', options: ['OFFERED-ONLY'] },
+    { label: 'No submitted answer', value: { arbitrary: 'PRIVATE-ARBITRARY' } },
+    { label: 'Token', value: 'PRIVATE-TOKEN' },
+    { label: 'business_id', value: 'PRIVATE-TENANT' },
+    { label: 'Metadata', value: 'PRIVATE-METADATA' },
+    { label: 'Select Services', value: [
+      { label: 'House Clean', value: 'choice-1' },
+      { label: 'OFFERED-ONLY', checked: false },
+      { label: 'OFFERED-ONLY', value: false },
+    ] },
+  ];
+  const result = await handleWixLead({ token: 'fixture', body: { fields, metadata: { fields: [{ label: 'Leak', value: 'PRIVATE' }] } },
+    lookupSource: async () => ({ business_id: 'fixture-tenant' }),
+    addLead: async payload => {
+      assert.deepEqual(payload.formAnswers, [
+        { label: 'Full name', answer: 'Morgan Fixture' },
+        { label: 'Custom question?', answer: 'Submitted answer' },
+        { label: 'Consent one', answer: 'Unchecked' },
+        { label: 'Consent two', answer: 'Checked' },
+        { label: 'Number of floors', answer: '2' },
+        { label: 'Select Services', answer: 'House Clean' },
+      ]);
+      return { id: 'saved' };
+    } });
+  assert.equal(result.status, 200);
+});
+
+test('nested contact details also survive in full answers without contact metadata', async () => {
+  const result = await handleWixLead({ token: 'fixture', body: { data: {
+    contact: { name: { first: 'Jamie', last: 'Fixture' }, email: 'jamie@example.test', phone: '0210000002',
+      id: 'PRIVATE-CONTACT-ID', metadata: { token: 'PRIVATE-TOKEN' } },
+    submissions: [{ label: 'Message', value: 'Please quote.' }],
+  } }, lookupSource: async () => ({ business_id: 'fixture-tenant' }), addLead: async payload => {
+    assert.deepEqual(payload.formAnswers, [
+      { label: 'Message', answer: 'Please quote.' },
+      { label: 'email', answer: 'jamie@example.test' },
+      { label: 'phone', answer: '0210000002' },
+      { label: 'Full name', answer: 'Jamie Fixture' },
+    ]);
+    assert.equal(payload.external_id, null);
+    return { id: 'saved' };
+  } });
+  assert.equal(result.status, 200);
+});
+
+test('full-answer extraction respects field and value bounds', async () => {
+  const fields = [{ label: 'Full name', value: 'Jamie Fixture' },
+    ...Array.from({ length: 120 }, (_, i) => ({ label: `Custom question ${i}`, value: 'x'.repeat(12000) }))];
+  const result = await handleWixLead({ token: 'fixture', body: { fields, 'Message': 'Beyond field budget' },
+    lookupSource: async () => ({ business_id: 'fixture-tenant' }), addLead: async payload => {
+      assert.equal(payload.formAnswers.length, 100);
+      assert.ok(payload.formAnswers.every(({ answer }) => answer.length <= 10000));
+      return { id: 'saved' };
+    } });
+  assert.equal(result.status, 200);
+});

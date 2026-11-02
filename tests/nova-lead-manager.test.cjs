@@ -81,13 +81,13 @@ test('lead cards show received date and exact Auckland time from the original su
   f.records[0].requestSubmittedAt = '2026-10-31T23:04:05Z';
   f.records[0].createdAt = '2026-11-01T01:00:00Z';
   f.manager.render();
-  assert.match(f.host.innerHTML, /Received 1 Nov 2026, 12:04:05 pm NZDT/);
+  assert.match(f.host.innerHTML, /1 Nov 2026, 12:04:05 pm NZDT/);
   f.records[0].requestSubmittedAt = 'invalid';
   f.manager.render();
-  assert.match(f.host.innerHTML, /Received 1 Nov 2026, 2:00:00 pm NZDT/);
+  assert.match(f.host.innerHTML, /1 Nov 2026, 2:00:00 pm NZDT/);
   delete f.records[0].createdAt;
   f.manager.render();
-  assert.match(f.host.innerHTML, /Received Date not recorded/);
+  assert.match(f.host.innerHTML, /Date not recorded/);
 });
 
 test('Meta poll answers stay separate from services and encoded questions are not split at commas', () => {
@@ -142,4 +142,11 @@ test('lead alerts include only unresponded new enquiries younger than three days
  assert.deepEqual(Array.from(f.manager.pendingLeads(now),r=>r.id),[1]);
  assert.equal(f.manager.pendingLeads(now+3*86400000).length,0);
  assert.equal(f.records.length,7);
+});
+
+test('full Wix answers remain visible and explicit services do not collapse into message text',()=>{
+ const m=manager(),r={source:'Wix',requestedServices:['House Clean','Roof Treatment'],formAnswers:[{label:'Select Services',answer:'House Clean, Roof Treatment'},{label:'Message',answer:'Please clean the roof and house.'},{label:'Select Window Cleaning Type',answer:'Both'},{label:'Cleaning Frequency',answer:'Every 4 Months'},{label:'I agree to the',answer:'Checked'}]};
+ assert.deepEqual(Array.from(m.services(r)),['House Clean','Roof Treatment']);
+ assert.deepEqual(Array.from(m.formAnswers(r),row=>row.label),r.formAnswers.map(row=>row.label));
+ assert.equal(m.formAnswers(r)[3].answer,'Every 4 Months');
 });

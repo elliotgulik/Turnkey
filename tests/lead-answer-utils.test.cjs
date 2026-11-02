@@ -130,3 +130,18 @@ test('written Wix requests for window quotes or moss removal remain readable who
     assert.deepEqual(reader.servicesFromNotes(answer+' · Submitted via online quote tool'),[answer]);
   }
 });
+
+test('complete Wix submission keeps context, checkboxes and exact labels separate from service choices',()=>{
+  const rows=U.answersFromSubmission([
+    {label:'Select Services',answer:'House Clean, Roof Treatment'},
+    {label:'Message',answer:'Please wash the house and inspect the roof.'},
+    {label:"How’d you find us",answer:'Instagram'},
+    {label:'Cleaning Frequency',answer:'Every 4 Months'},
+    {label:'I agree to the terms & conditions',answer:true},
+    {label:'Other consent',answer:false}
+  ]);
+  assert.equal(rows.length,6);
+  assert.equal(rows[0].kind,'service');assert.equal(rows[1].kind,'context');
+  assert.equal(rows[4].answer,'Checked');assert.equal(rows[5].answer,'Unchecked');
+  assert.equal(rows[3].answer,'Every 4 Months');
+});

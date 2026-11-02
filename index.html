@@ -6011,6 +6011,7 @@ function renderCustomerProfile(){
 
   const overviewHtml=`
     ${bookedHeroHtml}
+    ${window.TK_LEAD_REQUEST?.renderAnswers(latestJob)||''}
     <div class="cp-stats cp-stats-secondary">
       <div class="cp-stat"><div class="cp-stat-v">${money(totalQuoted)}</div><div class="cp-stat-l">Total quoted</div></div>
       <div class="cp-stat"><div class="cp-stat-v">${wonCount}</div><div class="cp-stat-l">Won</div></div>
@@ -10874,6 +10875,7 @@ function extractServicesFromNotes(notes){
 // Saved structured selections remain available when no written request was supplied.
 function getRequestedServices(r){
   const saved=Array.isArray(r.requestedServices)?r.requestedServices.map(normalizeReqSvc):[];
+  if(String(r.source||'').toLowerCase()==='wix'&&saved.length)return saved;
   const extracted=extractServicesFromNotes(r.notes);
   if(!extracted.length){const reader=window.TK_LEAD_ANSWERS;const explicit=String(r.jobNotes||'').split(/\r?\n/).filter(line=>reader?.isServiceField(line.split(':')[0]));extracted.push(...extractServicesFromNotes(explicit.join('\n')));}
   if(extracted.length){r.requestedServices=extracted;return extracted;}
@@ -10958,6 +10960,9 @@ function ingestQuoteRequest(payload){
   // svcRows already shows with real measurements/pricing, so the UI doesn't
   // repeat it there.
   rec.requestedServices=(Array.isArray(payload.requestedServices)?payload.requestedServices:[]).map(normalizeReqSvc);
+  // Keep the complete submitted form with this enquiry through local and DB sync.
+  rec.formAnswers=(window.TK_LEAD_ANSWERS?.answersFromSubmission?.(payload.formAnswers)||[]).map(({label,answer})=>({label,answer}));
+  if(String(payload.source||c.source||'').toLowerCase()==='wix'&&c.address){rec.address=c.address;rec.suburb='';}
   // The customer's own submit-time, kept distinct from createdAt (when this
   // ingest ran) so cardHtml/openDetail can show exactly when they hit
   // "Send" — sid is the same value, but that field only exists for the
@@ -11027,10 +11032,10 @@ async function retryPendingPhotos(){
 <script src="pipeline-model.js?v=20261018e"></script>
 <script src="lead-priority.js?v=20261017a"></script>
 <script src="meta-import.js?v=20261020a"></script>
-<script src="lead-answer-utils.js?v=20261101g"></script>
-<script src="lead-request-view.js?v=20261101g"></script>
+<script src="lead-answer-utils.js?v=20261102-wix-answers"></script>
+<script src="lead-request-view.js?v=20261102-wix-answers"></script>
 <script src="servicem8-pricing-view.js?v=20261102d"></script>
-<script src="sales-platform.js?v=20261102k"></script>
+<script src="sales-platform.js?v=20261102-wix-answers"></script>
 <script type="module" src="measurement-import.js?v=20261017a"></script>
 <script src="pricing-learning-engine.js?v=20261102k"></script>
 <script src="quote-workspace.js?v=20261017a"></script>
@@ -11048,7 +11053,7 @@ async function retryPendingPhotos(){
 <script src="workspace-controls.js?v=20261019a"></script>
 <script src="settings-experience.js?v=20261019d"></script>
 <script src="workspace-experience.js?v=20261019b"></script>
-<script src="nova-lead-manager.js?v=20261102k"></script>
+<script src="nova-lead-manager.js?v=20261102-wix-answers"></script>
 <script src="pricing-learning-ui.js?v=20261102k"></script>
 <script src="mobile-experience.js?v=20261102h"></script>
 <script src="workspace-help.js?v=20261102a"></script>
