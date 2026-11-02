@@ -13,6 +13,9 @@ fs.rmSync(target, { recursive: true, force: true });
 fs.mkdirSync(target, { recursive: true });
 const assets = [
   "index.html",
+  "reset-password.html",
+  "reset-password.js",
+  "reset-password.css",
   "workspace-cache.js",
   "mobile-experience.css",
   "workspace-design.css",

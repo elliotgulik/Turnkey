@@ -4,6 +4,15 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>TurnKey | Sales, Quotes & Growth</title>
+<script>
+// Recovery links return to the existing allowed site URL. Forward them before
+// loading Supabase or starting a workspace session; keep tokens on this origin.
+{const recoveryHash=new URLSearchParams(location.hash.slice(1));
+if(recoveryHash.get('type')==='recovery'||recoveryHash.get('error_code')==='otp_expired'){
+window.TK_REDIRECTING_RECOVERY=true;
+location.replace('/reset-password.html'+location.search+location.hash);
+}}
+</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
@@ -8978,7 +8987,7 @@ function saveState(){
    app (lead capture, quoting, scheduling, approving, marking paid, etc.), so
    hooking the Supabase writes into saveState() is enough to cover all of them
    without touching each mutation function individually. */
-const sb=(window.TURNKEY_CONFIG&&window.TURNKEY_CONFIG.supabaseUrl&&window.TURNKEY_CONFIG.supabaseAnonKey)
+const sb=(!window.TK_REDIRECTING_RECOVERY&&window.TURNKEY_CONFIG&&window.TURNKEY_CONFIG.supabaseUrl&&window.TURNKEY_CONFIG.supabaseAnonKey)
   ?window.supabase.createClient(window.TURNKEY_CONFIG.supabaseUrl,window.TURNKEY_CONFIG.supabaseAnonKey)
   :null;
 window.TK_SUPABASE_CLIENT=sb;
@@ -9071,22 +9080,9 @@ async function handleSignIn(){
   }
 }
 async function handleForgotPassword(){
-  if(!sb){setAuthMsg('Turnkey isn\u2019t finished setting up yet \u2014 contact support');return;}
   const email=document.getElementById('auth-email').value.trim();
-  if(!email){setAuthMsg('Enter your email above first, then tap "Forgot your password?"');return;}
-  setAuthBusy(true);
-  setAuthMsg('Sending a reset link…');
-  let error;
-  try{({error}=await sb.auth.resetPasswordForEmail(email,{redirectTo:window.location.origin+window.location.pathname}));}
-  catch(e){setAuthMsg(friendlyAuthError(e?.message||'Could not reach the reset service. Check your connection and try again.'));return;}
-  finally{setAuthBusy(false);}
-  // resetPasswordForEmail() itself never reveals whether the email exists
-  // — Supabase returns success either way; an error here means something
-  // actually went wrong (rate limit, malformed address, the project's email
-  // sending being down), not "no such account". The success copy is worded
-  // the same way regardless, so this stays true even if that changes.
-  if(error){setAuthMsg(friendlyAuthError(error.message));return;}
-  setAuthMsg('If an account exists with this email, a password reset link has been sent.',true);
+  try{if(email)sessionStorage.setItem('turnkey-reset-email',email);}catch{}
+  window.location.assign('/reset-password.html');
 }
 async function handlePasswordRecoverySubmit(){
   if(!sb)return;

@@ -22,7 +22,7 @@ function setup(method) {
   const ctx = vm.createContext({
     sb: { auth: method },
     document: { getElementById: id => elements.get(id) },
-    window: { location: { origin: 'https://turnkeycrm.net', pathname: '/index.html' } },
+    window: { location: { origin: 'https://turnkeycrm.net', pathname: '/index.html', assign: url=>messages.push(url) } },
     setAuthMsg: message => messages.push(message),
     setRecoveryMsg: message => messages.push(message),
     toast() {},
@@ -41,12 +41,12 @@ test('sign-in buttons unlock and explain network rejection', async () => {
   assert.match(messages.at(-1), /offline/i);
 });
 
-test('forgot-password buttons unlock and explain network rejection', async () => {
+test('forgot-password opens the dedicated recovery page', async () => {
   const { ctx, elements, messages } = setup({ resetPasswordForEmail: async () => { throw Error('offline'); } });
   await ctx.handleForgotPassword();
   assert.equal(elements.get('auth-signin-btn').disabled, false);
   assert.equal(elements.get('auth-signup-btn').disabled, false);
-  assert.match(messages.at(-1), /offline/i);
+  assert.equal(messages.at(-1), '/reset-password.html');
 });
 
 test('sign-up buttons unlock and explain network rejection', async () => {
