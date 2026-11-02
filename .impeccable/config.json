@@ -1,0 +1,26 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "overused-font",
+        "value": "inter",
+        "files": [
+          "reset-password.html"
+        ],
+        "createdAt": "2026-11-02T22:05:53.896Z",
+        "reason": "Codex decided: password recovery intentionally matches the existing TurnKey typography rather than introducing a separate visual identity."
+      },
+      {
+        "rule": "overused-font",
+        "value": "inter",
+        "files": [
+          "reset-password.css"
+        ],
+        "createdAt": "2026-11-02T22:05:53.927Z",
+        "reason": "Codex decided: password recovery intentionally matches the existing TurnKey typography rather than introducing a separate visual identity."
+      }
+    ]
+  }
+}
