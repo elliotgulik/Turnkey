@@ -65,6 +65,8 @@ const assets = [
   "quote-workspace.css",
   "conversations.js",
   "conversations-bridge.js",
+  "customer-conversations.js",
+  "customer-conversations.css",
   "conversations.css",
   "servicem8-import.js",
   "marketing-analytics.js",

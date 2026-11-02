@@ -368,13 +368,10 @@
   }
   function addCustomerHistory(host, r) {
     if (!host || host.querySelector('[data-customer-conversations]')) return;
-    const section = document.createElement('details'); section.className = 'panel'; section.dataset.customerConversations = String(r.id);
-    const title = document.createElement('summary'); title.textContent = 'Conversations';
+    const section = document.createElement('section'); section.className = 'nlm-record-section'; section.dataset.customerConversations = String(r.id);
     const body = document.createElement('div');
-    section.append(title, body); host.append(section);
-    section.addEventListener('toggle', () => {
-      if (section.open) void renderCustomerHistory(body, {customerId:r.customerId,email:r.email,name:r.name,recordId:r.id});
-    });
+    section.append(body); host.append(section);
+    void renderCustomerHistory(body, {customerId:r.customerId,email:r.email,name:r.name,recordId:r.id});
   }
   // Nova is loaded after this bridge and replaces its panel on every render.
   new MutationObserver(() => {
@@ -414,26 +411,19 @@
       const keys = new Set(matching.map(m => m.account_id + ':' + (m.thread_id || m.id)));
       const related = rows.filter(m => keys.has(m.account_id + ':' + (m.thread_id || m.id)));
       host.replaceChildren();
-      if (r && email) {
-        const composeButton = document.createElement('button'); composeButton.type = 'button'; composeButton.className = 'btn ghost sm'; composeButton.textContent = 'Compose email';
-        composeButton.addEventListener('click', () => { void guarded(async () => {
-          assertScope(start); const selected = recordFor(r.id);
-          if (typeof closeCustomerProfile === 'function') closeCustomerProfile();
-          document.querySelector('.nlm-record-panel [data-nlm="close"]')?.click();
-          return compose({to:selected.email,opportunityId:String(selected.id)});
-        })(); }); host.append(composeButton);
-      }
-      const intro = document.createElement('p'); intro.textContent = (name ? name + ' · ' : '') + 'Recent synced conversations' + (rows.length === 500 ? ' (latest 500 mailbox messages)' : '') + '. Sync in Conversations to check for new replies.'; host.append(intro);
-      if (!related.length) { const empty = document.createElement('p'); empty.textContent = 'No synced conversations for this customer.'; host.append(empty); }
-      for (const m of related) {
-        const item = document.createElement('details'), heading = document.createElement('summary'), body = document.createElement('div');
-        heading.textContent = [m.subject || '(no subject)', m.direction === 'sent' ? 'Sent' : 'Received', m.sent_at ? new Date(m.sent_at).toLocaleString() : 'Date unavailable'].join(' · ');
-        const text = m.body_text || m.snippet || 'No plain-text preview available.';
-        body.className = 'cv-body'; body.textContent = [m.from_address, 'To: ' + (m.to_addresses || ''), '', text].join('\n');
-        const open = document.createElement('button'); open.type = 'button'; open.className = 'btn ghost sm'; open.textContent = 'Open in Conversations';
-        open.addEventListener('click', () => { void guarded(() => openHistoryThread(start, m.account_id + ':' + (m.thread_id || m.id)))(); });
-        item.append(heading, body, open); host.append(item);
-      }
+      const composeCustomer = r && email ? guarded(async () => {
+        assertScope(start); const selected = recordFor(r.id);
+        if (typeof closeCustomerProfile === 'function') closeCustomerProfile();
+        document.querySelector('.nlm-record-panel [data-nlm="close"]')?.click();
+        return compose({to:selected.email,opportunityId:String(selected.id)});
+      }) : null;
+      global.TK_CUSTOMER_CONVERSATIONS.mount(host, {
+        messages: related, name, email, limited: rows.length === 500,
+        onCompose: composeCustomer,
+        onOpenThread: key => openHistoryThread(start,key),
+        onReply: async key => { await openHistoryThread(start,key); assertScope(start); await renderer.reply(); },
+        onRefresh: () => renderCustomerHistory(host,{customerId,email,name,recordId})
+      });
       return { count: related.length, limited: rows.length === 500 };
     } catch (error) { if (live()) host.textContent = 'Conversations could not load. Reopen this customer after checking your session and connection.'; }
   }

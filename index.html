@@ -1389,6 +1389,7 @@
 <link rel="stylesheet" href="nova-lead-manager.css?v=20261102e">
 <link rel="stylesheet" href="quote-workspace.css?v=20261017a">
 <link rel="stylesheet" href="conversations.css?v=20261102k">
+<link rel="stylesheet" href="customer-conversations.css?v=20261103-preview1">
 <link rel="stylesheet" href="marketing-analytics.css?v=20261025b">
 <link rel="stylesheet" href="sales-experience.css?v=20261019a">
 <link rel="stylesheet" href="settings-experience.css?v=20261019a">
@@ -5945,6 +5946,7 @@ function cpPropertyImageHtml(c,jobs){
 }
 function renderCustomerProfile(){
   const ctx=customerProfileCtx;if(!ctx)return;
+  document.getElementById('customer-body').classList.toggle('cp-conversation-mode',cpActiveTab==='conversations');
   const jobs=records.filter(r=>ctx.customerId?r.customerId===ctx.customerId:r.id===ctx.recordId);
   if(!jobs.length){document.getElementById('customer-body').innerHTML='<div class="empty-state"><div class="sm">This customer could not be loaded.</div></div>';return;}
   const c=jobs[0];
@@ -6104,6 +6106,7 @@ function renderCustomerProfile(){
 
   if(cpActiveTab==='photos')iwLoadCustomerPhotos();
   if(cpActiveTab==='conversations'){
+    requestAnimationFrame(()=>document.querySelector('#customer-body .cp-tabs [aria-selected="true"]')?.scrollIntoView({block:'nearest',inline:'center'}));
     const host=document.getElementById('cp-conversations');
     if(window.TK_CONVERSATIONS_BRIDGE)void window.TK_CONVERSATIONS_BRIDGE.renderCustomerHistory(host,{customerId:ctx.customerId,email:c.email,name:c.name,recordId:c.id});
     else host.textContent='Conversations is unavailable. Reload TurnKey and retry.';
@@ -11076,7 +11079,8 @@ async function retryPendingPhotos(){
 <script src="quote-workspace.js?v=20261017a"></script>
 <script src="workspace-cache.js?v=20261102j"></script>
 <script src="conversations.js?v=20261103a"></script>
-<script src="conversations-bridge.js?v=20261103c"></script>
+<script src="customer-conversations.js?v=20261103-preview1"></script>
+<script src="conversations-bridge.js?v=20261103-preview1"></script>
 <script src="servicem8-import.js?v=20261017a"></script>
 <script src="marketing-analytics.js?v=20261102b"></script>
 <footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a> · <span id="tk-app-version">v20261103c</span></footer>

@@ -58,7 +58,7 @@ const fs = require('node:fs'), path = require('node:path'), assert = require('no
       assembledFixture.historyRows = [
         {id:'m1',business_id:currentBusinessId,account_id:'a',thread_id:'selected',customer_id:records[0].customerId,direction:'received',from_address:'old-address@example.test',to_addresses:'owner@example.com',subject:'Selected customer',body_text:'Customer question',sent_at:'2026-11-01'},
         {id:'m2',business_id:currentBusinessId,account_id:'a',thread_id:'selected',direction:'sent',from_address:'owner@example.com',to_addresses:'alias@example.test',subject:'Selected reply',body_text:'Thread reply',sent_at:'2026-11-02'},
-        {id:'m3',business_id:currentBusinessId,account_id:'a',thread_id:'email-only',direction:'sent',from_address:'owner@example.com',to_addresses:'Customer <customer@example.com>',subject:'Email matched',body_text:'Exact address match',sent_at:'2026-11-03'},
+        {id:'m3',business_id:currentBusinessId,account_id:'a',thread_id:'email-only',direction:'sent',from_address:'owner@example.com',to_addresses:'Customer <customer@example.com>',subject:'Email matched',body_text:'Hi there,\n\nYou&amp;#39;d asked us to include the driveway. Here is your updated quote.\n\nThanks,\nAlex',sent_at:'2026-11-03'},
         {id:'other',business_id:currentBusinessId,account_id:'other-user',thread_id:'selected',customer_id:records[0].customerId,body_text:'OTHER_USER'},
         {id:'foreign',business_id:'foreign-business',account_id:'a',thread_id:'selected',customer_id:records[0].customerId,body_text:'FOREIGN_BUSINESS'},
         {id:'unrelated',business_id:currentBusinessId,account_id:'a',thread_id:'unrelated',from_address:'notcustomer@example.com',body_text:'UNRELATED_CUSTOMER'}
@@ -66,16 +66,38 @@ const fs = require('node:fs'), path = require('node:path'), assert = require('no
       return TK_CONVERSATIONS_BRIDGE.openCustomerHistory(701);
     });
     const history = page.locator('#cp-conversations');
-    await history.getByText(/Recent synced conversations/).waitFor();
-    assert.equal(await history.locator('details').count(),3);
+    await history.locator('.cch-thread').first().waitFor();
+    assert.equal(await history.locator('.cch-thread').count(),2);
     assert.doesNotMatch(await history.textContent(),/OTHER_USER|FOREIGN_BUSINESS|UNRELATED_CUSTOMER/);
     assert.deepEqual(await page.evaluate(()=>assembledFixture.historyAccountScopes.at(-1)),{business_id:'fixture-business',user_id:'11111111-1111-4111-8111-111111111111',provider:'gmail'});
-    await history.locator('details').filter({hasText:'Customer question'}).locator('summary').click();
-    await history.locator('details').filter({hasText:'Customer question'}).getByRole('button',{name:'Open in Conversations'}).click();
+    await history.locator('.cch-thread').filter({hasText:'Selected reply'}).click();
+    await history.locator('.cch-earlier > summary').click();
+    assert.match(await history.locator('.cch-body').first().innerText(),/Customer question/);
+    await history.getByRole('button',{name:'Open in inbox',exact:true}).click();
     await page.locator('.cv-thread-heading').getByText('Selected reply').waitFor();
     assert.equal(await page.locator('.cv-message').count(),2);
     // Existing compose path receives the selected record, never sends.
+
     await page.evaluate(()=>TK_CONVERSATIONS_BRIDGE.openCustomerHistory(701));
+    assert.match(await history.locator('.cch-body').innerText(),/You'd asked/);
+    assert.doesNotMatch(await history.textContent(),/&amp;#39;|&#39;/);
+    await page.evaluate(()=>{document.getElementById('customer-body').scrollTop=0;});
+    fs.mkdirSync('.local-ui-preview',{recursive:true});
+    await page.waitForFunction(()=>!document.getAnimations().some(a=>a.playState==='running'&&a.effect?.target?.closest?.('#customer-overlay')));
+    await page.screenshot({path:'.local-ui-preview/customer-conversations-desktop.png'});
+    for(const width of [390,360]){
+      await page.setViewportSize({width,height:900});
+      assert.equal(await history.locator('.cch-list').isVisible(),true);
+      await history.locator('.cch-thread').first().click();
+      assert.equal(await history.locator('.cch-reader').isVisible(),true);
+      assert.equal(await history.evaluate(el=>el.scrollWidth<=el.clientWidth+1),true);
+      await page.screenshot({path:'.local-ui-preview/customer-conversations-mobile-'+width+'.png'});
+      await history.getByRole('button',{name:'Back to conversations',exact:true}).click();
+      await history.locator('[data-cch-search]').fill('no matching thread');
+      assert.match(await history.locator('.cch-list').textContent(),/No matching conversations/);
+      await history.locator('[data-cch-search]').fill('');
+    }
+    await page.setViewportSize({width:1280,height:900});
     await history.getByRole('button',{name:'Compose email',exact:true}).click();
     await page.waitForFunction(()=>document.querySelector('.cv-composer [name=to]')?.value==='customer@example.com');
     await page.getByRole('button',{name:'Save & close',exact:true}).click();
@@ -83,9 +105,8 @@ const fs = require('node:fs'), path = require('node:path'), assert = require('no
     await page.evaluate(()=>{records[0].stage='new';switchView('leads');render();});
     await page.locator('[data-nlm="detail"][data-id="701"]').first().click();
     const leadHistory = page.locator('.nlm-record-panel [data-customer-conversations]');
-    await leadHistory.locator('summary').click();
-    await leadHistory.getByText(/Recent synced conversations/).waitFor();
-    assert.equal(await leadHistory.locator('details').count(),3);
+    await leadHistory.locator('.cch-thread').first().waitFor();
+    assert.equal(await leadHistory.locator('.cch-thread').count(),2);
     assert.doesNotMatch(await leadHistory.textContent(),/OTHER_USER|FOREIGN_BUSINESS|UNRELATED_CUSTOMER/);
     await page.evaluate(()=>TK_CONVERSATIONS_BRIDGE.reset());
     assert.doesNotMatch(await leadHistory.textContent(),/Customer question|Thread reply/);

@@ -20,6 +20,12 @@ feature styles remain in their existing modules.
   saved data. Existing accounts can open it from Settings without repeated nags.
 - Original form question labels and readable answers remain visible together.
   A missing answer is not inferred from an unrelated contact or job.
+- Customer Conversations groups saved messages into searchable threads. Desktop
+  uses a thread list and reader; narrow panels use list-to-reader navigation with
+  a visible Back action. Sent/Received filters, sender/date labels, readable text
+  and the existing compose/reply flow replace nested raw-message dropdowns.
+  Email HTML is never mounted into the customer profile. Older thread messages
+  and address metadata use disclosure; the latest message starts open.
 - Calendar starts in Day on a new phone session while restoring a saved view.
   Month, Week and List stay explicit. Date numbers open a day, and week columns
   scroll inside the timetable rather than widening the app. The timetable comes
