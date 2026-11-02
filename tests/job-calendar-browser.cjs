@@ -783,6 +783,7 @@ const { chromium } = require('playwright'),
       window.renderCalendar();
     });
     await page.waitForFunction(() => document.getElementById('tkjc-load-status').hidden && importCalls === 1);
+    await page.locator('.tkjc-calendar-options > summary').click();
     assert.match(await page.locator('#tkjc-servicem8').innerText(), /queued.*Last synced.*Sync delayed/);
     assert.doesNotMatch(await page.locator('#tkjc-servicem8').innerText(), /sensitive|script/);
     await page.click('[data-tkjc-section="completed"]');
@@ -822,6 +823,7 @@ const { chromium } = require('playwright'),
       TK_JOB_CALENDAR.configure({...options,request:path=>path.startsWith('/range')?new Promise(resolve=>{window.cachedRead=resolve;}):Promise.resolve({queued:false})});
       window.renderCalendar();
     });
+    await page.locator('.tkjc-booking-list > summary').click();
     assert.match(await page.locator('#tkjc-sidebar-list').innerText(),/Cached customer booking/);
     assert.equal(await page.locator('#tkjc-load-status').isVisible(),false);
     await page.evaluate(()=>cachedRead({...rangeData('Updated customer booking'),completedEvents:[],google:{connected:true},servicem8:{connected:true,seededAt:'2026-07-01'}}));

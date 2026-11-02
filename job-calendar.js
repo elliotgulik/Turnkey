@@ -155,7 +155,7 @@
       bizKey: null, version: null, loaded: false, loading: false, loadError: '',
       pending: new Map(), rangeReads: new Set(), snapshots: new Map(), dataLoadedAt: 0, dataRange: '', attemptedRange: '', revision: 0,
       jobs: [], staff: [], events: [], completedEvents: [], blocks: [], google: { connected: false }, servicem8: {}, canManage: false, myRole: null, myUserId: null,
-      view: 'month', section: 'schedule', anchor: new Date(), range: { fromISO: null, toISO: null },
+      view: root.matchMedia?.('(max-width: 760px)').matches ? 'day' : 'month', section: 'schedule', anchor: new Date(), range: { fromISO: null, toISO: null },
       staffFilter: new Set(), search: ''
     };
   }
@@ -189,7 +189,7 @@
     const bizKey = scope.biz + ':' + scope.user;
     if (!state || state.bizKey !== bizKey || state.version !== scope.version) {
       state = freshState(); state.bizKey = bizKey; state.version = scope.version; destroyFc();
-      const remembered=persistentCache()?.read(cacheScope(scope),'calendar-view')?.data;if(remembered&&['month','week','day'].includes(remembered.view)&&Number.isFinite(Date.parse(remembered.anchor))){state.view=remembered.view;state.anchor=new Date(remembered.anchor);state.section=remembered.section==='completed'?'completed':'schedule';}
+      const remembered=persistentCache()?.read(cacheScope(scope),'calendar-view')?.data;if(remembered&&['month','week','day','list'].includes(remembered.view)&&Number.isFinite(Date.parse(remembered.anchor))){state.view=remembered.view;state.anchor=new Date(remembered.anchor);state.section=remembered.section==='completed'?'completed':'schedule';}
       clearTimeout(realtimeTimer);
       if (realtimeChannel) { try { calendarClient()?.removeChannel?.(realtimeChannel); } catch (_) {} }
       realtimeChannel = null; realtimeKey = ''; realtimeConnected = false;
@@ -364,18 +364,18 @@
     host.innerHTML = `
       <div class="view-head"><div><h2>Calendar</h2><p>Book jobs, assign crews, and block unavailable time. ServiceM8 dispatch bookings stay saved here and update automatically when ServiceM8 sends changes.</p></div>
         <div class="tkjc-head-actions">
-          <button type="button" class="btn ghost sm" data-tkjc="actual-hours">Actual hours</button>
+          <button type="button" class="btn accent sm" data-tkjc="book">+ Book job</button>
           <button type="button" class="btn ghost sm" data-tkjc="event">+ Appointment</button>
           <button type="button" class="btn ghost sm" data-tkjc="block">+ Block time</button>
-          <button type="button" class="btn accent sm" data-tkjc="book">+ Book job</button>
+          <button type="button" class="btn ghost sm" data-tkjc="actual-hours">Actual hours</button>
         </div>
       </div>
       <div class="tkjc-toolbar">
         <div class="tkjc-nav">
           <button type="button" data-tkjc="today">Today</button>
-          <button type="button" data-tkjc="prev" aria-label="Previous">←</button>
-          <button type="button" data-tkjc="next" aria-label="Next">→</button>
-          <span class="tkjc-title" id="tkjc-title"></span>
+          <button type="button" data-tkjc="prev" aria-label="Previous period">←</button>
+          <button type="button" data-tkjc="next" aria-label="Next period">→</button>
+          <span class="tkjc-title" id="tkjc-title" aria-live="polite"></span>
         </div>
         <div class="tkjc-views" role="group" aria-label="Calendar view">
           <button type="button" data-tkjc-view="month">Month</button>
@@ -389,6 +389,7 @@
         <button type="button" data-tkjc-section="completed" aria-pressed="false">Completed</button>
       </div>
       <div id="tkjc-load-status" role="status" aria-live="polite" hidden></div>
+      <details class="tkjc-calendar-options"><summary>Connections & calendar key</summary>
       <div class="tkjc-legend">
         <span><i style="background:${STATUS_COLOR.scheduled}"></i>Scheduled</span>
         <span><i style="background:${STATUS_COLOR.in_progress}"></i>In progress</span>
@@ -399,12 +400,16 @@
       </div>
       <div class="tkjc-google" id="tkjc-google"></div>
       <div class="tkjc-sync-info" id="tkjc-servicem8" role="status" hidden></div>
+      </details>
+      <div class="tkjc-search-row"><input type="search" id="tkjc-search" placeholder="Search customers, addresses or bookings" aria-label="Search jobs"></div>
       <div class="tkjc-filters" id="tkjc-staff-filter"></div>
+      <p class="tkjc-mobile-hint" id="tkjc-mobile-hint" hidden></p>
       <button type="button" class="btn ghost sm" data-tkjc="clear-filters" hidden>Clear search and staff filters</button>
       <div class="tkjc-layout">
         <aside class="tkjc-sidebar">
-          <input type="search" id="tkjc-search" placeholder="Search jobs…" aria-label="Search jobs">
+          <details class="tkjc-booking-list" ${root.matchMedia?.('(max-width: 760px)').matches ? '' : 'open'}><summary>Jobs in this range & ready to book</summary>
           <div class="tkjc-sidebar-list" id="tkjc-sidebar-list"></div>
+          </details>
         </aside>
         <div class="tkjc-main" id="tkjc-main"></div>
       </div>`;
@@ -462,6 +467,11 @@
     if (search && search.value !== state.search) search.value = state.search;
     const clear = host.querySelector('[data-tkjc="clear-filters"]');
     if (clear) clear.hidden = !state.search.trim() && !state.staffFilter.size;
+    const hint = host.querySelector('#tkjc-mobile-hint');
+    if (hint) {
+      hint.hidden = state.section === 'completed' || !root.matchMedia?.('(max-width: 760px)').matches || !['month','week'].includes(state.view);
+      hint.textContent = state.view === 'week' ? 'Swipe the timetable sideways. Tap a booking for details.' : 'Tap a date number to see that day’s bookings.';
+    }
     const statusEl = document.getElementById('tkjc-load-status');
     if (statusEl) {
       const savedRange=state.loaded&&state.dataRange===state.range.fromISO+':'+state.range.toISO;
@@ -531,6 +541,14 @@
   const writableStaff = () => state.staff.filter((u) => !u.readOnly && u.source !== 'servicem8' && u.role !== 'servicem8' && !String(u.id).startsWith('servicem8:'));
   const eventStaffIds = (event) => Array.isArray(event.details?.assignedStaffIds) && event.details.assignedStaffIds.length
     ? event.details.assignedStaffIds : event.user_id ? [event.user_id] : [];
+  function matchesEventSearch(event) {
+    const q = state.search.trim().toLowerCase();
+    if (!q) return true;
+    const d = event.details || {};
+    return [event.title, d.personName, d.companyName, d.address, d.email, d.phone,
+      ...(d.services || []), ...(d.assignedStaff || []), ...(d.lineItems || []).map(line => line.name)]
+      .filter(Boolean).join(' ').toLowerCase().includes(q);
+  }
 
   function jobStaffIds(job) {
     const d = job.details || {};
@@ -650,6 +668,7 @@
   /* ===================== main calendar area ===================== */
   function renderMain() {
     const zone = document.getElementById('tkjc-main'); if (!zone) return;
+    zone.dataset.calendarView = state.view;
     if (state.section === 'completed') {
       destroyFc();
       const rows = completedRows();
@@ -687,6 +706,7 @@
     });
     state.events.forEach((ev) => {
       if (ev.source === 'servicem8' && String(ev.details?.status).toLowerCase() === 'completed') return;
+      if (!matchesEventSearch(ev)) return;
       if (!matchesStaffFilter(eventStaffIds(ev))) return;
       const free = ev.busy_status === 'free';
       out.push({
@@ -713,8 +733,11 @@
     if (!fcInstance) {
       fcElement = zone.querySelector('#tkjc-fc');
       fcInstance = new FullCalendar.Calendar(fcElement, {
-        initialView: fcViewName, initialDate: state.anchor, firstDay: 1, fixedWeekCount: true, height: 'auto', editable: true, selectable: true, dayMaxEvents: true,
-        headerToolbar: false,
+        initialView: fcViewName, initialDate: state.anchor, firstDay: 1, fixedWeekCount: true, height: root.matchMedia?.('(max-width: 760px)').matches ? 620 : 'auto', scrollTime: '07:00:00', editable: true, selectable: true, dayMaxEvents: true,
+        headerToolbar: false, eventMinHeight: 32, longPressDelay: 650,
+        navLinks: true,
+        navLinkDayClick: (date) => { state.anchor = date; state.view = 'day'; load({ cached: true }); },
+        views: { dayGridMonth: { dayMaxEvents: 2 }, timeGridWeek: { dayHeaderFormat: { weekday: 'short', day: 'numeric' } } },
         dayCellDidMount: (arg) => {
           const badge = root.calendarDayWeatherBadge?.(localDateStr(arg.date));
           const top = arg.el.querySelector('.fc-daygrid-day-top');
@@ -798,6 +821,7 @@
     });
     state.events.forEach((ev) => {
       if (ev.source === 'servicem8' && String(ev.details?.status).toLowerCase() === 'completed') return;
+      if (!matchesEventSearch(ev)) return;
       if (!matchesStaffFilter(eventStaffIds(ev))) return;
       days.forEach((dISO) => {
         if (new Date(ev.start_time) < parseLocalDate(addDaysISO(dISO, 1)) && new Date(ev.end_time) > parseLocalDate(dISO)) byDay[dISO].push({ kind: 'event', event: ev });

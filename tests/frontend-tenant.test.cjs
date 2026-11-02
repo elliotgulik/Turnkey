@@ -82,3 +82,27 @@ test('blank historical job snapshots cannot overwrite recovered customer fields;
  vm.runInContext(section('async function loadFromSupabase(){','function scheduleSupabaseSync(){'),ctx);
  assert.equal(await ctx.loadFromSupabase(),true);assert.equal(ctx.records.length,1);assert.equal(ctx.records[0].name,'Recovered Name');assert.equal(ctx.records[0].email,'recovered@example.test');assert.equal(ctx.records[0].source,'Wix');
 });
+
+test('hydration coalesces a repeated submission but preserves separate quoted jobs for one customer',async()=>{
+ const identity=require('../lead-identity.js');
+ const rows=[{id:'blank-copy',customer_id:'c',status:'new',details:{externalSource:'wix',externalId:'submission',total:0}},
+ {id:'quoted-job',customer_id:'c',quote_id:'quote-1',status:'quoted',details:{externalSource:'wix',externalId:'submission',total:465}},
+ {id:'separate-job',customer_id:'c',quote_id:'quote-2',status:'quoted',details:{externalSource:'wix',externalId:'different-submission',total:300}}];
+ const ctx=context({TK_LEAD_IDENTITY:identity,sb:{from(table){const q={select(){return q},eq(){return q},neq(){return q},order(){return q},range(){return Promise.resolve({data:table==='customers'?[{id:'c',name:'Same Customer'}]:table==='jobs'?rows:[]});}};return q;}},newRecord:d=>({...d})});
+ vm.runInContext(section('async function loadFromSupabase(){','function scheduleSupabaseSync(){'),ctx);
+ assert.equal(await ctx.loadFromSupabase(),true);assert.equal(ctx.records.length,2);
+ assert.deepEqual(Array.from(ctx.records,r=>r.jobId),['quoted-job','separate-job']);assert.equal(ctx.records[0].total,465);
+});
+
+test('intake returns its actual record, prevents redelivery and preserves same-time different submissions',()=>{
+ const identity=require('../lead-identity.js');
+ const ctx=context({window:{TK_LEAD_IDENTITY:identity},document:{getElementById(){return null;}},newRecord:d=>({id:7,...d}),
+ normalizeReqSvc:v=>v,switchView(){},ensureRecordSynced:async()=>{},logActivity(){},sendLifecycleEmail(){},notifyOwner(){}});
+ vm.runInContext(section('function ingestQuoteRequest(payload){','/* ===== Upload photos'),ctx);
+ const payload={business_id:'A',external_id:'first',source:'wix',submittedAt:'2026-11-03T01:00:00Z',historicalImport:true,customer:{name:'Same Customer'},requestedServices:['House wash']};
+ const a=ctx.ingestQuoteRequest(payload),again=ctx.ingestQuoteRequest({...payload});
+ assert.strictEqual(a,again);assert.equal(ctx.records.length,1);assert.equal(a.externalId,'first');
+ const b=ctx.ingestQuoteRequest({...payload,external_id:'second'});
+ assert.notStrictEqual(a,b);assert.equal(ctx.records.length,2);assert.equal(a.id,b.id,'UI ids cannot be intake identity');
+ assert.equal(ctx.ingestQuoteRequest({...payload,business_id:'B'}),undefined);
+});

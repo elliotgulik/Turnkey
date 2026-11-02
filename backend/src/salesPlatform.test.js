@@ -1926,6 +1926,19 @@ test('full import: database failures never stamp completion and retries preserve
 });
 
 const metricsRange={start:Date.parse('2026-10-01T00:00:00Z'),end:Date.parse('2026-11-01T00:00:00Z')};
+test('analytics coalesces repeated intake without collapsing separate customer jobs',async()=>{
+  const details={externalSource:'wix',externalId:'same-submission',createdAt:'2026-10-03T00:00:00Z'};
+  const jobs=[{id:id(4501),business_id:'A',customer_id:id(4500),status:'new',details:{...details,total:0}},
+    {id:id(4502),business_id:'A',customer_id:id(4500),quote_id:id(4504),status:'quoted',details:{...details,total:465}},
+    {id:id(4503),business_id:'A',customer_id:id(4500),quote_id:id(4505),status:'quoted',details:{...details,externalId:'different-submission',total:300}}];
+  const db=database({jobs,customers:[{id:id(4500),business_id:'A',name:'One Customer',source:'Wix'}],
+    quotes:[{id:id(4504),business_id:'A',amount:465},{id:id(4505),business_id:'A',amount:300}]});
+  const before=structuredClone(jobs),{route}=setup(db);
+  const res=await route('GET','/api/sales/metrics',{businessId:'A',query:metricsRange});
+  assert.equal(res.statusCode,200);
+  assert.equal(res.body.leads,2);
+  assert.deepEqual(jobs,before);
+});
 test('full import: analytics uses verified current prices including zero without rewriting quote/cost/history', async () => {
   for(const total of [0,690]){
     const snapshot=serviceM8PricingSnapshot({uuid:id(4401),total_invoice_amount:String(total)},[],{currency:'NZD'});

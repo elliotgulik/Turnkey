@@ -914,20 +914,13 @@
   };
   const originalIngest = ingestQuoteRequest;
   ingestQuoteRequest = function (payload) {
-    const existing = records.find(
-      (r) =>
-        payload.external_id &&
-        r.externalId === payload.external_id &&
-        r.externalSource === payload.source,
-    );
-    if (existing) return existing;
-    const before = new Set(records.map((r) => r.id));
-    originalIngest(payload);
-    const r =
-      records.find((r) => !before.has(r.id)) ||
-      records.find(
-        (r) => payload.submittedAt && r._submittedAt === payload.submittedAt,
-      );
+    if(!payload||payload.testLeadArchivedAt)return;
+    const matches=records.filter(r=>window.TK_LEAD_IDENTITY?.sameIntake(r,payload,currentBusinessId));
+    if(matches.length===1)return matches[0];
+    if(matches.length>1)return;
+    // The intake function returns its actual object; numeric UI IDs and
+    // shared timestamps cannot identify which enquiry was just created.
+    const r = originalIngest(payload);
     if (r) {
       r.externalId = payload.external_id || r.externalId || null;
       r.externalSource = payload.source || r.externalSource || null;
@@ -959,7 +952,9 @@
       const ack = [];
       for (const item of j.leads || []) {
         if (biz !== currentBusinessId) break;
-        const r = ingestQuoteRequest(item.payload);
+        const r = ingestQuoteRequest({...item.payload,
+          external_id:item.payload.external_id||'intake:'+item.id,
+          source:item.payload.source||item.payload.customer?.source||'website'});
         if (!r) continue;
         try {
           await syncRecordToSupabase(r);

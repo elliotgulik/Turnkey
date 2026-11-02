@@ -6,7 +6,8 @@ import * as SM from "./salesTransfer.js";
 import * as serviceM8Provider from "./providers/servicem8.js";
 import { performServiceM8Handoff } from "./servicem8Sync.js";
 const require = createRequire(import.meta.url),
-  METRICS = require("../../sales-metrics.js");
+  METRICS = require("../../sales-metrics.js"),
+  LEAD_IDENTITY = require("../../lead-identity.js");
 const unwrap = async (q) => {
   const { data, error } = await q;
   if (error) throw error;
@@ -2234,7 +2235,7 @@ export function installSalesPlatform(
         .eq("business_id", req.businessId).eq("connection_generation", c.generation).eq("object_type", "job")) : [];
       const priceCoverage = { source: "Current ServiceM8 snapshots for linked jobs; saved quote/job totals for other jobs",
         taxLabel: "Tax basis not specified", linked: 0, currentTotals: 0, unknownTotals: 0 };
-      const records = jobs.filter(j=>!j.details?.testLeadArchivedAt).map((j) => {
+      let records = jobs.filter(j=>!j.details?.testLeadArchivedAt).map((j) => {
         const c = cs.get(j.customer_id) || {},
           q = qs.get(j.quote_id);
         const links = maps.filter(m => m.local_id === j.id);
@@ -2250,6 +2251,8 @@ export function installSalesPlatform(
         return {
           ...j.details,
           jobId: j.id,
+          quoteId: j.quote_id || j.details?.quoteId || null,
+          serviceM8JobUuid: link?.external_uuid || j.details?.serviceM8JobUuid || null,
           stage: link?.snapshot?.status === "Unsuccessful" ? "lost" : j.status,
           name: c.name,
           source: c.source,
@@ -2263,6 +2266,7 @@ export function installSalesPlatform(
           createdAt: j.details?.createdAt || (j.details?.importedFrom === "servicem8" ? q?.created_at || null : j.created_at),
         };
       });
+      records = LEAD_IDENTITY.selectRepresentatives(records,req.businessId);
       const settings = await unwrap(
         db
           .from("sales_settings")

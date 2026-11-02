@@ -420,6 +420,7 @@ nav.tabs button.active{box-shadow:none}
 .sale-head>div:first-child>.tk-inline-help,.view-head>div:first-child>.tk-inline-help{position:absolute;right:0;top:0}
 @media(max-width:760px){
  .nlm-header-actions .btn,.nlm-header-actions .nlm-tools{flex:0 0 auto!important}
+ :is(input:not([type="checkbox"]):not([type="radio"]),textarea,select){font-size:16px}
  .tk-settings-experience .sx-count{display:none}
  .tk-settings-experience .sx-status{margin:8px 0 12px;line-height:1.5}
  .tk-settings-experience .sx-intro{padding-bottom:10px}

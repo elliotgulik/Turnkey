@@ -1393,11 +1393,11 @@
 <link rel="stylesheet" href="sales-experience.css?v=20261019a">
 <link rel="stylesheet" href="settings-experience.css?v=20261019a">
 <link rel="stylesheet" href="job-workspace.css?v=20261031.1">
-<link rel="stylesheet" href="job-calendar.css?v=20261031c">
+<link rel="stylesheet" href="job-calendar.css?v=20261103b">
 <link rel="stylesheet" href="operations-workspace.css?v=20261018c">
 <link rel="stylesheet" href="workspace-experience.css?v=20261022a">
 <link rel="stylesheet" href="mobile-experience.css?v=20261102k">
-<link rel="stylesheet" href="workspace-design.css?v=20261103a">
+<link rel="stylesheet" href="workspace-design.css?v=20261103b">
 <link rel="stylesheet" href="workspace-help.css?v=20261102a">
 </head>
 <body data-session-checking>
@@ -10443,6 +10443,7 @@ async function loadFromSupabase(){
         paymentLinkUrl:inv?(inv.payment_link_url||null):null
       });
     });
+    if(typeof TK_LEAD_IDENTITY!=='undefined')records=TK_LEAD_IDENTITY.selectRepresentatives(records,biz);
     records.forEach(r=>recordBusinesses.set(r,biz));
     const wasReady=businessStateReady;
     businessStateReady=false;
@@ -10765,7 +10766,7 @@ function loadState(){
     if(!raw)return false;
     const d=JSON.parse(raw);
     if(d.businessId!==currentBusinessId)return false;
-    records=d.records||[];records.forEach(r=>recordBusinesses.set(r,currentBusinessId));seq=d.seq||1;
+    records=d.records||[];if(typeof TK_LEAD_IDENTITY!=='undefined')records=TK_LEAD_IDENTITY.selectRepresentatives(records,currentBusinessId);records.forEach(r=>recordBusinesses.set(r,currentBusinessId));seq=d.seq||1;
     goals=d.goals||[];goalSeq=d.goalSeq||1;followSeq=d.followSeq||1;
     if(d.docTemplate)docTemplate=d.docTemplate;
     TK_COST.applyChemicalConfig(d);
@@ -10904,9 +10905,11 @@ function getRequestedServices(r){
 /* ===== Live intake: accept quote requests from the customer booking widget ===== */
 function ingestQuoteRequest(payload){
   if(!payload||payload.testLeadArchivedAt) return;
-  // Dedup: reject if we already have a record with same submittedAt timestamp
+  if(payload.business_id&&payload.business_id!==currentBusinessId)return;
+  const matches=records.filter(r=>window.TK_LEAD_IDENTITY?.sameIntake(r,payload,currentBusinessId));
+  if(matches.length===1)return matches[0];
+  if(matches.length>1)return; // Conflicting developed jobs need review, never guess an ack target.
   const sid=payload.submittedAt||null;
-  if(sid&&!payload.external_id&&records.some(r=>r._submittedAt===sid))return;
   const c=payload.customer||{};
   // map the customer's mapped areas → CRM service lines (carry storeys through)
   const services=(payload.areas||[]).map(a=>({
@@ -10924,6 +10927,7 @@ function ingestQuoteRequest(payload){
   // regardless of which flow it came from.
   const windowsNote=payload.windowsRequested?'Customer requested a separate window cleaning quote.':'';
   const rec=newRecord({
+    externalId:payload.external_id||null,externalSource:payload.source||c.source||'website',
     name:c.name||'Website enquiry',
     phone:c.phone||'',
     email:c.email||'',
@@ -11010,6 +11014,7 @@ function ingestQuoteRequest(payload){
     ?'('+services.length+' area'+(services.length!==1?'s':'')+', '+money(total)+' self-estimated'+(payload.windowsRequested?' + windows requested':'')+').'
     :(payload.windowsRequested?'(windows quote — no price yet, prepare one manually).':'(quick quote request — no price yet, prepare one manually).');
   if(!payload.historicalImport)notifyOwner('new_lead','New lead — '+rec.name,rec.name+' requested a quote for '+(rec.suburb||rec.address||'an address you’ll want to check')+' '+notifyDetail);
+  return rec;
 }
 
 /* ===== Upload photos that arrived with a lead (public booking page can't
@@ -11054,7 +11059,8 @@ async function retryPendingPhotos(){
 <script src="lead-answer-utils.js?v=20261102-wix-answers"></script>
 <script src="lead-request-view.js?v=20261102-wix-answers"></script>
 <script src="servicem8-pricing-view.js?v=20261102d"></script>
-<script src="sales-platform.js?v=20261103a"></script>
+<script src="lead-identity.js?v=20261103b"></script>
+<script src="sales-platform.js?v=20261103b"></script>
 <script type="module" src="measurement-import.js?v=20261017a"></script>
 <script src="pricing-learning-engine.js?v=20261102k"></script>
 <script src="quote-workspace.js?v=20261017a"></script>
@@ -11063,10 +11069,10 @@ async function retryPendingPhotos(){
 <script src="conversations-bridge.js?v=20261103a"></script>
 <script src="servicem8-import.js?v=20261017a"></script>
 <script src="marketing-analytics.js?v=20261102b"></script>
-<footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a> · <span id="tk-app-version">v20261103a</span></footer>
+<footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a> · <span id="tk-app-version">v20261103b</span></footer>
 <script src="extension-quote-link.js?v=20261102k"></script>
 <script src="job-workspace.js?v=20261031a"></script>
-<script src="job-calendar.js?v=20261103a"></script>
+<script src="job-calendar.js?v=20261103b"></script>
 <script src="operations-workspace.js?v=20261102b"></script>
 <script src="operations-bridge.js?v=20261018c"></script>
 <script src="workspace-controls.js?v=20261019a"></script>

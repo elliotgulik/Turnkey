@@ -20,6 +20,12 @@ feature styles remain in their existing modules.
   saved data. Existing accounts can open it from Settings without repeated nags.
 - Original form question labels and readable answers remain visible together.
   A missing answer is not inferred from an unrelated contact or job.
+- Calendar starts in Day on a new phone session while restoring a saved view.
+  Month, Week and List stay explicit. Date numbers open a day, and week columns
+  scroll inside the timetable rather than widening the app. The timetable comes
+  before the collapsible booking list; provider tools live in a labelled disclosure.
+- Lead identity comes from tenant-scoped job/submission IDs. Separate substantive
+  quotes and linked ServiceM8 jobs stay separate even for the same contact.
 
 Reviewed at 1440px desktop and 390px/360px mobile with synthetic contacts across
 Leads, Pipeline, customer detail, Settings, Conversations and Calendar. Two bounded

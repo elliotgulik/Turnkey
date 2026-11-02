@@ -383,7 +383,7 @@
 /* Native appointments share the calendar dialog and remain distinct from imports. */
 .tkjc-event-fields{border:0;padding:0;margin:0;min-width:0}
 .tkjc-event-fields label{display:flex;flex-direction:column;gap:6px;margin-bottom:12px}
-.tkjc-agenda-event.native{border-left:4px solid #387d78;background:#e4f2ee;cursor:pointer;text-align:left}
+.tkjc-agenda-event.native{border:1px solid #b8d8cf;background:#e4f2ee;cursor:pointer;text-align:left}
 .tkjc-agenda-event.external{cursor:pointer;text-align:left}
 .tkjc-event-fields:disabled{opacity:.8}
 .tkjc-sections{margin:10px 0}
@@ -416,3 +416,51 @@
 .tkjc-sync-info:not([hidden]) { margin: 8px 0; font-size: 12px; color: var(--ink-faint, #667085); }
 /* The completed archive spans all dates; date navigation belongs to Schedule. */
 .tkjc-show-completed .tkjc-toolbar, .tkjc-show-completed .tkjc-legend { display: none; }
+
+/* Keep booking navigation above the timetable; secondary provider details are
+   available without pushing a phone's entire schedule below the first screen. */
+.tkjc-calendar-options { margin: 8px 0 12px; border-bottom: 1px solid var(--line,#dce5e8); }
+.tkjc-calendar-options > summary, .tkjc-booking-list > summary { cursor: pointer; padding: 12px 0; font-size: 13px; font-weight: 600; color: var(--ink-soft,#405b65); }
+.tkjc-calendar-options > summary:focus-visible, .tkjc-booking-list > summary:focus-visible { outline: 2px solid var(--teal,#0f7d6b); outline-offset: 2px; border-radius: 6px; }
+.tkjc-search-row { margin: 10px 0; }
+.tkjc-search-row input { width: 100%; box-sizing: border-box; min-height: 44px; padding: 11px 12px; border: 1px solid var(--line,#dce5e8); border-radius: 10px; background: var(--surface,#fff); color: var(--ink,#18313d); font: inherit; }
+.tkjc-booking-list { min-width: 0; width: 100%; }
+.tkjc-mobile-hint { margin: 6px 0 12px; color: var(--ink-soft,#405b65); font-size: 12px; line-height: 1.5; }
+.tkjc-mobile-hint[hidden] { display: none; }
+.tkjc-sidebar-list { padding-top: 8px; }
+#tkjc-fc { --fc-border-color: var(--line,#dce5e8); --fc-today-bg-color: #eef8f4; --fc-page-bg-color: var(--surface,#fff); --fc-neutral-text-color: var(--ink-soft,#405b65); }
+#tkjc-fc .fc-col-header-cell-cushion { padding: 10px 3px; font-size: 12px; }
+#tkjc-fc .fc-timegrid-event { border-radius: 6px; }
+#tkjc-fc .fc-event-main { padding: 3px 5px; }
+#tkjc-fc .fc-event-title { font-weight: 600; }
+#tkjc-fc .fc-list-event-title { overflow-wrap: anywhere; }
+@media (max-width: 760px) {
+  #view-calendar .view-head > div:first-child > p { display: none; }
+  #view-calendar .tkjc-toolbar { gap: 10px; margin: 14px 0 10px; }
+  #view-calendar .tkjc-nav { display: grid; grid-template-columns: minmax(0,1fr) 44px 44px; width: 100%; gap: 8px; }
+  #view-calendar .tkjc-title { grid-column: 1 / -1; grid-row: 1; margin: 0 0 2px; text-align: left; font-size: 18px; font-weight: 650; line-height: 1.4; }
+  #view-calendar .tkjc-nav button { grid-row: 2; min-height: 44px; padding: 9px 12px; }
+  #view-calendar .tkjc-nav [data-tkjc="today"] { justify-self: start; min-width: 85px; }
+  #view-calendar .tkjc-views { display: flex; width: 100%; box-sizing: border-box; }
+  #view-calendar .tkjc-views button { min-height: 44px; min-width: 0; flex: 1; }
+  #view-calendar .tkjc-layout { display: flex; flex-direction: column; gap: 12px; }
+  #view-calendar .tkjc-main { order: 0; width: 100%; min-width: 0; overflow-x: auto; overscroll-behavior-x: contain; border-radius: 10px; }
+  #view-calendar .tkjc-sidebar { order: 1; width: 100%; box-sizing: border-box; padding: 0 12px; max-height: none; overflow: visible; }
+  #view-calendar .tkjc-sidebar-list { max-height: 360px; overscroll-behavior: contain; padding-bottom: 12px; }
+  #view-calendar .tkjc-main[data-calendar-view="week"] #tkjc-fc { min-width: 650px; }
+  #view-calendar .tkjc-fc-weather { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; box-sizing: border-box; }
+  #view-calendar .fc-dayGridMonth-view .tkjc-fc-weather { display: none; }
+  #view-calendar .fc-daygrid-day-number { display: inline-flex; align-items: center; justify-content: center; min-width: 32px; min-height: 36px; font-size: 13px; }
+  #view-calendar .fc-daygrid-more-link { display: block; min-height: 32px; padding: 6px 2px; font-size: 11px; }
+  #view-calendar .fc-daygrid-event { font-size: 11px; }
+  #view-calendar .fc-timegrid-slot-label-cushion { font-size: 11px; }
+  #view-calendar .tkjc-agenda-add { width: 44px; height: 44px; font-size: 20px; }
+  #view-calendar .tkjc-agenda-items > button { min-width: 0; width: 100%; min-height: 44px; overflow-wrap: anywhere; }
+  .tkjc-overlay { padding: 8px; align-items: flex-end; }
+  .tkjc-dialog { box-sizing: border-box; max-height: calc(var(--tk-visual-height,100dvh) - 16px); padding: 18px 16px; border-radius: 16px; overscroll-behavior: contain; overflow-wrap: anywhere; }
+  .tkjc-dialog input:not([type="checkbox"]), .tkjc-dialog select, .tkjc-dialog textarea { box-sizing: border-box; min-width: 0; max-width: 100%; min-height: 44px; font-size: 16px; }
+  .tkjc-dialog .tkjc-row > label { flex: 1 1 120px; min-width: 0; }
+  .tkjc-dialog-actions { position: sticky; bottom: -18px; background: #fff; padding: 12px 0 max(12px,env(safe-area-inset-bottom,0px)); flex-wrap: wrap; z-index: 2; }
+  .tkjc-dialog-actions > button { flex: 1 1 100px; min-height: 44px; white-space: normal; border-radius: 10px !important; }
+  .tkjc-dialog-actions > button:not(.accent):not(.danger) { border: 1px solid var(--line,#dce5e8); background: #f6f9fa; color: var(--ink,#18313d); }
+}
