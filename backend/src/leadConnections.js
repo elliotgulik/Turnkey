@@ -77,6 +77,7 @@ export function installLeadConnections(
     generateToken = generateWixToken,
     env = process.env,
     addLead,
+    getMetaAutoStatus,
     inspectToken = inspectMetaAccessToken,
     exchangeUserToken = exchangeMetaUserToken,
   },
@@ -117,7 +118,8 @@ export function installLeadConnections(
         const latest = await unwrap(db.from("leads").select("created_at,acked_at")
           .eq("business_id", req.businessId).eq("source", provider)
           .order("created_at", { ascending: false }).limit(1).maybeSingle());
-        res.json({ connected: !!row, ...(provider === "meta" ? { pageId: row?.external_id || null } : {}),
+        res.json({ connected: !!row, ...(provider === "meta" ? { pageId: row?.external_id || null,
+          ...(row&&getMetaAutoStatus?{autoSync:await getMetaAutoStatus(req.businessId)}:{}) } : {}),
           lastReceivedAt: latest?.created_at || null, lastIngested: !!latest?.acked_at });
       }),
     );

@@ -44,3 +44,9 @@ test('permission failure and foreign form responses never report a successful im
 test('empty form page with continuation is not mistaken for completed import',async()=>{
  const d=setup();d.fetchEdge=async()=>response([],'next-form-page');const r=await importMetaBatch(d);assert.equal(r.done,false);assert.ok(r.cursor);
 });
+test('automatic catch-up keeps its time window through pagination and treats leads as incoming',async()=>{
+ const d=setup();const first=await importMetaBatch({...d,since:123,historical:false});
+ await importMetaBatch({...d,cursor:first.cursor,since:456,historical:true});
+ assert.equal(d.calls[1].opts.since,123);assert.equal(d.calls[2].opts.since,123);
+ assert.equal(d.saved.get('101').historicalImport,undefined);
+});

@@ -58,3 +58,7 @@ test('Page subscription uses a real Graph edge and an encoded POST body, keeping
   assert.equal(request.options.headers.Authorization,'Bearer test-secret');
   assert.equal(request.url.href.includes('test-secret'),false);
 });
+test('automatic lead catch-up sends the documented time_created filter',async()=>{
+ let url;await fetchMetaEdge('123','leads',{token:'secret',since:100,fetchImpl:async u=>{url=u;return {ok:true};}});
+ assert.deepEqual(JSON.parse(url.searchParams.get('filtering')),[{field:'time_created',operator:'GREATER_THAN',value:100}]);
+});

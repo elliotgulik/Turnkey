@@ -7,8 +7,9 @@ const cursorText = value => value === null || (typeof value === 'string' && valu
 
 // One bounded batch per request. The encrypted continuation is authenticated,
 // tenant/Page-bound and expires; clients cannot substitute an arbitrary form.
-export async function importMetaBatch({ businessId, pageId, token, cursor, encrypt, decrypt, fetchEdge, addLead, now = Date.now }) {
-  let state = { kind: 'meta-lead-import-v1', businessId, pageId, issuedAt: now(), forms: [], formsAfter: null, leadsAfter: null, listed: false };
+export async function importMetaBatch({ businessId, pageId, token, cursor, encrypt, decrypt, fetchEdge, addLead, since=null, historical=true, now = Date.now }) {
+  if(since!==null&&(!Number.isSafeInteger(since)||since<0))throw problem('Invalid lead time filter.',400);
+  let state = { kind: 'meta-lead-import-v1', businessId, pageId, issuedAt: now(), forms: [], formsAfter: null, leadsAfter: null, listed: false, since, historical };
   if (cursor != null) {
     try {
       if (typeof cursor !== 'string' || cursor.length > 16000) throw Error();
@@ -16,11 +17,13 @@ export async function importMetaBatch({ businessId, pageId, token, cursor, encry
       if (state.kind !== 'meta-lead-import-v1' || state.businessId !== businessId || state.pageId !== pageId ||
         !Number.isFinite(state.issuedAt) || now() - state.issuedAt > 86400000 || state.issuedAt > now() ||
         !Array.isArray(state.forms) || state.forms.length > 25 || !state.forms.every(numericId) ||
-        !cursorText(state.formsAfter) || !cursorText(state.leadsAfter) || typeof state.listed !== 'boolean') throw Error();
+        !cursorText(state.formsAfter) || !cursorText(state.leadsAfter) || typeof state.listed !== 'boolean' ||
+        (state.since!=null&&(!Number.isSafeInteger(state.since)||state.since<0)) ||
+        (state.historical!=null&&typeof state.historical!=='boolean')) throw Error();
     } catch { throw problem('Import session changed or expired. Start the import again; saved leads will not be duplicated.', 400); }
   }
   const read = async (id, edge, fields, after, limit) => {
-    const response = await fetchEdge(id, edge, { token, fields, after, limit });
+    const response = await fetchEdge(id, edge, { token, fields, after, limit, ...(edge==='leads'&&state.since!=null?{since:state.since}:{}) });
     const body = await response.json();
     if (!response.ok) throw problem(metaConnectionIssue(body.error).message, [10, 200].includes(Number(body.error?.code)) ? 403 : 503);
     if (!Array.isArray(body.data) || body.data.length > limit) throw problem('Meta returned an invalid lead batch. Retry the import.');
@@ -44,7 +47,7 @@ export async function importMetaBatch({ businessId, pageId, token, cursor, encry
     const result = await read(formId, 'leads', 'id,created_time,field_data,form_id,ad_id', state.leadsAfter, 25);
     for (const lead of result.data) {
       if (!numericId(lead.id) || (lead.form_id && String(lead.form_id) !== formId)) throw problem('Meta returned a lead for an unexpected form.');
-      const payload = normalizeMetaLead({ ...lead, form_id: formId }, businessId, { historical: true, now });
+      const payload = normalizeMetaLead({ ...lead, form_id: formId }, businessId, { historical: state.historical!==false, now });
       const saved = await addLead(payload);
       if (!saved?.id) throw problem('Lead storage did not confirm the import. Retry; existing leads will be skipped.');
       if (saved.deduped) duplicates++; else imported++;

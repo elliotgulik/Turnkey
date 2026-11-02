@@ -23,6 +23,7 @@ import { fetchMetaObject } from './metaGraph.js'
 import { ingestMetaWebhook } from './metaLeads.js'
 import { decodeMetaCredentials, decryptMetaCredentials } from './metaCredentials.js'
 import { installLeadConnections, installWixBodyParser } from './leadConnections.js'
+import { createMetaLeadSync } from './metaLeadSync.js'
 import * as gmail from './providers/gmail.js'
 import * as googleCalendar from './providers/googleCalendar.js'
 import { fetchIcs } from './ical.js'
@@ -95,6 +96,9 @@ const storage =
 
 
 const app = express()
+const metaLeadSync=createMetaLeadSync({db:authClient,addLead:payload=>storage.addLead(payload),
+ notify:({businessId,name})=>sendNotification(authClient,{business_id:businessId,type:'new_lead',
+ title:'New Meta lead received',message:name+' submitted a lead ad on Facebook/Instagram',url:'/index.html?open=leads'})});
 
 app.set('trust proxy', 1) // needed for req.ip to reflect the real client (behind Render's proxy), not the proxy itself
 app.use((req,res,next)=>{
@@ -542,7 +546,8 @@ app.post('/api/leads/meta', async (req, res) => {
 /* ----- Connections management (requireBusiness-gated — these configure
    the mapping above, distinct from the public webhook routes themselves) ----- */
 
-installLeadConnections(app,{db:authClient,requireBusiness,addLead:payload=>storage.addLead(payload)})
+installLeadConnections(app,{db:authClient,requireBusiness,addLead:payload=>storage.addLead(payload),
+ getMetaAutoStatus:async businessId=>({enabled:STORAGE==='supabase',...await metaLeadSync.status(businessId)})})
 
 
 /* =====================================================================
@@ -1337,6 +1342,7 @@ app.use('/api/servicem8', createServiceM8Router({
 }))
 
 app.listen(PORT, () => {
+  if(STORAGE==='supabase')metaLeadSync.start()
   console.log(`🚀 TurnKey backend running on port ${PORT}`)
   console.log(`📦 Storage mode: ${STORAGE}`)
   // Loud and specific on purpose — "push notifications aren't delivering"
