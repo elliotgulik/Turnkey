@@ -1004,7 +1004,9 @@ async function sendJobOwnerPushOnce(businessId, job, pushKey, notifyOpts) {
   await authClient.from('lifecycle_email_log').insert({ business_id: businessId, job_id: job.id, key: pushKey })
   return true
 }
+const AUTOMATIC_CUSTOMER_FOLLOWUPS_ENABLED = false;
 async function sendAutomationEmail(businessId, job, key, invoice) {
+  if (!AUTOMATIC_CUSTOMER_FOLLOWUPS_ENABLED) return false;
   const { data: already } = await authClient.from('lifecycle_email_log').select('id')
     .eq('business_id', businessId).eq('job_id', job.id).eq('key', key).maybeSingle()
   if (already) return false // already sent for this job+key — never double-send

@@ -1945,6 +1945,7 @@ export function installSalesPlatform(
       if (!["42P01", "PGRST202", "PGRST205"].includes(error.code)) console.error("[ServiceM8 reconciliation]", error.code || error.name);
     } finally { scheduling = false; }
   }
+  async function customerFollowupsAllowed(businessId,job){if(!job?.customer_id)return true;const customer=await unwrap(db.from('customers').select('id,followups_disabled').eq('business_id',businessId).eq('id',job.customer_id).maybeSingle());return !!customer&&customer.followups_disabled!==true;}
   let running = false;
   async function tick() {
     if (running) return;
@@ -1960,10 +1961,10 @@ export function installSalesPlatform(
           else if (task.kind === "refresh_job")
             await refreshRemote(task.business_id, task.payload.uuid);
           else if (task.kind === "reminder") {
-            const job=await unwrap(db.from('jobs').select('id,status,details').eq('business_id',task.business_id).eq('id',task.payload.jobId).maybeSingle());
+            const job=await unwrap(db.from('jobs').select('id,customer_id,status,details').eq('business_id',task.business_id).eq('id',task.payload.jobId).maybeSingle());
             const due=job?.details?.nextFollowUpAt;
             const current=job&&!['won','scheduled','completed','paid','cancelled','lost'].includes(job.status)&&due&&Date.parse(due)<=Date.now()&&task.dedupe_key===job.id+':'+due;
-            if (sendNotification&&current)
+            if (sendNotification&&current&&await customerFollowupsAllowed(task.business_id,job))
               await sendNotification(db, {
                 business_id: task.business_id,
                 type: "sales_followup_due",
@@ -2080,7 +2081,7 @@ export function installSalesPlatform(
       const jobs = await unwrap(
         db
           .from("jobs")
-          .select("id,business_id,status,details")
+          .select("id,business_id,customer_id,status,details")
           .not("details->>nextFollowUpAt", "is", null)
           .lt("details->>nextFollowUpAt", new Date().toISOString())
           .order("id")
@@ -2093,6 +2094,7 @@ export function installSalesPlatform(
           )
         )
           continue;
+        if(!await customerFollowupsAllowed(j.business_id,j))continue;
         await enqueue(
           j.business_id,
           "reminder",

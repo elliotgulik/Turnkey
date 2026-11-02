@@ -1766,3 +1766,8 @@ test('follow-up reminders only notify for the current overdue schedule, never af
   const {worker}=setup(db,undefined,{sendNotification:async(_,alert)=>alerts.push(alert)});await worker.tick();assert.equal(alerts.length,expected);assert.equal(task.state,'succeeded');
  }
 });
+
+test('customer follow-up opt-out suppresses queued reminders across jobs without changing stages',async()=>{
+ const due=new Date(Date.now()-3600000).toISOString(),customerId=id(90),job={id:id(91),customer_id:customerId,business_id:'A',status:'quoted',details:{nextFollowUpAt:due}},task={id:id(92),business_id:'A',kind:'reminder',dedupe_key:job.id+':'+due,payload:{jobId:job.id,message:'Follow up'}};
+ const db=database({jobs:[job],customers:[{id:customerId,business_id:'A',followups_disabled:true}],integration_tasks:[task]});claimMock(db);const alerts=[];const {worker}=setup(db,undefined,{sendNotification:async(_,alert)=>alerts.push(alert)});await worker.tick();assert.equal(alerts.length,0);assert.equal(job.status,'quoted');assert.equal(task.state,'succeeded');
+});

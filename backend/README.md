@@ -154,3 +154,9 @@ The Follow-ups queue saves dates and completion history in existing job details.
 Connected Gmail accounts are checked server-side every 90 seconds while Render is running, using the same sync implementation as the manual button. Only newly stored, recent customer emails create `customer_reply` notifications, targeted to the mailbox owner. Gmail result pages are all read before advancing the cursor; uniqueness on `(account_id, provider_message_id)` prevents duplicate imports/alerts. Public quote acceptance, decline and question notifications retain their existing flow. No customer email is sent by this polling worker.
 
 No migrations or new credentials are required. Deploy the backend and frontend together. This release needs live verification with a real connected mailbox and a real customer reply. Web push still depends on configured OneSignal credentials and browser permission; in-app notifications do not.
+
+### Customer follow-up controls
+
+Automatic customer follow-up emails are paused in both the browser and cron email sender. Manual compose/send remains available. Staff-only reminders and incoming reply notifications remain enabled.
+
+The customer-level `followups_disabled` preference excludes all that customer's opportunities from the follow-up queue and suppresses queued reminders. Dates/history remain saved. Existing business RLS is unchanged. Migration `supabase/migrations/20261102000548_customer_followup_preferences.sql` is already applied to the connected TurnKey CRM project. Turning reminders back on does not enable automatic emails.

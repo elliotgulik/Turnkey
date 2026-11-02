@@ -75,6 +75,16 @@ const assert = require('node:assert/strict');
       await page.waitForFunction(()=>records[0].nextFollowUpAt===null);
       assert.equal(await page.evaluate(()=>records[0].stage),'new');
       await page.locator('#sales-dialog [data-sale-action="dialog-close"]').click();
+      await page.evaluate(()=>{
+        records[0].customerId=records[1].customerId='shared-customer';
+        window.TK_SUPABASE_CLIENT={from(table){if(table!=='customers')throw Error('Unexpected preference table');let values;return {update(v){values=v;return this;},eq(){return this;},select(){return this;},single:async()=>({data:{id:'shared-customer',...values},error:null})};}};
+      });
+      await leads.locator('[data-customer-followups="1"]').check();
+      await page.waitForFunction(()=>records[0].followupsDisabled===true&&records[1].followupsDisabled===true);
+      assert.equal(await page.evaluate(()=>TK_SALES_PLATFORM.followupRows('all').some(r=>r.id===1)),false);
+      await leads.locator('[data-customer-followups="1"]').uncheck();
+      await page.waitForFunction(()=>records[0].followupsDisabled===false&&records[1].followupsDisabled===false);
+
 
 
       assert.equal(await page.locator('#cnt-leads').innerText(),'1');

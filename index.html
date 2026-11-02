@@ -2433,6 +2433,8 @@ async function loadLifecycleEmails(){
 // on file, and the business hasn't disabled this key. Silent no-op otherwise —
 // these are a nice-to-have layered on top of the core flow, never a blocker.
 async function sendLifecycleEmail(r,key){
+  // Customer follow-up automation is paused globally by the owner.
+  if(['new_lead','job_booked','review_request','quote_reminder','invoice_overdue','day_before_reminder'].includes(key))return;
   if(!emailAccount||!r.email)return;
   const tpl=lifecycleEmails[key]||LIFECYCLE_DEFAULTS[key];
   if(!tpl||tpl.enabled===false)return;
@@ -5697,15 +5699,8 @@ function renderAlertsBar(){
 }
 
 // Promote stale quotes (no client response after N days) into Follow-Up automatically.
-function autoFollowUp(){
-  const now=Date.now(), D=24*60*60*1000;
-  records.forEach(r=>{
-    if(r.stage==='quoted' && !r.clientResponded && r.quoteSentAt && (now-r.quoteSentAt)>FOLLOWUP_DAYS*D){
-      r.stage='followup';
-      sendLifecycleEmail(r,'quote_reminder'); // fires exactly once — condition above only matches while stage is still 'quoted'
-    }
-  });
-}
+function autoFollowUp(){ /* Automatic quote follow-up emails are paused. */ }
+
 // What (if anything) needs the operator's attention on this record.
 function cardFlag(r){
   const now=Date.now(), D=24*60*60*1000;
@@ -6025,6 +6020,7 @@ function renderCustomerProfile(){
       <div class="cp-stat"><div class="cp-stat-v">${wonCount}</div><div class="cp-stat-l">Won</div></div>
     </div>
     <div class="panel" style="margin-bottom:14px"><h4>Contact &amp; property</h4>
+      ${window.TK_SALES_PLATFORM?.followupControl?.(jobs[0])||''}
       ${cpPropertyImageHtml(c,jobs)}
       <div class="field"><label>Name</label><input id="cp-name" value="${c.name.replace(/"/g,'&quot;')}"></div>
       <div class="field-row"><div class="field"><label>Phone</label><input id="cp-phone" value="${(c.phone||'').replace(/"/g,'&quot;')}"></div><div class="field"><label>Email</label><input id="cp-email" value="${(c.email||'').replace(/"/g,'&quot;')}"></div></div>
@@ -10424,7 +10420,7 @@ async function loadFromSupabase(){
         // job. Over weeks of normal use this is exactly how one customer
         // ends up with 144 "quotes" in their profile for what was really
         // one quote, edited many times across many sessions.
-        customerId:c.id||null,jobId:j.id,quoteId:j.quote_id||null,invoiceId:inv?inv.id:null,assignedStaffId:j.assigned_to||null,
+        followupsDisabled:c.followups_disabled===true,customerId:c.id||null,jobId:j.id,quoteId:j.quote_id||null,invoiceId:inv?inv.id:null,assignedStaffId:j.assigned_to||null,
         paymentStatus:inv?(inv.payment_status||base.paymentStatus):base.paymentStatus,
         paymentMethod:inv?(inv.payment_method||base.paymentMethod):base.paymentMethod,
         dueDate:inv?(inv.due_date||base.dueDate):base.dueDate,
@@ -10579,7 +10575,7 @@ async function persistRecordToSupabase(r){
     const editable={};
     for(const key of ['salesNotes','nextFollowUpAt','assignedSalespersonId','salespersonName','invoiceSent'])if(Object.hasOwn(r,key))editable[key]=r[key];
     // Restore the complete server snapshot, including removed commercial fields.
-    const excluded=['id','customerId','jobId','invoiceId','quoteId','assignedStaffId','stage','scheduledDate','scheduledDateISO','name','email','phone','address','suburb','notes','source','paymentStatus','paymentMethod','dueDate','_mapSnapshotDataUrl','_mapSnapshotWidth','_mapSnapshotHeight','_mapSnapshotPromise'];
+    const excluded=['followupsDisabled','id','customerId','jobId','invoiceId','quoteId','assignedStaffId','stage','scheduledDate','scheduledDateISO','name','email','phone','address','suburb','notes','source','paymentStatus','paymentMethod','dueDate','_mapSnapshotDataUrl','_mapSnapshotWidth','_mapSnapshotHeight','_mapSnapshotPromise'];
     for(const key of Object.keys(r))if(!excluded.includes(key))delete r[key];
     Object.assign(r,job.details||{},editable,{jobId:job.id,customerId:job.customer_id,quoteId:quote.id,quotePublicToken:quote.public_token,total:Number(quote.amount),stage:job.status});
     return {...job.details,...editable};
@@ -10641,7 +10637,7 @@ async function persistRecordToSupabase(r){
   // regenerable any time from areaPolys) — persisting it would bloat every
   // job row in Supabase for no benefit, so it's excluded here same as id/
   // customerId/etc.
-  ['id','customerId','jobId','invoiceId','quoteId','assignedStaffId','stage','scheduledDate','scheduledDateISO','name','email','phone','address','suburb','notes','source','paymentStatus','paymentMethod','dueDate','_mapSnapshotDataUrl','_mapSnapshotWidth','_mapSnapshotHeight','_mapSnapshotPromise']
+  ['followupsDisabled','id','customerId','jobId','invoiceId','quoteId','assignedStaffId','stage','scheduledDate','scheduledDateISO','name','email','phone','address','suburb','notes','source','paymentStatus','paymentMethod','dueDate','_mapSnapshotDataUrl','_mapSnapshotWidth','_mapSnapshotHeight','_mapSnapshotPromise']
     .forEach(k=>delete details[k]);
   const jobPayload={
     business_id:biz,customer_id:r.customerId,quote_id:r.quoteId||null,assigned_to:r.assignedStaffId||null,
@@ -11034,7 +11030,7 @@ async function retryPendingPhotos(){
 <script src="lead-answer-utils.js?v=20261101g"></script>
 <script src="lead-request-view.js?v=20261101g"></script>
 <script src="servicem8-pricing-view.js?v=20261102d"></script>
-<script src="sales-platform.js?v=20261102g"></script>
+<script src="sales-platform.js?v=20261102i"></script>
 <script type="module" src="measurement-import.js?v=20261017a"></script>
 <script src="pricing-learning-engine.js?v=20261101h"></script>
 <script src="quote-workspace.js?v=20261017a"></script>
@@ -11042,7 +11038,7 @@ async function retryPendingPhotos(){
 <script src="conversations-bridge.js?v=20261020a"></script>
 <script src="servicem8-import.js?v=20261017a"></script>
 <script src="marketing-analytics.js?v=20261102b"></script>
-<footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a> · <span id="tk-app-version">v20261102h</span></footer>
+<footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a> · <span id="tk-app-version">v20261102i</span></footer>
 <script src="extension-quote-link.js?v=20261102b"></script>
 <script src="job-workspace.js?v=20261031a"></script>
 <script src="job-calendar.js?v=20261102g"></script>
@@ -11051,7 +11047,7 @@ async function retryPendingPhotos(){
 <script src="workspace-controls.js?v=20261019a"></script>
 <script src="settings-experience.js?v=20261019d"></script>
 <script src="workspace-experience.js?v=20261019b"></script>
-<script src="nova-lead-manager.js?v=20261102g"></script>
+<script src="nova-lead-manager.js?v=20261102i"></script>
 <script src="pricing-learning-ui.js?v=20261101h"></script>
 <script src="mobile-experience.js?v=20261102h"></script>
 </body>

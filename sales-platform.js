@@ -391,7 +391,7 @@
     const t = r.nextFollowUpAt ? new Date(r.nextFollowUpAt).getTime() : NaN;
     return Number.isFinite(t) ? t : null;
   };
-  const isOverdue = (r) => isOpen(r) && followupTime(r) != null && followupTime(r) < Date.now();
+  const isOverdue = (r) => !followupsOff(r) && isOpen(r) && followupTime(r) != null && followupTime(r) < Date.now();
   const stageLabel = (r) => uiStages().find((s) => s.key === uiStage(r))?.label || uiStage(r) || "Unassigned stage";
   function stageBadge(r) {
     const operational = { scheduled: "Scheduled", paid: "Paid" }[r.stage];
@@ -413,11 +413,15 @@
     if (!r.address) return { action: "customer-edit", label: "Add property address", note: "Confirm the property address before opening Earth to quote." };
     return { action: "quote", label: "Build quote", note: "Open the property in Earth to measure and prepare a quote." };
   }
+  function followupsOff(r){return r.followupsDisabled===true||!!r.customerId&&records.some(x=>x.customerId===r.customerId&&x.followupsDisabled===true);}
+  function followupControl(r){if(!r)return '';return `<label class="sale-check sale-followup-preference"><input type="checkbox" data-customer-followups="${esc(r.id)}" ${followupsOff(r)?'checked':''}><span>Follow-ups off for this customer</span></label><small class="sale-muted">Automatic follow-up emails are paused for everyone. Manual emails remain available.</small>`;}
+  async function setFollowupsDisabled(id,disabled){const r=record(id),biz=currentBusinessId,version=businessSessionVersion,client=(typeof sb!=='undefined'?sb:null)||window.TK_SUPABASE_CLIENT;if(!r||!client||!biz)throw Error('Sign in to save this preference.');if(!r.customerId)await syncRecordToSupabase(r);if(biz!==currentBusinessId||version!==businessSessionVersion)throw Error('Business session changed.');if(!r.customerId)throw Error('Save this customer first.');const {data,error}=await client.from('customers').update({followups_disabled:!!disabled}).eq('business_id',biz).eq('id',r.customerId).select('id,followups_disabled').single();if(error)throw error;if(biz!==currentBusinessId||version!==businessSessionVersion)return;for(const item of records)if(item.customerId===data.id)item.followupsDisabled=data.followups_disabled;saveState();render();if(typeof customerProfileCtx!=='undefined'&&customerProfileCtx?.customerId===data.id)renderCustomerProfile();toast(disabled?'Follow-ups turned off for this customer.':'Follow-up reminders enabled. Automatic emails remain paused.');}
   let followupScope='due';
-  function followupRows(scope=followupScope){const now=Date.now(),end=new Date();end.setHours(23,59,59,999);return records.filter(isOpen).filter(r=>{const at=followupTime(r);return scope==='all'||scope==='due'&&at!==null&&at<now||scope==='today'&&at!==null&&at>=now&&at<=end.getTime()||scope==='upcoming'&&at!==null&&at>end.getTime()||scope==='unscheduled'&&at===null;}).sort((a,b)=>(followupTime(a)??Infinity)-(followupTime(b)??Infinity));}
+  function followupRows(scope=followupScope){const now=Date.now(),end=new Date();end.setHours(23,59,59,999);return records.filter(isOpen).filter(r=>!followupsOff(r)).filter(r=>{const at=followupTime(r);return scope==='all'||scope==='due'&&at!==null&&at<now||scope==='today'&&at!==null&&at>=now&&at<=end.getTime()||scope==='upcoming'&&at!==null&&at>end.getTime()||scope==='unscheduled'&&at===null;}).sort((a,b)=>(followupTime(a)??Infinity)-(followupTime(b)??Infinity));}
   function openFollowups(){const rows=followupRows();modal('Follow-ups',`<p>Plan the next contact, email your customer, or mark a follow-up done. Customer emails are sent only when you press Send.</p><div class="sale-scope-tabs">${[['due','Overdue'],['today','Today'],['upcoming','Upcoming'],['unscheduled','Needs a date'],['all','All open']].map(([key,label])=>button(label+' ('+followupRows(key).length+')','followup-scope',key,`aria-pressed="${followupScope===key}"`)).join('')}</div><div class="sale-followup-queue">${rows.map(r=>`<article class="sale-followup-row"><div><button type="button" class="sale-customer-link" data-sale-action="followup-record" data-id="${esc(r.id)}">${esc(r.name||'Customer')}</button><p>${esc(r.address||'')} · ${esc(r.salespersonName||'Unassigned')}</p>${followupLabel(r)}<small>${r.clientResponded?'Customer responded — review their reply':r.quoteSentAt?'Quote sent · awaiting response':'Awaiting next contact'}</small></div><div class="sale-followup-actions"><label class="sale-field"><span>Next follow-up</span><input type="datetime-local" data-followup-date="${esc(r.id)}" value="${followupTime(r)===null?'':esc(localDateTime(r.nextFollowUpAt))}"></label><div class="sale-actions">${r.email?button('Email','followup-email',r.id):''}${r.phone?`<a class="btn ghost sm" href="tel:${esc(String(r.phone).replace(/[^+\d]/g,''))}">Call</a>`:''}${button('Tomorrow','followup-tomorrow',r.id)}${button('In 3 days','followup-three',r.id)}${button('Done','followup-done',r.id)}</div></div></article>`).join('')||empty('No follow-ups in this group.')}</div>`);}
-  async function saveFollowup(r,date,label){if(!r||!isOpen(r))throw Error('Only open opportunities need sales follow-ups.');const previous={nextFollowUpAt:r.nextFollowUpAt,salesHistory:r.salesHistory};r.nextFollowUpAt=date;r.salesHistory=[...(r.salesHistory||[]),{at:Date.now(),label}];try{await syncRecordToSupabase(r);saveState();render();openFollowups();toast('Follow-up updated.');}catch(e){Object.assign(r,previous);throw e;}}
+  async function saveFollowup(r,date,label){if(r&&followupsOff(r))throw Error('Follow-ups are off for this customer. Enable reminders on their customer record first.');if(!r||!isOpen(r))throw Error('Only open opportunities need sales follow-ups.');const previous={nextFollowUpAt:r.nextFollowUpAt,salesHistory:r.salesHistory};r.nextFollowUpAt=date;r.salesHistory=[...(r.salesHistory||[]),{at:Date.now(),label}];try{await syncRecordToSupabase(r);saveState();render();openFollowups();toast('Follow-up updated.');}catch(e){Object.assign(r,previous);throw e;}}
   function followupLabel(r) {
+    if(followupsOff(r))return '<span class="sale-followup sale-followup-unset">Follow-ups off</span>';
     if (!isOpen(r)) return "";
     const t = followupTime(r);
     if (t == null) return '<span class="sale-followup sale-followup-unset">No follow-up scheduled</span>';
@@ -596,7 +600,7 @@
       <nav class="sale-detail-nav" aria-label="Opportunity sections"><a href="#sale-customer">Customer</a><a href="#sale-plan">Sales plan</a><a href="#sale-quote">Quote &amp; handoff</a><a href="#sale-history">Sales history</a></nav>
       <div class="sale-detail-layout"><div>
       <section class="sale-panel" id="sale-customer">${customerInfo(r)}</section>
-      <section class="sale-panel" id="sale-plan"><span class="sale-eyebrow">SALES PLAN</span><h3 tabindex="-1">Owner, follow-up &amp; notes</h3>${stageControl(r)}<p class="sale-muted">Contact and quote stages also update after a successful send. Confirming a sale requires a saved, complete quote.</p>
+      <section class="sale-panel" id="sale-plan"><span class="sale-eyebrow">SALES PLAN</span><h3 tabindex="-1">Owner, follow-up &amp; notes</h3>${followupControl(r)}${stageControl(r)}<p class="sale-muted">Contact and quote stages also update after a successful send. Confirming a sale requires a saved, complete quote.</p>
       <div class="sale-form-pair">${field('Estimated opportunity value', `<input id="sale-opportunity" type="number" min="0" step="0.01" value="${esc(r.opportunityValue || 0)}">`)}${field('Salesperson', `<select id="sale-assignee">${salespersonOptions(r)}</select>`)}</div>${field('Next follow-up', `<input id="sale-followup" type="datetime-local" value="${followupTime(r) == null ? '' : esc(localDateTime(r.nextFollowUpAt))}">`)}${followupLabel(r)}${field('Sales notes', `<textarea id="sale-notes" rows="4" placeholder="What did you agree? What should happen next?">${esc(r.salesNotes || r.jobNotes || '')}</textarea>`)}${button('Save sales details', 'save-details', r.id)}</section></div>
       <div>${window.TK_LEAD_REQUEST?.render(r)||''}${window.TK_SM8_PRICING?.render(r)||''}<section class="sale-panel" id="sale-quote"><span class="sale-eyebrow">QUOTE</span><h3>Quote &amp; profitability</h3><p class="sale-quote-services">${esc(servicesLabel(r))}</p>${table(['Metric', 'Value'], [
         ['Original TurnKey quote (incl. GST)', r.quoteId||r.total>0?money(r.total||0):'No TurnKey quote saved'],
@@ -1013,6 +1017,8 @@
     }
   });
   document.addEventListener("change", async (e) => {
+    if(e.target.hasAttribute('data-customer-followups')){const control=e.target;control.disabled=true;try{await setFollowupsDisabled(control.dataset.customerFollowups,control.checked);}catch(err){control.checked=!control.checked;toast('Could not save follow-up preference: '+err.message);}finally{if(control.isConnected)control.disabled=false;}return;}
+
     if(e.target.hasAttribute('data-followup-date')){try{const value=e.target.value;if(!value||!Number.isFinite(Date.parse(value)))throw Error('Choose a valid follow-up date.');await saveFollowup(record(e.target.dataset.followupDate),new Date(value).toISOString(),'Follow-up scheduled');}catch(err){toast(err.message);}return;}
 
     if(e.target.hasAttribute('data-sale-assignee')){const control=e.target;control.disabled=true;try{await assignSalesperson(control.dataset.saleAssignee,control.value);}catch(err){toast(err.message);}finally{if(control.isConnected)control.disabled=false;}return;}
@@ -1487,7 +1493,7 @@
       loadConnection();
   });
   window.TK_SALES_PLATFORM = {
-    loadPeople, salespeople, salespersonControl, assignSalesperson, openFollowups, followupRows,
+    loadPeople, salespeople, salespersonControl, assignSalesperson, openFollowups, followupRows, followupControl, followupsOff, setFollowupsDisabled,
     request: api,
     moveStage: async (id, key) => move(record(id), key),
     transferQuote: async (id) => {
