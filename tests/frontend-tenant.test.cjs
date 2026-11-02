@@ -65,20 +65,30 @@ test('auth clears the old business before waiting and never reveals an obsolete 
  assert.equal(shown,0);assert.equal(ctx.businessStateReady,false);
 });
 
- test('customer pagination preserves a job identity beyond the first thousand profiles without autosaving hydration',async()=>{
- const customers=Array.from({length:1001},(_,i)=>({id:'c'+i,name:'Customer '+i})),calls=[];let writes=0;
- const ctx=context({sb:{from(table){const q={select(){return q},eq(){return q},neq(){return q},order(){return q},range(start,end){calls.push([table,start,end]);return Promise.resolve({data:table==='customers'?customers.slice(start,end+1):table==='jobs'?[{id:'job',customer_id:'c1000',status:'new',details:{}}]:[]});}};return q;}},newRecord:d=>({...d}),render(){if(ctx.businessStateReady)writes++;},renderAll(){if(ctx.businessStateReady)writes++;}});
+ test('fresh sign-in loads linked customer details without a separate contact cache',async()=>{
+ const calls=[];let writes=0;
+ const jobs=Array.from({length:3},(_,i)=>({id:'job'+i,customer_id:'c'+i,status:'new',details:{name:'',address:''},customer:{id:'c'+i,business_id:'A',name:'Customer '+i,email:'c'+i+'@example.test',phone:'021000000'+i,address:'Address '+i}}));
+ const ctx=context({sb:{from(table){const q={select(fields){calls.push([table,fields]);return q},eq(){return q},order(){return q},range(start){return Promise.resolve({data:table==='jobs'?jobs.slice(start,start+2):[]});}};return q;}},newRecord:d=>({...d}),render(){if(ctx.businessStateReady)writes++;},renderAll(){if(ctx.businessStateReady)writes++;}});
  vm.runInContext(section('async function loadFromSupabase(){','function scheduleSupabaseSync(){'),ctx);
- assert.equal(await ctx.loadFromSupabase(),true);assert.equal(ctx.records[0].name,'Customer 1000');assert.equal(ctx.records[0].customerId,'c1000');assert.equal(writes,0);assert.equal(ctx.businessStateReady,true);assert.ok(calls.some(([table,start])=>table==='customers'&&start===1000));
+ assert.equal(await ctx.loadFromSupabase(),true);assert.equal(ctx.records.length,3);assert.equal(ctx.records[2].name,'Customer 2');assert.equal(ctx.records[2].address,'Address 2');assert.equal(ctx.records[2].email,'c2@example.test');assert.equal(writes,0);
+ assert.ok(calls.some(([table,fields])=>table==='jobs'&&fields.includes('jobs_customer_id_fkey')));assert.ok(!calls.some(([table])=>table==='customers'));
  });
  test('missing customer never becomes a new blank profile',async()=>{
- const ctx=context({sb:{from(table){const q={select(){return q},eq(){return q},neq(){return q},order(){return q},range(){return Promise.resolve({data:table==='jobs'?[{id:'job',customer_id:'original-customer',details:{}}]:[]});}};return q;}},newRecord:d=>({...d})});
+ const ctx=context({sb:{from(table){const q={select(){return q},eq(){return q},neq(){return q},order(){return q},range(start){if(start)return Promise.resolve({data:[]});return Promise.resolve({data:table==='jobs'?[{id:'job',customer_id:'original-customer',details:{}}]:[]});}};return q;}},newRecord:d=>({...d})});
  vm.runInContext(section('async function loadFromSupabase(){','function scheduleSupabaseSync(){'),ctx);
  await ctx.loadFromSupabase();assert.equal(ctx.records[0].customerId,'original-customer');assert.equal(ctx.records[0]._customerMissing,true);
  });
+test('joined blank profiles stay protected and foreign customer data is rejected',async()=>{
+ let customer={id:'c',business_id:'A',name:''};
+ const ctx=context({sb:{from(table){const q={select(){return q},eq(){return q},order(){return q},range(start){return Promise.resolve({data:!start&&table==='jobs'?[{id:'job',customer_id:'c',customer,details:{}}]:[]});}};return q;}},newRecord:d=>({...d}),console:{error(){}}});
+ vm.runInContext(section('async function loadFromSupabase(){','function scheduleSupabaseSync(){'),ctx);
+ assert.equal(await ctx.loadFromSupabase(),true);assert.equal(ctx.records[0]._customerMissing,true);
+ customer={id:'c',business_id:'B',name:'Other business'};
+ assert.equal(await ctx.loadFromSupabase(),false);assert.notEqual(ctx.records[0].name,'Other business');assert.equal(ctx.businessStateReady,false);
+});
 
 test('blank historical job snapshots cannot overwrite recovered customer fields; archived tests stay hidden',async()=>{
- const ctx=context({sb:{from(table){const q={select(){return q},eq(){return q},neq(){return q},order(){return q},range(){return Promise.resolve({data:table==='customers'?[{id:'c1',name:'Recovered Name',email:'recovered@example.test',phone:'0210000000',address:'7 Example Road',source:'Wix'}]:table==='jobs'?[{id:'j1',customer_id:'c1',details:{name:'',email:'',phone:'',address:'',source:''}},{id:'test',customer_id:'c1',details:{testLeadArchivedAt:123}}]:[]});}};return q;}},newRecord:d=>({...d})});
+ const ctx=context({sb:{from(table){const q={select(){return q},eq(){return q},neq(){return q},order(){return q},range(start){if(start)return Promise.resolve({data:[]});return Promise.resolve({data:table==='customers'?[{id:'c1',name:'Recovered Name',email:'recovered@example.test',phone:'0210000000',address:'7 Example Road',source:'Wix'}]:table==='jobs'?[{id:'j1',customer_id:'c1',customer:{id:'c1',name:'Recovered Name',email:'recovered@example.test',phone:'0210000000',address:'7 Example Road',source:'Wix'},details:{name:'',email:'',phone:'',address:'',source:''}},{id:'test',customer_id:'c1',details:{testLeadArchivedAt:123}}]:[]});}};return q;}},newRecord:d=>({...d})});
  vm.runInContext(section('async function loadFromSupabase(){','function scheduleSupabaseSync(){'),ctx);
  assert.equal(await ctx.loadFromSupabase(),true);assert.equal(ctx.records.length,1);assert.equal(ctx.records[0].name,'Recovered Name');assert.equal(ctx.records[0].email,'recovered@example.test');assert.equal(ctx.records[0].source,'Wix');
 });
@@ -88,7 +98,7 @@ test('hydration coalesces a repeated submission but preserves separate quoted jo
  const rows=[{id:'blank-copy',customer_id:'c',status:'new',details:{externalSource:'wix',externalId:'submission',total:0}},
  {id:'quoted-job',customer_id:'c',quote_id:'quote-1',status:'quoted',details:{externalSource:'wix',externalId:'submission',total:465}},
  {id:'separate-job',customer_id:'c',quote_id:'quote-2',status:'quoted',details:{externalSource:'wix',externalId:'different-submission',total:300}}];
- const ctx=context({TK_LEAD_IDENTITY:identity,sb:{from(table){const q={select(){return q},eq(){return q},neq(){return q},order(){return q},range(){return Promise.resolve({data:table==='customers'?[{id:'c',name:'Same Customer'}]:table==='jobs'?rows:[]});}};return q;}},newRecord:d=>({...d})});
+ const ctx=context({TK_LEAD_IDENTITY:identity,sb:{from(table){const q={select(){return q},eq(){return q},neq(){return q},order(){return q},range(start){if(start)return Promise.resolve({data:[]});return Promise.resolve({data:table==='customers'?[{id:'c',name:'Same Customer'}]:table==='jobs'?rows.map(row=>({...row,customer:{id:'c',name:'Same Customer'}})):[]});}};return q;}},newRecord:d=>({...d})});
  vm.runInContext(section('async function loadFromSupabase(){','function scheduleSupabaseSync(){'),ctx);
  assert.equal(await ctx.loadFromSupabase(),true);assert.equal(ctx.records.length,2);
  assert.deepEqual(Array.from(ctx.records,r=>r.jobId),['quoted-job','separate-job']);assert.equal(ctx.records[0].total,465);
