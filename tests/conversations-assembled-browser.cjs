@@ -9,7 +9,7 @@ const fs = require('node:fs'), path = require('node:path'), assert = require('no
     const drafts = new Map(), loaded = new Set(), errors = [], escapes = []; let sends = 0;
     page.on('pageerror', e => errors.push(e.message));
     await page.addInitScript(() => {
-      window.assembledFixture = { user: null, opens: [], writes: [] };
+      window.assembledFixture = { user: null, opens: [], writes: [], historyRows: [], historyScopes: [], historyAccountScopes: [] };
       window.open = (...args) => { assembledFixture.opens.push(args); return null; };
       window.supabase = { createClient: () => ({
         auth: { getSession: async () => ({ data: { session: assembledFixture.user ? { user: { id: assembledFixture.user }, access_token: 'fixture-token' } : null } }), onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } }) },
@@ -18,8 +18,8 @@ const fs = require('node:fs'), path = require('node:path'), assert = require('no
           const q = { select(c) { columns = c; return q; }, eq(k,v) { filters[k]=v;return q; }, neq(){return q;},is(){return q;},order(){return q;},limit(){return q;},
             insert(v){value=v;assembledFixture.writes.push({table,value:v});return q;},update(v){value=v;assembledFixture.writes.push({table,value:v});return q;},upsert(v){value=v;return q;},
             async single(){return {data:table==='quotes'?{id:filters.id||'33333333-3333-4333-8333-333333333333',amount:200,status:'sent',public_token:'quote-token'}:{id:filters.id||'44444444-4444-4444-8444-444444444444'},error:null};},
-            async maybeSingle(){return {data:value?{...value,public_token:'quote-token'}:null,error:null};},
-            then(resolve,reject){return Promise.resolve({data:[],error:null}).then(resolve,reject);} };return q;
+            async maybeSingle(){if(table==='email_accounts'){assembledFixture.historyAccountScopes.push(filters);return {data:{id:'a'},error:null};}return {data:value?{...value,public_token:'quote-token'}:null,error:null};},
+            then(resolve,reject){if(table==='emails')assembledFixture.historyScopes.push(filters);return Promise.resolve({data:table==='emails'?assembledFixture.historyRows.filter(m=>m.business_id===filters.business_id&&m.account_id===filters.account_id):[],error:null}).then(resolve,reject);} };return q;
         }
       }) };
       class PDF { constructor(){this.lines=[];} setFillColor(){} rect(){} roundedRect(){} setFont(){} setFontSize(){} setTextColor(){} setDrawColor(){} setLineWidth(){} line(){} addPage(){} addImage(){} text(v){this.lines.push(v);} splitTextToSize(v){return [v];} output(kind){if(kind!=='datauristring')throw Error('Unexpected download');return 'data:application/pdf;base64,'+btoa(unescape(encodeURIComponent('%PDF-1.7\n'+JSON.stringify(this.lines))));} }
@@ -57,6 +57,8 @@ const fs = require('node:fs'), path = require('node:path'), assert = require('no
     await page.evaluate(() => generateAndSendDoc('quote',records[0]));
     await page.locator('.cv-files li').waitFor();
     assert.ok([...drafts.values()].some(d=>d.payload.attachments[0]?.contentBase64));
+    const attachedPDF = [...drafts.values()].find(d=>d.payload.attachments[0]?.contentBase64).payload.attachments[0].contentBase64;
+    assert.equal(await page.locator('.cv-pdf-preview object').evaluate(async el => btoa(String.fromCharCode(...new Uint8Array(await (await fetch(el.data)).arrayBuffer())))), attachedPDF);
     await page.getByRole('button',{name:'Save & close',exact:true}).click();
     await page.getByRole('button',{name:/^Drafts/}).click();
     await page.locator('[data-cv-action=draft]').first().click();
@@ -79,14 +81,18 @@ const fs = require('node:fs'), path = require('node:path'), assert = require('no
     assert.equal(await page.locator('[data-qf-action=quote]').count(),1);
     await page.locator('[data-qf-action=quote]').click();
     await page.locator('#doc-preview-overlay.open').waitFor();
-    assert.match(await page.locator('#doc-preview-body').innerText(), /Driveway/);
+    await page.locator('#doc-preview-body object').waitFor();
+    const previewPDF = await page.locator('#doc-preview-body object').evaluate(async el => btoa(String.fromCharCode(...new Uint8Array(await (await fetch(el.data)).arrayBuffer()))));
+    assert.equal(previewPDF, attachedPDF, 'Document preview must reuse the exact attachment bytes');
+    assert.match(Buffer.from(previewPDF, 'base64').toString(), /Driveway/);
+    assert.equal(await page.locator('#doc-preview-body a[download]').getAttribute('href'), await page.locator('#doc-preview-body object').getAttribute('data'));
     assert.match(await page.locator('#doc-preview-foot').innerText(), /Compose/i);
     await page.evaluate(()=>openTemplateEditor());
     await page.locator('#tpl-quote-body').fill('Hello {{customer_name}} at {{address}}: {{quote_total}} for {{services}}.');
-    assert.match(await page.locator('#tpl-quote-preview').innerText(),/Hello Assembled at 1 Test Road: \$200/);
+    assert.match(await page.locator('#tpl-quote-preview').innerText(),/Hello Assembled at 1 Test Road: (?:NZ)?\$200/);
     assert.match(await page.locator('#tpl-quote-preview').innerText(),/Driveway/);
     await page.locator('#tpl-invoice-body').fill('Invoice for {{customer_name}}: {{invoice_total}}.');
-    assert.match(await page.locator('#tpl-invoice-preview').innerText(),/Invoice for Assembled: \$200/);
+    assert.match(await page.locator('#tpl-invoice-preview').innerText(),/Invoice for Assembled: (?:NZ)?\$200/);
     await page.locator('#tpl-quote-body').fill('<img src=x onerror="window.templateUnsafe=true"> {{customer_name}}');
     assert.equal(await page.locator('#tpl-quote-preview img').count(),0);
     assert.equal(await page.evaluate(()=>window.templateUnsafe),undefined);
@@ -98,6 +104,27 @@ const fs = require('node:fs'), path = require('node:path'), assert = require('no
     await page.screenshot({path:'/private/tmp/turnkey-quote-workflow-mobile.png',fullPage:false});
     assert.ok(await page.locator('#doc-preview-foot').evaluate(el=>el.getBoundingClientRect().bottom<=window.innerHeight+1));
     assert.ok(await page.locator('#doc-preview-overlay').evaluate(el=>el.getBoundingClientRect().right<=window.innerWidth+1));
+    await page.evaluate(async () => {
+      const host = document.createElement('section'); host.id = 'history-test'; document.body.append(host);
+      assembledFixture.historyRows = [
+        {id:'m1',business_id:currentBusinessId,account_id:'a',thread_id:'t',customer_id:null,from_address:'Customer <customer@example.com>',subject:'Quote question',body_html:'<p>Hello</p><img src=x onerror="window.historyUnsafe=true"><script>window.historyUnsafe=true</script>',sent_at:'2026-11-01'},
+        {id:'m2',business_id:currentBusinessId,account_id:'a',thread_id:'t',from_address:'owner@example.com',to_addresses:'alias@example.com',body_text:'Thread reply',sent_at:'2026-11-02'},
+        {id:'m3',business_id:currentBusinessId,account_id:'other',thread_id:'t',from_address:'someone@example.com',body_text:'UNRELATED_ACCOUNT'},
+        {id:'m4',business_id:'other-business',account_id:'a',thread_id:'t',from_address:'customer@example.com',body_text:'FOREIGN_BUSINESS'},
+        {id:'m5',business_id:currentBusinessId,account_id:'a',thread_id:'other',from_address:'notcustomer@example.com',body_text:'SUBSTRING_MATCH'}
+      ];
+      window.historyResult = await TK_CONVERSATIONS_BRIDGE.renderCustomerHistory(host, {customerId:'customer-id',email:'customer@example.com',name:'Customer'});
+    });
+    assert.equal(await page.evaluate(()=>historyResult.count),2);
+    assert.match(await page.locator('#history-test').textContent(),/Thread reply/);
+    assert.doesNotMatch(await page.locator('#history-test').textContent(),/UNRELATED_ACCOUNT|FOREIGN_BUSINESS|SUBSTRING_MATCH/);
+    assert.equal(await page.locator('#history-test img,#history-test script').count(),0);
+    assert.equal(await page.evaluate(()=>window.historyUnsafe),undefined);
+    assert.equal(await page.evaluate(()=>assembledFixture.historyScopes.at(-1).business_id),'fixture-business');
+    assert.equal(await page.evaluate(()=>assembledFixture.historyScopes.at(-1).account_id),'a');
+    assert.deepEqual(await page.evaluate(()=>assembledFixture.historyAccountScopes.at(-1)),{business_id:'fixture-business',user_id:'11111111-1111-4111-8111-111111111111',provider:'gmail'});
+    await page.evaluate(()=>TK_CONVERSATIONS_BRIDGE.reset());
+    assert.equal(await page.locator('#history-test').textContent(),'');
     assert.deepEqual(errors,[]);
     console.log('Assembled Conversations passed: real index/module order, real quote PDF helper/save path, PDF draft restore, captured mailto/Gmail links, no external mail navigation or email sends.');
   } finally { await browser.close(); }

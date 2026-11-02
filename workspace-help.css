@@ -1,0 +1,6 @@
+.tk-inline-help{display:inline-grid;place-items:center;width:26px;height:26px;min-height:26px!important;padding:4px!important;border:0;border-radius:50%;background:transparent;color:var(--ink-soft,#536672);vertical-align:middle;cursor:pointer;flex:none}
+.tk-inline-help:hover{background:var(--teal-wash,#eaf6f3);color:var(--teal,#087f70)}
+.tk-inline-help:focus-visible{outline:2px solid var(--teal,#087f70);outline-offset:2px}
+.tk-help-text{position:fixed;inset:auto;margin:0;z-index:40000;padding:12px 14px;border:1px solid var(--line,#dce5e9);border-radius:8px;background:#fff;color:var(--ink,#122d3a);box-shadow:0 8px 24px #122d3a24;font-size:12px;line-height:1.6;max-height:calc(100dvh - 28px);overflow:auto;overflow-wrap:anywhere}
+.sale-kpi>.tk-inline-help{position:absolute;top:8px;right:8px}.sale-kpi:has(>.tk-inline-help){position:relative;padding-right:36px}
+@media(max-width:760px){.tk-inline-help{width:44px;height:44px;min-height:44px!important;padding:12px!important}.sale-kpi>.tk-inline-help{top:0;right:0}.sale-kpi:has(>.tk-inline-help){padding-right:42px}}

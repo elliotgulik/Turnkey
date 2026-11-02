@@ -19,6 +19,7 @@ function installChromeMock() {
   const listeners = { onMessage: [], onUpdated: [], onRemoved: [], onChanged: [] };
   const storageData = {};
   const createdTabs = [];
+  const navigation = [];
   global.chrome = {
     runtime: {
       id: 'test-extension-id',
@@ -32,6 +33,8 @@ function installChromeMock() {
         return tab;
       },
       sendMessage: async () => ({ok:true}),
+      update: async (id,options) => { navigation.push(['tab',id,options]);return {id,windowId:7}; },
+      remove: async id => { navigation.push(['close',id]); },
       onUpdated: { addListener: (fn) => listeners.onUpdated.push(fn) },
       onRemoved: { addListener: (fn) => listeners.onRemoved.push(fn) }
     },
@@ -48,12 +51,13 @@ function installChromeMock() {
       },
       onChanged: { addListener: (fn) => listeners.onChanged.push(fn) }
     },
-    windows: { WINDOW_ID_CURRENT: -2 }
+    windows: { WINDOW_ID_CURRENT: -2, update: async (id,options) => { navigation.push(['window',id,options]); } }
   };
   storageData.tk_config = { siteUrl: 'https://turnkeycrm.net' };
   return {
     listeners,
     createdTabs,
+    navigation,
     resetListeners: () => { listeners.onMessage = []; listeners.onUpdated = []; listeners.onRemoved = []; },
     setSiteUrl: (url) => { storageData.tk_config = { siteUrl: url }; }
   };
@@ -180,4 +184,43 @@ test('opening the workspace on a TurnKey site outside the bridge allowlist fails
   assert.equal(res.ok, false);
   assert.match(res.error, /secure bridge isn't enabled/);
   assert.equal(createdTabs.length, 0, 'must not open a workspace tab that can never complete a measurement');
+});
+
+test('return closes only the acknowledged workspace, focuses its Earth window, and survives restart',async()=>{
+ const {listeners,navigation,resetListeners}=installChromeMock();const bg=await loadBackground();
+ bg.pendingRequests.set('return',{earthTabId:10,workspaceTabId:20,createdAt:Date.now(),completed:false});
+ const sender={tab:{id:20}};
+ assert.equal((await dispatch(listeners,{type:'TK_MEASURE_RETURN',requestId:'return'},sender)).ok,false);
+ assert.deepEqual(navigation,[]);
+ assert.equal((await dispatch(listeners,{type:'TK_MEASURE_RESULT',requestId:'return',result:{value:42}},sender)).ok,true);
+ assert.deepEqual(navigation,[],'receiving a result does not close a page before bridge ACK');
+ resetListeners();await loadBackground();
+ assert.equal((await dispatch(listeners,{type:'TK_MEASURE_RETURN',requestId:'return'},{tab:{id:99}})).ok,false);
+ assert.deepEqual(navigation,[]);
+ assert.equal((await dispatch(listeners,{type:'TK_MEASURE_RETURN',requestId:'return'},sender)).ok,true);
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.deepEqual(navigation,[['tab',10,{active:true}],['window',7,{focused:true}],['close',20]]);
+ assert.equal((await dispatch(listeners,{type:'TK_MEASURE_RETURN',requestId:'return'},sender)).ok,false);
+});
+test('failed or in-flight Earth acceptance never permits return or closes the measurement',async()=>{
+ const {listeners,navigation}=installChromeMock();const bg=await loadBackground();
+ bg.pendingRequests.set('failed',{earthTabId:10,workspaceTabId:20,createdAt:Date.now(),completed:true});
+ const sender={tab:{id:20}};
+ assert.equal((await dispatch(listeners,{type:'TK_MEASURE_RETURN',requestId:'failed'},sender)).ok,false);
+ bg.pendingRequests.get('failed').completed=false;chrome.tabs.sendMessage=async()=>({ok:false});
+ assert.equal((await dispatch(listeners,{type:'TK_MEASURE_RESULT',requestId:'failed',result:{}},sender)).ok,false);
+ assert.equal((await dispatch(listeners,{type:'TK_MEASURE_RETURN',requestId:'failed'},sender)).ok,false);
+ assert.deepEqual(navigation,[]);assert.equal(bg.pendingRequests.get('failed').completed,false);
+});
+test('return failure keeps the accepted measurement and cannot deliver it twice',async()=>{
+ const {listeners,navigation}=installChromeMock();const bg=await loadBackground();
+ bg.pendingRequests.set('focus',{earthTabId:10,workspaceTabId:20,createdAt:Date.now(),completed:false});
+ const sender={tab:{id:20}};let deliveries=0;
+ chrome.tabs.sendMessage=async()=>{deliveries++;return {ok:true}};
+ await dispatch(listeners,{type:'TK_MEASURE_RESULT',requestId:'focus',result:{}},sender);
+ chrome.tabs.update=async()=>{throw Error('Earth tab closed')};
+ const result=await dispatch(listeners,{type:'TK_MEASURE_RETURN',requestId:'focus'},sender);
+ assert.equal(result.ok,false);assert.match(result.error,/Measurement saved/);assert.deepEqual(navigation,[]);
+ assert.equal((await dispatch(listeners,{type:'TK_MEASURE_RESULT',requestId:'focus',result:{}},sender)).ok,false);
+ assert.equal(deliveries,1);assert.equal(bg.pendingRequests.get('focus').accepted,true);
 });

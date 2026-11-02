@@ -247,9 +247,9 @@
       : empty("No data in this period.");
   }
   function notice() {
-    return migrationError
-      ? `<div class="sale-notice" role="status">${esc(migrationError)}. Your existing records and quoting tools remain available.</div>`
-      : "";
+    const source=metrics?.pricing;
+    return (migrationError?`<div class="sale-notice" role="status">${esc(migrationError)}. Existing records and quoting tools remain available.</div>`:'')+
+      (source?`<p class="sale-metric-source">${esc(source.source)} · ${Number(source.currentTotals)||0} of ${Number(source.linked)||0} linked jobs have a current total${source.unknownTotals?`; ${Number(source.unknownTotals)} totals unavailable`:''}. Original accepted quotes are preserved.</p>`:'');
   }
   renderDashboard = function () {
     const r = currentReport(),
@@ -812,7 +812,7 @@
         el = document.getElementById("sale-sm8");
       if (!el) return;
       mappings = s.mappings || [];
-      el.innerHTML = `<h3>ServiceM8 · operations handoff</h3><p>${s.connected ? "Connected to " + esc(s.accountName || s.accountUuid) : "Connect ServiceM8 to transfer approved work."}</p>${s.connected ? `<p>Pending: ${s.pending || 0} · Failed: ${s.failed || 0} · Last sync: ${esc(dates(s.lastSyncAt))} · Status updates: ${s.webhookSubscribed ? "connected" : "not subscribed"}</p>${s.scheduleSyncPermissionMissing ? '<p class="sale-warning">Reconnect ServiceM8 to grant read_schedule. TurnKey cannot read the dispatch board until this permission is approved.</p>' : '<p>Bookings and job statuses are saved in TurnKey and checked automatically in the background every 15 minutes. Available ServiceM8 webhooks also trigger updates.</p>'}${s.syncWarning ? `<p class="sale-warning">${esc(s.syncWarning)}</p>` : ""}${s.lastError ? `<p role="alert">${esc(s.lastError)}</p>` : ""}<label><input type="checkbox" data-sale-auto ${s.autoHandoff ? "checked" : ""}> Automatically transfer approved sales</label><div class="sale-actions">${button("Retry failed transfers", "retry", "", s.retryAvailable ? "" : "disabled")}${button("Refresh linked jobs", "refresh-jobs")}${s.scheduleSyncPermissionMissing?button("Reconnect for booking sync", "oauth-sm8"):""}${button(s.webhookSubscribed?"Refresh status hooks":"Connect status updates", "subscribe-sm8")}${button("Disconnect", "disconnect-sm8")}</div>` : `<div class="sale-actions">${button("Connect ServiceM8", "oauth-sm8", "", s.oauthConfigured ? "" : "disabled")}${s.privateEnabled ? button("Private API key (testing)", "private-sm8") : ""}</div><p>${s.oauthConfigured ? "Authorize access to your ServiceM8 account." : "ServiceM8 OAuth needs to be configured on the backend."}</p>`}`;
+      el.innerHTML = `<h3>ServiceM8 · operations handoff</h3><p>${s.connected ? "Connected to " + esc(s.accountName || s.accountUuid) : "Connect ServiceM8 to transfer approved work."}</p>${s.connected ? `<p>Pending: ${s.pending || 0} · Failed: ${s.failed || 0} · Last sync: ${esc(dates(s.lastSyncAt))} · Status updates: ${s.webhookSubscribed ? "connected" : "not subscribed"}</p>${s.fullImport ? `<p>Full import: ${Number(s.fullImport.linked)||0} linked jobs · Last completed ${esc(dates(s.fullImport.completedAt))}. Analytics use current ServiceM8 prices for linked jobs.</p>${s.fullImport.skipped?`<details><summary>${Number(s.fullImport.skipped)} records need review</summary><ul>${(s.fullImport.warnings||[]).slice(0,30).map(w=>`<li>${esc(w.jobUuid||'Unknown job')}: ${esc(w.reason||'Review required')}</li>`).join('')}</ul></details>`:''}` : ''}${s.scheduleSyncPermissionMissing ? '<p class="sale-warning">Reconnect ServiceM8 to grant read_schedule. TurnKey cannot read the dispatch board until this permission is approved.</p>' : '<p>Bookings and job statuses are saved in TurnKey and checked automatically in the background every 15 minutes. Available ServiceM8 webhooks also trigger updates.</p>'}${s.syncWarning ? `<p class="sale-warning">${esc(s.syncWarning)}</p>` : ""}${s.lastError ? `<p role="alert">${esc(s.lastError)}</p>` : ""}<label><input type="checkbox" data-sale-auto ${s.autoHandoff ? "checked" : ""}> Automatically transfer approved sales</label><div class="sale-actions">${button("Retry failed transfers", "retry", "", s.retryAvailable ? "" : "disabled")}${button("Full import from ServiceM8", "full-import-sm8")}${button("Refresh linked jobs", "refresh-jobs")}${s.scheduleSyncPermissionMissing?button("Reconnect for booking sync", "oauth-sm8"):""}${button(s.webhookSubscribed?"Refresh status hooks":"Connect status updates", "subscribe-sm8")}${button("Disconnect", "disconnect-sm8")}</div>` : `<div class="sale-actions">${button("Connect ServiceM8", "oauth-sm8", "", s.oauthConfigured ? "" : "disabled")}${s.privateEnabled ? button("Private API key (testing)", "private-sm8") : ""}</div><p>${s.oauthConfigured ? "Authorize access to your ServiceM8 account." : "ServiceM8 OAuth needs to be configured on the backend."}</p>`}`;
     } catch (e) {
       const el = document.getElementById("sale-sm8");
       if (el) el.textContent = "ServiceM8: " + e.message;
@@ -1330,6 +1330,11 @@
         await api("/api/sales/servicem8/retry", { method: "POST" });
         toast("Failed transfers queued for retry");
         loadConnection();
+      }
+      if(a === 'full-import-sm8'){
+        b.disabled=true;
+        try{const result=await api('/api/sales/servicem8/import',{method:'POST'});toast(result.queued?'Full ServiceM8 import queued. Existing quotes and history are preserved.':'ServiceM8 import is already queued.');await loadConnection();}
+        finally{if(b.isConnected)b.disabled=false;}
       }
       if (a === "refresh-jobs") {
         await api("/api/sales/servicem8/refresh", { method: "POST" });

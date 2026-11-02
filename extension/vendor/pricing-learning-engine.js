@@ -23,6 +23,15 @@
     return { enabled: s.enabled !== false, minSamples: Number.isInteger(n) ? clamp(n, 5, 50) : 5,
       maxAdjustment: finite(max) ? clamp(max, 0, 0.35) : 0.25 };
   }
+  // Only a direct, measured-service price edit is implicit pricing feedback.
+  // Keep explicit reasons (including exclusions), and never learn our own output.
+  function reasonForPriceEdit({ reason, isManual, unit, chosenPrice, recommendedPrice, verifiedQuantity } = {}) {
+    if (reason) return reason;
+    if (!isManual || verifiedQuantity != null || !['m', 'm²', 'm2', 'sqm', 'lm'].includes(unit) ||
+        !finite(chosenPrice) || chosenPrice < 0 || !finite(recommendedPrice) ||
+        money(chosenPrice) === money(recommendedPrice)) return '';
+    return 'pricing_correction';
+  }
   function normalized(o) {
     return { ...o, businessId: get(o, 'businessId', 'business_id'), jobId: get(o, 'jobId', 'job_id'),
       quoteKey: get(o, 'quoteKey', 'quote_key'), baselinePrice: get(o, 'baselinePrice', 'baseline_price'),
@@ -94,5 +103,5 @@
         measurement: { factor, sampleCount: mn, suggestedQuantity: positive(line.quantity) ? money(Math.min(Number.MAX_VALUE, line.quantity * factor)) : null } };
     });
   }
-  return Object.freeze({ recommend, DEFAULTS, modelVersion: 1 });
+  return Object.freeze({ recommend, reasonForPriceEdit, DEFAULTS, modelVersion: 1 });
 }));

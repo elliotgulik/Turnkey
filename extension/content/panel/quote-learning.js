@@ -1,6 +1,6 @@
 import { instantPricing } from './quote-pricing.js';
 
-export const REASONS = {pricing_correction:'Pricing correction',difficult_access:'Difficult access',extra_work:'Extra work',discount:'Discount',measurement_correction:'Measurement correction'};
+export const REASONS = {unexplained:'Exclude from price learning',pricing_correction:'Pricing correction',difficult_access:'Difficult access',extra_work:'Extra work',discount:'Discount',measurement_correction:'Measurement correction'};
 export const cents = n => Math.round(Number(n)*100);
 export function allocatePrices(total, weights) {
   const value=cents(total);
@@ -39,19 +39,24 @@ export function learningPricing(pricing,cost,lines,options={}) {
   const priced=lines.map((line,i)=>{
     const fixedPrice=line.manualPrice==null?recommendations[i].recommendedPrice:Math.round(line.manualPrice*100)/100;
     if(!Number.isFinite(fixedPrice)||fixedPrice<0||fixedPrice>1e8)throw Error('Enter a valid final service price (zero or more).');
-    const {manualPrice,reason,measurementReason,verifiedQuantity,...saved}=line;
+    const {manualPrice,distributedPrice,reason,measurementReason,verifiedQuantity,...saved}=line;
     return {...saved,fixedPrice};
   });
   const total=priced.reduce((sum,line)=>sum+cents(line.fixedPrice),0)/100;
   if(total<1||total>1e8)throw Error('Enter a valid final price greater than zero.');
   const recommended=recommendations.reduce((sum,line)=>sum+cents(line.recommendedPrice),0)/100;
   const exGst=cost.exGst(total);
-  return {...base,lines:priced,total,exGst,gst:total-exGst,profit:cost.profit(total,base.breakdown.costUnrounded),marginPct:cost.marginPct(total,base.breakdown.costUnrounded),breakdown:{...base.breakdown,recommended},snapshot:{...base.snapshot,price:total,recommended},recommendations,engineError};
+  const observationReasons=lines.map((line,i)=>options.engine?.reasonForPriceEdit?.({
+    reason:line.reason,isManual:line.manualPrice!=null&&!line.distributedPrice,
+    unit:inputs[i].unit,chosenPrice:priced[i].fixedPrice,
+    recommendedPrice:recommendations[i].recommendedPrice,verifiedQuantity:line.verifiedQuantity
+  })||'');
+  return {...base,lines:priced,total,exGst,gst:total-exGst,profit:cost.profit(total,base.breakdown.costUnrounded),marginPct:cost.marginPct(total,base.breakdown.costUnrounded),breakdown:{...base.breakdown,recommended},snapshot:{...base.snapshot,price:total,recommended},recommendations,engineError,observationReasons};
 }
 
 export function observationLines(model,lines,pricing) {
   if(lines.some(l=>l.reason==='measurement_correction'&&!(l.verifiedQuantity>0)))throw Error('Apply a verified quantity and measurement reason for each measurement correction before saving.');
-  return model.lines.map((line,i)=>({lineKey:line.lineKey,svc:line.svc,unit:pricing.SERVICES[line.svc].unit,quantity:line.qty,baselinePrice:model.recommendations[i].baselinePrice,chosenPrice:line.fixedPrice,reason:lines[i].reason||'',storeys:line.storeys||1,access:model.recommendations[i].access,...(lines[i].verifiedQuantity!=null?{measuredQuantity:lines[i].originalQuantity,verifiedQuantity:lines[i].verifiedQuantity,measurementReason:lines[i].measurementReason||''}:{})}));
+  return model.lines.map((line,i)=>({lineKey:line.lineKey,svc:line.svc,unit:pricing.SERVICES[line.svc].unit,quantity:line.qty,baselinePrice:model.recommendations[i].baselinePrice,chosenPrice:line.fixedPrice,reason:lines[i].reason||model.observationReasons?.[i]||'',storeys:line.storeys||1,access:model.recommendations[i].access,...(lines[i].verifiedQuantity!=null?{measuredQuantity:lines[i].originalQuantity,verifiedQuantity:lines[i].verifiedQuantity,measurementReason:lines[i].measurementReason||''}:{})}));
 }
 
 // The POST is deliberately separate from draft persistence. Reuse this exact

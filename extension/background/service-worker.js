@@ -194,6 +194,31 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
+  if (msg && msg.type === 'TK_MEASURE_RETURN') {
+    (async () => {
+      await sweepExpired();
+      const req = pendingRequests.get(msg.requestId);
+      if (!req?.accepted || !sender.tab || sender.tab.id !== req.workspaceTabId) {
+        sendResponse({ ok: false, error: 'This measurement has not been accepted from this workspace.' });
+        return;
+      }
+      try {
+        const earth = await chrome.tabs.update(req.earthTabId, { active: true });
+        if (Number.isInteger(earth?.windowId)) await chrome.windows.update(earth.windowId, { focused: true });
+      } catch {
+        sendResponse({ ok: false, error: 'Measurement saved. Return to the original Google Earth tab and close this tab.' });
+        return;
+      }
+      pendingRequests.delete(msg.requestId);
+      await savePending();
+      sendResponse({ ok: true });
+      // Navigation failures cannot undo an accepted measurement or trigger a resend.
+      try { await chrome.tabs.remove(req.workspaceTabId); }
+      catch (error) { console.warn('[TurnKey] measurement saved; close workspace manually', error?.message); }
+    })();
+    return true;
+  }
+
   if (msg && msg.type === 'TK_MEASURE_RESULT') {
     (async () => {
       await sweepExpired();
@@ -227,10 +252,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           result: msg.result
         });
         if (!ack?.ok) throw new Error('The Earth toolbar could not accept this measurement.');
+        req.accepted = true;
+        await savePending();
         sendResponse({ ok: true });
-        pendingRequests.delete(msg.requestId);
+        // Retain the completed request until the bridge has acknowledged the
+        // page and asks to return. This prevents closing before a successful ACK.
       } catch {
         req.completed = false;
+        req.accepted = false;
         sendResponse({ ok: false, error: 'The Google Earth toolbar could not accept this measurement. Keep the original Earth tab open and retry.' });
       }
       await savePending();

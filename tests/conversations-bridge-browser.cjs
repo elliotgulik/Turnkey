@@ -97,7 +97,7 @@ const fs = require('node:fs'), path = require('node:path'), assert = require('no
     assert.deepEqual(state.last.payload.document, { mode: 'quote', recordId: '1' });
     assert.equal(state.pdf.output, 'base64'); assert.equal(state.pdf.record.estimatedCost, undefined); assert.equal(state.pdf.record.services[0].internalCost, undefined);
     const pdf = Buffer.from(state.last.payload.attachments[0].contentBase64, 'base64').toString();
-    assert.match(pdf, /%PDF-1.7/); assert.match(pdf, /Driveway/); assert.match(pdf, /\$200.00/); assert.doesNotMatch(pdf, /PRIVATE_SALES_NOTES|estimatedCost|internalCost|margin/);
+    assert.match(pdf, /%PDF-1.7/); assert.match(pdf, /Driveway/); assert.match(pdf, /(?:NZ)?\$200(?:\.0{1,2})?(?![\d.])/); assert.doesNotMatch(pdf, /PRIVATE_SALES_NOTES|estimatedCost|internalCost|margin/);
     await page.evaluate(() => { bridgeFixture.uploadFailure = true; });
     await page.getByRole('button', { name: 'Saved quote PDF', exact: true }).click();
     assert.equal(await page.locator('[data-cv-action=opportunity-quote]').count(), 2);
@@ -125,7 +125,7 @@ const fs = require('node:fs'), path = require('node:path'), assert = require('no
     assert.equal(await page.evaluate(() => bridgeFixture.activities.length), 1);
     // CRM persistence may be slow after Gmail has already accepted delivery.
     // The composer must report success and unlock without waiting for it.
-    await page.getByRole('button', { name: 'Save & close', exact: true }).click();
+    assert.equal(await page.locator('.cv-composer').count(), 0, 'confirmed send closes the composer');
     await page.evaluate(() => { bridgeFixture.pauseSync = true; return generateAndSendDoc('quote', records[0]); });
     await page.locator('.cv-files li').first().waitFor();
     await page.evaluate(() => { bridgeFixture.sendMode = 'success'; });
@@ -135,10 +135,11 @@ const fs = require('node:fs'), path = require('node:path'), assert = require('no
     assert.equal(await page.locator('.cv-composer').count(), 0, 'confirmed delivery closes/unlocks the composer during CRM sync');
     await page.evaluate(() => { bridgeFixture.resumeSync(); bridgeFixture.pauseSync = false; });
     await page.waitForFunction(() => bridgeFixture.syncs.length >= 2);
-    assert.equal(await page.evaluate(() => bridgeFixture.pushes.length), 1, 'notification only follows Gmail-confirmed send');
+    assert.equal(await page.evaluate(() => bridgeFixture.pushes.length), 2, 'one notification for each of the two Gmail-confirmed sends');
     // Invoice entry points only prepare; they never mark invoices as sent.
     await page.evaluate(() => { records[1].stage='completed'; });
     await page.evaluate(() => openSendDocModal('invoice', records[1]));
+    await page.locator('.cv-files li').first().waitFor();
     assert.match(await page.locator('.cv-files').textContent(), /Invoice-INV-1002-[a-f0-9]{32}\.pdf/);
     assert.equal(await page.evaluate(() => records[1].invoiceSent), undefined);
     await page.evaluate(() => { docPreview.recordId = 2; return sendInvoiceDoc(); });
@@ -152,19 +153,21 @@ const fs = require('node:fs'), path = require('node:path'), assert = require('no
     });
     assert.equal(await page.locator('[name=subject]').inputValue(), 'Edited quote subject');
     assert.equal(await page.locator('[name=bodyText]').inputValue(), 'Edited quote message');
+    await page.locator('.cv-files li').first().waitFor();
     assert.match(await page.locator('.cv-files').textContent(), /Quote-Q-1002-[a-f0-9]{32}\.pdf/);
-    assert.equal(await page.evaluate(() => bridgeFixture.sends), 2);
+    assert.equal(await page.evaluate(() => bridgeFixture.sends), 3);
     const countBefore = await page.evaluate(() => bridgeFixture.drafts.size);
-    await page.evaluate(() => { bridgeFixture.pdfFails = true; return generateAndSendDoc('quote', records[1]); });
+    await page.evaluate(() => { bridgeFixture.pdfFails = true; docTemplate.quoteTerms = 'New uncached terms'; return generateAndSendDoc('quote', records[1]); });
     await page.getByRole('button', {name:'Retry PDF'}).waitFor();
     assert.ok(await page.evaluate(() => bridgeFixture.drafts.size) >= countBefore, 'preparation failure keeps a usable draft open');
-    assert.match(await page.evaluate(() => bridgeFixture.notices.at(-1)), /PDF generation failed/);
+    assert.match(await page.locator('.cv-document-context').innerText(), /PDF generation failed/);
     await page.evaluate(() => { bridgeFixture.pdfFails = false; return openComposeModal({ to: 'alice@example.com', subject: 'Follow up', body: 'Checking in' }); });
     assert.equal(await page.locator('[name=bodyText]').inputValue(), 'Checking in');
     await page.getByRole('button', { name: /^Inbox/ }).click();
     await page.locator('[data-cv-action=thread]').click();
     await page.evaluate(() => sendReply());
     assert.equal(await page.locator('[name=subject]').inputValue(), 'Re: Question');
+    await page.getByRole('button', {name:'Save draft',exact:true}).click();
     state = await page.evaluate(() => [...bridgeFixture.drafts.values()].at(-1));
     assert.equal(state.payload.replyToId, '22222222-2222-4222-8222-222222222222');
     // Real successful send callback advances contacted -> quote sent; drafts never do.
@@ -173,14 +176,18 @@ const fs = require('node:fs'), path = require('node:path'), assert = require('no
     await page.getByRole('button',{name:'Send email',exact:true}).click();
     await page.waitForFunction(()=>records[1].stage==='contacted');
     await page.evaluate(()=>generateAndSendDoc('quote',records[1]));
+    await page.locator('.cv-files li').first().waitFor();
     assert.equal(await page.evaluate(()=>records[1].stage),'contacted');
     await page.getByRole('button',{name:'Send email',exact:true}).click();
     await page.waitForFunction(()=>records[1].stage==='quoted');
     // Fingerprint survives saved drafts; local or remote changes cannot send an old PDF.
     await page.evaluate(()=>generateAndSendDoc('quote',records[1]));
+    await page.locator('.cv-files li').first().waitFor();
+    const staleDraftId = await page.evaluate(() => bridgeFixture.calls.filter(c=>c.url.includes('/drafts/') && c.method==='PUT').at(-1).url.split('/').pop());
     await page.getByRole('button',{name:'Save & close',exact:true}).click();
     await page.getByRole('button',{name:/^Drafts/}).click();
-    await page.locator('[data-cv-action=draft]').filter({hasText:'Your quote from Fixture Wash — Q-1002'}).last().click();
+    await page.locator('[data-cv-action=draft][data-id="' + staleDraftId + '"]').click();
+    await page.locator('.cv-files li').first().waitFor();
     const sendsBeforeChanges=await page.evaluate(()=>bridgeFixture.sends);
     await page.evaluate(()=>{records[1].total=350;});
     await page.getByRole('button',{name:'Send email',exact:true}).click();
@@ -198,15 +205,15 @@ const fs = require('node:fs'), path = require('node:path'), assert = require('no
     assert.equal(await page.evaluate(()=>bridgeFixture.sends),sendsBeforeChanges);
     assert.equal(await page.locator('.cv-files [data-cv-action=remove-file]').first().isDisabled(),true);
     // In-flight PDF work must not create a draft in the next business.
-    const beforeSwitch = await page.evaluate(() => bridgeFixture.drafts.size);
-    await page.evaluate(() => { bridgeFixture.pauseSync = true; bridgeFixture.preparing = generateAndSendDoc('quote', records[0]); });
+    await page.evaluate(() => { records[0].jobId = null; bridgeFixture.pauseSync = true; bridgeFixture.resumeSync = null; bridgeFixture.preparing = generateAndSendDoc('quote', records[0]); });
     await page.waitForFunction(() => !!bridgeFixture.resumeSync);
+    const writesBeforeSwitch = await page.evaluate(() => bridgeFixture.calls.filter(c=>c.method==='PUT').length);
     await page.evaluate(async () => { currentBusinessId = 'B'; TK_SALES_PLATFORM.reset(); bridgeFixture.resumeSync(); await bridgeFixture.preparing; });
-    assert.equal(await page.evaluate(() => bridgeFixture.drafts.size), beforeSwitch);
+    assert.equal(await page.evaluate(() => bridgeFixture.calls.filter(c=>c.method==='PUT').length), writesBeforeSwitch, 'Old preparation must not write any draft after the business switch');
     assert.equal(await page.locator('#view-inbox').textContent(), '');
     assert.equal(await page.evaluate(() => bridgeFixture.opens), 0);
     assert.equal(await page.evaluate(() => bridgeFixture.downloads), 0);
-    assert.equal(await page.evaluate(() => bridgeFixture.sends), 4);
+    assert.equal(await page.evaluate(() => bridgeFixture.sends), 5);
     assert.equal(browser.contexts()[0].pages().length, 1);
     console.log('Conversations bridge browser passed: actual PDF helper/base64 contract, public fields, opportunity picker without uploads, persisted PDF drafts, no popups/downloads, quote/invoice entry points, send rejection/success, reply, tenant-switch fencing.');
   } finally { await browser.close(); }

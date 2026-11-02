@@ -236,7 +236,7 @@ test('plural native service labels retain separate answers in flat and nested su
     const fields = { submissions: [
       { label: 'Full name', value: ' Jane Doe ' },
       { label: 'Email address', value: 'jane@example.test' },
-      { label, value: [' House wash ', 'Roof wash', { value: 'invalid' }] },
+      { label, value: [' House wash ', 'Roof wash', { unrelated: 'invalid' }] },
     ] }
     for (const body of [fields, { data: fields }, { submission: fields }, { data: { submission: fields } }]) {
       const result = await handleWixLead({ token: 't', body, lookupSource: async () => ({ business_id: 'A' }),
@@ -314,4 +314,126 @@ test('Wix checkbox labels supplied as a joined answer become separate requested 
  let saved;
  await handleWixLead({token:'t',body:{name:'Fixture',submissions:[{label:'Select Services Required',value:'House Clean, Roof Treatment; Driveway Clean'}]},lookupSource:async()=>({business_id:'A'}),addLead:async p=>{saved=p;return{id:'saved'}}});
  assert.deepEqual(saved.requestedServices,['House Clean','Roof Treatment','Driveway Clean']);
+});
+
+test('select services imports every checkbox option and urgency through nested Automation wrappers', async () => {
+  const selections = ['House Clean', 'Window Clean (Outside Only)', 'Roof Treatment', 'Driveway Clean'];
+  for (const container of ['submissions', 'fields', 'answers']) {
+    for (const label of ['Select services', 'select_services', 'Select Services Required']) {
+      const submission = {
+        _id: 'automation-submission-42', business_id: 'spoofed',
+        [container]: [
+          { label: 'Full name', value: { value: 'Jane Doe' } },
+          { label: 'Email address', value: { value: 'jane@example.test' } },
+          { label, value: selections.map((label, i) => ({ label, value: `choice-${i}` })) },
+          { label: 'Urgency', value: { label: 'As soon as possible', value: 'as_soon_as_possible' } },
+          { label: 'Leave us a message...', value: 'Please call first, and check the roof too.' },
+          { label: 'Unrelated question', value: 'Fence Clean' },
+        ],
+      };
+      let saved;
+      const result = await handleWixLead({ token: 't', body: { payload: { data: { submission } } },
+        lookupSource: async () => ({ business_id: 'real-tenant' }),
+        addLead: async payload => { saved = payload; return { id: 'saved', deduped: true }; } });
+      assert.equal(result.status, 200);
+      assert.equal(result.deduped, true);
+      assert.equal(saved.business_id, 'real-tenant');
+      assert.equal(saved.external_id, 'automation-submission-42');
+      assert.deepEqual(saved.requestedServices, selections);
+      assert.equal(saved.customer.timing, 'As soon as possible');
+      assert.equal(saved.urgency, 'As soon as possible');
+      assert.equal(saved.customer.notes, 'Please call first, and check the roof too.');
+    }
+  }
+});
+
+test('repeated label answers and multiple explicit service fields are accumulated', async () => {
+  let saved;
+  const result = await handleWixLead({ token: 't', body: { name: 'Jane',
+    requestedServices: ['House Clean'],
+    'Select services': { values: [{ value: 'Roof Treatment' }, { label: 'Outside windows', value: true }] },
+    submissions: [
+      { label: 'Select services', value: 'Driveway Clean' },
+      { label: 'Select services', value: ['Deck Clean', 'Fence Clean'] },
+      { label: 'Urgency', value: 'as soon as possible' },
+    ],
+  }, lookupSource: async () => ({ business_id: 'A' }),
+  addLead: async payload => { saved = payload; return { id: 'saved' }; } });
+  assert.equal(result.status, 200);
+  assert.deepEqual(saved.requestedServices, ['House Clean', 'Roof Treatment', 'Outside windows', 'Driveway Clean', 'Deck Clean', 'Fence Clean']);
+  assert.equal(saved.customer.timing, 'as soon as possible');
+  assert.equal(saved.urgency, 'as soon as possible');
+});
+
+test('field maps decode labelled values and written service answers without importing choices', async () => {
+  for (const fields of [
+    { 'Full name': { value: 'Jane' }, 'Select services': { value: 'House Clean; Roof Treatment\nDriveway Clean' }, urgency: { value: 'As soon as possible' } },
+    { nameId: { label: 'Full name', value: 'Jane' }, serviceId: { label: 'Select services', value: ['House Clean', 'Roof Treatment', 'Driveway Clean'], options: ['Not selected'] }, timingId: { label: 'Urgency', value: 'As soon as possible' } },
+  ]) {
+    let saved;
+    const result = await handleWixLead({ token: 't', body: { data: { payload: { submission: { fields } } } },
+      lookupSource: async () => ({ business_id: 'A' }), addLead: async payload => { saved = payload; return { id: 'saved' }; } });
+    assert.equal(result.status, 200);
+    assert.deepEqual(saved.requestedServices, ['House Clean', 'Roof Treatment', 'Driveway Clean']);
+    assert.equal(saved.customer.timing, 'As soon as possible');
+  }
+});
+
+test('unknown fields, unselected options and arbitrary structures never become services', async () => {
+  let saved;
+  const result = await handleWixLead({ token: 't', body: { name: 'Jane',
+    metadata: { services: ['Metadata roof clean'] },
+    customQuestion: ['House Clean'], urgency: 'As soon as possible',
+    fields: [
+      { label: 'Would you like roof, house or window cleaning?', value: 'Call me' },
+      { label: 'Select services', options: ['Roof Clean'], value: [
+        { label: 'House Clean', checked: false }, { label: 'Roof Clean', selected: false },
+        { label: 'Deck Clean', value: false }, { unrelated: 'Fence Clean' },
+        ['Nested garbage'], true, null,
+      ] },
+    ],
+  }, lookupSource: async () => ({ business_id: 'A' }), addLead: async payload => { saved = payload; return { id: 'saved' }; } });
+  assert.equal(result.status, 200);
+  assert.deepEqual(saved.requestedServices, []);
+  assert.equal(saved.customer.timing, 'As soon as possible');
+});
+
+test('nested answer objects cannot bypass identity validation', async () => {
+  for (const fields of [
+    [{ label: 'Full name', value: { arbitrary: 'Jane' } }],
+    [{ label: 'Full name', value: { value: 'Jane' } }, { label: 'Email', value: { value: 'bad-email' } }],
+  ]) {
+    const result = await handleWixLead({ token: 't', body: { payload: { data: { submission: { fields } } } },
+      lookupSource: async () => ({ business_id: 'A' }), addLead: async () => assert.fail('invalid lead persisted') });
+    assert.equal(result.status, 400);
+  }
+});
+
+test('nested wrappers and option objects have bounded scans and do not mutate inputs', () => {
+  const fields = Object.freeze([
+    Object.freeze({ label: 'Full name', value: 'Jane' }),
+    Object.freeze({ label: 'Urgency', value: Object.freeze({ value: 'As soon as possible' }) }),
+  ]);
+  assert.equal(mapWixPayload(Object.freeze({ payload: Object.freeze({ fields }) })).timing, 'As soon as possible');
+  const cyclic = {}; cyclic.payload = cyclic;
+  assert.equal(mapWixPayload(cyclic).name, '');
+  let deep = { name: 'Too deep' };
+  for (let i = 0; i < 10; i++) deep = { payload: deep };
+  assert.equal(mapWixPayload(deep).name, '');
+});
+
+test('urgency contract prefers explicit urgency and retains customer timing for legacy notes', async () => {
+  for (const [fields, expected] of [
+    [{ urgency: ' As soon as possible ', timing: 'Next month' }, 'As soon as possible'],
+    [{ timing: { value: 'Within two weeks' } }, 'Within two weeks'],
+    [{}, ''],
+  ]) {
+    let saved;
+    const result = await handleWixLead({ token: 't', body: { name: 'Jane', ...fields },
+      lookupSource: async () => ({ business_id: 'A' }), addLead: async payload => { saved = payload; return { id: 'saved' }; } });
+    assert.equal(result.status, 200);
+    assert.equal(saved.urgency, expected);
+    assert.equal(saved.customer.timing || '', expected);
+    assert.equal(saved.customer.source, 'Wix');
+  }
 });

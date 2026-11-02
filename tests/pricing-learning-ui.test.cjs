@@ -11,3 +11,28 @@ test('learning submission occurs only after a durable quote save and is idempote
 test('switching businesses clears pending learning rather than submitting another business records',async()=>{const{c,calls}=fixture();c.confirmQuoteSend();c.currentBusinessId='biz-b';await c.syncRecordToSupabase(c.records[0]);await new Promise(resolve=>setImmediate(resolve));assert.equal(calls.length,0);});
 test('history failure leaves the durably saved quote intact with an actionable retry warning',async()=>{const{c,toasts}=fixture();c.window.TK_SALES_PLATFORM.request=async()=>{throw Error('History unavailable');};c.confirmQuoteSend();await c.syncRecordToSupabase(c.records[0]);await new Promise(resolve=>setImmediate(resolve));assert.equal(c.records[0].total,225);assert.match(toasts[0],/Quote saved.*Retry in Settings/);});
 test('accepted quotes never capture a new learning decision',async()=>{const{c,calls}=fixture();c.records[0].stage='won';c.confirmQuoteSend();assert.equal(c.records[0].quoteLearning,undefined);await c.syncRecordToSupabase(c.records[0]);assert.equal(calls.length,0);});
+
+test('CRM captures direct measured-service overrides automatically but excludes allocated totals and counts',()=>{
+ const {c}=fixture();c.window.TK_PRICE_LEARNING=require('../pricing-learning-engine.js');
+ let snapshot=c.window.TK_PRICE_LEARNING_UI.capture(c.records[0]);
+ assert.equal(snapshot.lines[0].reason,'pricing_correction');
+ assert.equal(snapshot.lines[1].reason,'','panes need an explicit reason');
+ c.quoteTotalOverride=225;snapshot=c.window.TK_PRICE_LEARNING_UI.capture(c.records[0]);
+ assert.equal(snapshot.lines[0].reason,'','a distributed total does not prove a service-price decision');
+ c.quoteTotalOverride=null;delete c.draftLines[0].fixedPrice;
+ assert.equal(c.window.TK_PRICE_LEARNING_UI.capture(c.records[0]).lines[0].reason,'');
+});
+test('failed history refresh clears old learned recommendations and falls back to configured settings',async()=>{
+ const {c}=fixture();c.window.TK_PRICE_LEARNING=require('../pricing-learning-engine.js');
+ const api=c.window.TK_PRICE_LEARNING_UI,entry=api.recommendations().lines[0];
+ c.window.TK_SALES_PLATFORM.request=async()=>({settings:{},observations:Array.from({length:5},(_,i)=>({...entry,line:undefined,businessId:'biz-a',quoteKey:'q'+i,jobId:'j'+i,chosenPrice:entry.baselinePrice*1.2,reason:'pricing_correction'}))});
+ await api.load(true);assert.equal(api.recommendations().results[0].sampleCount,5);
+ c.window.TK_SALES_PLATFORM.request=async()=>{throw Error('offline')};await api.load(true);
+ assert.equal(api.recommendations().results[0].sampleCount,0);
+ assert.equal(api.recommendations().results[0].recommendedPrice,Math.round(entry.baselinePrice*100)/100);
+});
+
+test('acceptance between capture and retry prevents further learning writes',async()=>{
+ const {c,calls}=fixture();c.confirmQuoteSend();c.records[0].quoteAcceptedAt='2026-11-02T00:00:00Z';
+ await c.syncRecordToSupabase(c.records[0]);assert.equal(calls.length,0);
+});

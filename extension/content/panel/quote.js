@@ -63,12 +63,12 @@ export function renderQuotePanel(container, ctx, actions) {
   const activeRows=()=>lineState.concat(extraLines).filter(l=>l.include);
   const rawQuantity=l=>l.measurementId?measurementQuantity(ctx.measurements.find(m=>m.id===l.measurementId),SERVICES[l.svc]):l.qty;
   function computeLines() {
-    return activeRows().map(l=>({lineKey:l.lineKey,svc:l.svc,qty:l.appliedQuantity??rawQuantity(l),originalQuantity:l.originalQuantity??rawQuantity(l),manualPrice:l.manualPrice,reason:l.reason,verifiedQuantity:l.verifiedQuantity,measurementReason:l.measurementReason,...(l.svc==='housewash'?{storeys:Number(l.storeys)||1}:{})}));
+    return activeRows().map(l=>({lineKey:l.lineKey,svc:l.svc,qty:l.appliedQuantity??rawQuantity(l),originalQuantity:l.originalQuantity??rawQuantity(l),manualPrice:l.manualPrice,distributedPrice:l.distributedPrice,reason:l.reason,verifiedQuantity:l.verifiedQuantity,measurementReason:l.measurementReason,...(l.svc==='housewash'?{storeys:Number(l.storeys)||1}:{})}));
   }
   function changeService(line,svc) {
     line.svc=svc;
     // A different unit/service needs its own quantity verification and reason.
-    delete line.appliedQuantity;delete line.originalQuantity;delete line.verifiedQuantity;delete line.measurementReason;delete line.reason;
+    delete line.appliedQuantity;delete line.originalQuantity;delete line.verifiedQuantity;delete line.measurementReason;delete line.reason;delete line.manualPrice;delete line.distributedPrice;
     if(svc==='housewash'&&!line.storeys)line.storeys=1;
   }
   function priceCard(l,i,model) {
@@ -82,7 +82,7 @@ export function renderQuotePanel(container, ctx, actions) {
       <label class="tk-price-line">Final service price (GST inclusive dollars)<input class="tk-qty-input" style="width:120px" aria-label="Final service price for ${escapeHtml(SERVICES[l.svc]?.label)}" data-line-price="${escapeHtml(l.lineKey)}" type="number" min="0" step="0.01" value="${row.manualPrice==null?l.fixedPrice:Number.isFinite(row.manualPrice)?row.manualPrice:''}"></label>
       <button type="button" class="tk-link-btn" data-reset-line="${escapeHtml(l.lineKey)}" ${row.manualPrice==null?'hidden':''}>Reset this service to recommended</button>
       <p class="tk-error" role="status" data-line-floor-warning ${l.fixedPrice+0.001<rec.marginFloor?'':'hidden'}>This service price is below its target margin floor. You can save this manual price.</p>
-      <label class="tk-quote-field">Optional override reason<select class="tk-select" aria-label="Override reason" data-line-reason="${escapeHtml(l.lineKey)}"><option value="">No explanation — excluded from training</option>${Object.entries(REASONS).map(([value,label])=>`<option value="${value}" ${row.reason===value?'selected':''}>${label}</option>`).join('')}</select></label>
+      <label class="tk-quote-field">Price learning reason (optional)<select class="tk-select" aria-label="Override reason" data-line-reason="${escapeHtml(l.lineKey)}"><option value="">Automatic for edited measured-service prices</option>${Object.entries(REASONS).map(([value,label])=>`<option value="${value}" ${row.reason===value?'selected':''}>${label}</option>`).join('')}</select></label>
       <p class="tk-modal-sub">Discounts never train pricing. Pricing corrections and explained difficult access can train matching contexts.</p>
       <div class="tk-measurement-correction"><p class="tk-modal-sub">Original quantity: ${escapeHtml(row.originalQuantity??rawQuantity(row))} ${escapeHtml(SERVICES[l.svc]?.unit)}. Applying a verified quantity changes this service quantity and price only; it does not move the outline or change the geometry.</p>
       ${hasHint&&Number.isFinite(hint)&&hint>0?`<p class="tk-modal-sub">Learned measurement hint: ${hint.toFixed(2)} ${escapeHtml(SERVICES[l.svc]?.unit)} (${Number(rec.measurement.sampleCount)||0} quotes). Review before applying.</p><button type="button" class="tk-link-btn" data-measure-hint="${escapeHtml(l.lineKey)}" data-hint="${hint}">Use hint as verified input</button>`:''}
@@ -216,6 +216,7 @@ export function renderQuotePanel(container, ctx, actions) {
     // updates preserve decimal typing/caret and the pending click target.
     function updateServicePrice(input) {
       rowFor(input.dataset.linePrice).manualPrice=input.value===''?NaN:Number(input.value);
+      delete rowFor(input.dataset.linePrice).distributedPrice;
       pendingTotal=null;
       let model,error='';
       try{model=priceModel();}catch(e){error=e.message;}
@@ -256,7 +257,7 @@ export function renderQuotePanel(container, ctx, actions) {
         const total=Number(pendingTotal),model=priceModel();
         if(!pendingTotal||!Number.isFinite(total)||total<1)throw Error('Enter a positive total before distributing.');
         const amounts=allocatePrices(total,model.lines.map(l=>l.fixedPrice));
-        activeRows().forEach((row,i)=>{row.manualPrice=amounts[i];row.reason='';});pendingTotal=null;totalError='';
+        activeRows().forEach((row,i)=>{row.manualPrice=amounts[i];row.distributedPrice=true;row.reason='';});pendingTotal=null;totalError='';
       }catch(error){totalError=error.message;}
       paint();
     });

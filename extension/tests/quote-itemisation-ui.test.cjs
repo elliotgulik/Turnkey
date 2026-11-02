@@ -69,6 +69,9 @@ test('quote UI reuses outline quantities, requires manual panes and saves exactl
     assert.equal(await page.locator('[data-create]').isDisabled(),true);
     await page.locator('[data-line-price]').first().fill('123.45');await page.locator('[data-line-price]').first().dispatchEvent('change');
     await page.locator('[data-access]').selectOption('standard');
+    // A direct measured-service edit is captured without a reason-selection step.
+    await page.locator('[data-create]').click();
+    assert.equal((await page.evaluate(()=>window.saved)).quoteLearning.lines[0].reason,'pricing_correction');
     // Draft measurements do nothing until Apply, which preserves original geometry.
     const quantityBefore=await page.locator('[data-service-price]').first().innerText();
     await page.locator('[data-verified]').first().fill('240');
@@ -81,7 +84,7 @@ test('quote UI reuses outline quantities, requires manual panes and saves exactl
     await page.locator('[data-price]').fill('650.37');await page.locator('[data-price]').dispatchEvent('change');
     await page.locator('[data-distribute-total]').click();
     assert.match(await page.locator('[data-price-adjustment]').innerText(),/exact sum/);
-    const displayed=await page.locator('[data-service-price]').evaluateAll(rows=>rows.map(row=>({svc:row.dataset.servicePrice,cents:Math.round(Number(row.querySelector('strong').textContent.replace(/[$,]/g,''))*100)})));
+    const displayed=await page.locator('[data-service-price]').evaluateAll(rows=>rows.map(row=>({svc:row.dataset.servicePrice,cents:Math.round(Number(row.querySelector('[data-line-price]').value)*100)})));
     assert.equal(displayed.reduce((sum,line)=>sum+line.cents,0),65037);
     await page.locator('[data-create]').click();
     const saved=await page.evaluate(()=>window.saved);
@@ -97,7 +100,12 @@ test('quote UI reuses outline quantities, requires manual panes and saves exactl
     assert.deepEqual(saved.lines.map(line=>[line.svc,line.qty]),[['driveway',240],['housewash',60],['windows',12]]);
     assert.deepEqual(saved.areaPolys.map(area=>[area.service,area.size,area.unit,area.type]),[['driveway',200,'m²','area'],['housewash',60,'m','perimeter']]);
     assert.equal(saved.areaPolys[0].geoPts.length,saved.areaPolys[1].geoPts.length);
-    if(process.env.TK_EXTENSION_UI_SCREENSHOT)await page.screenshot({path:process.env.TK_EXTENSION_UI_SCREENSHOT});
+    if(process.env.TK_EXTENSION_UI_SCREENSHOT){
+      await page.screenshot({path:process.env.TK_EXTENSION_UI_SCREENSHOT});
+      await page.setViewportSize({width:390,height:844});
+      await page.screenshot({path:process.env.TK_EXTENSION_UI_SCREENSHOT.replace('.png','-mobile.png')});
+      await page.setViewportSize({width:1100,height:1000});
+    }
     await page.evaluate(()=>window.paintQuote({measurements:[],manualWindows:true,boundJob:null}));
     assert.equal(await page.locator('[data-extra-qty="0"]').inputValue(),'');
     assert.equal(await page.locator('[data-create]').isDisabled(),true);
@@ -111,7 +119,7 @@ test('quote UI reuses outline quantities, requires manual panes and saves exactl
     const priceHandle=await page.locator('[data-line-price]').first().elementHandle();
     const createHandle=await page.locator('[data-create]').elementHandle();
     await page.locator('[data-line-price]').first().fill('203.47');
-    assert.match(await page.locator('[data-final-total]').innerText(),/203.47/);
+    assert.match(await page.locator('[data-final-total]').innerText(),/NZ\$203\.5/);
     await page.locator('[data-create]').click(); // actual blur + pointer click; no synthetic change
     assert.equal(await page.evaluate(()=>window.saveCount),beforeSaves+1,'a single click immediately after editing saves once');
     assert.equal((await page.evaluate(()=>window.saved)).lines[0].fixedPrice,203.47);
@@ -123,7 +131,7 @@ test('quote UI reuses outline quantities, requires manual panes and saves exactl
       renderQuoteCreated(document.querySelector('#quote'),{address:'Saved property',total:123.45,lines:[{svc:'driveway',qty:200,fixedPrice:123.45}],SERVICES:window.TK_PRICING.SERVICES,learningWarning:'Your quote is saved. Learning was not saved.'},{onRetryLearning:async()=>{if(++window.retries===1)throw Error('Temporary outage');},onDone:()=>{}});
     });
     await page.locator('[data-retry-learning]').click();assert.match(await page.locator('[data-learning-status]').innerText(),/quote is saved.*Temporary outage/);
-    assert.match(await page.locator('.tk-created-total').innerText(),/123.45/);
+    assert.match(await page.locator('.tk-created-total').innerText(),/NZ\$123\.5/);
     await page.locator('[data-retry-learning]').click();await page.locator('[data-retry-learning]').waitFor({state:'hidden'});assert.equal(await page.locator('[data-retry-learning]').isHidden(),true);
     assert.equal(await page.evaluate(()=>window.retries),2);assert.deepEqual(errors,[]);
   } finally {await browser.close()}

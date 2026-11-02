@@ -1771,3 +1771,250 @@ test('customer follow-up opt-out suppresses queued reminders across jobs without
  const due=new Date(Date.now()-3600000).toISOString(),customerId=id(90),job={id:id(91),customer_id:customerId,business_id:'A',status:'quoted',details:{nextFollowUpAt:due}},task={id:id(92),business_id:'A',kind:'reminder',dedupe_key:job.id+':'+due,payload:{jobId:job.id,message:'Follow up'}};
  const db=database({jobs:[job],customers:[{id:customerId,business_id:'A',followups_disabled:true}],integration_tasks:[task]});claimMock(db);const alerts=[];const {worker}=setup(db,undefined,{sendNotification:async(_,alert)=>alerts.push(alert)});await worker.tick();assert.equal(alerts.length,0);assert.equal(job.status,'quoted');assert.equal(task.state,'succeeded');
 });
+
+const fullImportPath = '/api/sales/servicem8/import';
+const fullImportMarker = f => f.db.tables.external_object_mappings.find(row => row.business_id === 'A' &&
+  row.connection_generation === id(2) && row.object_type === 'full_import');
+const fullImportJobs = () => [
+  { uuid:id(4101), status:'Quote', active:1, total_invoice_amount:'230', date:'2026-10-01 09:00:00' },
+  { uuid:id(4102), status:'Work Order', active:1, total_invoice_amount:'0' },
+  { uuid:id(4103), status:'Completed', active:1, total_invoice_amount:'345' },
+  { uuid:id(4104), status:'Unsuccessful', active:1 },
+];
+
+test('full import: admin enqueue is durable, generation scoped and dedupes concurrent requests without provider IO', async () => {
+  const f=seedFixture();
+  const results=await Promise.all([f.route('POST',fullImportPath,owner),f.route('POST',fullImportPath,owner)]);
+  assert.ok(results.every(res=>res.statusCode===202));
+  assert.equal(f.calls.length,0);
+  assert.equal(f.db.tables.integration_tasks.length,1);
+  const task=f.db.tables.integration_tasks[0];
+  assert.equal(task.kind,'dispatch_seed');
+  assert.deepEqual(task.payload,{generation:id(2),fullImport:true});
+  assert.equal(task.business_id,'A');
+  assert.deepEqual(results[0].body,{ok:true,queued:true,generation:id(2),fullImport:true});
+  assert.equal((await f.route('POST',fullImportPath,{userId:'outsider',businessId:'A'})).statusCode,403);
+  assert.equal((await f.route('POST',fullImportPath,{userId:'u',businessId:'B'})).statusCode,403);
+  f.db.tables.users.push({id:'manager',business_id:'B',role:'manager'});
+  assert.equal((await f.route('POST',fullImportPath,{userId:'manager',businessId:'B'})).statusCode,409);
+  f.db.fail=(table,op)=>table==='integration_tasks'&&op==='insert';
+  f.db.tables.integration_tasks=[];
+  const failed=await f.route('POST',fullImportPath,owner);
+  assert.equal(failed.statusCode,503);assert.equal(failed.body.queued,undefined);
+});
+
+test('full import: all active supported statuses import, repeats reuse IDs and periodic sync retains full mode', async () => {
+  const f=seedFixture({extraJobs:[...fullImportJobs(),
+    {uuid:id(4105),status:'Quote',active:0},{uuid:id(4106),status:'Mystery',active:1}],tables:{jobs:[],external_object_mappings:[]}});
+  await f.route('POST',fullImportPath,owner);await f.worker.tick();
+  const task=f.db.tables.integration_tasks[0];assert.equal(task.state,'succeeded');
+  const marker=fullImportMarker(f).snapshot;
+  assert.equal(marker.fullImport,true);assert.equal(marker.linked,6);assert.equal(marker.skipped,2);
+  assert.equal(marker.warnings.length,2);
+  const jobs=f.db.tables.jobs;
+  for(const [uuid,status] of [[4101,'quoted'],[4102,'won'],[4103,'completed'],[4104,'cancelled']]){
+    const job=jobs.find(row=>row.details?.serviceM8JobUuid===id(uuid));
+    assert.equal(job.id,SM.stableUuid('servicem8-inbound-job','A',id(2),id(uuid)));
+    assert.equal(job.status,status);assert.equal(job.scheduled_date,null);
+    assert.equal(job.details.wonAt,undefined);assert.equal(job.details.acceptedAt,undefined);
+    assert.equal(job.details.estimatedCost,undefined);assert.equal(job.details.lostAt,undefined);
+  }
+  assert.equal(jobs.find(row=>row.details?.serviceM8JobUuid===id(4101)).details.createdAt,'2026-09-30T20:00:00.000Z');
+  const originalIds=jobs.map(row=>row.id).sort();
+  await f.route('POST',fullImportPath,owner);await f.worker.tick();
+  assert.equal(task.state,'succeeded');assert.deepEqual(jobs.map(row=>row.id).sort(),originalIds);
+  await f.worker.scheduleReconciliation();
+  const recurring=f.db.tables.integration_tasks.find(row=>row.payload.recurring);
+  recurring.next_attempt_at=new Date(0).toISOString();
+  f.resources.job.push({uuid:id(4107),status:'Quote',active:1});
+  await f.worker.tick();
+  assert.equal(recurring.state,'pending');
+  assert.ok(jobs.some(row=>row.details?.serviceM8JobUuid===id(4107)));
+  assert.equal((await f.route('GET','/api/sales/servicem8/status',owner)).body.fullImport.fullImport,true);
+  assert.ok(f.calls.every(row=>row.options.method==='GET'));
+});
+
+test('full import: concurrent workers converge on deterministic job/customer IDs and immutable mappings', async () => {
+  const f=seedFixture({extraJobs:fullImportJobs(),tables:{jobs:[],external_object_mappings:[]}});
+  await f.route('POST',fullImportPath,owner);
+  // Two independent workers process full snapshots with the same database. The
+  // fake below enforces both mapping constraints used by PostgreSQL.
+  const originalFrom=f.db.from.bind(f.db);
+  f.db.from=table=>{
+    const query=originalFrom(table);
+    if(table==='external_object_mappings'){
+      const upsert=query.upsert;
+      query.upsert=(value,options)=>{
+        const conflict=f.db.tables.external_object_mappings.find(row=>row.business_id===value.business_id&&
+          row.connection_generation===value.connection_generation&&row.object_type===value.object_type&&
+          row.external_uuid===value.external_uuid&&row.local_id!==value.local_id);
+        if(conflict)return {then:resolve=>Promise.resolve({error:{code:'23505'}}).then(resolve)};
+        return upsert(value,options);
+      };
+    }
+    return query;
+  };
+  const task=f.db.tables.integration_tasks[0];
+  const second={...task,id:id(4199),dedupe_key:'concurrent-test',payload:{generation:id(2),fullImport:true}};
+  f.db.tables.integration_tasks.push(second);
+  const peer=setup(f.db,async(url,options)=>{
+    if(url.includes('/webhook_subscriptions?'))return response([]);
+    if(url.endsWith('/vendor.json'))return response(f.vendor);
+    const resource=new URL(url).pathname.split('/').at(-1).replace('.json','');
+    assert.ok(Object.hasOwn(f.resources,resource));assert.equal(options.method,'GET');
+    return response(f.resources[resource]);
+  });
+  await Promise.all([f.worker.tick(),peer.worker.tick()]);
+  assert.equal(task.state,'succeeded');assert.equal(second.state,'succeeded');
+  assert.equal(f.db.tables.jobs.length,6);
+  assert.equal(new Set(f.db.tables.jobs.map(row=>row.id)).size,6);
+  assert.equal(new Set(f.db.tables.customers.map(row=>row.id)).size,f.db.tables.customers.length);
+  const links=f.db.tables.external_object_mappings.filter(row=>row.object_type==='job');
+  assert.equal(links.length,6);assert.equal(new Set(links.map(row=>row.external_uuid)).size,6);
+});
+
+test('full import: accepted originals and unique existing customer links survive reconciliation', async () => {
+  const customer={id:id(4201),business_id:'A',source:'Wix',name:'Original',email:'alex@example.test',phone:'0215550100',address:'29 Selwyn Cres'};
+  const local={id:id(4202),business_id:'A',customer_id:customer.id,quote_id:id(4203),status:'won',
+    details:{total:575,estimatedCost:200,gstRegistered:true,acceptedAt:'2026-10-01T00:00:00Z',
+      salesHistory:[{type:'accepted',at:'2026-10-01T00:00:00Z'}],services:[{svc:'housewash',priceSnapshot:575}],notes:'keep'}};
+  const quote={id:id(4203),business_id:'A',amount:575,status:'accepted'};
+  const f=seedFixture({tables:{jobs:[local],customers:[customer],quotes:[quote],external_object_mappings:[]}});
+  f.resources.job[0].total_invoice_amount='690';
+  const original=structuredClone({customer,quote,details:local.details});
+  await f.route('POST',fullImportPath,owner);await f.worker.tick();
+  assert.equal(f.db.tables.integration_tasks[0].state,'succeeded');
+  assert.equal(f.db.tables.jobs.filter(row=>row.details?.serviceM8JobUuid===id(31)).length,0,'unique existing job is reused');
+  const {serviceM8Pricing,...details}=local.details;
+  assert.equal(serviceM8Pricing.total,690);
+  assert.deepEqual({customer,quote,details},original);
+  assert.equal(local.customer_id,customer.id);
+  assert.ok(f.db.tables.external_object_mappings.some(row=>row.object_type==='job'&&row.local_id===local.id&&row.external_uuid===id(31)));
+});
+
+test('full import: ambiguous matches and foreign-tenant identities are skipped with visible warnings', async () => {
+  const ambiguous=seedFixture({tables:{jobs:[],external_object_mappings:[],customers:[4301,4302].map(n=>({
+    id:id(n),business_id:'A',email:'alex@example.test',address:'29 Selwyn Cres'}))}});
+  await ambiguous.route('POST',fullImportPath,owner);await ambiguous.worker.tick();
+  assert.equal(ambiguous.db.tables.integration_tasks[0].state,'succeeded');
+  assert.ok(!ambiguous.db.tables.jobs.some(row=>row.details?.serviceM8JobUuid===id(31)));
+  assert.ok(fullImportMarker(ambiguous).snapshot.warnings.some(row=>row.jobUuid===id(31)&&/Multiple customer/.test(row.reason)));
+  const foreign={id:id(4310),business_id:'B',status:'quoted',details:{notes:'untouched'}};
+  const f=seedFixture({tables:{jobs:[foreign],customers:[{id:id(4311),business_id:'B',name:'Foreign'}],
+    external_object_mappings:[{business_id:'A',connection_generation:id(2),object_type:'job',local_id:foreign.id,external_uuid:id(31)}]}});
+  const before=structuredClone(foreign);
+  await f.route('POST',fullImportPath,owner);await f.worker.tick();
+  assert.equal(f.db.tables.integration_tasks[0].state,'succeeded');assert.deepEqual(foreign,before);
+  assert.ok(!f.stateSyncs.some(row=>row.p_job_id===foreign.id));
+  assert.ok(fullImportMarker(f).snapshot.warnings.some(row=>row.jobUuid===id(31)&&/outside this business/.test(row.reason)));
+});
+
+test('full import: database failures never stamp completion and retries preserve stable IDs', async () => {
+  for(const failedTable of ['jobs','customers','external_object_mappings']){
+    const f=seedFixture({tables:{jobs:[],external_object_mappings:[]}});
+    f.db.fail=(table,op,value)=>table===failedTable&&op==='upsert'&&
+      (table!=='external_object_mappings'||value.object_type==='full_import');
+    await f.route('POST',fullImportPath,owner);await f.worker.tick();
+    const task=f.db.tables.integration_tasks[0];assert.equal(task.state,'failed');
+    assert.equal(fullImportMarker(f),undefined);
+    const ids=f.db.tables.jobs.map(row=>row.id);
+    f.db.fail=null;
+    await f.route('POST',fullImportPath,owner);await f.worker.tick();
+    assert.equal(task.state,'succeeded');assert.equal(fullImportMarker(f).snapshot.fullImport,true);
+    assert.ok(ids.every(id=>f.db.tables.jobs.filter(row=>row.id===id).length===1));
+  }
+});
+
+const metricsRange={start:Date.parse('2026-10-01T00:00:00Z'),end:Date.parse('2026-11-01T00:00:00Z')};
+test('full import: analytics uses verified current prices including zero without rewriting quote/cost/history', async () => {
+  for(const total of [0,690]){
+    const snapshot=serviceM8PricingSnapshot({uuid:id(4401),total_invoice_amount:String(total)},[],{currency:'NZD'});
+    const job={id:id(4402),business_id:'A',customer_id:id(4403),quote_id:id(4404),status:'won',created_at:'2026-10-01T00:00:00Z',
+      details:{total:575,opportunityValue:575,estimatedCost:200,gstRegistered:true,acceptedAt:'2026-10-05T00:00:00Z',
+        salesHistory:[{type:'accepted',at:'2026-10-05T00:00:00Z'}],serviceM8Pricing:snapshot}};
+    const quote={id:id(4404),business_id:'A',amount:575,status:'accepted'};
+    const db=database({servicem8_connections:[privateConnection()],jobs:[job],quotes:[quote],
+      customers:[{id:id(4403),business_id:'A',source:'Wix'}],external_object_mappings:[{
+        business_id:'A',connection_generation:id(2),object_type:'job',local_id:job.id,external_uuid:id(4401),snapshot:{profile:{pricing:snapshot}}}]});
+    const before=structuredClone({job,quote});
+    const {route}=setup(db);
+    const res=await route('GET','/api/sales/metrics',{businessId:'A',query:metricsRange});
+    assert.equal(res.statusCode,200);assert.equal(res.body.bookedSales,total);
+    assert.equal(res.body.source[0].revenue,total);
+    assert.equal(res.body.estimatedProfit,null);assert.equal(res.body.costCoverage.known,0);
+    assert.deepEqual(res.body.pricing,{source:'Current ServiceM8 snapshots for linked jobs; saved quote/job totals for other jobs',
+      taxLabel:'Tax basis not specified',linked:1,currentTotals:1,unknownTotals:0});
+    assert.deepEqual({job,quote},before);
+  }
+});
+
+test('full import: analytics rejects wrong UUID/generation/tenant snapshots and leaves win dates unknown', async () => {
+  const snapshot=serviceM8PricingSnapshot({uuid:id(4501),total_invoice_amount:'999'},[]);
+  const job={id:id(4502),business_id:'A',status:'completed',created_at:'2026-10-01T00:00:00Z',details:{total:123,serviceM8Pricing:snapshot}};
+  const db=database({servicem8_connections:[privateConnection()],jobs:[job],external_object_mappings:[
+    {business_id:'B',connection_generation:id(2),object_type:'job',local_id:job.id,external_uuid:id(4501),snapshot:{profile:{pricing:snapshot}}},
+    {business_id:'A',connection_generation:id(999),object_type:'job',local_id:job.id,external_uuid:id(4501),snapshot:{profile:{pricing:snapshot}}},
+    {business_id:'A',connection_generation:id(2),object_type:'job',local_id:job.id,external_uuid:id(4503),snapshot:{profile:{pricing:snapshot}}},
+  ]});
+  const {route}=setup(db);
+  let res=await route('GET','/api/sales/metrics',{businessId:'A',query:metricsRange});
+  assert.equal(res.body.bookedSales,0);assert.equal(res.body.cohortWonValue,0);
+  assert.equal(res.body.unknownWinDates,1);assert.equal(res.body.pricing.unknownTotals,1);
+  db.tables.external_object_mappings.pop();
+  res=await route('GET','/api/sales/metrics',{businessId:'A',query:metricsRange});
+  assert.equal(res.body.cohortWonValue,123,'unlinked saved total remains available');assert.equal(res.body.pricing.linked,0);
+  db.fail=(table,op)=>table==='external_object_mappings'&&op==='select';
+  res=await route('GET','/api/sales/metrics',{businessId:'A',query:metricsRange});
+  assert.equal(res.statusCode,503);assert.equal(res.body.bookedSales,undefined);
+});
+
+test('full import: analytics prefers the newest verified snapshot and never falls back from an unknown latest total', async () => {
+  const old=serviceM8PricingSnapshot({uuid:id(4601),total_invoice_amount:'575'},[],{updatedAt:'2026-10-01T00:00:00Z'});
+  const current=serviceM8PricingSnapshot({uuid:id(4601),total_invoice_amount:'0'},[],{updatedAt:'2026-10-02T00:00:00Z'});
+  const job={id:id(4602),business_id:'A',status:'won',created_at:'2026-10-01T00:00:00Z',
+    details:{total:575,acceptedAt:'2026-10-05T00:00:00Z',serviceM8Pricing:current}};
+  const mapping={business_id:'A',connection_generation:id(2),object_type:'job',local_id:job.id,external_uuid:id(4601),
+    snapshot:{profile:{pricing:old},pricing:current}};
+  const db=database({servicem8_connections:[privateConnection()],jobs:[job],external_object_mappings:[mapping]});
+  const {route}=setup(db);
+  let res=await route('GET','/api/sales/metrics',{businessId:'A',query:metricsRange});
+  assert.equal(res.body.bookedSales,0);assert.equal(res.body.pricing.currentTotals,1);
+  mapping.snapshot.pricing=serviceM8PricingSnapshot({uuid:id(4601)},[],{updatedAt:'2026-10-03T00:00:00Z'});
+  res=await route('GET','/api/sales/metrics',{businessId:'A',query:metricsRange});
+  assert.equal(res.body.bookedSales,0);assert.equal(res.body.pricing.unknownTotals,1);
+});
+
+test('full import: undated historical imports never become leads or quotes on database insertion day', async () => {
+  const jobs=['quoted','won','completed'].map((status,index)=>({id:id(4701+index),business_id:'A',status,
+    created_at:'2026-10-15T00:00:00Z',details:{importedFrom:'servicem8',total:100}}));
+  const original=structuredClone(jobs);
+  const {route}=setup(database({jobs}));
+  const res=await route('GET','/api/sales/metrics',{businessId:'A',query:metricsRange});
+  assert.equal(res.statusCode,200);
+  assert.equal(res.body.leads,0);assert.equal(res.body.newLeads,0);
+  assert.equal(res.body.quotes,0);assert.equal(res.body.bookedSales,0);
+  assert.equal(res.body.unknownWinDates,2);
+  assert.equal(res.body.dateCoverage.unknownLeadDates,3);
+  assert.equal(res.body.dateCoverage.unknownQuoteDates,1);
+  assert.match(res.body.dateCoverage.note,/without sent dates are excluded/);
+  assert.deepEqual(jobs,original);
+});
+
+test('full import: original arrival and saved quote creation dates remain usable while ordinary leads retain insertion dates', async () => {
+  const jobs=[
+    {id:id(4801),business_id:'A',status:'quoted',created_at:'2026-10-15T00:00:00Z',details:{importedFrom:'servicem8',
+      createdAt:'2026-09-01T00:00:00Z',quoteSentAt:'2026-10-05T00:00:00Z',total:100}},
+    {id:id(4802),business_id:'A',quote_id:id(4812),status:'quoted',created_at:'2026-10-15T00:00:00Z',details:{importedFrom:'servicem8'}},
+    {id:id(4803),business_id:'A',quote_id:id(4813),status:'quoted',created_at:'2026-10-15T00:00:00Z',details:{importedFrom:'servicem8'}},
+    {id:id(4804),business_id:'A',status:'new',created_at:'2026-10-15T00:00:00Z',details:{}},
+    {id:id(4805),business_id:'A',status:'new',created_at:'2026-10-15T00:00:00Z',details:{importedFrom:'servicem8',requestSubmittedAt:'2026-10-02T00:00:00Z'}},
+  ];
+  const quotes=[{id:id(4812),business_id:'A',created_at:'2026-09-02T00:00:00Z'},
+    {id:id(4813),business_id:'A',created_at:'2026-10-03T00:00:00Z'}];
+  const {route}=setup(database({jobs,quotes}));
+  const res=await route('GET','/api/sales/metrics',{businessId:'A',query:metricsRange});
+  assert.equal(res.statusCode,200);assert.equal(res.body.leads,3);assert.equal(res.body.newLeads,2);
+  assert.equal(res.body.quotes,1,'only the real sent date counts; quote creation is not a sent date');
+  assert.equal(res.body.dateCoverage.unknownLeadDates,0);
+  assert.equal(res.body.dateCoverage.unknownQuoteDates,2);
+});

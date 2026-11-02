@@ -20,54 +20,102 @@ export function hashWixToken(token) {
   return crypto.createHash('sha256').update(String(token || '')).digest('hex')
 }
 
-// Preserve flat, data and contact wrappers; missing or non-scalar names
-// stay empty so validation rejects them rather than creating fake leads.
+// Decode known Wix answer envelopes; missing or malformed names stay empty
+// so validation rejects them rather than creating fake leads.
 const object = value => value && typeof value==='object' && !Array.isArray(value) ? value : {};
 const text = value => typeof value==='string' ? value.trim() : '';
 const labelKey = value => text(value).toLowerCase().replace(/[^a-z0-9]/g,'');
-const answerValues = value => (Array.isArray(value) ? value.slice(0,100) : [value]).map(text).filter(Boolean);
-const serviceKeys = ['requestedServices','requested_services','requestedService','requested_service','services','service','Services required','Service required','Select Services Required','What services do you require?','What services do you need?'];
+function answerValues(value, depth=0) {
+  if(depth>5)return [];
+  if(Array.isArray(value))return value.slice(0,100).flatMap(item=>Array.isArray(item)?[]:answerValues(item,depth+1)).slice(0,100);
+  if(typeof value==='string')return text(value)?[text(value)]:[];
+  const answer=object(value);
+  if(answer.selected===false||answer.checked===false)return [];
+  // Only known answer envelopes/options are decoded, never arbitrary object values.
+  if('values' in answer)return answerValues(answer.values,depth+1);
+  if('value' in answer){
+    if(typeof answer.value==='boolean')return answer.value&&text(answer.label)?[text(answer.label)]:[];
+    if(text(answer.label))return [text(answer.label)];
+    return answerValues(answer.value,depth+1);
+  }
+  return text(answer.label)?[text(answer.label)]:[];
+}
+const serviceKeys = new Set(['requestedservices','requestedservice','servicesrequested','services','service','servicesrequired','servicerequired','selectservice','selectservices','selectservicesrequired','whatservicesdoyourequire','whatservicesdoyouneed','whatwouldyoulikecleaned']);
 function wixEvent(body) {
   const b=object(body),data=Object.keys(object(b.data)).length?object(b.data):b;
-  const submission=object(data.submission),contact=object(data.contact||submission.contact),labels=Object.create(null);
-  // Native Old Wix Forms sends an array of label/value answers, not name/email keys.
+  const wrappers=[],seen=new Set();
+  function visit(value,depth=0){
+    if(!value||typeof value!=='object'||Array.isArray(value)||seen.has(value)||depth>6||wrappers.length>=30)return;
+    seen.add(value);wrappers.push(value);
+    for(const key of ['data','payload','submission'])visit(value[key],depth+1);
+  }
+  visit(data);visit(b);
+  const submission=wrappers.find(wrapper=>Object.keys(object(wrapper.submission)).length)?.submission||{};
+  const contact=wrappers.map(wrapper=>object(wrapper.contact)).find(value=>Object.keys(value).length)||{};
+  const labels=Object.create(null);
+  // Native Forms/Automations use labelled arrays or maps under these containers.
   let remaining=100;
-  for(const wrapper of new Set([data,submission,b])){
-    for(const field of (Array.isArray(wrapper.submissions)?wrapper.submissions:[]).slice(0,remaining)){
-      remaining--;
-      const key=labelKey(field?.label);
-      const values=answerValues(field?.value);
-      if(key&&key.length<=120&&!labels[key]&&values.length)labels[key]=values;
+  for(const wrapper of wrappers){
+    for(const container of ['submissions','fields','answers']){
+      const fields=wrapper[container];
+      const entries=Array.isArray(fields)?fields.slice(0,remaining):Object.entries(object(fields)).slice(0,remaining).map(([key,value])=>{
+        const field=object(value);
+        return text(field.label)||text(field.name)?field:{label:key,value};
+      });
+      for(const field of entries){
+        remaining--;
+        const key=labelKey(field?.label||field?.name||field?.key);
+        const values=answerValues(field?.value??field?.values??field?.answer);
+        if(key&&key.length<=120&&values.length)labels[key]=[...(labels[key]||[]),...values].slice(0,100);
+      }
     }
   }
-  return {b,data,submission,contact,labels};
+  return {b,data,submission,contact,labels,wrappers};
 }
 export function mapWixPayload(body) {
-  const {b,data,submission,contact,labels}=wixEvent(body);
-  const field=(...names)=>{for(const n of names){const v=text(data[n])||text(submission[n])||text(b[n])||text(contact[n])||labels[labelKey(n)]?.join(', ');if(v)return v;}return '';};
+  const {contact,labels,wrappers}=wixEvent(body);
+  const field=(...names)=>{
+    for(const n of names){
+      for(const wrapper of [...wrappers,contact]){
+        const value=wrapper[n]??Object.entries(wrapper).find(([key])=>labelKey(key)===labelKey(n))?.[1];
+        // Bare arrays are selections, not scalar customer identity fields.
+        const answer=Array.isArray(value)?'':answerValues(value).join(', ');
+        if(answer)return answer;
+      }
+      const answer=labels[labelKey(n)]?.join(', ');
+      if(answer)return answer;
+    }
+    return '';
+  };
   const person=object(contact.name),address=object(contact.address);
   const name=field('name','fullName','full_name','contactName','Full name','Your name')||
     [field('firstName','first_name','First name')||text(person.first),field('lastName','last_name','Last name')||text(person.last)].filter(Boolean).join(' ');
+  const timing=field('urgency','timing','How soon do you need this done?','When do you need this done?','When would you like this done?');
   return {
     name,
     email:field('email','emailAddress','email_address','Email address')||undefined,
     phone:field('phone','phoneNumber','phone_number','Phone number','Mobile number')||undefined,
     address:field('address','streetAddress','street_address','Property address','Select an Address')||text(address.formatted)||text(address.formattedAddress)||[text(address.addressLine1),text(address.city),text(address.subdivision),text(address.postalCode)].filter(Boolean).join(', ')||undefined,
     notes:field('message','notes','comment','comments','Enquiry message','How can we help','Tell us about your job','Leave us a message...')||undefined,
+    // ingestQuoteRequest reads c.timing when composing the saved lead notes.
+    ...(timing?{timing}:{}),
     source:'Wix'
   };
 }
 function wixRequestedServices(body){
-  const {b,data,submission,contact,labels}=wixEvent(body);
-  // Prefer explicit fields, then native form labels. Keep each selected
-  // service separate; arbitrary objects are never coerced into strings.
-  for(const wrapper of new Set([data,submission,b,contact,labels])){
-    for(const key of serviceKeys){
-      const values=answerValues(wrapper===labels?wrapper[labelKey(key)]:wrapper[key]);
-      if(values.length)return values.flatMap(value=>value.split(/[,;\n]+/)).map(value=>value.trim().slice(0,500)).filter(Boolean).slice(0,100);
+  const {contact,labels,wrappers}=wixEvent(body),services=[];
+  // Accumulate every recognized service answer, including repeated checkbox labels.
+  // Never inspect unknown questions, metadata, or the question's offered choices.
+  for(const wrapper of new Set([...wrappers,contact,labels])){
+    for(const [key,value] of Object.entries(wrapper)){
+      if(!serviceKeys.has(labelKey(key)))continue;
+      for(const answer of answerValues(value)){
+        services.push(...answer.split(/[,;\n]+/).map(value=>value.trim().slice(0,500)).filter(Boolean).slice(0,100-services.length));
+        if(services.length>=100)return services;
+      }
     }
   }
-  return [];
+  return services;
 }
 
 // A Wix submission's own id, if present, used as the idempotency key so a
@@ -76,9 +124,9 @@ function wixRequestedServices(body){
 // one, there's nothing safe to dedupe on, so the lead is still accepted —
 // just without redelivery protection for that one submission.
 function extractExternalId(body) {
-  const {b,data,submission,contact} = wixEvent(body)
+  const {b,data,submission,contact,wrappers} = wixEvent(body)
   const topContact = object(b.contact)
-  const id = b.submissionId ?? b.submission_id ?? b.id ?? b._id ?? data.submissionId ?? data.submission_id ?? data.id ?? data._id ?? submission.submissionId ?? submission.submission_id ?? submission.id ?? submission._id ?? contact.submissionId ?? contact.submission_id ?? topContact.submissionId ?? topContact.submission_id
+  const id = b.submissionId ?? b.submission_id ?? b.id ?? b._id ?? data.submissionId ?? data.submission_id ?? data.id ?? data._id ?? submission.submissionId ?? submission.submission_id ?? submission.id ?? submission._id ?? wrappers.map(wrapper=>wrapper.submissionId??wrapper.submission_id??wrapper.id??wrapper._id).find(value=>value!=null) ?? contact.submissionId ?? contact.submission_id ?? topContact.submissionId ?? topContact.submission_id
   return (typeof id === 'string' || typeof id === 'number') && String(id).trim() ? String(id).trim().slice(0, 200) : null
 }
 
@@ -119,6 +167,7 @@ export async function handleWixLead({ token, body, lookupSource, addLead }) {
     business_id: source.business_id,
     customer,
     source: 'wix',
+    urgency: customer.timing || '',
     requestedServices: wixRequestedServices(body),
     external_id: extractExternalId(body),
     submittedAt: Date.now()

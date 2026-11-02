@@ -34,6 +34,17 @@
     template.content.querySelectorAll('p,div,tr,li,h1,h2,h3').forEach(n => n.append('\n'));
     return template.content.textContent.trim() || message.snippet || '';
   }
+  const emailFonts = { arial: 'Arial, Helvetica, sans-serif', georgia: 'Georgia, serif', system: '-apple-system, Segoe UI, sans-serif' };
+  const normalizeEmailFont = font => Object.hasOwn(emailFonts, font) ? font : 'arial';
+  function renderEmailHtml(bodyText, font = 'arial') {
+    return `<div style="font-family:${emailFonts[normalizeEmailFont(font)]};line-height:1.6;white-space:pre-wrap">${esc(bodyText)}</div>`;
+  }
+  function pdfBlob(attachment) {
+    if (attachment?.mimeType !== 'application/pdf' || !attachment.contentBase64) throw Error('PDF bytes are unavailable.');
+    const decoded = global.atob(attachment.contentBase64);
+    if (!decoded.startsWith('%PDF-')) throw Error('Invalid PDF attachment.');
+    return new Blob([Uint8Array.from(decoded, c => c.charCodeAt(0))], { type: 'application/pdf' });
+  }
   function mount({ root, request, onConnect = () => {}, onCount = () => {}, listQuotes = () => [], buildQuoteAttachment, buildDocumentAttachment, beforeSend = () => {}, onDocument = () => {}, onSent = () => {}, initialSnapshot = null, onSnapshot = () => {} }) {
     if (!root || typeof request !== 'function') throw Error('Conversations requires a root and authenticated request function');
     let messages = [], stars = [], drafts = [], account = null, folder = 'inbox', selected = null;
@@ -45,7 +56,18 @@
       return searchText.get(m);
     };
     const dateLabel = value => Number.isNaN(new Date(value).getTime()) ? 'Date unavailable' : new Date(value).toLocaleString();
-    let lastDocument = null;
+    let lastDocument = null, preview = null;
+    function clearPreview() { if (preview) global.URL.revokeObjectURL(preview.url); preview = null; }
+    function previewHtml() {
+      const file = composer?.payload.attachments.find(f => f.mimeType === 'application/pdf' && f.contentBase64);
+      if (!file) { clearPreview(); return ''; }
+      if (preview?.contentBase64 !== file.contentBase64) {
+        clearPreview();
+        try { preview = { contentBase64: file.contentBase64, url: global.URL.createObjectURL(pdfBlob(file)) }; }
+        catch { return '<p>PDF preview unavailable: this attachment does not contain a valid PDF.</p>'; }
+      }
+      return `<section class="cv-pdf-preview" aria-label="Exact PDF attachment preview"><h4>PDF attachment preview</h4><p>This is the PDF attached to this email.</p><object data="${esc(preview.url)}" type="application/pdf" aria-label="PDF attachment"><p>Use Download PDF to review this attachment in your PDF viewer.</p></object><a href="${esc(preview.url)}" download="${esc(file.filename)}">Download PDF</a></section>`;
+    }
     let composer = null, notice = '', pending = false, sending = false, destroyed = false, timer, hasMore = false, loading = false;
     let saveQueue = Promise.resolve(), refreshPending=null,refreshDirty=false,lastLoadedAt=0,draftsLoaded=false;
     const saved=initialSnapshot?.data;if(saved&&Array.isArray(saved.messages)&&Array.isArray(saved.stars)){messages=saved.messages;stars=saved.stars;account=saved.account||null;hasMore=!!saved.hasMore;loaded=true;lastLoadedAt=initialSnapshot.savedAt||0;}
@@ -60,7 +82,7 @@
     }
     function restoreFocus(focus) {
       if (!focus) return;
-      const next = [...root.querySelectorAll('input,textarea,[data-cv-action]')].find(el => focus.name ? el.name === focus.name : focus.action && el.dataset.cvAction === focus.action && el.dataset.key === focus.key && el.dataset.id === focus.id && el.dataset.folder === focus.folder && el.dataset.index === focus.index);
+      const next = [...root.querySelectorAll('input,textarea,select,[data-cv-action]')].find(el => focus.name ? el.name === focus.name : focus.action && el.dataset.cvAction === focus.action && el.dataset.key === focus.key && el.dataset.id === focus.id && el.dataset.folder === focus.folder && el.dataset.index === focus.index);
       if (!next || next.disabled) return;
       next.focus({ preventScroll: true });
       if (typeof focus.start === 'number' && ['text', 'search', 'textarea'].includes(next.type)) next.setSelectionRange(focus.start, focus.end);
@@ -94,6 +116,7 @@
       if (destroyed) return;
       const focus = focusSnapshot(), groups = groupMessages(messages, stars);
       root.classList.add('tk-conversations');
+      if (!composer) clearPreview();
       root.innerHTML = `<header class="cv-head"><div><h2>Conversations</h2><p>${account ? '<span class="cv-connected">Gmail connected</span> ' + esc(account.email_address) : 'Customer emails, replies and saved drafts.'}</p></div><div>${button('Connections', 'connect')}${button(pending ? 'Working…' : 'Sync', 'sync', pending || !account ? 'disabled' : '')}${button('Compose', 'compose', pending ? 'disabled class="cv-primary"' : 'class="cv-primary"')}</div></header>
         <p class="cv-notice" role="status" aria-live="polite">${esc(notice)}</p>
         ${lastDocument && !composer ? `<div class="cv-document-context"><span>${lastDocument.mode === 'quote' ? 'Next: track acceptance on the opportunity.' : 'Next: track payment on the opportunity.'}</span>${button('Open opportunity', 'document')}</div>` : ''}
@@ -106,13 +129,15 @@
     function composeHtml() {
       const locked = sending || composer.status !== 'draft';
       const preparing = !!composer.documentPending;
-      const documentMessage = preparing ? 'Preparing the quote PDF… Edit the recipient or message while it finishes.' : composer.documentError ? `PDF preparation failed: ${esc(composer.documentError)}` : 'Quote PDF attached · Your email is ready to edit.';
-      const fileNames = composer.payload.attachments.map((f, i) => `<li><span><b>${esc(f.filename)}</b><small>${f.savedAttachmentId ? 'Saved quote PDF' : f.mimeType === 'application/pdf' ? 'PDF document' : 'File attachment'}</small></span>${button('Remove', 'remove-file', `data-index="${i}" aria-label="Remove ${esc(f.filename)}" ${locked || (composer.payload.document && i === 0) ? 'disabled' : ''}`)}</li>`).join('');
+      const emailFont = normalizeEmailFont(composer.payload.emailFont);
+      const documentMessage = preparing ? 'Preparing and saving the PDF… Edit the recipient or message while it finishes.' : composer.documentError ? `PDF preparation failed: ${esc(composer.documentError)}` : 'PDF attached · Review the exact document below before sending.';
+      const fileNames = (preparing ? [] : composer.payload.attachments).map((f, i) => `<li><span><b>${esc(f.filename)}</b><small>${f.savedAttachmentId ? 'Saved quote PDF' : f.mimeType === 'application/pdf' ? 'PDF document' : 'File attachment'}</small></span>${button('Remove', 'remove-file', `data-index="${i}" aria-label="Remove ${esc(f.filename)}" ${locked || (composer.payload.document && i === 0) ? 'disabled' : ''}`)}</li>`).join('');
       return `<section class="cv-composer" aria-label="Email composer"><header><div><h3>${composer.payload.document ? (composer.payload.document.mode === 'quote' ? 'Quote email' : 'Invoice email') : composer.payload.replyToId ? 'Reply' : 'New email'}</h3><p>Your draft saves as you type. Send when you are ready.</p></div>${button(composer.status === 'draft' ? 'Save & close' : 'Close', 'close', pending || preparing ? 'disabled' : '')}</header>${composer.payload.document ? `<div class="cv-document-context"><span>${documentMessage}</span>${composer.documentError ? button('Retry PDF', 'retry-document', pending ? 'disabled' : '') : ''}${button('Open opportunity', 'document', pending ? 'disabled' : '')}</div>` : ''}<form data-cv-form>
         <label>To<input name="to" type="email" autocomplete="email" placeholder="customer@example.com" required maxlength="2000" value="${esc(composer.payload.to)}" ${locked ? 'disabled' : ''}></label>
         <label>Subject<input name="subject" placeholder="What is this email about?" required maxlength="998" value="${esc(composer.payload.subject)}" ${locked ? 'disabled' : ''}></label>
-        <label>Message<textarea name="bodyText" rows="9" placeholder="Write your message…" required maxlength="100000" ${locked ? 'disabled' : ''}>${esc(composer.payload.bodyText)}</textarea></label>
-        <div class="cv-attachments"><h4>Attachments <span>${composer.payload.attachments.length}/10</span></h4><p>Up to 10 files, 12 MB total. Review attached files before sending.</p><ul class="cv-files">${fileNames}</ul><label class="cv-file-input">Attach images or files<input type="file" name="files" multiple ${locked ? 'disabled' : ''}></label>${button('Saved quote PDF', 'quotes', `aria-expanded="${!!quoteFiles}" ${locked ? 'disabled' : ''}`)}</div>
+        <label>Email font<select name="emailFont" ${locked ? 'disabled' : ''}>${Object.keys(emailFonts).map(font => `<option value="${font}" ${emailFont === font ? 'selected' : ''}>${font === 'arial' ? 'Arial' : font === 'georgia' ? 'Georgia' : 'System'}</option>`).join('')}</select></label><p class="cv-font-help">Applies to your email message. Some email apps may use their own font.</p>
+        <label>Message<textarea style="font-family:${emailFonts[emailFont]}" name="bodyText" rows="9" placeholder="Write your message…" required maxlength="100000" ${locked ? 'disabled' : ''}>${esc(composer.payload.bodyText)}</textarea></label>
+        ${preparing ? '' : previewHtml()}<div class="cv-attachments"><h4>Attachments <span>${composer.payload.attachments.length}/10</span></h4><p>Up to 10 files, 12 MB total. Review attached files before sending.</p><ul class="cv-files">${fileNames}</ul><label class="cv-file-input">Attach images or files<input type="file" name="files" multiple ${locked ? 'disabled' : ''}></label>${button('Saved quote PDF', 'quotes', `aria-expanded="${!!quoteFiles}" ${locked ? 'disabled' : ''}`)}</div>
         <div class="cv-quote-picker" ${quoteFiles ? '' : 'hidden'}>${quoteFiles ? '<header><h4>Choose a quote to attach</h4>' + button('Close quote picker', 'quotes') + '</header><h4>Opportunity quotes</h4>' + (quoteChoices.map(q => button(esc(q.label), 'opportunity-quote', `data-id="${esc(q.id)}" ${locked ? 'disabled' : ''}`)).join('') || '<p>No opportunity quotes available.</p>') + '<h4>Uploaded quote PDFs</h4>' + (quoteFiles.map(f => button(esc(f.filename), 'quote', `data-id="${esc(f.id)}" data-filename="${esc(f.filename)}" ${locked ? 'disabled' : ''}`)).join('') || '<p>No uploaded quote PDFs. You can attach a file above.</p>') : ''}</div>
         <footer class="cv-compose-footer"><p class="cv-save-state" role="status" aria-live="polite">${esc(composer.status !== 'draft' ? 'Delivery is ' + composer.status + '. Check Sent or sync before creating another email.' : composer.dirty ? 'Unsaved changes' : 'Draft saved')}</p>${!account ? '<p>Connect Gmail in Connections to send this draft.</p>' : ''}<div class="cv-compose-actions">${button('Save draft', 'save', locked ? 'disabled' : '')}${button('Discard', 'discard', pending || composer.status === 'sending' ? 'disabled' : '')}<button type="submit" class="cv-primary" ${locked || pending || preparing || !!composer.documentError || !account ? 'disabled' : ''}>${sending ? 'Sending…' : preparing ? 'Preparing PDF…' : 'Send email'}</button></div></footer></form></section>`;
     }
@@ -129,7 +154,7 @@
       }finally{loading=false;refreshPending=null;draw();}})();return refreshPending;
     }
     function persist() {
-      if (!composer || composer.status !== 'draft') return saveQueue;
+      if (!composer || composer.status !== 'draft' || !composer.dirty) return saveQueue;
       const target = composer, payload = JSON.parse(JSON.stringify(target.payload));
       const operation = saveQueue.catch(() => {}).then(async () => {
         const result = await api('/drafts/' + target.id, 'PUT', payload);
@@ -150,7 +175,7 @@
       void persist().catch(error => { notice = error.message || 'A previous draft could not be saved.'; draw(); });
       quoteFiles = null; quoteChoices = [];
       const { documentPending = false, ...draftPayload } = payload;
-      composer = { id: global.crypto.randomUUID(), status: 'draft', dirty: true, documentPending, documentError: '', documentAttachment: null, payload: { to: '', subject: '', bodyText: '', replyToId: '', attachments: [], ...draftPayload } };
+      composer = { id: global.crypto.randomUUID(), status: 'draft', dirty: true, documentPending, documentError: '', documentAttachment: null, payload: { to: '', subject: '', bodyText: '', replyToId: '', attachments: [], ...draftPayload, emailFont: normalizeEmailFont(draftPayload.emailFont) } };
       const target = composer;
       draw(); root.querySelector('[name="to"]')?.focus();
       void persist().catch(error => {
@@ -217,8 +242,8 @@
           if (!composer?.payload.document || !buildDocumentAttachment) throw Error('Quote PDF preparation is unavailable.');
           pending = true; composer.documentPending = true; composer.documentError = ''; draw();
           const target = composer;
-          try { completeDocumentPreparation(target.payload.document.recordId, await buildDocumentAttachment(target.payload.document.mode, target.payload.document.recordId)); }
-          catch (err) { completeDocumentPreparation(target.payload.document.recordId, null, err); }
+          try { await completeDocumentPreparation(target.payload.document.recordId, await buildDocumentAttachment(target.payload.document.mode, target.payload.document.recordId), null, target.payload.document); }
+          catch (err) { await completeDocumentPreparation(target.payload.document.recordId, null, err, target.payload.document); }
           return;
         }
         if (name === 'clear-search') { query = ''; const search = root.querySelector('[name=cvQuery]'); search.value = ''; search.focus(); }
@@ -237,7 +262,7 @@
         }
         if (name === 'save' || name === 'close') { clearTimeout(timer); await persist(); notice = composer.status === 'draft' ? 'Draft saved.' : 'Draft kept. Check Sent or sync to verify delivery.'; if (name === 'close') composer = null; draw(); }
         if (name === 'discard') { clearTimeout(timer); await saveQueue.catch(() => {}); await api('/drafts/' + composer.id, 'DELETE'); drafts = drafts.filter(d => d.id !== composer.id); composer = null; draw(); }
-        if (name === 'draft') { await persist(); const d = drafts.find(d => d.id === b.dataset.id); quoteFiles = null; quoteChoices = []; composer = { ...d, payload: JSON.parse(JSON.stringify(d.payload)), dirty: false }; draw(); root.querySelector('[name=to]')?.focus(); }
+        if (name === 'draft') { await persist(); const d = drafts.find(d => d.id === b.dataset.id); quoteFiles = null; quoteChoices = []; composer = { ...d, payload: { ...JSON.parse(JSON.stringify(d.payload)), emailFont: normalizeEmailFont(d.payload.emailFont) }, dirty: false }; draw(); root.querySelector('[name=to]')?.focus(); }
         if (name === 'remove-file') { if(composer.payload.document && Number(b.dataset.index) === 0) return; composer.payload.attachments.splice(Number(b.dataset.index), 1); composer.dirty = true; await persist(); draw(); }
         if (name === 'quotes') {
           if (quoteFiles) { quoteFiles = null; return; }
@@ -288,8 +313,10 @@
         root.querySelector('[data-cv-action=clear-search]').hidden = !query;
         return;
       }
-      if (!composer || !['to', 'subject', 'bodyText'].includes(e.target.name)) return;
-      composer.payload[e.target.name] = e.target.value; composer.dirty = true; clearTimeout(timer);
+      if (!composer || !['to', 'subject', 'bodyText', 'emailFont'].includes(e.target.name)) return;
+      composer.payload[e.target.name] = e.target.name === 'emailFont' ? normalizeEmailFont(e.target.value) : e.target.value;
+      if (e.target.name === 'emailFont') root.querySelector('[name=bodyText]').style.fontFamily = emailFonts[composer.payload.emailFont];
+      composer.dirty = true; clearTimeout(timer);
       const el = root.querySelector('.cv-save-state'); if (el) el.textContent = 'Saving…';
       timer = setTimeout(() => persist().catch(e => { notice = e.message; const el = root.querySelector('.cv-notice'); if (el) { el.textContent = notice; el.hidden = false; } }), 700);
     }
@@ -312,9 +339,11 @@
       } catch (err) { notice = err.message; } finally { pending = false; draw(); }
     }
     function submit(e) { if (e.target.matches('[data-cv-form]')) { e.preventDefault(); void send(); } }
-    function completeDocumentPreparation(recordId, attachment, error) {
+    async function completeDocumentPreparation(recordId, attachment, error, expectedDocument) {
       if (!composer || String(composer.payload.document?.recordId) !== String(recordId)) return;
-      composer.documentPending = false; composer.documentError = error ? (error.message || String(error)) : '';
+      if (expectedDocument && composer.payload.document !== expectedDocument) return;
+      const target = composer;
+      composer.documentError = error ? (error.message || String(error)) : '';
       if (attachment) {
         if (composer.documentAttachment) {
           const i = composer.payload.attachments.indexOf(composer.documentAttachment);
@@ -324,15 +353,21 @@
         composer.payload.attachments.unshift(attachment); composer.dirty = true;
       }
       if (error) notice = composer.documentError;
+      // Do not advertise an attached, ready PDF before the saved draft contains it.
+      if (attachment) {
+        try { await persist(); }
+        catch (err) { notice = err.message || 'PDF is ready, but the draft could not be saved yet.'; }
+      }
+      if (composer !== target || destroyed) return;
+      target.documentPending = false;
       draw();
-      if (attachment) void persist().catch(err => { notice = err.message || 'Quote PDF is ready, but the draft could not be saved yet.'; draw(); });
     }
     function unload(e) { if (composer?.dirty || pending) { e.preventDefault(); e.returnValue = ''; } }
     root.addEventListener('click', action); root.addEventListener('input', input); root.addEventListener('change', files); root.addEventListener('submit', submit); global.addEventListener('beforeunload', unload);
     draw();
     return {
       refresh, compose: startCompose, reply, completeDocumentPreparation,
-      destroy() { destroyed = true; clearTimeout(timer); root.removeEventListener('click', action); root.removeEventListener('input', input); root.removeEventListener('change', files); root.removeEventListener('submit', submit); global.removeEventListener('beforeunload', unload); root.innerHTML = ''; },
+      destroy() { clearPreview(); destroyed = true; clearTimeout(timer); root.removeEventListener('click', action); root.removeEventListener('input', input); root.removeEventListener('change', files); root.removeEventListener('submit', submit); global.removeEventListener('beforeunload', unload); root.innerHTML = ''; },
     };
   }
   // Host adapter: capture the business/user at mount time and reject late
@@ -398,5 +433,5 @@
     render.reply = async bodyText => { await render(); if (!view) throw Error('Sign in to reply.'); await view.reply(bodyText); };
     return render;
   }
-  global.TK_CONVERSATIONS = { mount, createRenderer, groupMessages, category };
+  global.TK_CONVERSATIONS = { mount, createRenderer, groupMessages, category, pdfBlob, renderEmailHtml, messageText, normalizeEmailFont };
 })(typeof window !== 'undefined' ? window : globalThis);

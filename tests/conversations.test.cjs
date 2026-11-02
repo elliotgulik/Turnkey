@@ -38,3 +38,20 @@ test('migration enforces owner/business RLS and backend-only writes in real Post
     await db.exec('set role anon'); await assert.rejects(db.query('select * from conversation_drafts'), /permission denied/);
   } finally { await db.close(); }
 });
+
+test('PDF blobs preserve every attachment byte and reject HTML approximations', async () => {
+  const bytes = Buffer.concat([Buffer.from('%PDF-1.7\n'), Buffer.from([0, 127, 128, 255])]);
+  const blob = TK_CONVERSATIONS.pdfBlob({mimeType:'application/pdf',contentBase64:bytes.toString('base64')});
+  assert.equal(blob.type, 'application/pdf');
+  assert.deepEqual(Buffer.from(await blob.arrayBuffer()), bytes);
+  assert.throws(() => TK_CONVERSATIONS.pdfBlob({mimeType:'application/pdf',contentBase64:btoa('<html>fake</html>')}), /Invalid PDF/);
+});
+test('email HTML uses allowlisted fonts and escapes message markup', () => {
+  const html = TK_CONVERSATIONS.renderEmailHtml('<img src=x onerror="bad()"> & hello', 'arial');
+  assert.match(html, /font-family:Arial, Helvetica, sans-serif/);
+  assert.match(html, /&lt;img/); assert.doesNotMatch(html, /<img/);
+  assert.equal(TK_CONVERSATIONS.normalizeEmailFont('__proto__'), 'arial');
+  assert.match(TK_CONVERSATIONS.renderEmailHtml('Hi', 'georgia'), /font-family:Georgia, serif/);
+  assert.match(TK_CONVERSATIONS.renderEmailHtml('Hi', 'x; background:url(evil)'), /font-family:Arial, Helvetica, sans-serif/);
+  assert.doesNotMatch(TK_CONVERSATIONS.renderEmailHtml('Hi', 'x; background:url(evil)'), /url\(/);
+});

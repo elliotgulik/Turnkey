@@ -1,0 +1,13 @@
+/* Optional explanations stay one tap away; warnings and task/status content remain visible. */
+(function(){
+ 'use strict';
+ const optional='.sale-kpi>small,.sale-head>div>p,.view-head>div>p,.sale-board-hint,.pl-help,.settings-help,.conn-note';
+ let serial=0,active=null;
+ const icon='<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 8.5a2.7 2.7 0 0 1 5 1.5c0 2-2.5 2-2.5 4"/><path d="M12 17h.01"/></svg>';
+ function close(){if(!active)return;const {panel,button}=active;if(panel.matches(':popover-open'))panel.hidePopover();panel.remove();button.setAttribute('aria-expanded','false');active=null;}
+ function scan(node){if(node.nodeType!==1||node.closest('.tk-help-text,.tk-inline-help'))return;const nodes=[...(node.matches(optional)?[node]:[]),...node.querySelectorAll(optional)];for(const el of nodes){if(!el.isConnected||el.closest('.tk-help-text,.tk-inline-help,[role=alert],.sale-warning,.cv-notice')||!el.textContent.trim())continue;const button=document.createElement('button');button.type='button';button.className='tk-inline-help';button.innerHTML=icon;button.setAttribute('aria-label','More information');button.setAttribute('aria-expanded','false');button.dataset.helpText=el.textContent.trim();el.replaceWith(button);}}
+ document.addEventListener('click',event=>{const button=event.target.closest('.tk-inline-help');if(!button){if(active&&!active.panel.contains(event.target))close();return;}if(active?.button===button){close();return;}close();const panel=document.createElement('div');panel.id='tk-help-'+(++serial);panel.className='tk-help-text';panel.textContent=button.dataset.helpText;panel.setAttribute('role','note');document.body.append(panel);button.setAttribute('aria-controls',panel.id);button.setAttribute('aria-expanded','true');active={panel,button};if(typeof panel.showPopover==='function'){panel.setAttribute('popover','manual');panel.showPopover();}const rect=button.getBoundingClientRect(),w=Math.min(320,innerWidth-28);Object.assign(panel.style,{width:w+'px',left:Math.max(14,Math.min(rect.left,innerWidth-w-14))+'px',top:Math.max(14,Math.min(rect.bottom+8,innerHeight-panel.offsetHeight-14))+'px'});});
+ document.addEventListener('keydown',e=>{if(e.key==='Escape'&&active){const button=active.button;close();button.focus();}});
+ window.addEventListener('scroll',close,true);window.addEventListener('resize',close);
+ const observer=new MutationObserver(changes=>{for(const change of changes)for(const node of change.addedNodes)scan(node);if(active&&!active.button.isConnected)close();});observer.observe(document.body,{subtree:true,childList:true});scan(document.body);
+})();

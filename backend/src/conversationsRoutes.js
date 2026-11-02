@@ -11,6 +11,8 @@ export function validateDraft(input = {}) {
     if (typeof value !== 'string' || value.length > max || (key !== 'bodyText' && /[\r\n]/.test(value))) throw fail('Invalid ' + key)
     out[key] = value
   }
+  if(input.emailFont != null && !['arial','georgia','system'].includes(input.emailFont))throw fail('Invalid email font')
+  out.emailFont=input.emailFont||'arial'
   // Non-authoritative client correlation only. Authorization never uses it.
   if (input.document != null) {
     const d = input.document;
@@ -127,9 +129,12 @@ export function installConversations(app, { db, requireBusiness, getValidAccessT
     }
     const claimed = await unwrap(scope(db.from('conversation_drafts').update({ status: 'sending', updated_at: new Date().toISOString() }).eq('id', row.id).eq('status', 'draft').eq('updated_at', row.updated_at), req).select('id').maybeSingle())
     if (!claimed) throw fail('This draft is already being sent', 409)
+    const fonts={arial:'Arial, Helvetica, sans-serif',georgia:'Georgia, serif',system:'-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif'}
+    const escape=value=>String(value).replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]))
+    const bodyHtml='<div style="font-family:'+fonts[payload.emailFont]+';font-size:14px;line-height:1.6;white-space:pre-wrap">'+escape(payload.bodyText)+'</div>'
     let sent
     try {
-      sent = await provider.sendMessage(auth.accessToken, { from: auth.account.email_address, to: payload.to, subject: payload.subject, bodyText: payload.bodyText, attachments: files, ...reply })
+      sent = await provider.sendMessage(auth.accessToken, { from: auth.account.email_address, to: payload.to, subject: payload.subject, bodyText: payload.bodyText, bodyHtml, attachments: files, ...reply })
       if (!sent?.id) throw Error('Missing confirmation')
     } catch (e) {
       const rejected = e.code === 'SEND_REJECTED'
@@ -145,7 +150,7 @@ export function installConversations(app, { db, requireBusiness, getValidAccessT
     // Gmail has accepted delivery and the idempotency guard is now `sent`.
     // Indexing the message is recoverable through mailbox sync, so keep it
     // off the critical response path that the composer is waiting on.
-    void unwrap(db.from('emails').upsert({ business_id: req.businessId, account_id: auth.account.id, provider_message_id: sent.id, thread_id: sent.threadId || reply.threadId || null, direction: 'sent', from_address: auth.account.email_address, to_addresses: payload.to, subject: payload.subject, body_text: payload.bodyText, snippet: payload.bodyText.slice(0, 140), sent_at: new Date().toISOString() }, { onConflict: 'account_id,provider_message_id' }))
+    void unwrap(db.from('emails').upsert({ business_id: req.businessId, account_id: auth.account.id, provider_message_id: sent.id, thread_id: sent.threadId || reply.threadId || null, direction: 'sent', from_address: auth.account.email_address, to_addresses: payload.to, subject: payload.subject, body_text: payload.bodyText, body_html: bodyHtml, snippet: payload.bodyText.slice(0, 140), sent_at: new Date().toISOString() }, { onConflict: 'account_id,provider_message_id' }))
       .catch(() => console.error('[Conversations] Sent message indexing failed; mailbox sync can repair it.'))
     res.json({ ok: true, id: sent.id, threadId: sent.threadId, warning: warnings.join(' ') || undefined })
   })

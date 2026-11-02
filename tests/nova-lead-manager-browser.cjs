@@ -59,7 +59,10 @@ const assert = require('node:assert/strict');
       const scope = key => leads.locator(`[data-nlm-scope="${key}"]`);
       assert.match(await leads.locator('h2').innerText(), /^Lead Manager\s+1$/);
       assert.deepEqual(await ids(), [1]);
+      assert.equal(await leads.locator('.nlm-new:visible').count(),1);
       await leads.locator('.nlm-name').first().click();
+      assert.equal(await leads.locator('.nlm-new:visible').count(),0);
+      assert.equal(await page.evaluate(()=>TK_NOVA_LEAD_MANAGER.pendingLeads().length),0);
       await page.waitForFunction(()=>!document.querySelector('#view-leads [data-sale-assignee="1"]').disabled);
       const assignee=leads.locator('[data-sale-assignee="1"]');
       assert.match(await assignee.innerText(),/Elliot Gulik/);
@@ -92,6 +95,10 @@ const assert = require('node:assert/strict');
 
 
 
+      await leads.locator('.nlm-name').first().click();
+      await leads.getByRole('button',{name:'Mark as unread',exact:true}).click();
+      assert.equal(await leads.locator('.nlm-new:visible').count(),1);
+      await leads.locator('.nlm-close').click();
       assert.equal(await page.locator('#cnt-leads').innerText(),'1');
       await page.locator(width>760?'#lead-alert-button':'#view-leads [data-nlm="notifications"]').click();
       assert.match(await page.locator('#lead-alert-list').innerText(),/Customer 1/);
@@ -152,6 +159,96 @@ const assert = require('node:assert/strict');
       assert.equal(sizing.overflow,false);
       const priceBox=await pipelineCard.locator('.tk-sm8-pricing').evaluate(el=>({width:el.clientWidth,scroll:el.scrollWidth}));
       assert(priceBox.scroll<=priceBox.width+1,'Pricing must fit inside the card');
+      // Urgency uses Wix timing answers, configured zones and known geography only.
+      const grades=await page.evaluate(()=>{
+        const m=TK_NOVA_LEAD_MANAGER;
+        const base={source:'Wix',urgency:'As soon as possible',services:['House wash']};
+        const results=[
+          m.grade({...base,address:'Takapuna, Auckland'}).grade,
+          m.grade({...base,address:'Manurewa, South Auckland'}).grade,
+          m.grade({...base,address:'Manurewa, South Auckland',services:['House wash','Windows']}).grade,
+          m.grade({...base,address:'Unconfirmed Road, Auckland',suburb:'Unconfirmed'}).grade,
+          m.grade({...base,address:'Northshore, Auckland'}).grade,
+          m.grade({...base,address:'Central Auckland'}).grade,
+          m.grade({...base,urgency:'',notes:'Preferred timing: ASAP',address:'Takapuna, Auckland'}).grade,
+          m.grade({...base,address:'NotTakapuna, Manurewa'}).grade,
+        ];
+        m.setConfig({suburbs:['Manurewa'],postcodes:[]});
+        results.push(m.grade({...base,address:'Manurewa, South Auckland'}).grade);
+        m.setConfig({suburbs:['Takapuna'],postcodes:[]});
+        return results;
+      });
+      assert.deepEqual(grades,['A','C','A','A','A','A','A','C','A']);
+      // Existing read markers survive beyond 72 hours; NEW does not expire.
+      await page.evaluate(()=>{
+        switchView('leads');TK_NOVA_LEAD_MANAGER.reset();
+        records=[newRecord({id:51,stage:'new',name:'Old unread',createdAt:Date.now()-4*86400000}),
+          newRecord({id:52,stage:'new',name:'Fresh read',createdAt:Date.now()-1000})];
+        const oldRead={};oldRead['52:'+records[1].createdAt]=Date.now()-4*86400000;
+        localStorage.setItem('turnkey-lead-alerts-read:test-business:test-owner',JSON.stringify(oldRead));
+        render();
+      });
+      await scope('all').click();
+      assert.equal(await leads.locator('[data-nlm-record="51"] .nlm-new:visible').count(),1);
+      assert.equal(await leads.locator('[data-nlm-record="52"] .nlm-new:visible').count(),0);
+      assert.equal(await page.evaluate(()=>TK_NOVA_LEAD_MANAGER.pendingLeads().length),0);
+      await leads.locator('[data-nlm-record="51"] .nlm-name').click();
+      await leads.locator('.nlm-close').click();
+      await page.evaluate(()=>{render();});
+      assert.equal(await leads.locator('.nlm-new:visible').count(),0);
+      await leads.locator('[data-nlm-record="51"] .nlm-name').click();
+      await leads.getByRole('button',{name:'Mark as unread',exact:true}).click();
+      assert.equal(await page.evaluate(()=>TK_NOVA_LEAD_MANAGER.pendingLeads().length),0);
+      await leads.locator('.nlm-close').click();
+      await page.evaluate(()=>{
+        currentUserId='another-user';render();
+      });
+      assert.equal(await leads.locator('.nlm-new:visible').count(),2);
+      await page.evaluate(()=>{currentUserId='test-owner';currentBusinessId='another-business';render();});
+      assert.equal(await leads.locator('.nlm-new:visible').count(),2);
+      await page.evaluate(()=>{currentBusinessId='test-business';render();});
+      assert.equal(await leads.locator('.nlm-new:visible').count(),1);
+      // Every row interaction, including a direct quote action, acknowledges the lead.
+      await page.evaluate(()=>{TK_EARTH_QUOTES.open=()=>{};records[0].address='Takapuna';});
+      await leads.locator('[data-nlm-record="51"] [data-nlm="earth"]').click();
+      assert.equal(await leads.locator('.nlm-new:visible').count(),0);
+      if(width<760){
+        const nav=page.locator('#bottom-nav');
+        assert.deepEqual(await nav.locator('button').evaluateAll(els=>els.map(el=>el.getAttribute('aria-label'))),['Leads','Pipeline','Calendar','Inbox','More']);
+        assert.equal(await nav.getAttribute('aria-label'),'Main navigation');
+        for(const view of ['pipeline','calendar','inbox','leads']){
+          await nav.locator(`[data-view="${view}"]`).click();
+          assert.equal(await page.locator('#view-'+view).evaluate(el=>el.classList.contains('active')),true);
+          assert.equal(await nav.locator(`[data-view="${view}"]`).getAttribute('aria-current'),'page');
+        }
+        for(const button of await nav.locator('button').all()){
+          const box=await button.boundingBox();assert(box.width>=44&&box.height>=44);
+          assert.equal(await button.locator('svg').count(),1);
+        }
+        await nav.getByRole('button',{name:'More',exact:true}).click();
+        assert.match(await page.locator('#more-body').innerText(),/Analytics/);
+        await page.locator('#more-overlay .x').click();
+        assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+      }
+      // Arrival expiry is independent of persistent NEW and read markers.
+      await page.evaluate(()=>{
+        records[0].createdAt=Date.now()-1000;TK_NOVA_LEAD_MANAGER.setRead(records[0],false);
+        render();
+      });
+      assert.equal(await page.evaluate(()=>TK_NOVA_LEAD_MANAGER.pendingLeads().length),1);
+      assert.equal(await page.evaluate(()=>TK_NOVA_LEAD_MANAGER.pendingLeads(Date.now()+3*86400000).length),0);
+      assert.equal(await leads.locator('[data-nlm-record="51"] .nlm-new:visible').count(),1);
+      const savedRecords=await page.evaluate(()=>records);
+      await page.screenshot({path:path.join(os.tmpdir(),`turnkey-nova-${width}.png`),fullPage:true});
+      await page.reload();
+      await page.waitForFunction(()=>window.TK_NOVA_LEAD_MANAGER);
+      await page.evaluate(saved=>{
+        currentBusinessId='test-business';currentUserId='test-owner';currentUserRole='owner';records=saved;
+        showApp();render();switchView('leads');
+      },savedRecords);
+      await scope('all').click();
+      assert.equal(await leads.locator('[data-nlm-record="51"] .nlm-new:visible').count(),1);
+      assert.equal(await leads.locator('[data-nlm-record="52"] .nlm-new:visible').count(),0);
       assert.deepEqual(errors, []);
       await context.close();
       console.log(`PASS production Nova Leads Manager at ${width}px`);

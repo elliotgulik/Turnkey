@@ -1,12 +1,14 @@
-## Version 0.2.10: editable service prices and quote learning
+## Version 0.2.11: return to Earth and automatic price feedback
+
+After **Finish**, the measurement workspace returns to the original Earth tab and closes only after Earth accepts the measurement. If navigation fails, the saved measurement stays accepted and the page explains how to return manually.
 
 Edit the final GST-inclusive dollar amount for each service independently. The customer total is their exact sum. Manual prices survive access, height, travel and margin changes. Entering a quote total requires **Distribute entered total across services**; this explicitly replaces line prices. **Discard entered total** keeps them, and service/all-service reset buttons restore recommendations.
 
-Each service shows configured pricing, its target-margin floor, base, learned dollar adjustment, recommendation, comparable quote count and confidence. Choose an optional override reason; unexplained edits and discounts do not train prices. Verified quantity corrections require an explicit measurement reason and **Apply verified quantity**. Learned measurement hints never change quantities or geometry automatically.
+Each service shows configured pricing, its target-margin floor, base, learned dollar adjustment, recommendation, comparable quote count and confidence. Direct edits to measured area/perimeter service prices automatically train future recommendations for the same service, storeys and access. Generated recommendations and distributed quote totals do not train automatically. Choose a reason to mark discounts, extra work, or explicitly exclude a decision. Verified quantity corrections require an explicit measurement reason and **Apply verified quantity**. Learned measurement hints never change quantities or geometry automatically.
 
 Learning uses the connected business’s authenticated backend. Open the extension popup and **Enable quote learning & ServiceM8** if backend access has not yet been granted. If learning is unavailable, base pricing and manual edits still work. Learning is submitted after the quote is saved; a failed submission shows a warning and a safe retry button on the saved-quote screen. Manage learning settings and resets in TurnKey.
 
-Build the downloadable ZIP with `node extension/scripts/pack.cjs`; this refreshes all vendored engines from the root source and writes `extension/dist/turnkey-earth-extension-0.2.10.zip`. Unzip, load the folder containing `manifest.json`, and refresh Earth and TurnKey. Main publishes the download in the site's assets.
+Build the downloadable ZIP with `node extension/scripts/pack.cjs`; this refreshes all vendored engines from the root source and writes `extension/dist/turnkey-earth-extension-0.2.11.zip`. Unzip, load the folder containing `manifest.json`, and refresh Earth and TurnKey. Main publishes the download in the site's assets.
 
 ## Version 0.2.8: quote levels and access settings
 

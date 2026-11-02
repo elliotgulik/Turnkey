@@ -149,6 +149,13 @@
           return;
         }
         postToPage(msg.requestId, 'TURNKEY_MEASURE_ACK', {});
+        chrome.runtime.sendMessage({ type: 'TK_MEASURE_RETURN', requestId: msg.requestId }, (returned) => {
+          if (chrome.runtime.lastError || !returned?.ok) {
+            postToPage(msg.requestId, 'TURNKEY_MEASURE_RETURN_ERROR', {
+              message: returned?.error || 'Measurement saved. Return to Google Earth and close this tab.'
+            });
+          }
+        });
       });
     });
   }

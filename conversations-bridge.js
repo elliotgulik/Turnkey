@@ -7,7 +7,9 @@
   if (!global.TK_CONVERSATIONS) throw Error('Load conversations.js before conversations-bridge.js');
   const root = document.getElementById('view-inbox');
   if (!root) throw Error('Conversations requires #view-inbox');
-  let generation = 0;
+  let generation = 0, previewUrl = null, previewRequest = 0;
+  const historyHosts = new Set();
+  const documentCache = new Map(), customerHistoryLoads = new WeakMap();
   const context = () => ({
     client: typeof sb !== 'undefined' ? sb : null,
     businessId: typeof currentBusinessId !== 'undefined' ? currentBusinessId : null,
@@ -71,23 +73,23 @@
     return Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join('').slice(0,32);
   }
   const documentFilename = (mode,r,fingerprint) => (mode === 'quote' ? 'Quote-' : 'Invoice-') + docNumber(mode,r) + '-' + fingerprint + '.pdf';
-  async function prepareDocument(mode, value) {
+  async function prepareDocument(mode, value, { previewOnly = false } = {}) {
     if (!['quote', 'invoice'].includes(mode)) throw Error('Choose a quote or invoice.');
     const start = scope(), r = recordFor(value);
     if (!Array.isArray(r.services) || !r.services.length || !Number.isFinite(Number(r.total)) || Number(r.total) <= 0) throw Error('Build and save the quote lines before attaching a PDF.');
     if (typeof buildDocPDF !== 'function') throw Error('The PDF renderer is unavailable. Please reload TurnKey.');
-    if (mode === 'invoice' && !['completed', 'paid'].includes(r.stage)) throw Error('Complete the work before issuing an invoice. You can preview an invoice draft from the accepted quote.');
+    if (!previewOnly && mode === 'invoice' && !['completed', 'paid'].includes(r.stage)) throw Error('Complete the work before issuing an invoice. You can preview an invoice draft from the accepted quote.');
     // Quote creation already persists the commercial snapshot. Avoid a second
     // full-record write on the compose path; beforeSend below verifies the
     // stored job and quote immediately before Gmail accepts the message.
     // Older/incomplete records still get the save they need here.
-    if (!r.jobId || !r.quoteId || (mode === 'quote' && !r.quotePublicToken)) {
+    if (!previewOnly && (!r.jobId || !r.quoteId || (mode === 'quote' && !r.quotePublicToken))) {
       await syncRecordToSupabase(r);
       assertScope(start);
     }
     if (recordFor(r.id) !== r) throw Error('The opportunity changed. Select it again.');
-    if (mode === 'quote' && !r.quotePublicToken) throw Error('The quote approval link is not ready. Save the quote and retry. Nothing was sent.');
-    if (mode === 'invoice' && !['completed', 'paid'].includes(r.stage)) throw Error('The job status changed. Reopen the opportunity before issuing an invoice.');
+    if (!previewOnly && mode === 'quote' && !r.quotePublicToken) throw Error('The quote approval link is not ready. Save the quote and retry. Nothing was sent.');
+    if (!previewOnly && mode === 'invoice' && !['completed', 'paid'].includes(r.stage)) throw Error('The job status changed. Reopen the opportunity before issuing an invoice.');
     // Preload the owned record, not a detached copy, so preview/send share
     // in-flight work and the loader can enforce the business/session guard.
     if (typeof preloadMapSnapshot === 'function') {
@@ -98,6 +100,9 @@
     const safe = publicRecord(r);
     const fingerprint = await documentFingerprint(mode,r);
     assertScope(start);
+    const cacheKey = [start.generation, start.businessId, start.userId, mode, r.id, fingerprint].join(':');
+    const cached = documentCache.get(cacheKey);
+    if (cached) return { record: r, start, attachment: { ...cached } };
     // Actual helper contract: buildDocPDF(mode, record, 'base64') returns raw
     // base64; its default returns a Blob and is intentionally not used here.
     const contentBase64 = buildDocPDF(mode, safe, 'base64');
@@ -107,7 +112,10 @@
     try { decoded = atob(contentBase64); } catch { throw Error('The PDF could not be generated. Nothing was sent.'); }
     if (!decoded.startsWith('%PDF-')) throw Error('The PDF renderer did not return a valid PDF. Nothing was sent.');
     assertScope(start);
-    return { record: r, start, attachment: { filename: documentFilename(mode,r,fingerprint), mimeType: 'application/pdf', contentBase64 } };
+    const attachment = { filename: documentFilename(mode,r,fingerprint), mimeType: 'application/pdf', contentBase64 };
+    if (documentCache.size >= 3) documentCache.delete(documentCache.keys().next().value);
+    documentCache.set(cacheKey, attachment);
+    return { record: r, start, attachment: { ...attachment } };
   }
   function bodyFor(mode, r) {
     const first = (r.name || '').split(' ')[0] || 'there', number = docNumber(mode, r);
@@ -193,7 +201,7 @@
     onSent,
   });
   const resetRenderer = renderer.reset;
-  function reset() { generation++; resetRenderer(); const el = document.getElementById('cnt-inbox'); if (el) el.textContent = '0'; }
+  function reset() { generation++; previewRequest++; for (const host of historyHosts) { host.textContent = ''; customerHistoryLoads.delete(host); } historyHosts.clear(); documentCache.clear(); if (previewUrl) global.URL.revokeObjectURL(previewUrl); previewUrl = null; resetRenderer(); const el = document.getElementById('cnt-inbox'); if (el) el.textContent = '0'; }
   // Existing auth paths already call these hooks on sign-out and business
   // changes. Wrap them here, without editing any host or ServiceM8 file.
   for (const name of ['showAuth', 'handleAuthedSession']) {
@@ -237,9 +245,9 @@
     const opened = await compose(payload);
     if (typeof closeModal === 'function') { closeModal('send-doc-overlay'); closeModal('compose-overlay'); }
     void prepareDocument(mode, r.id).then(({ attachment }) => {
-      assertScope(start); renderer.completeDocumentPreparation(r.id, attachment);
+      assertScope(start); renderer.completeDocumentPreparation(r.id, attachment, null, payload.document);
     }).catch(error => {
-      try { assertScope(start); renderer.completeDocumentPreparation(r.id, null, error); } catch { /* session changed while preparing */ }
+      try { assertScope(start); renderer.completeDocumentPreparation(r.id, null, error, payload.document); } catch { /* session changed while preparing */ }
     });
     return opened;
   }
@@ -319,7 +327,81 @@
     return composeDocument(sendDocCtx.mode, sendDocCtx.recordId, overrides);
   });
   global.sendComposeModal = guarded(() => compose({ to: document.getElementById('cmp-to')?.value || '', subject: document.getElementById('cmp-subject')?.value || '', bodyText: document.getElementById('cmp-body')?.value || '', attachments: [] }));
-  global.TK_CONVERSATIONS_BRIDGE = { render: renderer, reset, compose: guarded(compose), composeDocument: guarded(composeDocument), listQuotes };
+  // Read-only profile integration. Query within the active business; exact
+  // address matching covers synced messages whose customer_id is not populated.
+  async function renderCustomerHistory(host, { customerId, email = '', name = '' } = {}) {
+    if (!host) return;
+    for (const old of historyHosts) if (!old.isConnected) historyHosts.delete(old);
+    historyHosts.add(host);
+    const token = {}; customerHistoryLoads.set(host, token);
+    const live = () => customerHistoryLoads.get(host) === token && host.isConnected;
+    host.textContent = 'Loading conversations…';
+    try {
+      const start = scope();
+      if (!customerId && !email.trim()) { host.textContent = 'No customer email or linked conversations.'; return; }
+      const owned = await start.client.from('email_accounts').select('id')
+        .eq('business_id', start.businessId).eq('user_id', start.userId).eq('provider', 'gmail').maybeSingle();
+      assertScope(start);
+      if (!live()) return;
+      if (owned.error) throw owned.error;
+      if (!owned.data) { host.textContent = 'Connect Gmail in Conversations to see this customer’s emails.'; return { count: 0, limited: false }; }
+      const { data, error } = await start.client.from('emails')
+        .select('id,account_id,thread_id,customer_id,direction,from_address,to_addresses,subject,body_text,snippet,sent_at')
+        .eq('business_id', start.businessId).eq('account_id', owned.data.id).order('sent_at', { ascending: false }).limit(500);
+      assertScope(start);
+      if (!live()) return;
+      if (error) throw error;
+      const address = email.trim().toLowerCase();
+      const addresses = value => String(value || '').toLowerCase().match(/[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)+/g) || [];
+      const rows = data || [], matching = rows.filter(m => (customerId && String(m.customer_id) === String(customerId)) || (address && [...addresses(m.from_address), ...addresses(m.to_addresses)].includes(address)));
+      const keys = new Set(matching.map(m => m.account_id + ':' + (m.thread_id || m.id)));
+      const related = rows.filter(m => keys.has(m.account_id + ':' + (m.thread_id || m.id)));
+      host.replaceChildren();
+      const intro = document.createElement('p'); intro.textContent = (name ? name + ' · ' : '') + 'Recent synced conversations' + (rows.length === 500 ? ' (latest 500 mailbox messages)' : '') + '. Sync in Conversations to check for new replies.'; host.append(intro);
+      if (!related.length) { const empty = document.createElement('p'); empty.textContent = 'No synced conversations for this customer.'; host.append(empty); }
+      for (const m of related) {
+        const item = document.createElement('details'), heading = document.createElement('summary'), body = document.createElement('div');
+        heading.textContent = [m.subject || '(no subject)', m.direction === 'sent' ? 'Sent' : 'Received', m.sent_at ? new Date(m.sent_at).toLocaleString() : 'Date unavailable'].join(' · ');
+        const text = m.body_text || m.snippet || 'No plain-text preview available.';
+        body.className = 'cv-body'; body.textContent = [m.from_address, 'To: ' + (m.to_addresses || ''), '', text].join('\n');
+        item.append(heading, body); host.append(item);
+      }
+      return { count: related.length, limited: rows.length === 500 };
+    } catch (error) { if (live()) host.textContent = 'Conversations could not load. Reopen this customer after checking your session and connection.'; }
+  }
+  // Replace the legacy HTML approximation at its existing entry point. The
+  // cached bytes below are reused when the operator composes the attachment.
+  if (typeof global.openDocPreview === 'function') global.openDocPreview = guarded(async (mode, id) => {
+    const start = scope(), r = recordFor(id), request = ++previewRequest;
+    if (!['quote', 'invoice'].includes(mode)) throw Error('Choose a quote or invoice.');
+    const host = document.getElementById('doc-preview-body');
+    if (!host) throw Error('Document preview is unavailable.');
+    docPreview = { mode, recordId: r.id };
+    if (previewUrl) global.URL.revokeObjectURL(previewUrl); previewUrl = null;
+    document.getElementById('doc-preview-title').textContent = (mode === 'quote' ? 'Quote' : 'Invoice') + ' PDF preview · ' + docNumber(mode, r);
+    document.getElementById('doc-preview-help').textContent = 'Review the exact PDF. The same bytes will be attached when you compose your email.';
+    host.textContent = 'Preparing PDF preview…';
+    const foot = document.getElementById('doc-preview-foot'); foot.replaceChildren();
+    const edit = document.createElement('button'); edit.type = 'button'; edit.className = 'btn ghost'; edit.textContent = 'Edit document & email templates'; edit.onclick = () => openTemplateEditor(); foot.append(edit);
+    const back = document.createElement('button'); back.type = 'button'; back.className = 'btn ghost'; back.textContent = 'Back'; back.onclick = () => closeDocPreview(); foot.append(back);
+    openModal('doc-preview-overlay');
+    const { attachment } = await prepareDocument(mode, id, { previewOnly: true }); assertScope(start);
+    if (request !== previewRequest || docPreview.recordId !== r.id || docPreview.mode !== mode || !host.isConnected || !document.getElementById('doc-preview-overlay').classList.contains('open')) return;
+    previewUrl = global.URL.createObjectURL(global.TK_CONVERSATIONS.pdfBlob(attachment));
+    host.replaceChildren();
+    const pdf = document.createElement('object'); pdf.type = 'application/pdf'; pdf.data = previewUrl; pdf.className = 'cv-document-pdf'; pdf.setAttribute('aria-label', 'Exact PDF preview'); pdf.textContent = 'Use Download PDF to review this document in your PDF viewer.';
+    const download = document.createElement('a'); download.href = previewUrl; download.download = attachment.filename; download.textContent = 'Download PDF'; host.append(pdf, download);
+    const composeButton = document.createElement('button'); composeButton.type = 'button'; composeButton.className = 'btn primary'; composeButton.textContent = 'Compose ' + mode + ' email →'; composeButton.disabled = mode === 'invoice' && !['completed','paid'].includes(r.stage);
+    composeButton.onclick = () => { closeDocPreview(); void global.generateAndSendDoc(mode, r); }; foot.append(composeButton);
+  });
+  if (typeof global.closeDocPreview === 'function') {
+    const close = global.closeDocPreview; global.closeDocPreview = function (...args) { previewRequest++; if (previewUrl) global.URL.revokeObjectURL(previewUrl); previewUrl = null; return close.apply(this, args); };
+  }
+  if (typeof global.saveTemplate === 'function') {
+    const save = global.saveTemplate; global.saveTemplate = async function (...args) { const result = await save.apply(this, args); if (document.getElementById('doc-preview-overlay')?.classList.contains('open')) await global.openDocPreview(docPreview.mode, docPreview.recordId); return result; };
+  }
+  if (typeof global.renderEmailBodyHtml === 'function') global.renderEmailBodyHtml = global.TK_CONVERSATIONS.renderEmailHtml;
+  global.TK_CONVERSATIONS_BRIDGE = { render: renderer, reset, compose: guarded(compose), composeDocument: guarded(composeDocument), listQuotes, renderCustomerHistory };
   // Install before extension-quote-link.js: an Earth return opens this same
   // detail view, so saved quotes have a clear next action immediately.
   if (typeof global.openDetail === 'function') {

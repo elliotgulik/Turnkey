@@ -112,3 +112,26 @@ test('material baseline rate changes invalidate old corrections rather than comp
   assert.equal(rec(samples(5, { baselinePrice: 110 })).sampleCount, 5);
   assert.equal(rec(samples(5, { baselinePrice: 111 })).sampleCount, 0);
 });
+
+test('automatic feedback requires a real measured-service edit and preserves explicit reasons', () => {
+  const edit={isManual:true,unit:'m²',chosenPrice:125,recommendedPrice:110};
+  assert.equal(engine.reasonForPriceEdit(edit),'pricing_correction');
+  assert.equal(engine.reasonForPriceEdit({...edit,unit:'m'}),'pricing_correction');
+  for(const patch of [{isManual:false},{unit:'panes'},{chosenPrice:110},{chosenPrice:NaN},{recommendedPrice:Infinity},{verifiedQuantity:120}])
+    assert.equal(engine.reasonForPriceEdit({...edit,...patch}),'');
+  for(const reason of ['discount','extra_work','measurement_correction','unexplained','difficult_access'])
+    assert.equal(engine.reasonForPriceEdit({...edit,reason}),reason);
+  assert.equal(engine.reasonForPriceEdit({...edit,chosenPrice:0}),'pricing_correction','free service edits remain real observations');
+});
+test('automatic price feedback stays comparable by perimeter, area and storeys without changing old observations', () => {
+  for(const unit of ['m²','m']) {
+    const rows=samples(5,{unit,storeys:2,businessId:'a',reason:engine.reasonForPriceEdit({unit,isManual:true,chosenPrice:120,recommendedPrice:100})});
+    const original=structuredClone(rows);
+    const result=rec(rows,{businessId:'a',lines:[{...line,unit,storeys:2}]});
+    assert.equal(result.recommendedPrice,110);
+    assert.equal(rec(rows,{businessId:'a',lines:[{...line,unit,storeys:1}]}).sampleCount,0);
+    assert.equal(rec(rows,{businessId:'b',lines:[{...line,unit,storeys:2}]}).sampleCount,0);
+    assert.deepEqual(rows,original);
+  }
+  assert.equal(fs.readFileSync('extension/vendor/pricing-learning-engine.js','utf8'),fs.readFileSync('pricing-learning-engine.js','utf8'));
+});

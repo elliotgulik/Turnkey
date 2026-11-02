@@ -526,8 +526,13 @@ window.addEventListener('message', (e) => {
   if (msg.requestId !== requestId) return;
   if (msg.type === 'TURNKEY_MEASURE_ACK') {
     clearTimeout(finishTimer);
+    finishing = true;
+    render();
     els.finish.textContent = 'Sent to Google Earth ✓';
-    setState('<p>Measurement sent back to Google Earth — you can close this tab, or keep tracing another shape there.</p>');
+    setState('<p>Measurement saved. Returning to Google Earth… If this tab stays open, return to Earth and close it.</p>');
+  } else if (msg.type === 'TURNKEY_MEASURE_RETURN_ERROR') {
+    // The result is already accepted; navigation trouble must never enable resend.
+    els.readout.textContent = msg.message || 'Measurement saved. Return to Google Earth and close this tab.';
   } else if (msg.type === 'TURNKEY_MEASURE_ERROR') {
     clearTimeout(finishTimer);
     finishing = false;

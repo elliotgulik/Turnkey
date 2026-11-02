@@ -151,3 +151,13 @@ test('opportunity correlation survives draft saves but remains non-authoritative
  assert.equal(validateDraft({opportunityId:'42'}).opportunityId,'42');
  assert.throws(()=>validateDraft({opportunityId:{}}),/opportunityId/);
 });
+
+
+test('allowed email font reaches Gmail as escaped HTML with a plain-text alternative',async()=>{
+ const h=setup({payload:{emailFont:'georgia',bodyText:'Hello <script>alert(1)</script> & goodbye'}});
+ const res=await h.run('post','/send',{body:{draftId}});assert.equal(res.body.ok,true);
+ const mail=h.calls[0][1];assert.match(mail.bodyHtml,/font-family:Georgia, serif/);
+ assert.match(mail.bodyHtml,/&lt;script&gt;/);assert.doesNotMatch(mail.bodyHtml,/<script>/);
+ assert.equal(mail.bodyText,'Hello <script>alert(1)</script> & goodbye');
+ assert.throws(()=>validateDraft({emailFont:'url(https://tracker.example)'}),/font/);
+});

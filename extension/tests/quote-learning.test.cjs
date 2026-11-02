@@ -63,3 +63,19 @@ test('observation retry follows durable job save, keeps exact context and never 
  let current=false;const changed=observationSubmission(api,'B',result.quote,result.job,snapshot,()=>current);
  await assert.rejects(changed,/account changed/);assert.equal(posts,2);
 });
+
+test('direct service edits learn automatically, distributed totals and generated prices do not',async()=>{
+ const {learningPricing,observationLines}=await load(),{TK_PRICING:p,TK_COST:c}=engines();
+ const rows=[{lineKey:'area',svc:'driveway',qty:140,manualPrice:700},{lineKey:'perimeter',svc:'housewash',qty:60,storeys:2,manualPrice:650}];
+ const options={engine,learningState:{settings:{},observations:[]},businessId:'B'};
+ const snapshot=r=>{const model=learningPricing(p,c,r,options);return {model,observations:observationLines(model,r,p)}};
+ const {model,observations}=snapshot(rows);
+ assert.deepEqual(observations.map(l=>l.reason),['pricing_correction','pricing_correction']);
+ assert.deepEqual(observations.map(l=>[l.unit,l.quantity,l.storeys,l.chosenPrice]),[['m²',140,1,700],['m',60,2,650]]);
+ assert.equal(snapshot(rows.map(l=>({...l,distributedPrice:true}))).observations[0].reason,'');
+ assert.equal(snapshot(rows.map((l,i)=>({...l,manualPrice:model.recommendations[i].recommendedPrice}))).observations[0].reason,'');
+ for(const reason of ['discount','extra_work','unexplained','difficult_access'])assert.equal(snapshot(rows.map(l=>({...l,reason}))).observations[0].reason,reason);
+ assert.equal(model.lines[0].distributedPrice,undefined);
+ // Revisiting changed service context must keep the actual edited price.
+ assert.equal(snapshot(rows.map(l=>({...l,storeys:3}))).observations[1].chosenPrice,650);
+});

@@ -15,6 +15,11 @@ const ONESIGNAL_API_KEY = process.env.ONESIGNAL_API_KEY || '' // REST API key, n
 
 export const isConfigured = () => !!(ONESIGNAL_APP_ID && ONESIGNAL_API_KEY)
 
+// Customer outcomes and replies only. Reminders remain in task/history views.
+export const ACTIONABLE_NOTIFICATION_TYPES = new Set(['customer_reply','email_received','customer_question','quote_accepted','payment_received','invoice_paid']);
+export const isActionableNotification = type => ACTIONABLE_NOTIFICATION_TYPES.has(type);
+
+
 // Actually calls OneSignal's REST API. Targets specific subscription ids
 // (not a broadcast/segment) so a push only ever reaches devices that
 // belong to this business — resolved by the caller from
@@ -52,6 +57,7 @@ async function pushToOneSignal(subscriptionIds, { title, message, url }) {
 //     user_id,          // optional — target one specific user's devices instead of the whole business
 //   })
 export async function sendNotification(supabase, { business_id, type, title, message, url, user_id }) {
+  if (!isActionableNotification(type)) return { ok: true, skipped: 'notification_type_disabled' }
   if (!business_id || !title || !message) {
     console.error('[Notify] missing required field(s)', { business_id, type, title, message })
     return { ok: false, error: 'missing_required_field' }

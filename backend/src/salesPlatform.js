@@ -506,6 +506,9 @@ export function installSalesPlatform(
     // calendar request even when provider mocks or adapters resolve immediately.
     if (kind !== "dispatch_seed") tick().catch((e) => console.error("[Sales handoff] immediate wake failed", e.code || e.name));
   }
+  const fullImportState = c => unwrap(db.from("external_object_mappings").select("snapshot")
+    .eq("business_id", c.business_id).eq("connection_generation", c.generation)
+    .eq("object_type", "full_import").eq("local_id", "servicem8:full-import").maybeSingle());
   app.get(
     "/api/sales/servicem8/status",
     requireBusiness,
@@ -547,6 +550,7 @@ export function installSalesPlatform(
       const webhookDeliveryReady = ["job", "jobpayment", "jobactivity"].every(object =>
         webhookHealth?.subscriptions?.some(row => row.object === object && row.active === true));
       const health = connectionHealth(c);
+      const imported = await fullImportState(c);
       const failed = tasks.filter(x => x.state === "failed");
       res.json({
         connected: true,
@@ -559,6 +563,7 @@ export function installSalesPlatform(
         webhookSubscribedAt: c.webhook_subscribed_at || null,
         dispatchSeededAt: c.dispatch_seeded_at || null,
         dispatchSeedVersion: "v3",
+        fullImport: imported?.snapshot || null,
         reconciliationIntervalMinutes: 15,
         scheduleSyncPermissionMissing: c.auth_mode === "oauth" && !String(c.scope || "").split(/\s+/).includes("read_schedule"),
         retryAvailable: health.serverConfigured && health.credentialsReady && !health.reconnectRequired && failed.length > 0,
@@ -992,6 +997,25 @@ export function installSalesPlatform(
           { uuid: m.external_uuid },
         );
       res.status(202).json({ queued: maps.length });
+    }),
+  );
+  app.post(
+    "/api/sales/servicem8/import",
+    requireBusiness,
+    admin,
+    wrap(async (req, res) => {
+      const c = await conn(req.businessId);
+      if (!c) throw fail("Connect ServiceM8 first.", 409);
+      const key = "full-import-v1:" + c.generation;
+      const previous = await unwrap(db.from("integration_tasks").select("id,state,attempts")
+        .eq("business_id", req.businessId).eq("kind", "dispatch_seed").eq("dedupe_key", key).maybeSingle());
+      const payload = { fullImport: true, generation: c.generation };
+      if (previous && ["failed", "succeeded"].includes(previous.state)) {
+        await unwrap(db.from("integration_tasks").update({ state: "pending", attempts: 0, payload,
+          lease_until: null, lease_token: null, last_error: null, next_attempt_at: new Date().toISOString() })
+          .eq("business_id", req.businessId).eq("id", previous.id).eq("state", previous.state).eq("attempts", previous.attempts));
+      } else await enqueue(req.businessId, "dispatch_seed", key, payload);
+      res.status(202).json({ ok: true, queued: true, ...payload });
     }),
   );
   app.post(
@@ -1458,6 +1482,9 @@ export function installSalesPlatform(
   async function seedDispatch(task) {
     const businessId = task.business_id, c = await conn(businessId);
     if (!c || task.payload.generation !== c.generation) throw fail("ServiceM8 connection changed before dispatch import.", 409);
+    const imported = await fullImportState(c);
+    const fullImport = task.payload.fullImport === true || imported?.snapshot?.fullImport === true;
+    const reconciliation = { warnings: [], skipped: 0 };
     let checkedAt = 0;
     const checkpoint = async (force = false) => {
       if (!force && Date.now() - checkedAt < 60000) return;
@@ -1508,7 +1535,7 @@ export function installSalesPlatform(
     }
     const byJob = grouped(activities, "job_uuid");
     // Local profiles/pricing must not wait behind historical event writes.
-    await reconcileJobs(businessId, c, jobs, checkpoint, { byJob, timeZone, cache });
+    const linked = await reconcileJobs(businessId, c, jobs, checkpoint, { byJob, timeZone, cache, fullImport, reconciliation });
     for (const job of jobs) {
       await checkpoint();
       if (!SM.uuid(job.uuid)) continue;
@@ -1537,17 +1564,30 @@ export function installSalesPlatform(
     const saved = await unwrap(db.from("servicem8_connections").update({ last_sync_at: new Date().toISOString(),
       dispatch_seeded_at: c.dispatch_seeded_at || new Date().toISOString(), last_error: null }).eq("business_id", businessId).eq("generation", c.generation).select("business_id"));
     if (!saved.length) throw fail("ServiceM8 connection changed before dispatch import was saved.", 409);
+    if (fullImport) await unwrap(db.from("external_object_mappings").upsert({ business_id: businessId,
+      connection_generation: c.generation, object_type: "full_import", local_id: "servicem8:full-import", external_uuid: c.generation,
+      snapshot: { fullImport: true, completedAt: new Date().toISOString(), linked: linked.size,
+        skipped: reconciliation.skipped, warnings: reconciliation.warnings }, synced_at: new Date().toISOString() },
+      { onConflict: "business_id,connection_generation,object_type,local_id" }));
   }
-  async function reconcileJobs(businessId, c, remoteJobs, checkpoint, { byJob, timeZone, cache, allowReferences = true, syncStatuses = true }) {
+  async function reconcileJobs(businessId, c, remoteJobs, checkpoint, { byJob, timeZone, cache, allowReferences = true, syncStatuses = true,
+    fullImport = false, reconciliation = { warnings: [], skipped: 0 } }) {
     const [current, legacy, handoffs, records, batches, localJobs, customers] = await Promise.all([
       allRows(db, "external_object_mappings", businessId, "*", "external_uuid"), allRows(db, "servicem8_object_map", businessId),
       allRows(db, "servicem8_handoffs", businessId), allRows(db, "import_records", businessId),
       allRows(db, "import_batches", businessId), allRows(db, "jobs", businessId), allRows(db, "customers", businessId),
     ]);
-    const locals = new Map(localJobs.map(job => [job.id, job])), candidates = new Map(), reverse = new Map(), blocked = new Set();
+    const locals = new Map(localJobs.map(job => [job.id, job])), candidates = new Map(), reverse = new Map(), blocked = new Map();
+    const eligible = job => SM.uuid(job.uuid) && ["Quote", "Work Order", "Completed", "Unsuccessful"].includes(job.status) &&
+      (job.active == null || [1, "1", true].includes(job.active));
+    const skip = (job, reason) => {
+      if (!fullImport) return;
+      reconciliation.skipped++;
+      if (reconciliation.warnings.length < 1000) reconciliation.warnings.push({ jobUuid: job.uuid || null, reason });
+    };
     const add = (external, local, snapshot) => {
       if (!SM.uuid(external) || !SM.uuid(local)) return;
-      if (!locals.has(local)) { blocked.add(external); return; }
+      if (!locals.has(local)) { blocked.set(external, "Existing job link points outside this business or to a missing job."); return; }
       const targets = candidates.get(external) || new Map();
       targets.set(local, snapshot || targets.get(local) || {}); candidates.set(external, targets);
       const sources = reverse.get(local) || new Set(); sources.add(external); reverse.set(local, sources);
@@ -1565,12 +1605,14 @@ export function installSalesPlatform(
       if (!allowReferences || row.entity_type !== "job" || !serviceM8Batches.has(row.batch_id) || !row.dedupe_key?.startsWith("servicem8:")) continue;
       const matches = references.get(row.dedupe_key.slice("servicem8:".length));
       if (matches?.length === 1) add(matches[0], row.entity_id);
+      else if (fullImport && matches?.length > 1) for (const uuid of matches)
+        blocked.set(uuid, "Multiple ServiceM8 jobs share an imported reference; no match was chosen.");
     }
     const profileMatches = new Map(), detailByJob = new Map(), explicitlyLinked = new Set(reverse.keys());
     for (const job of remoteJobs) {
       await checkpoint();
       const booking = serviceM8Booking(byJob.get(job.uuid) || [], timeZone);
-      if (!((job.status === "Work Order" && (job.active == null || Number(job.active) === 1) && booking) || job.status === "Completed") || candidates.has(job.uuid) || blocked.has(job.uuid)) continue;
+      if (!(fullImport ? eligible(job) : ((job.status === "Work Order" && (job.active == null || Number(job.active) === 1) && booking) || job.status === "Completed")) || candidates.has(job.uuid) || blocked.has(job.uuid)) continue;
       const details = await serviceM8DispatchDetails({ call, listRemote, businessId, job,
         activity: (byJob.get(job.uuid) || []).find(row => row.uuid === booking?.activityUuid) || {}, generation: c.generation, cache });
       detailByJob.set(job.uuid, details);
@@ -1579,38 +1621,46 @@ export function installSalesPlatform(
       const profiles = strictDispatchProfiles(details, customers).filter(row => (!companyIds.size || companyIds.has(row.id)) &&
         !current.some(mapping => mapping.connection_generation === c.generation && mapping.object_type === "company" &&
           mapping.local_id === row.id && mapping.external_uuid !== job.company_uuid));
-      if (profiles.length > 1) { blocked.add(job.uuid); continue; }
+      if (profiles.length > 1) { blocked.set(job.uuid, "Multiple customer profiles match; review the exact customer links."); continue; }
       if (profiles.length !== 1) continue;
       profileMatches.set(job.uuid, profiles[0]);
       const jobs = localJobs.filter(local => local.customer_id === profiles[0].id &&
         ["new", "quoted", "followup", "won", "scheduled"].includes(local.status) &&
         normalizeDispatchAddress(local.details?.address || profiles[0].address) === normalizeDispatchAddress(details.address) &&
         !explicitlyLinked.has(local.id));
-      if (jobs.length > 1) { blocked.add(job.uuid); continue; }
+      if (jobs.length > 1) { blocked.set(job.uuid, "Multiple local jobs match; review the exact job links."); continue; }
       if (jobs.length === 1) add(job.uuid, jobs[0].id);
     }
     const linked = new Map();
     for (const job of remoteJobs) {
       await checkpoint();
-      if (!SM.uuid(job.uuid) || blocked.has(job.uuid)) continue;
+      if (fullImport && !eligible(job)) { skip(job, "Inactive job, unsupported status or invalid ServiceM8 UUID."); continue; }
+      if (!SM.uuid(job.uuid) || blocked.has(job.uuid)) { if (blocked.has(job.uuid)) skip(job, blocked.get(job.uuid)); continue; }
       const matches = candidates.get(job.uuid);
-      if (matches && (matches.size !== 1 || reverse.get([...matches.keys()][0])?.size !== 1)) continue;
+      if (matches && (matches.size !== 1 || reverse.get([...matches.keys()][0])?.size !== 1)) { skip(job, "Conflicting job identities; no match was chosen."); continue; }
       let [localId, snapshot] = matches ? [...matches][0] : [null, {}];
       const booking = serviceM8Booking(byJob.get(job.uuid) || [], timeZone);
       const booked = job.status === "Work Order" && (job.active == null || Number(job.active) === 1) && booking;
-      if (!localId && !booked) continue;
-      if (booked) {
+      if (!localId && !booked && !fullImport) continue;
+      if (booked || fullImport) {
         const details = detailByJob.get(job.uuid) || await serviceM8DispatchDetails({ call, listRemote, businessId, job,
-          activity: (byJob.get(job.uuid) || []).find(row => row.uuid === booking.activityUuid) || {}, generation: c.generation, cache });
+          activity: (byJob.get(job.uuid) || []).find(row => row.uuid === booking?.activityUuid) || {}, generation: c.generation, cache });
         const local = localId ? locals.get(localId) : null;
-        const customerId = await ensureDispatchCustomer(businessId, c, job, details, local, current, legacy, profileMatches.get(job.uuid));
+        let customerId;
+        try { customerId = await ensureDispatchCustomer(businessId, c, job, details, local, current, legacy, profileMatches.get(job.uuid)); }
+        catch (error) {
+          if (!fullImport || error.status !== 409) throw error;
+          skip(job, error.publicMessage); continue;
+        }
         if (!localId) {
           localId = SM.stableUuid("servicem8-inbound-job", businessId, c.generation, job.uuid);
           const names = details.lineItems.length ? details.lineItems : details.services.map(name => ({ name, quantity: "1" }));
           await unwrap(db.from("jobs").upsert({ id: localId, business_id: businessId, customer_id: customerId,
-            status: "scheduled", scheduled_date: serviceM8BookingDate(booking),
+            status: booked ? "scheduled" : ({ Quote: "quoted", "Work Order": "won", Completed: "completed", Unsuccessful: "cancelled" })[job.status],
+            scheduled_date: booked ? serviceM8BookingDate(booking) : null,
             details: { importedFrom: "servicem8", serviceM8JobUuid: job.uuid, serviceM8Status: job.status, serviceM8Booking: booking,
-              assignedStaffIds: booking.assignedStaffIds, services: [], requestedServices: names.map(item => ({ name: item.name, service_id: null })),
+              assignedStaffIds: booking?.assignedStaffIds || [], services: [], requestedServices: names.map(item => ({ name: item.name, service_id: null })),
+              ...(serviceM8WallClock(job.date, timeZone) ? { createdAt: serviceM8WallClock(job.date, timeZone).toISOString() } : {}),
               serviceM8LineItems: details.serviceM8LineItems,
               jobNotes: String(job.job_description || "").slice(0, 4000), name: details.personName, address: details.address } },
             { onConflict: "id", ignoreDuplicates: true }));
@@ -1621,6 +1671,17 @@ export function installSalesPlatform(
         }
       }
       if (!localId) continue;
+      if (fullImport) {
+        // Reserve immutable identity before touching status/pricing. DB uniqueness
+        // arbitrates concurrent workers; retries reuse the same deterministic IDs.
+        const { error } = await db.from("external_object_mappings").upsert({ business_id: businessId,
+          connection_generation: c.generation, object_type: "job", local_id: localId, external_uuid: job.uuid, snapshot },
+          { onConflict: "business_id,connection_generation,object_type,local_id", ignoreDuplicates: true });
+        if (error && error.code !== "23505") throw error;
+        const reserved = await unwrap(db.from("external_object_mappings").select("external_uuid,local_id")
+          .eq("business_id", businessId).eq("connection_generation", c.generation).eq("object_type", "job").eq("local_id", localId).maybeSingle());
+        if (!reserved || reserved.external_uuid !== job.uuid) { skip(job, "Concurrent job link conflicts; review the exact mapping."); continue; }
+      }
       if (syncStatuses) await unwrap(db.rpc("sync_servicem8_job_state", { p_business_id: businessId, p_job_id: localId,
         p_status: String(job.status || "Unknown"), p_booking: job.status === "Completed" ? snapshot.booking || null : booking,
         p_schedule_permission_missing: job.status === "Completed" }));
@@ -2144,17 +2205,38 @@ export function installSalesPlatform(
       ]);
       const cs = new Map(customers.map((c) => [c.id, c])),
         qs = new Map(quotes.map((q) => [q.id, q]));
+      const c = await conn(req.businessId);
+      const maps = c ? await unwrap(db.from("external_object_mappings").select("local_id,external_uuid,snapshot")
+        .eq("business_id", req.businessId).eq("connection_generation", c.generation).eq("object_type", "job")) : [];
+      const priceCoverage = { source: "Current ServiceM8 snapshots for linked jobs; saved quote/job totals for other jobs",
+        taxLabel: "Tax basis not specified", linked: 0, currentTotals: 0, unknownTotals: 0 };
       const records = jobs.map((j) => {
         const c = cs.get(j.customer_id) || {},
           q = qs.get(j.quote_id);
+        const links = maps.filter(m => m.local_id === j.id);
+        const link = links.length === 1 ? links[0] : null;
+        const latest = link && [j.details?.serviceM8Pricing, link.snapshot?.pricing, link.snapshot?.profile?.pricing]
+          .filter(snapshot => snapshot?.jobUuid === link.external_uuid)
+          .sort((a, b) => (Date.parse(b.updatedAt) || 0) - (Date.parse(a.updatedAt) || 0))[0];
+        const pricing = latest && serviceM8Number(latest.total) !== null ? latest : null;
+        if (links.length) {
+          priceCoverage.linked++;
+          if (pricing) priceCoverage.currentTotals++; else priceCoverage.unknownTotals++;
+        }
         return {
           ...j.details,
           jobId: j.id,
-          stage: j.status,
+          stage: link?.snapshot?.status === "Unsuccessful" ? "lost" : j.status,
           name: c.name,
           source: c.source,
-          total: q?.amount ?? j.details?.total ?? 0,
-          createdAt: j.details?.createdAt || j.created_at,
+          total: links.length ? (pricing ? serviceM8Number(pricing.total) : null) : q?.amount ?? j.details?.total ?? 0,
+          // A snapshot's tax basis is unknown; historical costs/GST cannot imply
+          // a current margin. These are report-only overrides, never stored edits.
+          ...(links.length ? { opportunityValue: pricing ? serviceM8Number(pricing.total) : 0,
+            gstRegistered: undefined, estimatedMarginPct: undefined } : {}),
+          // Imported rows are inserted today even when their original arrival
+          // date is unknown. A saved quote date is usable; import time is not.
+          createdAt: j.details?.createdAt || (j.details?.importedFrom === "servicem8" ? q?.created_at || null : j.created_at),
         };
       });
       const settings = await unwrap(
@@ -2172,16 +2254,14 @@ export function installSalesPlatform(
         spend,
         probabilities: settings?.probabilities || {},
       });
-      const c = await conn(req.businessId);
+      report.pricing = priceCoverage;
+      const importedRecords = records.filter(record => record.importedFrom === "servicem8");
+      report.dateCoverage = {
+        unknownLeadDates: importedRecords.filter(record => METRICS.leadTime(record) == null).length,
+        unknownQuoteDates: importedRecords.filter(record => ["quoted", "followup"].includes(record.stage) && METRICS.quoteTime(record) == null).length,
+        note: "Imported records without original arrival dates are excluded from lead cohorts. Imported quote stages without sent dates are excluded from date-based quote counts. Import time is not an original arrival, quote or win date.",
+      };
       if (c) {
-        const maps = await unwrap(
-          db
-            .from("external_object_mappings")
-            .select("local_id,snapshot")
-            .eq("business_id", req.businessId)
-            .eq("connection_generation", c.generation)
-            .eq("object_type", "job"),
-        );
         const wins = records.filter(
           (r) =>
             METRICS.won(r) &&

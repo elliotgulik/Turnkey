@@ -202,3 +202,14 @@ nav.tabs button.active{box-shadow:none}
  .nlm-record-panel .nlm-fields{grid-template-columns:75px minmax(0,1fr)}
  .nlm-record-panel .nlm-fields dd{overflow-wrap:anywhere}
 }
+/* Read status is independent of sales stage and notification age. */
+.nlm-new{display:inline-block;flex:none;padding:3px 5px;border-radius:4px;background:var(--teal-wash,#e7f4ef);color:#076454;font-size:10px;font-weight:750;line-height:1.4}
+.nlm-card.unread .nlm-name{font-weight:750}
+.nlm-read-toggle{border:1px solid var(--line);border-radius:6px;background:var(--surface,#fff);color:var(--teal);font:inherit;font-size:12px;font-weight:600;padding:8px 10px;min-height:36px;cursor:pointer}
+.nlm-read-toggle:hover{background:var(--teal-wash,#e7f4ef)}
+.nlm-read-toggle:focus-visible,.nlm-name:focus-visible{outline:2px solid var(--teal);outline-offset:3px}
+@media(max-width:760px){
+ .nlm-card-top{flex-wrap:wrap}
+ .nlm-read-toggle{min-height:44px}
+ .nlm-section-heading{flex-wrap:wrap;align-items:center}
+}
