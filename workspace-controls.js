@@ -9,7 +9,8 @@
     if(select.getAttribute('aria-label'))return select.getAttribute('aria-label');
     const label=select.labels?.[0];
     if(label){const copy=label.cloneNode(true);copy.querySelectorAll('select,input,button,.ux-select').forEach(el=>el.remove());if(copy.textContent.trim())return copy.textContent.trim();}
-    return select.title||'Choose an option';
+    const fieldLabel=select.closest('.field')?.querySelector(':scope > label');
+    return fieldLabel?.textContent.trim()||select.title||'Choose an option';
   }
   function enhance(select){
     if(instances.has(select)||select.multiple||select.size>1||select.dataset.nativeControl!=null)return;

@@ -1,0 +1,204 @@
+/* Compact working layouts. TurnKey's existing palette, type and icons remain. */
+[hidden]{display:none!important}
+.app main{max-width:none;padding:0 24px 80px}
+.ux-workspace-bar{padding:12px 0;margin-bottom:22px;backdrop-filter:none}
+nav.tabs{width:216px;padding:12px}
+nav.tabs .sidebar-brand{padding:8px 8px 16px}
+nav.tabs button{min-height:38px;padding:8px 10px;border-radius:6px}
+nav.tabs .lead-manager-nav:not(.active){background:transparent;color:var(--ink-soft);box-shadow:none;font-weight:500}
+nav.tabs button.active{box-shadow:none}
+.sidebar-label{padding:16px 10px 6px}
+.sale-head h2,.view-head h2,.nlm-header h2{font-size:24px;line-height:1.25;letter-spacing:-.6px}
+.sale-head,.view-head{margin-bottom:16px}
+.app .btn,.overlay .btn,dialog .btn{border-radius:7px;min-height:36px;padding:8px 12px;box-shadow:none}
+.app .btn.primary,.app .btn.accent{box-shadow:none}
+.panel,.sale-panel,.sale-kpi,.conn-card,.rate-card,.settings-card,.dash-card,.stat{border-radius:9px;box-shadow:none}
+.nlm-shell{max-width:none;padding:0 0 32px}
+.nlm-header{align-items:center;margin-bottom:22px;gap:20px}
+.nlm-header h2{display:flex;align-items:center;gap:10px;margin:0 0 5px}
+.nlm-heading-count{font-size:13px;line-height:1;background:#e9efef;color:var(--ink-soft);border-radius:6px;padding:5px 8px;letter-spacing:0;font-weight:600;font-variant-numeric:tabular-nums}
+.nlm-header p{font-size:13px;margin:0}
+.nlm-header-actions{display:flex;align-items:center;gap:8px;flex-wrap:nowrap}
+.nlm-header-actions .nlm-alert-button{min-height:36px;gap:7px}
+.nlm-tools{position:relative}
+.nlm-tools>summary{list-style:none;cursor:pointer;border:1px solid var(--line);border-radius:7px;min-height:36px;padding:8px 12px;font-size:13px;background:#fff;color:var(--ink-soft);font-weight:600;white-space:nowrap}
+.nlm-tools>summary::after{content:'⌄';margin-left:10px}
+.nlm-tools>summary::-webkit-details-marker{display:none}
+.nlm-tools>div{position:absolute;right:0;top:calc(100% + 6px);z-index:15;display:grid;gap:4px;padding:6px;border:1px solid var(--line);border-radius:9px;box-shadow:0 8px 24px #122d3a18;background:#fff;min-width:180px}
+.nlm-tools .btn{text-align:left;justify-content:flex-start;border:0;background:transparent;white-space:nowrap}
+.nlm-command-row{display:flex;align-items:center;gap:14px;border-bottom:1px solid var(--line);padding-bottom:12px}
+.nlm-scopes{margin:0;gap:3px;flex-wrap:nowrap;flex:none;padding:3px;background:#eaf0f1;border-radius:8px}
+.nlm-scopes button{min-height:34px;padding:7px 12px;border:0;border-radius:6px;background:transparent;font-size:12px;white-space:nowrap}
+.nlm-scopes button[aria-pressed=true]{background:#fff;color:var(--ink);box-shadow:0 1px 3px #122d3a12}
+.nlm-scopes button span{font-size:11px;color:var(--ink-soft)}
+.nlm-search{position:relative;flex:1;margin-left:auto;max-width:420px;min-width:120px}
+.nlm-search input{width:100%;min-height:38px;border:1px solid var(--line);border-radius:7px;background:#fff;padding:9px 12px;font:inherit;font-size:13px;outline:none}
+.nlm-search input:focus{border-color:var(--teal);box-shadow:0 0 0 2px #087f7012}
+.nlm-filter-disclosure{flex:none}
+.nlm-filter-disclosure>summary{cursor:pointer;font-size:13px;font-weight:600;color:var(--ink-soft);border:1px solid var(--line);border-radius:7px;padding:9px 12px;background:#fff;list-style:none}
+.nlm-filter-disclosure>summary::after{content:'⌄';margin-left:10px}
+.nlm-filter-disclosure>summary::-webkit-details-marker{display:none}
+.nlm-filters{position:absolute;right:24px;z-index:18;display:grid;grid-template-columns:1fr 1fr;width:440px;max-width:calc(100vw - 32px);margin-top:8px;padding:16px;border-radius:9px;box-shadow:0 8px 24px #122d3a18}
+.nlm-filters label>span{font-size:12px;letter-spacing:0;text-transform:none}
+.nlm-filters .nlm-overdue{grid-column:1/-1}
+.nlm-result-line{margin:12px 0;font-size:12px}
+.nlm-list{border:1px solid var(--line);border-radius:9px;background:#fff;overflow:hidden;gap:0}
+.nlm-list-heading,.nlm-card{display:grid;grid-template-columns:minmax(180px,1.5fr) minmax(160px,1.35fr) 75px minmax(140px,.95fr) 100px 140px;gap:18px;align-items:center}
+.nlm-list-heading{padding:12px 16px;background:#f8fafb;color:var(--ink-soft);font-size:11px;font-weight:600;border-bottom:1px solid var(--line)}
+.nlm-list-heading>span:nth-child(5){text-align:right}
+.nlm-card{border:0;border-bottom:1px solid var(--line);border-radius:0;box-shadow:none;padding:16px;min-height:112px;transition:background-color .12s}
+.nlm-card:last-child{border-bottom:0}
+.nlm-card:hover{box-shadow:none;border-color:var(--line);background:#f8fbfa}
+.nlm-card:focus-within{background:#f4faf8}
+.nlm-card>*{min-width:0}
+.nlm-card-top{gap:7px;flex-wrap:nowrap}
+.nlm-name{font-size:14px;font-weight:650;line-height:1.4;overflow-wrap:anywhere}
+.nlm-grade{height:20px;min-width:20px;padding:3px 5px;border-radius:4px;font-size:10px;flex:none}
+.nlm-row-address{font-size:12px;color:var(--ink-soft);line-height:1.5;margin:4px 0;overflow-wrap:anywhere}
+.nlm-row-phone{font-size:12px;color:var(--teal);text-decoration:none}
+.nlm-card .nlm-services{margin:0}
+.nlm-row-services{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.nlm-row-services .nlm-selected-services{gap:2px}
+.nlm-row-services .nlm-selected-services li{font-size:12px;line-height:1.5;padding:0}
+.nlm-row-services .nlm-selected-services li::before{display:none}
+.nlm-source-label{font-size:11px;font-weight:500;border-radius:5px;padding:4px 7px;background:#f1f4f7;display:inline-block;overflow-wrap:anywhere}
+.nlm-received-cell time{display:block;font-size:12px;line-height:1.55;color:var(--ink-soft);font-variant-numeric:tabular-nums}
+.nlm-owner-link{border:0;background:none;padding:0;margin-top:4px;color:var(--teal);font-size:12px;cursor:pointer;text-align:left}
+.nlm-value-cell{font-size:14px;font-weight:650;text-align:right;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.nlm-value-cell .nlm-muted{font-weight:400;font-size:12px}
+.nlm-card .nlm-actions{display:flex;gap:6px;justify-content:flex-end;flex-wrap:nowrap;margin:0}
+.nlm-action{min-height:34px;font-size:12px;padding:7px 9px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;gap:6px;white-space:nowrap;font-weight:600}
+.nlm-row-open{width:28px;height:34px;display:grid;place-items:center;cursor:pointer;border:0;background:transparent;color:var(--ink-soft);border-radius:5px;flex:none}
+.nlm-row-open:hover{background:#eaf2ef;color:var(--teal)}
+.nlm-row-overdue{display:block;margin-top:5px;font-size:11px;color:#ac3e2a;font-weight:500}
+.nlm-queue-note{margin:12px 0;font-size:12px;color:var(--ink-soft)}
+.nlm-detail{width:min(560px,100%)}
+.nlm-detail>header{padding:20px 24px}.nlm-detail>header h3{margin:0 0 6px;font-size:22px}
+.nlm-detail .nlm-eyebrow{display:none}
+.nlm-detail-grade{background:#f8fafb;padding:12px;border-radius:7px}
+.nlm-detail-scroll h4{font-size:12px;color:var(--ink-soft);margin:24px 0 12px}
+.nlm-fields{font-size:13px;line-height:1.6}
+.nlm-detail .sale-person-control{margin:12px 0}
+.nlm-detail .sale-followup-preference{font-size:12px;margin:12px 0}
+.nlm-detail .sale-followup-preference+.sale-muted{font-size:11px}
+/* Pipeline: decision summary, one next action, editing on demand. */
+.sale-kanban{gap:12px}
+.sale-column{border-radius:9px;padding:10px;background:#edf2f3;box-shadow:none}
+.sale-column>header{padding:4px 4px 12px}
+.sale-column h3{margin-bottom:6px}.sale-column>header>p{font-size:12px}
+.sale-card{border-radius:8px;padding:14px;box-shadow:none;margin-bottom:8px}
+.sale-card-top{align-items:flex-start;gap:10px;margin-bottom:8px}
+.sale-card .sale-record-open{font-size:15px;font-weight:650;line-height:1.4}
+.sale-card .sale-card-value strong{font-size:15px;white-space:nowrap}
+.sale-card .sale-card-value small{font-size:10px}
+.sale-card-address{font-size:12px;margin:6px 0!important}
+.sale-card .tk-lead-request{border:0;background:none;padding:0;margin:10px 0;font-size:12px}
+.sale-card .tk-lead-request>strong{display:none}
+.sale-card .tk-lead-request p{margin:2px 0;font-size:12px}
+.sale-card .sale-tags{margin:10px 0;gap:5px}
+.sale-card .sale-tags span{font-size:10px;padding:3px 5px;border-radius:4px}
+.sale-card .sale-followup{font-size:11px;margin:8px 0}
+.sale-card-footer{display:flex;gap:8px;align-items:flex-start;margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}
+.sale-card .sale-next-action{flex:1;min-width:0;margin:0;padding:0;border:0}
+.sale-card .sale-next-action p{display:none}
+.sale-card .sale-next-action .btn{width:100%;min-height:34px;padding:7px 9px;font-size:12px}
+.sale-card-tools{flex:none}
+.sale-card-tools>summary{cursor:pointer;padding:8px 9px;border:1px solid var(--line);border-radius:6px;font-size:12px;color:var(--ink-soft);background:#fff;list-style:none;white-space:nowrap}
+.sale-card-tools>summary::after{content:'⌄';margin-left:5px}
+.sale-card-tools>summary::-webkit-details-marker{display:none}
+.sale-card-tools[open]{flex:1}
+.sale-card-footer:has(.sale-card-tools[open]){flex-wrap:wrap}
+.sale-card-tools>div{padding:8px 0 0}
+.sale-card-tools .sale-record-actions{margin:8px 0;gap:5px;border:0;padding:0}
+.sale-card-tools .sale-card-stage{padding:8px 0 0;margin:0}
+#view-pipeline .sale-stage-jump,#view-pipeline .sale-board-hint{display:none}
+#view-pipeline .sale-pipeline-toolbar{margin-bottom:10px;gap:12px;align-items:center}
+#view-pipeline .sale-pipeline-toolbar .sale-field{margin:0}
+#view-pipeline .sale-results{margin:8px 0 14px}
+#view-pipeline .sale-column>header{padding:4px 4px 12px;margin-bottom:10px}
+#view-pipeline .sale-column>header>p{display:none}
+#view-pipeline .sale-opportunity{padding:14px;border-radius:8px;gap:0}
+#view-pipeline .sale-card-top{margin:0 0 6px;gap:10px;align-items:flex-start}
+#view-pipeline .sale-card-value strong{font-size:15px;line-height:1.4}
+#view-pipeline .sale-opportunity .sale-card-address{margin:4px 0 8px;font-size:12px}
+#view-pipeline .sale-next-action{padding:0;margin:0}
+#view-pipeline .sale-next-action p{display:none}
+#view-pipeline .sale-card .sale-tags{margin:8px 0}
+#view-pipeline .sale-record-open{font-size:15px}
+#view-pipeline .sale-card-stage{margin:10px 0 0;padding:10px 0 0}
+@media(max-width:1250px) and (min-width:761px){
+ .nlm-list-heading,.nlm-card{grid-template-columns:minmax(160px,1.4fr) minmax(130px,1fr) minmax(120px,1fr) 100px 125px;gap:12px}
+ .nlm-source-cell,.nlm-list-heading>span:nth-child(3){display:none}
+ .nlm-list-heading>span:nth-child(5){text-align:right}
+ .nlm-source-label{font-size:11px}
+}
+@media(max-width:1000px) and (min-width:761px){
+ .nlm-list-heading,.nlm-card{grid-template-columns:minmax(150px,1.2fr) minmax(140px,1fr) 100px 125px}
+ .nlm-received-cell,.nlm-list-heading>span:nth-child(4){display:none}
+}
+@media(max-width:760px){
+ .app main{padding:0 14px calc(90px + env(safe-area-inset-bottom,0px))}
+ .ux-workspace-bar{padding:10px 0;margin-bottom:18px}
+ .nlm-header{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:16px}
+ .nlm-header h2{font-size:21px;margin:0}
+ .nlm-header p{display:none}
+ .nlm-header-actions{display:flex!important;width:auto!important;gap:6px;margin:0 0 0 auto}
+ .nlm-header-actions .btn,.nlm-tools>summary{min-height:44px;padding:10px;font-size:12px}
+ .nlm-header-actions .nlm-alert-button{display:flex}
+ .nlm-header-actions .btn.primary{white-space:nowrap}
+ .nlm-heading-count{font-size:11px;padding:4px 6px}
+ .nlm-command-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;padding-bottom:10px}
+ .nlm-command-row .nlm-search{grid-column:1/-1;grid-row:1;max-width:none;width:100%;margin:0}
+ .nlm-search input{min-height:44px;font-size:16px}
+ .nlm-scopes{overflow:auto;max-width:100%;min-width:0}
+ .nlm-scopes button{font-size:12px;min-height:44px;padding:8px 10px}
+ .nlm-filter-disclosure>summary{min-height:44px;padding:12px;font-size:12px}
+ .nlm-filters{right:14px;width:calc(100vw - 28px);margin-top:6px;gap:12px}
+ .nlm-result-line{font-size:11px;margin:10px 0}
+ .nlm-list-heading{display:none}
+ .nlm-list{border-radius:8px}
+ .nlm-card{grid-template-columns:minmax(0,1fr) auto;gap:8px 10px;min-height:0;padding:14px}
+ .nlm-customer-cell{grid-column:1;grid-row:1}.nlm-name{font-size:15px}
+ .nlm-row-address{font-size:12px;margin:4px 0;line-height:1.45}
+ .nlm-row-phone{font-size:12px;display:inline-flex;min-height:32px;align-items:center}
+ .nlm-card .nlm-services{grid-column:1;grid-row:2}.nlm-row-services .nlm-selected-services li{font-size:12px}
+ .nlm-source-cell{grid-column:2;grid-row:2;align-self:start;justify-self:end}
+ .nlm-received-cell{grid-column:1;grid-row:3;font-size:11px}
+ .nlm-received-cell time{font-size:11px}.nlm-owner-link{min-height:32px;margin:0;display:inline-flex;align-items:center;font-size:12px}
+ .nlm-value-cell{grid-column:2;grid-row:1;font-size:14px;align-self:start;margin-top:2px}
+ .nlm-card .nlm-actions{grid-column:2;grid-row:3;align-self:center;gap:0}
+ .nlm-card .nlm-action{min-height:44px;padding:8px 10px;font-size:12px}
+ .nlm-card .nlm-row-open{display:none}
+ .nlm-queue-note{font-size:11px;line-height:1.6}
+ .sale-card{padding:14px}.sale-card .sale-next-action .btn,.sale-card-tools>summary{min-height:44px;font-size:13px}
+ .sale-card-tools>summary{padding:12px 10px}
+}
+/* Customer detail panel follows the same task order as the compact list. */
+.nlm-record-panel .nlm-detail-scroll{padding:16px 24px 24px}
+.nlm-primary-actions{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:4px}
+.nlm-primary-actions .btn{font-size:12px;min-height:36px}
+.nlm-primary-actions .btn.primary{margin-left:auto}
+.nlm-record-section{padding:18px 0;border-bottom:1px solid var(--line)}
+.nlm-record-panel .nlm-record-section h4{margin:0 0 12px;font-size:13px;color:var(--ink);font-weight:650}
+.nlm-section-heading{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+.nlm-record-panel .nlm-note{margin:0;font-size:13px}
+.nlm-note-actions{display:flex;justify-content:flex-end;margin-top:10px}
+.nlm-manage-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.nlm-manage-grid .nlm-stage-select,.nlm-record-panel .nlm-manage-grid .sale-person-control{grid-column:auto;grid-row:auto;gap:5px;margin:0;min-width:0}
+.nlm-manage-grid .nlm-stage-select>span{font-size:12px;letter-spacing:0;text-transform:none;font-weight:500}
+.nlm-followup-summary{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:16px 0;font-size:12px;color:var(--ink-soft)}
+.nlm-record-panel .tk-lead-request{padding:0;border:0;background:none;margin:0}
+.nlm-record-panel .tk-lead-request>strong{display:none}
+.nlm-record-panel .tk-lead-request p{margin:4px 0;font-size:13px}
+.nlm-record-panel .nlm-form-answers{margin:14px 0 0}
+.nlm-record-extra{margin-top:18px}
+.nlm-record-extra>summary{cursor:pointer;font-size:12px;color:var(--ink-soft);padding:8px 0}
+.nlm-record-extra .nlm-detail-grade{margin-top:10px}
+.nlm-record-panel .sale-muted{font-size:11px;line-height:1.6}
+@media(max-width:760px){
+ .nlm-record-panel .nlm-detail-scroll{padding:14px 18px 24px}
+ .nlm-primary-actions .btn{flex:1;min-height:44px;font-size:12px;padding:8px}
+ .nlm-record-panel .nlm-note-actions .btn{min-height:44px}
+ .nlm-record-panel .nlm-fields{grid-template-columns:75px minmax(0,1fr)}
+ .nlm-record-panel .nlm-fields dd{overflow-wrap:anywhere}
+}

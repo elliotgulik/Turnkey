@@ -25,3 +25,6 @@ supabase/.temp/
 
 # Reproducible extension package output; published copies live in assets/
 extension/dist/
+
+# Local design review screenshots; not deployed
+.local-ui-preview/

@@ -57,8 +57,9 @@ const assert = require('node:assert/strict');
       const leads = page.locator('#view-leads');
       const ids = () => leads.locator('[data-nlm-record]').evaluateAll(els => els.map(el => Number(el.dataset.nlmRecord)));
       const scope = key => leads.locator(`[data-nlm-scope="${key}"]`);
-      assert.equal(await leads.locator('h2').innerText(), 'Lead Manager');
+      assert.match(await leads.locator('h2').innerText(), /^Lead Manager\s+1$/);
       assert.deepEqual(await ids(), [1]);
+      await leads.locator('.nlm-name').first().click();
       await page.waitForFunction(()=>!document.querySelector('#view-leads [data-sale-assignee="1"]').disabled);
       const assignee=leads.locator('[data-sale-assignee="1"]');
       assert.match(await assignee.innerText(),/Elliot Gulik/);
@@ -66,6 +67,8 @@ const assert = require('node:assert/strict');
       await page.waitForFunction(()=>records[0].salespersonName==='Luca Anderson'&&window.lastAssigned==='servicem8:luca');
       assert.equal(await page.evaluate(()=>records[0].stage),'new');
       await page.evaluate(()=>{records[0].nextFollowUpAt=new Date(Date.now()-3600000).toISOString();});
+      await leads.locator('.nlm-close').click();
+      await leads.locator('.nlm-tools summary').click();
       await leads.locator('[data-sale-action="followups"]').click();
       assert.match(await page.locator('#sales-dialog').innerText(),/Customer 1/);
       await page.locator('#sales-dialog [data-sale-action="followup-tomorrow"]').click();
@@ -79,11 +82,13 @@ const assert = require('node:assert/strict');
         records[0].customerId=records[1].customerId='shared-customer';
         window.TK_SUPABASE_CLIENT={from(table){if(table!=='customers')throw Error('Unexpected preference table');let values;return {update(v){values=v;return this;},eq(){return this;},select(){return this;},single:async()=>({data:{id:'shared-customer',...values},error:null})};}};
       });
+      await leads.locator('.nlm-name').first().click();
       await leads.locator('[data-customer-followups="1"]').check();
       await page.waitForFunction(()=>records[0].followupsDisabled===true&&records[1].followupsDisabled===true);
       assert.equal(await page.evaluate(()=>TK_SALES_PLATFORM.followupRows('all').some(r=>r.id===1)),false);
       await leads.locator('[data-customer-followups="1"]').uncheck();
       await page.waitForFunction(()=>records[0].followupsDisabled===false&&records[1].followupsDisabled===false);
+      await leads.locator('.nlm-close').click();
 
 
 
