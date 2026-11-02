@@ -29,7 +29,7 @@ test('legacy state is preserved but never assigned; business caches stay isolate
 });
 test('late database response cannot replace the next business records',async()=>{
  const pending=[];const filters=[];
- const ctx=context({sb:{from(table){const q={select(){return q},eq(k,v){filters.push([table,k,v]);return new Promise(resolve=>pending.push(resolve));}};return q;}},newRecord(){throw Error('stale rows must never be materialized');}});
+ const ctx=context({sb:{from(table){const q={select(){return q},eq(k,v){filters.push([table,k,v]);return q;},neq(){return q;},order(){return q;},range(){return new Promise(resolve=>pending.push(resolve));}};return q;}},newRecord(){throw Error('stale rows must never be materialized');}});
  vm.runInContext(section('async function loadFromSupabase(){','function scheduleSupabaseSync(){'),ctx);
  const load=ctx.loadFromSupabase();
  ctx.currentBusinessId='B';ctx.businessSessionVersion++;ctx.records=[{name:'B customer'}];
@@ -41,7 +41,7 @@ test('switch during a save prevents subsequent writes and rejects old records',a
  let release;const requests=[];
  const ctx=context({sb:{from(table){requests.push(table);const q={update(){return q},eq(){return q},then(resolve){return new Promise(r=>release=r).then(resolve);}};return q;}}});
  vm.runInContext(section('const recordSaveQueue = new WeakMap();','/* ===== Supabase Storage:'),ctx);
- const record={customerId:'customer-A',stage:'new',total:0};ctx.recordBusinesses.set(record,'A');
+ const record={name:'Customer A',customerId:'customer-A',stage:'new',total:0};ctx.recordBusinesses.set(record,'A');
  const save=ctx.syncRecordToSupabase(record);
  await new Promise(resolve=>setImmediate(resolve));ctx.currentBusinessId='B';ctx.businessSessionVersion++;release({});
  await assert.rejects(save,/Business session changed/);assert.deepEqual(requests,['customers']);
@@ -64,3 +64,15 @@ test('auth clears the old business before waiting and never reveals an obsolete 
  ctx.businessSessionVersion++;ctx.currentBusinessId='C';finishLoad(true);await auth;
  assert.equal(shown,0);assert.equal(ctx.businessStateReady,false);
 });
+
+ test('customer pagination preserves a job identity beyond the first thousand profiles without autosaving hydration',async()=>{
+ const customers=Array.from({length:1001},(_,i)=>({id:'c'+i,name:'Customer '+i})),calls=[];let writes=0;
+ const ctx=context({sb:{from(table){const q={select(){return q},eq(){return q},neq(){return q},order(){return q},range(start,end){calls.push([table,start,end]);return Promise.resolve({data:table==='customers'?customers.slice(start,end+1):table==='jobs'?[{id:'job',customer_id:'c1000',status:'new',details:{}}]:[]});}};return q;}},newRecord:d=>({...d}),render(){if(ctx.businessStateReady)writes++;},renderAll(){if(ctx.businessStateReady)writes++;}});
+ vm.runInContext(section('async function loadFromSupabase(){','function scheduleSupabaseSync(){'),ctx);
+ assert.equal(await ctx.loadFromSupabase(),true);assert.equal(ctx.records[0].name,'Customer 1000');assert.equal(ctx.records[0].customerId,'c1000');assert.equal(writes,0);assert.equal(ctx.businessStateReady,true);assert.ok(calls.some(([table,start])=>table==='customers'&&start===1000));
+ });
+ test('missing customer never becomes a new blank profile',async()=>{
+ const ctx=context({sb:{from(table){const q={select(){return q},eq(){return q},neq(){return q},order(){return q},range(){return Promise.resolve({data:table==='jobs'?[{id:'job',customer_id:'original-customer',details:{}}]:[]});}};return q;}},newRecord:d=>({...d})});
+ vm.runInContext(section('async function loadFromSupabase(){','function scheduleSupabaseSync(){'),ctx);
+ await ctx.loadFromSupabase();assert.equal(ctx.records[0].customerId,'original-customer');assert.equal(ctx.records[0]._customerMissing,true);
+ });

@@ -10382,6 +10382,20 @@ async function loadFromSupabase(){
   if(!sb||!currentBusinessId)return false;
   const biz=currentBusinessId,version=businessSessionVersion;
   try{
+    // Supabase caps each response at 1,000 rows. Never hydrate a job from
+    // an incomplete customer page, then autosave it as a new blank customer.
+    async function pages(table){
+      const rows=[];
+      for(let offset=0;;offset+=1000){
+        let query=sb.from(table).select('*').eq('business_id',biz);
+        if(table==='customers')query=query.neq('name','');
+        const {data,error}=await query.order('id').range(offset,offset+999);
+        if(error)throw error;
+        if(biz!==currentBusinessId||version!==businessSessionVersion)return {data:[],error:null};
+        rows.push(...(data||[]));
+        if(!data||data.length<1000)return {data:rows,error:null};
+      }
+    }
     // Explicit business_id filter on all three, even though RLS already
     // scopes these — defense-in-depth so a gap in one RLS policy can't
     // silently merge another business's customers/jobs/invoices into this
@@ -10389,9 +10403,7 @@ async function loadFromSupabase(){
     // already does the same (checklist_templates, notifications, etc.),
     // these three were the exceptions.
     const [{data:customers,error:ce},{data:jobs,error:je},{data:invoices,error:ie}]=await Promise.all([
-      sb.from('customers').select('*').eq('business_id',biz),
-      sb.from('jobs').select('*').eq('business_id',biz),
-      sb.from('invoices').select('*').eq('business_id',biz)
+      pages('customers'),pages('jobs'),pages('invoices')
     ]);
     if(biz!==currentBusinessId||version!==businessSessionVersion)return false;
     if(ce)throw ce; if(je)throw je; if(ie)throw ie;
@@ -10404,7 +10416,7 @@ async function loadFromSupabase(){
       const c=custById.get(j.customer_id)||{};
       const inv=invoiceByJobId.get(j.id);
       const base=newRecord({
-        name:c.name||'',email:c.email||'',phone:c.phone||'',
+        name:c.name||j.details?.name||'Customer details unavailable',email:c.email||'',phone:c.phone||'',
         address:c.address||'',suburb:c.suburb||'',notes:c.notes||'',source:c.source||''
       });
       return Object.assign(base,j.details||{},{
@@ -10420,7 +10432,7 @@ async function loadFromSupabase(){
         // job. Over weeks of normal use this is exactly how one customer
         // ends up with 144 "quotes" in their profile for what was really
         // one quote, edited many times across many sessions.
-        followupsDisabled:c.followups_disabled===true,customerId:c.id||null,jobId:j.id,quoteId:j.quote_id||null,invoiceId:inv?inv.id:null,assignedStaffId:j.assigned_to||null,
+        _customerMissing:!c.id,followupsDisabled:c.followups_disabled===true,customerId:j.customer_id||null,jobId:j.id,quoteId:j.quote_id||null,invoiceId:inv?inv.id:null,assignedStaffId:j.assigned_to||null,
         paymentStatus:inv?(inv.payment_status||base.paymentStatus):base.paymentStatus,
         paymentMethod:inv?(inv.payment_method||base.paymentMethod):base.paymentMethod,
         dueDate:inv?(inv.due_date||base.dueDate):base.dueDate,
@@ -10428,7 +10440,9 @@ async function loadFromSupabase(){
       });
     });
     records.forEach(r=>recordBusinesses.set(r,biz));
-    render();renderAll();
+    const wasReady=businessStateReady;
+    businessStateReady=false;
+    try{render();renderAll();}finally{businessStateReady=wasReady;}
     return true;
   }catch(e){
     if(biz!==currentBusinessId||version!==businessSessionVersion)return false;
@@ -10550,6 +10564,7 @@ async function persistRecordToSupabase(r){
   const biz=currentBusinessId,version=businessSessionVersion;
   const assertSession=()=>{if(!biz||biz!==currentBusinessId||version!==businessSessionVersion||recordBusinesses.get(r)!==biz)throw new Error('Business session changed. Reload before saving.');};
   assertSession();
+  if(r._customerMissing||!String(r.name||'').trim())throw new Error('Customer details are incomplete. Reload before saving this job.');
   const customerPayload={
     business_id:biz,name:r.name||'',email:r.email||'',phone:r.phone||'',
     address:r.address||'',suburb:r.suburb||'',notes:r.notes||'',source:r.source||''
