@@ -9,8 +9,8 @@
   const categories = [
     { id: 'business', label: 'Business & team', description: 'Your business details, branding and people.', groups: ['Business', 'Branding', 'Team'] },
     { id: 'sales', label: 'Sales & quotes', description: 'Rates, pipeline, templates and online enquiries.', groups: ['Pricing', 'Pipeline', 'Templates', 'Quote embeds'] },
-    { id: 'operations', label: 'Daily operations', description: 'Job requirements and the alerts you receive.', groups: ['Workflows', 'Notifications'] },
-    { id: 'connections', label: 'Connections & billing', description: 'Email, calendars, integrations and payments.', groups: ['Email', 'Calendar', 'Integrations', 'Billing'] },
+    { id: 'operations', label: 'Operations', description: 'Job requirements and the alerts you receive.', groups: ['Workflows', 'Notifications'] },
+    { id: 'connections', label: 'Connections', description: 'Email, calendars, integrations and payments.', groups: ['Email', 'Calendar', 'Integrations', 'Billing'] },
     { id: 'data', label: 'Data & support', description: 'Imports, backups, permissions and help.', groups: ['Imports', 'Advanced', 'Support'] },
     { id: 'other', label: 'More settings', description: 'Additional settings available for your business.', groups: [] },
   ];
@@ -35,7 +35,7 @@
       });
       const available = categories.filter(c => entries.some(e => e.category === c));
       const intro = make('div', 'sx-intro');
-      intro.innerHTML = '<p class="sx-eyebrow">Business settings</p><h3>Make TurnKey work for you</h3><p>All settings are listed below. Open a section or use search; each section keeps its own save button.</p>';
+      intro.innerHTML = '<p>Search for a setting, or choose a category below.</p>';
       const layout = make('div', 'sx-layout');
       const nav = make('nav', 'sx-nav'); nav.setAttribute('aria-label', 'Settings categories');
       const content = make('div', 'sx-content');
@@ -108,9 +108,9 @@
   }
 
   function renderIndex(state) {
-    state.nav.innerHTML = [{ id: 'overview', label: 'All settings' }, ...state.available].map(c => `<button type="button" data-sx-category="${c.id}"><span>${esc(c.label)}</span>${c.id === 'overview' ? '' : `<span class="sx-count">${state.entries.filter(e => e.category.id === c.id).length}</span>`}</button>`).join('');
+    state.nav.innerHTML = [{ id: 'overview', label: 'Overview' }, ...state.available].map(c => `<button type="button" data-sx-category="${c.id}"><span>${esc(c.label)}</span>${c.id === 'overview' ? '' : `<span class="sx-count">${state.entries.filter(e => e.category.id === c.id).length}</span>`}</button>`).join('');
     const quick = ['Business', 'Quote embeds', 'Integrations', 'Pricing', 'Pipeline', 'Team'].filter(label => state.entries.some(e => e.label === label));
-    state.overview.innerHTML = `<p class="sx-eyebrow">Quick access</p><div class="sx-quick">${quick.map(label => `<button type="button" data-sx-group="${esc(label)}">${esc(label === 'Quote embeds' ? 'Website HTML embeds' : label === 'Integrations' ? 'All connections' : label)}</button>`).join('')}</div><h4>Browse settings</h4><div class="sx-cards">${state.available.map(c => `<button type="button" data-sx-category="${c.id}"><strong>${esc(c.label)}</strong><span>${esc(c.description)}</span><small>${state.entries.filter(e => e.category.id === c.id).map(e => esc(e.label)).join(' · ')}</small></button>`).join('')}</div>`;
+    state.overview.innerHTML = `<h4>Frequently used</h4><div class="sx-quick">${quick.map(label => `<button type="button" data-sx-group="${esc(label)}">${esc(label === 'Quote embeds' ? 'Website HTML embeds' : label === 'Integrations' ? 'All connections' : label)}</button>`).join('')}</div>`;
   }
 
   function apply(state) {
@@ -122,7 +122,7 @@
     state.entries.forEach(entry => {
       // Search labels and guidance, never index credential/input values.
       const hints = [...entry.el.querySelectorAll('[placeholder]')].map(el => el.getAttribute('placeholder')).join(' ');
-      const match = q ? (entry.label + ' ' + entry.el.textContent + ' ' + hints).toLowerCase().includes(q) : state.category === 'overview' || entry.category.id === state.category;
+      const match = q ? (entry.label + ' ' + entry.el.textContent + ' ' + hints).toLowerCase().includes(q) : entry.category.id === state.category;
       entry.el.hidden = !match;
       if (q && match) entry.el.open = true;
       if (match) matches++;
@@ -130,6 +130,7 @@
     const category = state.available.find(c => c.id === state.category);
     state.heading.innerHTML = `<h3>${esc(q ? 'Search all settings' : category?.label || 'All settings')}</h3><p>${esc(q ? 'Results include every category.' : category?.description || 'Every section is available below, including website embeds and all connections.')}</p>`;
     state.overview.hidden = !!q || state.category !== 'overview';
+    state.heading.hidden = !q && state.category === 'overview';
     state.empty.hidden = !q || matches !== 0;
     state.status.textContent = q ? `${matches} matching section${matches === 1 ? '' : 's'} across all settings` : `${state.entries.length} sections available · Your changes stay in place as you browse`;
     state.nav.querySelectorAll('[data-sx-category]').forEach(button => button.setAttribute('aria-current', !q && button.dataset.sxCategory === state.category ? 'page' : 'false'));

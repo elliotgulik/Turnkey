@@ -619,6 +619,8 @@ const { chromium } = require('playwright'),
     await page.evaluate(() => reads[6].resolve(rangeData('Old August response')));
     assert.match(await page.locator('#tkjc-sidebar-list').innerText(), /September booking/);
     await page.click('[data-tkjc="today"]');
+    assert.equal(await page.evaluate(() => reads.length), 8, 'returning to a fresh range uses its saved bookings');
+    await page.evaluate(() => { TK_JOB_CALENDAR.refresh(); });
     await page.evaluate(() => reads[8].reject(Error('July temporarily unavailable')));
     await page.waitForFunction(() => document.getElementById('tkjc-load-status').textContent.includes('July temporarily unavailable'));
     assert.match(await page.locator('#tkjc-sidebar-list').innerText(), /Saved booking/);
@@ -642,6 +644,9 @@ const { chromium } = require('playwright'),
       }};
       window.renderCalendar();
     });
+    // Reopening after the July failure retries rather than treating it as fresh.
+    await page.evaluate(() => reads[9].resolve(rangeData()));
+    await page.waitForFunction(() => document.getElementById('tkjc-load-status').hidden);
     await page.click('[data-tkjc-section="schedule"]');
     for (let i = 0; i < 3; i++) {
       await page.click('[data-tkjc-section="completed"]');
@@ -653,7 +658,7 @@ const { chromium } = require('playwright'),
       TK_JOB_CALENDAR.refresh();
       const completed = {id:'done',status:'paid',scheduled_date:'2026-07-18',customer:{name:'Done <safe>',address:'A street'},details:{serviceM8JobUuid:'remote-job',assignedStaffIds:['owner-1']}};
       const ev = {source:'servicem8',user_id:'owner-1',start_time:'2026-07-18T01:00Z',end_time:'2026-07-18T02:00Z',details:{jobUuid:'remote-job',status:'Completed',personName:'Duplicate'}};
-      reads[9].resolve({...rangeData(),jobs:[completed,completed],events:[{...ev,id:'crew-1'},{...ev,id:'crew-2'},
+      reads[10].resolve({...rangeData(),jobs:[completed,completed],events:[{...ev,id:'crew-1'},{...ev,id:'crew-2'},
         {...ev,id:'only-1',details:{...ev.details,jobUuid:'event-only',personName:'Event only'}},
         {...ev,id:'only-2',user_id:'tech-1',details:{...ev.details,jobUuid:'event-only',personName:'Event only'}},
         {...ev,id:'old',end_time:'2025-01-01T02:00Z',details:{...ev.details,jobUuid:'old',personName:'Outside range'}}]});
@@ -678,15 +683,15 @@ const { chromium } = require('playwright'),
     await page.click('[data-tkjc="clear-filters"]');
     await page.click('[data-tkjc-section="schedule"]');
     await page.click('[data-tkjc-view="week"]');
-    await page.evaluate(() => reads[10].resolve(rangeData()));
+    await page.evaluate(() => reads[11].resolve(rangeData()));
     await page.waitForFunction(() => document.getElementById('tkjc-load-status').hidden);
     assert.equal(await page.evaluate(() => latestFc.view.type), 'timeGridWeek');
 
     // A session version change invalidates both cached permissions and reads.
     await page.evaluate(() => { TK_JOB_CALENDAR.refresh(); fixture.version++; window.renderCalendar(); });
-    await page.evaluate(() => reads[12].resolve({...rangeData('New session'),canManage:false}));
+    await page.evaluate(() => reads[13].resolve({...rangeData('New session'),canManage:false}));
     await page.waitForFunction(() => document.getElementById('tkjc-load-status').hidden);
-    await page.evaluate(() => reads[11].resolve(rangeData('Old session')));
+    await page.evaluate(() => reads[12].resolve(rangeData('Old session')));
     assert.match(await page.locator('#tkjc-sidebar-list').innerText(), /New session/);
     assert.doesNotMatch(await page.locator('#tkjc-sidebar-list').innerText(), /Old session/);
 
@@ -821,6 +826,22 @@ const { chromium } = require('playwright'),
     assert.equal(await page.locator('#tkjc-load-status').isVisible(),false);
     await page.evaluate(()=>cachedRead({...rangeData('Updated customer booking'),completedEvents:[],google:{connected:true},servicem8:{connected:true,seededAt:'2026-07-01'}}));
     await page.waitForFunction(()=>document.getElementById('tkjc-sidebar-list').textContent.includes('Updated customer booking'));
+    await page.evaluate(async () => {
+      const pending = []; let active = 0, peak = 0;
+      TK_JOB_CALENDAR.configure({getBusinessId:()=> 'bounded-navigation', getUserId:()=>fixture.userId,
+        request:path=>path.startsWith('/range') ? new Promise(resolve=>{
+          active++; peak=Math.max(peak,active);
+          pending.push(()=>{active--;resolve({...rangeData(),canManage:false});});
+        }) : Promise.resolve({})});
+      const first=window.renderCalendar();
+      const next=document.querySelector('[data-tkjc="next"]');
+      next.click();next.click();next.click();next.click();
+      if(pending.length!==2)throw Error('Navigation started more than two range requests');
+      pending[0]();await first;await new Promise(resolve=>setTimeout(resolve,0));
+      if(pending.length!==3)throw Error('Latest range was not loaded or obsolete queued ranges were fetched');
+      pending[1]();pending[2]();await new Promise(resolve=>setTimeout(resolve,0));
+      if(peak>2)throw Error('Calendar request concurrency exceeded two');
+    });
     assert.deepEqual(errors, []);
     await page.close();
     console.log('Job calendar UI passed');

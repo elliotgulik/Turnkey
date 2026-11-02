@@ -16,6 +16,7 @@ const assets = [
   "workspace-cache.js",
   "mobile-experience.css",
   "workspace-design.css",
+  "onboarding.js",
   "workspace-help.js",
   "workspace-help.css",
   "mobile-experience.js",

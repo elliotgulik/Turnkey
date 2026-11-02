@@ -92,17 +92,18 @@
     if (!previewOnly && mode === 'invoice' && !['completed', 'paid'].includes(r.stage)) throw Error('The job status changed. Reopen the opportunity before issuing an invoice.');
     // Preload the owned record, not a detached copy, so preview/send share
     // in-flight work and the loader can enforce the business/session guard.
+    const fingerprint = await documentFingerprint(mode,r);
+    assertScope(start);
+    const cacheKey = [start.generation, start.businessId, start.userId, mode, r.id, fingerprint].join(':');
+    const cached = documentCache.get(cacheKey);
+    if (cached) return { record: r, start, attachment: { ...cached } };
+    // Reopening an unchanged quote must not wait for map imagery a second time.
     if (typeof preloadMapSnapshot === 'function') {
       await preloadMapSnapshot(r); assertScope(start);
     }
     if (recordFor(r.id) !== r) throw Error('The opportunity changed. Select it again.');
     if (global.TK_MAP_SNAPSHOT?.getAreas(r.areaPolys).length && !r._mapSnapshotDataUrl) throw Error('The property outline could not be prepared. Please retry. Nothing was sent.');
     const safe = publicRecord(r);
-    const fingerprint = await documentFingerprint(mode,r);
-    assertScope(start);
-    const cacheKey = [start.generation, start.businessId, start.userId, mode, r.id, fingerprint].join(':');
-    const cached = documentCache.get(cacheKey);
-    if (cached) return { record: r, start, attachment: { ...cached } };
     // Actual helper contract: buildDocPDF(mode, record, 'base64') returns raw
     // base64; its default returns a Blob and is intentionally not used here.
     const contentBase64 = buildDocPDF(mode, safe, 'base64');

@@ -25,21 +25,6 @@ export function hashWixToken(token) {
 const object = value => value && typeof value==='object' && !Array.isArray(value) ? value : {};
 const text = value => typeof value==='string' ? value.trim() : '';
 const labelKey = value => text(value).toLowerCase().replace(/[^a-z0-9]/g,'');
-function answerValues(value, depth=0) {
-  if(depth>5)return [];
-  if(Array.isArray(value))return value.slice(0,100).flatMap(item=>Array.isArray(item)?[]:answerValues(item,depth+1)).slice(0,100);
-  if(typeof value==='string')return text(value)?[text(value)]:[];
-  const answer=object(value);
-  if(answer.selected===false||answer.checked===false)return [];
-  // Only known answer envelopes/options are decoded, never arbitrary object values.
-  if('values' in answer)return answerValues(answer.values,depth+1);
-  if('value' in answer){
-    if(typeof answer.value==='boolean')return answer.value&&text(answer.label)?[text(answer.label)]:[];
-    if(text(answer.label))return [text(answer.label)];
-    return answerValues(answer.value,depth+1);
-  }
-  return text(answer.label)?[text(answer.label)]:[];
-}
 const serviceKeys = new Set(['requestedservices','requestedservice','servicesrequested','services','service','servicesrequired','servicerequired','selectservice','selectservices','selectservicesrequired','whatservicesdoyourequire','whatservicesdoyouneed','whatwouldyoulikecleaned']);
 // Flat Automation payloads mix answers with routing/transport metadata. Only
 // recognized questions are answers there; labelled containers can carry custom questions.
@@ -54,22 +39,55 @@ const flatAnswerKeys = new Set([...serviceKeys, ...[
 ].map(labelKey)]);
 const internalAnswerKey = key => /token|secret|authorization|apikey/.test(key) ||
   /^(id|internalid|businessid|contactid|submissionid|externalid|metadata|options|choices|offeredchoices|formid|formname|createdat|updatedat)$/.test(key);
-function submittedValues(value, depth=0) {
-  if(depth>5)return [];
-  if(typeof value==='boolean')return [value?'Checked':'Unchecked'];
-  if(typeof value==='number'&&Number.isFinite(value))return [String(value)];
-  if(Array.isArray(value))return value.slice(0,100).flatMap(item=>Array.isArray(item)?[]:submittedValues(item,depth+1)).slice(0,100);
-  if(typeof value==='string')return text(value)?[text(value)]:[];
-  const answer=object(value);
-  if(answer.selected===false||answer.checked===false)return [];
-  if('values' in answer)return submittedValues(answer.values,depth+1);
-  if('value' in answer){
-    if(typeof answer.value==='boolean')return text(answer.label)?(answer.value?[text(answer.label)]:[]):submittedValues(answer.value,depth+1);
-    return text(answer.label)?[text(answer.label)]:submittedValues(answer.value,depth+1);
-  }
-  if('answer' in answer)return submittedValues(answer.answer,depth+1);
-  return text(answer.label)?[text(answer.label)]:[];
+const nameKeys = new Set(['name','fullname','contactname','yourname']);
+const identityKeys = new Set(['name','fullname','contactname','yourname','firstname','lastname','email','emailaddress','phone','phonenumber','mobilenumber']);
+const addressKeys = new Set(['address','streetaddress','propertyaddress','selectanaddress','jobaddress']);
+const timingLabels = ['urgency','timing','timeframe','How urgent is your request?',
+  'How soon do you need this done?','How soon do you need it done?',
+  'When do you need this done?','When do you need it done?',
+  'When would you like this done?','When would you like the work done?'];
+const windowLabels = ['Select Window Cleaning Type','Window Cleaning Type','windowType'];
+for(const label of [...timingLabels,...windowLabels])flatAnswerKeys.add(labelKey(label));
+
+function structuredAnswer(value, key) {
+  if(nameKeys.has(key))return [text(value.first)||text(value.firstName)||text(value.first_name),
+    text(value.last)||text(value.lastName)||text(value.last_name)].filter(Boolean).join(' ');
+  if(!addressKeys.has(key))return '';
+  const street=object(value.streetAddress);
+  return text(value.formatted)||text(value.formattedAddress)||[
+    text(value.addressLine)||text(value.addressLine1)||text(value.address_line)||text(value.streetAddress)||
+      [text(value.streetNumber)||text(street.number),text(value.streetName)||text(street.name)].filter(Boolean).join(' '),
+    text(value.addressLine2)||text(value.address_line_2),text(value.city),text(value.subdivision),
+    text(value.postalCode)||text(value.postal_code),text(value.country)
+  ].filter(Boolean).join(', ');
 }
+
+// A field envelope's label describes the question; an option's label describes
+// the selected choice. Keep that distinction through nested value/answer wrappers.
+function decodeAnswer(value, question, submitted=false, depth=0) {
+  if(depth>5)return [];
+  if(Array.isArray(value))return value.slice(0,100).flatMap(item=>Array.isArray(item)?[]:decodeAnswer(item,question,submitted,depth+1)).slice(0,100);
+  if(typeof value==='string')return text(value)?[text(value)]:[];
+  if(submitted&&typeof value==='boolean')return [value?'Checked':'Unchecked'];
+  if(submitted&&typeof value==='number'&&Number.isFinite(value))return [String(value)];
+  const answer=object(value),key=labelKey(question),label=text(answer.label);
+  if(answer.selected===false||answer.checked===false)return [];
+  const questionLabel=labelKey(label)===key||flatAnswerKeys.has(labelKey(label));
+  const choiceLabel=label&&!questionLabel;
+  if('values' in answer)return decodeAnswer(answer.values,question,submitted,depth+1);
+  if('value' in answer){
+    if(typeof answer.value==='boolean')return choiceLabel&&!identityKeys.has(key)&&!addressKeys.has(key)?(answer.value?[label]:[]):decodeAnswer(answer.value,question,submitted,depth+1);
+    // Identity/address labels can never replace their actual submitted values.
+    if(choiceLabel&&!identityKeys.has(key)&&!addressKeys.has(key))return [label];
+    return decodeAnswer(answer.value,question,submitted,depth+1);
+  }
+  if('answer' in answer)return decodeAnswer(answer.answer,question,submitted,depth+1);
+  const structured=structuredAnswer(answer,key);
+  if(structured)return [structured];
+  return choiceLabel&&!identityKeys.has(key)&&!addressKeys.has(key)?[label]:[];
+}
+const answerValues = (value, question) => decodeAnswer(value, question);
+const submittedValues = (value, question) => decodeAnswer(value, question, true);
 function wixEvent(body) {
   const b=object(body),data=Object.keys(object(b.data)).length?object(b.data):b;
   const wrappers=[],seen=new Set();
@@ -90,16 +108,17 @@ function wixEvent(body) {
       const fields=wrapper[container];
       const entries=Array.isArray(fields)?fields.slice(0,remaining):Object.entries(object(fields)).slice(0,remaining).map(([key,value])=>{
         const field=object(value);
-        return text(field.label)||text(field.name)?field:{label:key,value};
+        const fieldLabel=text(field.label)||text(field.name);
+        return fieldLabel&&(!flatAnswerKeys.has(labelKey(key))||flatAnswerKeys.has(labelKey(fieldLabel)))?field:{label:key,value};
       });
       for(const field of entries){
         remaining--;
         const label=text(field?.label||field?.name||field?.key);
         const key=labelKey(field?.label||field?.name||field?.key);
         const raw=field?.value??field?.values??field?.answer;
-        const values=answerValues(raw);
+        const values=answerValues(raw,label);
         if(key&&key.length<=120&&values.length)labels[key]=[...(labels[key]||[]),...values].slice(0,100);
-        const answers=submittedValues(raw);
+        const answers=submittedValues(raw,label);
         if(key&&key.length<=120&&!internalAnswerKey(key)&&answers.length)formAnswers.push({label,answer:answers.join(', ').slice(0,4000)});
       }
     }
@@ -108,8 +127,10 @@ function wixEvent(body) {
     for(const [label,value] of Object.entries(wrapper).slice(0,100)){
       if(remaining<=0)break;
       const key=labelKey(label);
+      // Preserve the existing canonical full-name answer for Wix contact.name.
+      if(wrapper===contact&&key==='name'&&structuredAnswer(object(value),key))continue;
       if((!flatAnswerKeys.has(key)&&!/^(iagree|consent|subscribe|acceptterms)/.test(key))||internalAnswerKey(key))continue;
-      const answers=submittedValues(value);
+      const answers=submittedValues(value,label);
       if(!answers.length)continue;
       remaining--;
       formAnswers.push({label,answer:answers.join(', ').slice(0,4000)});
@@ -117,35 +138,44 @@ function wixEvent(body) {
   }
   const person=object(contact.name);
   if(!formAnswers.some(({label})=>['name','fullname','contactname','firstname','lastname'].includes(labelKey(label)))){
-    const fullName=[text(person.first),text(person.last)].filter(Boolean).join(' ');
+    const fullName=structuredAnswer(person,'name');
     if(fullName&&remaining>0)formAnswers.push({label:'Full name',answer:fullName});
   }
   return {b,data,submission,contact,labels,wrappers,formAnswers};
 }
 export function mapWixPayload(body) {
   const {contact,labels,wrappers}=wixEvent(body);
-  const field=(...names)=>{
+  const fieldFrom=(includeContact,...names)=>{
     for(const n of names){
-      for(const wrapper of [...wrappers,contact]){
+      for(const wrapper of wrappers){
         const value=wrapper[n]??Object.entries(wrapper).find(([key])=>labelKey(key)===labelKey(n))?.[1];
         // Bare arrays are selections, not scalar customer identity fields.
-        const answer=Array.isArray(value)?'':answerValues(value).join(', ');
+        const answer=Array.isArray(value)?'':answerValues(value,n).join(', ');
         if(answer)return answer;
       }
       const answer=labels[labelKey(n)]?.join(', ');
       if(answer)return answer;
     }
+    // Submitted form fields take precedence over the mapped contact snapshot.
+    for(const n of includeContact?names:[]){
+      const value=contact[n]??Object.entries(contact).find(([key])=>labelKey(key)===labelKey(n))?.[1];
+      const answer=Array.isArray(value)?'':answerValues(value,n).join(', ');
+      if(answer)return answer;
+    }
     return '';
   };
-  const person=object(contact.name),address=object(contact.address);
-  const name=field('name','fullName','full_name','contactName','Full name','Your name')||
-    [field('firstName','first_name','First name')||text(person.first),field('lastName','last_name','Last name')||text(person.last)].filter(Boolean).join(' ');
-  const timing=field('urgency','timing','How soon do you need this done?','When do you need this done?','When would you like this done?');
+  const field=(...names)=>fieldFrom(true,...names);
+  const fullNames=['name','fullName','full_name','contactName','Full name','Your name'];
+  const firstNames=['firstName','first_name','First name'],lastNames=['lastName','last_name','Last name'];
+  const name=fieldFrom(false,...fullNames)||
+    [fieldFrom(false,...firstNames),fieldFrom(false,...lastNames)].filter(Boolean).join(' ')||
+    field(...fullNames)||[field(...firstNames),field(...lastNames)].filter(Boolean).join(' ');
+  const timing=field(...timingLabels);
   return {
     name,
     email:field('email','emailAddress','email_address','Email address')||undefined,
     phone:field('phone','phoneNumber','phone_number','Phone number','Mobile number')||undefined,
-    address:field('address','streetAddress','street_address','Property address','Select an Address','Job Address')||text(address.formatted)||text(address.formattedAddress)||[text(address.addressLine1),text(address.city),text(address.subdivision),text(address.postalCode)].filter(Boolean).join(', ')||undefined,
+    address:field('address','streetAddress','street_address','Property address','Select an Address','Job Address')||undefined,
     notes:field('message','notes','comment','comments','Enquiry message','How can we help','Tell us about your job','Leave us a message...')||undefined,
     // ingestQuoteRequest reads c.timing when composing the saved lead notes.
     ...(timing?{timing}:{}),
@@ -159,7 +189,7 @@ function wixRequestedServices(body){
   for(const wrapper of new Set([...wrappers,contact,labels])){
     for(const [key,value] of Object.entries(wrapper)){
       if(!serviceKeys.has(labelKey(key)))continue;
-      for(const answer of answerValues(value)){
+      for(const answer of answerValues(value,key)){
         services.push(...answer.split(/[,;\n]+/).map(value=>value.trim().slice(0,500)).filter(Boolean).slice(0,100-services.length));
         if(services.length>=100)return services;
       }
@@ -167,8 +197,9 @@ function wixRequestedServices(body){
   }
   if(!services.length){
     const {formAnswers}=wixEvent(body);
-    const windowType=formAnswers.find(({label})=>labelKey(label)==='selectwindowcleaningtype')?.answer;
-    const windowServices={both:'Window Clean (Inside & Outside)',outsideonly:'Window Clean (Outside Only)',insideonly:'Window Clean (Inside Only)'};
+    const windowType=formAnswers.find(({label})=>windowLabels.some(name=>labelKey(label)===labelKey(name)))?.answer;
+    const windowServices={both:'Window Clean (Inside & Outside)',insideoutside:'Window Clean (Inside & Outside)',
+      insideandoutside:'Window Clean (Inside & Outside)',outsideonly:'Window Clean (Outside Only)',insideonly:'Window Clean (Inside Only)'};
     const service=windowServices[labelKey(windowType)];
     if(service)services.push(service);
   }
@@ -181,9 +212,13 @@ function wixRequestedServices(body){
 // one, there's nothing safe to dedupe on, so the lead is still accepted —
 // just without redelivery protection for that one submission.
 function extractExternalId(body) {
-  const {b,data,submission,contact,wrappers} = wixEvent(body)
+  const {b,submission,contact,wrappers} = wixEvent(body)
   const topContact = object(b.contact)
-  const id = b.submissionId ?? b.submission_id ?? b.id ?? b._id ?? data.submissionId ?? data.submission_id ?? data.id ?? data._id ?? submission.submissionId ?? submission.submission_id ?? submission.id ?? submission._id ?? wrappers.map(wrapper=>wrapper.submissionId??wrapper.submission_id??wrapper.id??wrapper._id).find(value=>value!=null) ?? contact.submissionId ?? contact.submission_id ?? topContact.submissionId ?? topContact.submission_id
+  const validId = value => (typeof value==='string'||typeof value==='number')&&String(value).trim();
+  const id = wrappers.flatMap(wrapper=>[wrapper.submissionId,wrapper.submission_id]).find(validId) ??
+    [submission.id,submission._id].find(validId) ??
+    [contact.submissionId,contact.submission_id,topContact.submissionId,topContact.submission_id].find(validId) ??
+    wrappers.flatMap(wrapper=>[wrapper.id,wrapper._id]).find(validId)
   return (typeof id === 'string' || typeof id === 'number') && String(id).trim() ? String(id).trim().slice(0, 200) : null
 }
 

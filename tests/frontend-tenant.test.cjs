@@ -76,3 +76,9 @@ test('auth clears the old business before waiting and never reveals an obsolete 
  vm.runInContext(section('async function loadFromSupabase(){','function scheduleSupabaseSync(){'),ctx);
  await ctx.loadFromSupabase();assert.equal(ctx.records[0].customerId,'original-customer');assert.equal(ctx.records[0]._customerMissing,true);
  });
+
+test('blank historical job snapshots cannot overwrite recovered customer fields; archived tests stay hidden',async()=>{
+ const ctx=context({sb:{from(table){const q={select(){return q},eq(){return q},neq(){return q},order(){return q},range(){return Promise.resolve({data:table==='customers'?[{id:'c1',name:'Recovered Name',email:'recovered@example.test',phone:'0210000000',address:'7 Example Road',source:'Wix'}]:table==='jobs'?[{id:'j1',customer_id:'c1',details:{name:'',email:'',phone:'',address:'',source:''}},{id:'test',customer_id:'c1',details:{testLeadArchivedAt:123}}]:[]});}};return q;}},newRecord:d=>({...d})});
+ vm.runInContext(section('async function loadFromSupabase(){','function scheduleSupabaseSync(){'),ctx);
+ assert.equal(await ctx.loadFromSupabase(),true);assert.equal(ctx.records.length,1);assert.equal(ctx.records[0].name,'Recovered Name');assert.equal(ctx.records[0].email,'recovered@example.test');assert.equal(ctx.records[0].source,'Wix');
+});

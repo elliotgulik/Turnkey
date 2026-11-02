@@ -30,6 +30,17 @@ const quoteDetails = value => {
   return details;
 };
 const pick = (value, keys) => Object.fromEntries(keys.map(key => [key, value?.[key]]));
+// Exact linked ServiceM8 profiles can repair damage from a truncated client
+// load. Existing operator-entered contact values always take precedence.
+export function missingServiceM8CustomerFields(customer, profile) {
+  const patch={};
+  for(const [key,value] of Object.entries({name:profile?.personName,email:profile?.email,phone:profile?.phone,address:profile?.address})){
+    if(String(customer?.[key]||'').trim()||!String(value||'').trim())continue;
+    if(key==='name'&&/^(servicem8 (booking|customer)|unknown|unnamed)$/i.test(String(value).trim()))continue;
+    patch[key]=String(value).trim();
+  }
+  return String(customer?.name||patch.name||'').trim()?patch:{};
+}
 const zoneParts = (date, timeZone) => Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
   timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
 }).formatToParts(date).filter(p => p.type !== "literal").map(p => [p.type, p.value]));
@@ -1737,8 +1748,19 @@ export function installSalesPlatform(
   }
   async function ensureDispatchCustomer(businessId, c, job, details, local, current, legacy, profileMatch) {
     const get = id => unwrap(db.from("customers").select("*").eq("business_id", businessId).eq("id", id).maybeSingle());
+    const repair = async row => {
+      const patch=missingServiceM8CustomerFields(row,details);
+      if(!Object.keys(patch).length)return;
+      let query=db.from('customers').update(patch).eq('business_id',businessId).eq('id',row.id);
+      // Only fill values which are still exactly what was read; an edit made
+      // while ServiceM8 is responding wins over the background repair.
+      for(const key of Object.keys(patch))query=row[key]==null?query.is(key,null):query.eq(key,row[key]);
+      await unwrap(query);
+    };
     if (local?.customer_id) {
-      if (!await get(local.customer_id)) throw fail("Linked ServiceM8 customer is missing from this business.", 409);
+      const row=await get(local.customer_id);
+      if (!row) throw fail("Linked ServiceM8 customer is missing from this business.", 409);
+      await repair(row);
       return local.customer_id;
     }
     const ids = new Set(current.filter(row => row.connection_generation === c.generation && row.object_type === "company" && row.external_uuid === job.company_uuid).map(row => row.local_id));
@@ -1746,10 +1768,12 @@ export function installSalesPlatform(
     if (ids.size > 1) throw fail("ServiceM8 company has conflicting customer links. Review the exact mappings.", 409);
     let customerId = [...ids][0];
     if (customerId) {
-      if (!await get(customerId)) throw fail("ServiceM8 customer mapping points outside this business or to a missing profile.", 409);
+      const row=await get(customerId);
+      if (!row) throw fail("ServiceM8 customer mapping points outside this business or to a missing profile.", 409);
+      await repair(row);
       return customerId;
     }
-    if (profileMatch) customerId = profileMatch.id;
+    if (profileMatch) {customerId = profileMatch.id;await repair(profileMatch);}
     else customerId = SM.stableUuid("servicem8-inbound-customer", businessId, c.generation, SM.uuid(job.company_uuid) ? job.company_uuid : job.uuid);
     if (!profileMatch) await unwrap(db.from("customers").upsert({ id: customerId, business_id: businessId, name: details.personName,
       email: details.email || null, phone: details.phone || null, address: details.address || null, source: "servicem8" }, { onConflict: "id", ignoreDuplicates: true }));
@@ -2210,7 +2234,7 @@ export function installSalesPlatform(
         .eq("business_id", req.businessId).eq("connection_generation", c.generation).eq("object_type", "job")) : [];
       const priceCoverage = { source: "Current ServiceM8 snapshots for linked jobs; saved quote/job totals for other jobs",
         taxLabel: "Tax basis not specified", linked: 0, currentTotals: 0, unknownTotals: 0 };
-      const records = jobs.map((j) => {
+      const records = jobs.filter(j=>!j.details?.testLeadArchivedAt).map((j) => {
         const c = cs.get(j.customer_id) || {},
           q = qs.get(j.quote_id);
         const links = maps.filter(m => m.local_id === j.id);

@@ -47,6 +47,21 @@
   }
   function mount({ root, request, onConnect = () => {}, onCount = () => {}, listQuotes = () => [], buildQuoteAttachment, buildDocumentAttachment, beforeSend = () => {}, onDocument = () => {}, onSent = () => {}, initialSnapshot = null, onSnapshot = () => {} }) {
     if (!root || typeof request !== 'function') throw Error('Conversations requires a root and authenticated request function');
+    // Bound auth, response-body and injected requests too, not just fetch.
+    const transport = request;
+    request = async (path, options = {}) => {
+      const controller = new AbortController();
+      let timeout;
+      try {
+        return await Promise.race([
+          transport(path, { ...options, signal: controller.signal }),
+          new Promise((_, reject) => { timeout = setTimeout(() => {
+            const error = Error('Email request timed out. Changes may be unsaved; check Sent before retrying a send.');
+            controller.abort(error); reject(error);
+          }, 30000); })
+        ]);
+      } finally { clearTimeout(timeout); }
+    };
     let messages = [], stars = [], drafts = [], account = null, folder = 'inbox', selected = null;
     let quoteFiles = null, quoteChoices = [], query = '', loaded = false;
     const folders = [['inbox', 'Inbox', 'Customer emails and replies, together in one place.'], ['sent', 'Sent', 'Conversations containing emails you have sent.'], ['starred', 'Starred', 'Keep important conversations close at hand.'], ['drafts', 'Drafts', 'Continue a saved email when you are ready.'], ['all', 'All mail', 'Every conversation synced to TurnKey.']];
@@ -146,16 +161,33 @@
       if(!force&&loaded&&Date.now()-lastLoadedAt<30000&&draftsLoaded)return Promise.resolve();
       loading=!loaded;if(loading)draw();
       refreshPending=(async()=>{try{do{refreshDirty=false;
-        const [mail,saved]=await Promise.all([api('/messages'),api('/drafts')]);if(destroyed)return;
-        loaded=true;draftsLoaded=true;account=mail.account;messages=mail.messages;stars=mail.stars;hasMore=mail.hasMore;drafts=saved.drafts;lastLoadedAt=Date.now();
-        // Draft contents/attachments are always loaded from the server, never restored stale.
-        onSnapshot({account:account?{id:account.id,email_address:account.email_address,provider:account.provider}:null,messages:messages.slice(0,100),stars,hasMore:!!hasMore||messages.length>100});
+        const results = await Promise.allSettled([
+          api('/messages').then(mail => {
+            if (destroyed) return;
+            loaded=true;account=mail.account;messages=mail.messages;stars=mail.stars;hasMore=mail.hasMore;lastLoadedAt=Date.now();
+            onSnapshot({account:account?{id:account.id,email_address:account.email_address,provider:account.provider}:null,messages:messages.slice(0,100),stars,hasMore:!!hasMore||messages.length>100});
+            loading=false;draw();
+          }),
+          api('/drafts').then(saved => {
+            if (destroyed) return;
+            // Draft contents/attachments always come from the server.
+            draftsLoaded=true;drafts=saved.drafts;draw();
+          })
+        ]);
+        const failures=results.filter(result=>result.status==='rejected');
+        if(failures.length){
+          notice=failures.map(result=>result.reason.message||'Could not refresh conversations.').join(' ');
+          throw failures[0].reason;
+        }
         }while(refreshDirty&&!destroyed);
       }finally{loading=false;refreshPending=null;draw();}})();return refreshPending;
     }
+    const pendingSaves = new WeakMap();
     function persist() {
       if (!composer || composer.status !== 'draft' || !composer.dirty) return saveQueue;
-      const target = composer, payload = JSON.parse(JSON.stringify(target.payload));
+      const target = composer, serialized = JSON.stringify(target.payload), payload = JSON.parse(serialized);
+      const existing = pendingSaves.get(target);
+      if (existing?.serialized === serialized) return existing.promise;
       const operation = saveQueue.catch(() => {}).then(async () => {
         const result = await api('/drafts/' + target.id, 'PUT', payload);
         if (destroyed) return;
@@ -165,11 +197,16 @@
           const el = root.querySelector('.cv-save-state'); if (el) el.textContent = 'Draft saved';
         }
       });
+      pendingSaves.set(target, { serialized, promise: operation });
+      void operation.finally(() => {
+        if (pendingSaves.get(target)?.promise === operation) pendingSaves.delete(target);
+      }).catch(() => {});
       saveQueue = operation;
       return operation;
     }
     async function startCompose(payload) {
       payload ||= {};
+      clearTimeout(timer);
       // Keep the composer responsive: saving a previous draft must not block a
       // new one from opening, and the new draft can be persisted after render.
       void persist().catch(error => { notice = error.message || 'A previous draft could not be saved.'; draw(); });
@@ -427,7 +464,11 @@
       if (!view) throw Error('Sign in to compose an email.');
       const activeView = view;
       const result = activeView.compose(payload);
-      if (created) void activeView.refresh().catch(() => {});
+      if (created) void activeView.refresh({force:false}).catch(error => {
+        if (view !== activeView) return;
+        const notice = root.querySelector('.cv-notice');
+        if (notice) { notice.textContent = error.message; notice.hidden = false; }
+      });
       await result;
     };
     render.reply = async bodyText => { await render(); if (!view) throw Error('Sign in to reply.'); await view.reply(bodyText); };

@@ -110,6 +110,39 @@ const path = require('node:path');
       if(JSON.stringify(localStorage).includes('private-session-not-for-storage'))throw Error('Credential cached');
       view.reset();TK_WORKSPACE_CACHE.clearAll();if(TK_WORKSPACE_CACHE.read(scope,'inbox'))throw Error('Sign-out did not clear cached mail');
     });
+    await page.evaluate(async () => {
+      const root=document.getElementById('view-inbox');let releaseDrafts, releaseSave, writes=0;
+      window.slowView=TK_CONVERSATIONS.mount({root,request:async (url,options)=>{
+        if(url.endsWith('/messages'))return {account:{email_address:'owner@example.test'},messages:[{id:'fast',account_id:'a',direction:'received',subject:'Mail before drafts',body_text:'Hello',sent_at:new Date().toISOString()}],stars:[]};
+        if(url.endsWith('/drafts'))return new Promise(resolve=>{releaseDrafts=resolve;});
+        if(options.method==='PUT'){writes++;return new Promise(resolve=>{releaseSave=()=>resolve({draft:{id:url.split('/').pop(),status:'draft',payload:JSON.parse(options.body)}});});}
+      }});
+      const refresh=slowView.refresh();await new Promise(resolve=>setTimeout(resolve,0));
+      if(!root.innerText.includes('Mail before drafts'))throw Error('Mail waited for drafts');
+      releaseDrafts({drafts:[]});await refresh;
+      const quoteDocument={recordId:'quote-1',mode:'quote'};
+      await slowView.compose({document:quoteDocument,documentPending:true});
+      const file={filename:'quote.pdf',mimeType:'application/pdf',contentBase64:btoa('%PDF-1.7 test')};
+      const prepared=slowView.completeDocumentPreparation('quote-1',file,null,quoteDocument);
+      root.querySelector('[data-cv-action="save"]').click();
+      await new Promise(resolve=>setTimeout(resolve,0));
+      releaseSave();await new Promise(resolve=>setTimeout(resolve,0));
+      if(writes!==2)throw Error('Identical PDF saves were not deduplicated');
+      releaseSave();await prepared;
+      if(root.innerText.includes('Preparing PDF…'))throw Error('PDF preparation remained blocked');
+      slowView.destroy();
+    });
+    await page.clock.install();
+    await page.evaluate(async () => {
+      window.timeoutView=TK_CONVERSATIONS.mount({root:document.getElementById('view-inbox'),request:()=>new Promise(()=>{})});
+      window.timedRefresh=timeoutView.refresh().catch(error=>{window.timeoutError=error.message;});
+    });
+    await page.clock.runFor(30001);
+    await page.evaluate(async()=>{
+      await timedRefresh;
+      if(!timeoutError.includes('timed out')||!document.getElementById('view-inbox').innerText.includes('timed out'))throw Error('Request timeout was hidden');
+      timeoutView.destroy();
+    });
     console.log('Conversations browser passed: folders, safe rendering, reply, files, saved PDF, draft restore, rejection, unknown delivery, confirmed send.');
   } finally { await browser.close(); }
 })().catch(e => { console.error(e); process.exitCode = 1; });

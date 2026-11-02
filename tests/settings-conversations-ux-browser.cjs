@@ -66,7 +66,7 @@ const base = path.resolve(__dirname, '..');
     assert.equal(await page.locator('.sx-layout').count(), 1);
     assert.equal(await page.locator('#settings-body .settings-group').count(), 17);
     assert.equal(await page.evaluate(() => hostGroups.every(el => document.getElementById('settings-body').contains(el))), true);
-    assert.equal(await page.locator('#settings-body .settings-group:not([hidden])').count(),17,'All sections appear on the initial settings screen');
+    assert.equal(await page.locator('#settings-body .settings-group:not([hidden])').count(),0,'Overview shows categories rather than every settings form');
     await page.locator('.sx-quick [data-sx-group="Quote embeds"]').click();
     assert.equal(await page.locator('#conn-embed-code').isVisible(),true,'Website HTML embed remains directly accessible');
     assert.match(await page.locator('#conn-embed-code').inputValue(), /iframe/);

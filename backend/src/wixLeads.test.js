@@ -593,3 +593,143 @@ test('full-answer extraction respects field and value bounds', async () => {
     } });
   assert.equal(result.status, 200);
 });
+
+// Reliability fixtures are synthetic contacts only; no Wix/account mutations.
+describe('Wix answer envelopes and native target maps', () => {
+  const address = { addressLine: '12 Example Road', addressLine2: 'Unit 4', city: 'Auckland',
+    subdivision: 'NZ-AUK', postalCode: '0000', country: 'NZ', metadata: { secret: 'PRIVATE' } };
+  const formattedAddress = '12 Example Road, Unit 4, Auckland, NZ-AUK, 0000, NZ';
+  const fields = {
+    full_name: { label: 'Full name', value: { firstName: 'Avery', lastName: 'Fixture' } },
+    email: { label: 'Email address', answer: { value: 'avery@example.test' } },
+    phone_number: { label: 'Mobile number', value: '0210000003' },
+    job_address: { label: 'Job Address', value: address },
+    select_services: { label: 'Select services', values: [
+      { label: 'House Clean', value: 'choice-house' },
+      { label: 'Roof Treatment', value: 'choice-roof' },
+      { label: 'Fence Clean', value: false },
+    ] },
+    urgency: { label: 'Urgency', answer: { label: 'As soon as possible', value: 'asap' } },
+    message: { label: 'Message', value: 'Please include the back steps.' },
+  };
+  for (const container of ['submissions', 'fields', 'answers']) {
+    test(`${container} map keeps question labels separate from submitted values`, async () => {
+      const body = { id: 'transport-event', payload: { data: { submission: {
+        _id: 'fixture-submission', [container]: fields,
+      } } }, contact: { name: 'Stale Fixture', email: 'stale@example.test', address: 'Old address', id: 'contact-only' } };
+      const original = structuredClone(body);
+      let saved;
+      const result = await handleWixLead({ token: 'fixture', body,
+        lookupSource: async () => ({ business_id: 'fixture-tenant' }),
+        addLead: async payload => { saved = payload; return { id: 'saved' }; } });
+      assert.equal(result.status, 200);
+      assert.deepEqual(saved.customer, { name: 'Avery Fixture', email: 'avery@example.test',
+        phone: '0210000003', address: formattedAddress, timing: 'As soon as possible',
+        notes: 'Please include the back steps.', source: 'Wix' });
+      assert.deepEqual(saved.requestedServices, ['House Clean', 'Roof Treatment']);
+      assert.equal(saved.urgency, 'As soon as possible');
+      assert.equal(saved.external_id, 'fixture-submission');
+      assert.equal(saved.business_id, 'fixture-tenant');
+      for (const answer of ['Avery Fixture', 'avery@example.test', formattedAddress,
+        'House Clean, Roof Treatment', 'As soon as possible', 'Please include the back steps.']) {
+        assert.ok(saved.formAnswers.some(field => field.answer === answer), answer);
+      }
+      assert.doesNotMatch(JSON.stringify(saved.formAnswers), /PRIVATE|transport-event|contact-only/);
+      assert.deepEqual(body, original);
+    });
+  }
+
+  test('flat field envelopes and nested aliases map values rather than field labels', async () => {
+    let saved;
+    const result = await handleWixLead({ token: 'fixture', body: { payload: { data: {
+      name: { label: 'Full name', value: 'Casey Fixture' },
+      email: { label: 'Email', value: 'casey@example.test' },
+      address: { label: 'Property address', answer: { value: { streetAddress: { number: '7', name: 'Example Lane' }, city: 'Auckland' } } },
+      'When would you like the work done?': { answer: { value: 'Next month' } },
+      services: { label: 'Select Services', value: { answer: ['Deck Clean', 'Fence Clean'] } },
+      'Window Cleaning Type': { label: 'Window Cleaning Type', value: 'Both' },
+    } } }, lookupSource: async () => ({ business_id: 'fixture-tenant' }),
+    addLead: async payload => { saved = payload; return { id: 'saved' }; } });
+    assert.equal(result.status, 200);
+    assert.equal(saved.customer.name, 'Casey Fixture');
+    assert.equal(saved.customer.email, 'casey@example.test');
+    assert.equal(saved.customer.address, '7 Example Lane, Auckland');
+    assert.equal(saved.urgency, 'Next month');
+    assert.deepEqual(saved.requestedServices, ['Deck Clean', 'Fence Clean']);
+    assert.ok(saved.formAnswers.some(({ label, answer }) => label === 'Window Cleaning Type' && answer === 'Both'));
+  });
+
+  test('window type question envelopes infer services while retaining the original answer', async () => {
+    for (const [type, expected] of [
+      ['Inside & Outside', 'Window Clean (Inside & Outside)'],
+      ['Outside Only', 'Window Clean (Outside Only)'],
+      ['Inside Only', 'Window Clean (Inside Only)'],
+    ]) {
+      const result = await handleWixLead({ token: 'fixture', body: { name: 'Window Fixture',
+        fields: [{ label: 'Window Cleaning Type', value: { label: 'Window Cleaning Type', value: type } }],
+      }, lookupSource: async () => ({ business_id: 'fixture-tenant' }), addLead: async payload => {
+        assert.deepEqual(payload.requestedServices, [expected]);
+        assert.deepEqual(payload.formAnswers[0], { label: 'Window Cleaning Type', answer: type });
+        return { id: 'saved' };
+      } });
+      assert.equal(result.status, 200);
+    }
+  });
+
+  test('question labels alone cannot manufacture identity or service answers', async () => {
+    for (const name of [{ label: 'Full name' }, { label: 'Display label only' },
+      { label: 'Full name', value: { arbitrary: 'Not an answer' } }]) {
+      const result = await handleWixLead({ token: 'fixture', body: { name },
+        lookupSource: async () => ({ business_id: 'fixture-tenant' }),
+        addLead: async () => assert.fail('label-only name persisted') });
+      assert.equal(result.status, 400);
+    }
+    const result = await handleWixLead({ token: 'fixture', body: { name: 'Valid Fixture',
+      services: { label: 'Select services', options: ['OFFERED-ONLY'] },
+      urgency: { label: 'Urgency' },
+    }, lookupSource: async () => ({ business_id: 'fixture-tenant' }), addLead: async payload => {
+      assert.deepEqual(payload.requestedServices, []);
+      assert.equal(payload.urgency, '');
+      assert.deepEqual(payload.formAnswers, [{ label: 'name', answer: 'Valid Fixture' }]);
+      return { id: 'saved' };
+    } });
+    assert.equal(result.status, 200);
+  });
+
+  test('native primitive target maps preserve selected values and structured addresses', async () => {
+    const result = await handleWixLead({ token: 'fixture', body: { submission: {
+      id: 'native-fixture', submissions: { first_name: 'Robin', last_name: 'Fixture',
+        email: 'robin@example.test', address, services: ['House Clean', 'Driveway Clean'],
+        timing: 'Within two weeks', 'Custom access instructions': 'Use side gate', consent: false },
+    } }, lookupSource: async () => ({ business_id: 'fixture-tenant' }), addLead: async payload => {
+      assert.equal(payload.customer.name, 'Robin Fixture');
+      assert.equal(payload.customer.address, formattedAddress);
+      assert.equal(payload.urgency, 'Within two weeks');
+      assert.deepEqual(payload.requestedServices, ['House Clean', 'Driveway Clean']);
+      assert.ok(payload.formAnswers.some(({ label, answer }) => label === 'Custom access instructions' && answer === 'Use side gate'));
+      assert.ok(payload.formAnswers.some(({ label, answer }) => label === 'consent' && answer === 'Unchecked'));
+      return { id: 'saved' };
+    } });
+    assert.equal(result.status, 200);
+  });
+
+  test('explicit submission IDs outrank envelope IDs and stay unique for repeat contacts', async () => {
+    const ids = [];
+    for (const submissionId of ['submission-one', 'submission-two']) {
+      const result = await handleWixLead({ token: 'fixture', body: { id: 'same-event', submissionId: ' ',
+        data: { submission: { submission_id: submissionId, name: 'Repeat Fixture' }, contact: { id: 'same-contact' } },
+      }, lookupSource: async () => ({ business_id: 'fixture-tenant' }), addLead: async payload => {
+        ids.push(payload.external_id); return { id: payload.external_id };
+      } });
+      assert.equal(result.status, 200);
+    }
+    assert.deepEqual(ids, ['submission-one', 'submission-two']);
+  });
+});
+
+test('submitted split names outrank stale structured contact names', () => {
+  const customer = mapWixPayload({ contact: { name: { first: 'Old', last: 'Contact' } },
+    submissions: { first_name: 'Current', last_name: 'Fixture' } });
+  assert.equal(customer.name, 'Current Fixture');
+  assert.equal(mapWixPayload({ name: { label: 'Made up identity', value: true } }).name, '');
+});

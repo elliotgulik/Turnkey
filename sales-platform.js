@@ -791,31 +791,60 @@
       `<button class="more-row" data-sale-action="connections">Connections</button><button class="more-row" data-sale-action="import">Import records</button><button class="more-row" onclick="closeModal('more-overlay');openSettings()">Settings</button><button class="more-row" onclick="handleLogout()">Log out</button>`;
     openModal("more-overlay");
   };
-  let connectionOpenSerial=0;
-  openConnections = async function () {
-    const call=++connectionOpenSerial,biz=currentBusinessId,version=businessSessionVersion;
-    openModal('conn-overlay');
-    document.getElementById('conn-body').innerHTML='<p role="status">Checking saved connections…</p>';
-    await Promise.allSettled([loadEmailAccountStatus(),wixStatus.pendingUrl?Promise.resolve():loadWixStatus(),loadMetaStatus()]);
-    if(call!==connectionOpenSerial||biz!==currentBusinessId||version!==businessSessionVersion||!document.getElementById('conn-overlay').classList.contains('open'))return;
-    oldConnections();
-    const el = document.createElement("div");
-    el.className = "conn-card";
-    el.id = "sale-sm8";
-    el.innerHTML = "<h3>ServiceM8</h3><p>Checking connection…</p>";
-    document.getElementById("conn-body").prepend(el);
-    loadConnection();
-  };
-  async function loadConnection() {
-    try {
-      const s = await api("/api/sales/servicem8/status"),
-        el = document.getElementById("sale-sm8");
-      if (!el) return;
-      mappings = s.mappings || [];
+  let connectionOpenSerial=0, connectionDirty=false, connectionSourcesAt=0;
+  let connectionCache=null, connectionFlight=null, connectionSourcesFlight=null;
+  const connectionScope=()=>String(currentBusinessId)+':'+String(currentUserId)+':'+String(businessSessionVersion);
+  document.addEventListener('input',event=>{if(event.target.closest('#conn-body'))connectionDirty=true;});
+  function renderServiceM8Connection(el,s){
       el.innerHTML = `<h3>ServiceM8 · operations handoff</h3><p>${s.connected ? "Connected to " + esc(s.accountName || s.accountUuid) : "Connect ServiceM8 to transfer approved work."}</p>${s.connected ? `<p>Pending: ${s.pending || 0} · Failed: ${s.failed || 0} · Last sync: ${esc(dates(s.lastSyncAt))} · Status updates: ${s.webhookSubscribed ? "connected" : "not subscribed"}</p>${s.fullImport ? `<p>Full import: ${Number(s.fullImport.linked)||0} linked jobs · Last completed ${esc(dates(s.fullImport.completedAt))}. Analytics use current ServiceM8 prices for linked jobs.</p>${s.fullImport.skipped?`<details><summary>${Number(s.fullImport.skipped)} records need review</summary><ul>${(s.fullImport.warnings||[]).slice(0,30).map(w=>`<li>${esc(w.jobUuid||'Unknown job')}: ${esc(w.reason||'Review required')}</li>`).join('')}</ul></details>`:''}` : ''}${s.scheduleSyncPermissionMissing ? '<p class="sale-warning">Reconnect ServiceM8 to grant read_schedule. TurnKey cannot read the dispatch board until this permission is approved.</p>' : '<p>Bookings and job statuses are saved in TurnKey and checked automatically in the background every 15 minutes. Available ServiceM8 webhooks also trigger updates.</p>'}${s.syncWarning ? `<p class="sale-warning">${esc(s.syncWarning)}</p>` : ""}${s.lastError ? `<p role="alert">${esc(s.lastError)}</p>` : ""}<label><input type="checkbox" data-sale-auto ${s.autoHandoff ? "checked" : ""}> Automatically transfer approved sales</label><div class="sale-actions">${button("Retry failed transfers", "retry", "", s.retryAvailable ? "" : "disabled")}${button("Full import from ServiceM8", "full-import-sm8")}${button("Refresh linked jobs", "refresh-jobs")}${s.scheduleSyncPermissionMissing?button("Reconnect for booking sync", "oauth-sm8"):""}${button(s.webhookSubscribed?"Refresh status hooks":"Connect status updates", "subscribe-sm8")}${button("Disconnect", "disconnect-sm8")}</div>` : `<div class="sale-actions">${button("Connect ServiceM8", "oauth-sm8", "", s.oauthConfigured ? "" : "disabled")}${s.privateEnabled ? button("Private API key (testing)", "private-sm8") : ""}</div><p>${s.oauthConfigured ? "Authorize access to your ServiceM8 account." : "ServiceM8 OAuth needs to be configured on the backend."}</p>`}`;
-    } catch (e) {
-      const el = document.getElementById("sale-sm8");
-      if (el) el.textContent = "ServiceM8: " + e.message;
+  }
+  function paintConnections(){
+    oldConnections();
+    const el=document.createElement('div');el.className='conn-card';el.id='sale-sm8';
+    document.getElementById('conn-body').prepend(el);
+    if(connectionCache?.scope===connectionScope())renderServiceM8Connection(el,connectionCache.data);
+    else el.innerHTML='<h3>ServiceM8</h3><p role="status">Checking saved account…</p>';
+  }
+  openConnections = function () {
+    const call=++connectionOpenSerial,scope=connectionScope();connectionDirty=false;
+    // Saved cards are useful immediately. Checking the providers must not gate
+    // the entire Connections screen or erase credentials being typed.
+    paintConnections();void loadConnection();
+    if(Date.now()-connectionSourcesAt<60000)return;
+    if(!connectionSourcesFlight||connectionSourcesFlight.scope!==scope){
+      const flight={scope,promise:Promise.allSettled([loadEmailAccountStatus(),wixStatus.pendingUrl?Promise.resolve():loadWixStatus(),loadMetaStatus()])};
+      connectionSourcesFlight=flight;
+      flight.promise.finally(()=>{if(connectionSourcesFlight===flight)connectionSourcesFlight=null;});
+    }
+    void connectionSourcesFlight.promise.then(()=>{
+      if(scope!==connectionScope()||call!==connectionOpenSerial)return;
+      connectionSourcesAt=Date.now();
+      if(connectionDirty||!document.getElementById('conn-overlay').classList.contains('open'))return;
+      paintConnections();void loadConnection();
+    });
+  };
+  async function loadConnection(force=false) {
+    const scope=connectionScope();
+    try {
+      let s;
+      if(!force&&connectionCache?.scope===scope&&Date.now()-connectionCache.at<60000)s=connectionCache.data;
+      else{
+        if(!connectionFlight||connectionFlight.scope!==scope){
+          const flight={scope,promise:api('/api/sales/servicem8/status')};connectionFlight=flight;
+          flight.promise.finally(()=>{if(connectionFlight===flight)connectionFlight=null;}).catch(()=>{});
+        }
+        s=await connectionFlight.promise;
+        if(scope!==connectionScope())return;
+        connectionCache={scope,at:Date.now(),data:s};
+      }
+      if(scope!==connectionScope())return;
+      mappings=s.mappings||[];
+      const el=document.getElementById('sale-sm8');
+      if(el&&!connectionDirty)renderServiceM8Connection(el,s);
+    }catch(e){
+      if(scope!==connectionScope())return;
+      const el=document.getElementById('sale-sm8');
+      if(el&&!connectionDirty&&!connectionCache)el.textContent='ServiceM8: '+e.message;
     }
   }
   openSettings = function () {
@@ -1310,7 +1339,7 @@
           throw Error("Allow the connection popup to authorize ServiceM8.");
         }
       }
-      if(a === "subscribe-sm8") {await api('/api/sales/servicem8/webhooks',{method:'POST'});await loadConnection();toast('ServiceM8 status updates connected');}
+      if(a === "subscribe-sm8") {await api('/api/sales/servicem8/webhooks',{method:'POST'});await loadConnection(true);toast('ServiceM8 status updates connected');}
       if (a === "private-sm8")
         modal(
           "Private ServiceM8 test connection",
@@ -1323,17 +1352,17 @@
           )
         ) {
           await api("/api/sales/servicem8/disconnect", { method: "POST" });
-          await loadConnection();
+          await loadConnection(true);
         }
       }
       if (a === "retry") {
         await api("/api/sales/servicem8/retry", { method: "POST" });
         toast("Failed transfers queued for retry");
-        loadConnection();
+        loadConnection(true);
       }
       if(a === 'full-import-sm8'){
         b.disabled=true;
-        try{const result=await api('/api/sales/servicem8/import',{method:'POST'});toast(result.queued?'Full ServiceM8 import queued. Existing quotes and history are preserved.':'ServiceM8 import is already queued.');await loadConnection();}
+        try{const result=await api('/api/sales/servicem8/import',{method:'POST'});toast(result.queued?'Full ServiceM8 import queued. Existing quotes and history are preserved.':'ServiceM8 import is already queued.');await loadConnection(true);}
         finally{if(b.isConnected)b.disabled=false;}
       }
       if (a === "refresh-jobs") {
@@ -1467,7 +1496,7 @@
           method: "POST",
           body: JSON.stringify({ apiKey: f.get("key") }),
         });
-        loadConnection();
+        loadConnection(true);
       }
       document.getElementById("sales-dialog").close();
       toast("Saved");
@@ -1521,7 +1550,7 @@
       metrics = null;
       mappings = [];
       migrationError = "";
-      ++connectionOpenSerial;
+      ++connectionOpenSerial;connectionCache=null;connectionFlight=null;connectionSourcesFlight=null;connectionSourcesAt=0;connectionDirty=false;
       stages = defaults.map((x) => ({ ...x }));
     },
   };

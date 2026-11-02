@@ -153,7 +153,7 @@
   function freshState() {
     return {
       bizKey: null, version: null, loaded: false, loading: false, loadError: '',
-      pending: new Map(), snapshots: new Map(), dataRange: '', attemptedRange: '', revision: 0,
+      pending: new Map(), rangeReads: new Set(), snapshots: new Map(), dataLoadedAt: 0, dataRange: '', attemptedRange: '', revision: 0,
       jobs: [], staff: [], events: [], completedEvents: [], blocks: [], google: { connected: false }, servicem8: {}, canManage: false, myRole: null, myUserId: null,
       view: 'month', section: 'schedule', anchor: new Date(), range: { fromISO: null, toISO: null },
       staffFilter: new Set(), search: ''
@@ -179,7 +179,7 @@
   function rememberRange(owner) {
     if (!owner.dataRange) return;
     owner.snapshots.delete(owner.dataRange);
-    owner.snapshots.set(owner.dataRange, Object.fromEntries(rangeDataKeys.map(key => [key, owner[key]])));
+    owner.snapshots.set(owner.dataRange, { ...Object.fromEntries(rangeDataKeys.map(key => [key, owner[key]])), savedAt: owner.dataLoadedAt });
     // Keep navigation memory bounded in long-running desktop sessions.
     if (owner.snapshots.size > 8) owner.snapshots.delete(owner.snapshots.keys().next().value);
   }
@@ -203,7 +203,7 @@
       rememberRange(owner);
       const persisted=persistentCache()?.read(cacheScope(scope),calendarCacheName(key));
       const saved = owner.snapshots.get(key)||persisted?.data;
-      if(saved&&rangeDataKeys.every(field=>Array.isArray(saved[field]))){Object.assign(owner,saved);owner.dataRange=key;owner.loaded=true;owner.myUserId=scope.user;}
+      if(saved&&rangeDataKeys.every(field=>Array.isArray(saved[field]))){Object.assign(owner,saved);owner.dataRange=key;owner.loaded=true;owner.dataLoadedAt=saved.savedAt||0;owner.myUserId=scope.user;}
     }
     owner.range = { fromISO, toISO };
     const pending = owner.pending.get(key);
@@ -215,7 +215,7 @@
       renderBody();
       return pending.promise;
     }
-    if (cached && owner.attemptedRange === key && Date.now()-lastReadAt<60000) {
+    if (cached && owner.loaded && owner.dataRange === key && !owner.loadError && Date.now()-owner.dataLoadedAt<60000) {
       renderBody();
       fcInstance?.updateSize();
       return Promise.resolve();
@@ -235,7 +235,16 @@
           entry.dirty = false;
           const revision = owner.revision;
           try {
-            const data = await request(`/range?from=${encodeURIComponent(parseLocalDate(fromISO).toISOString())}&to=${encodeURIComponent(parseLocalDate(toISO).toISOString())}`, {}, scope);
+            // Rapid date navigation shares each range read and permits only two
+            // reads at once. Obsolete queued ranges need no network request.
+            while (owner.rangeReads.size >= 2) {
+              await Promise.race([...owner.rangeReads].map(read => read.catch(() => {})));
+            }
+            if (!current()) break;
+            const read = request(`/range?from=${encodeURIComponent(parseLocalDate(fromISO).toISOString())}&to=${encodeURIComponent(parseLocalDate(toISO).toISOString())}`, {}, scope);
+            owner.rangeReads.add(read);
+            let data;
+            try { data = await read; } finally { owner.rangeReads.delete(read); }
             if (current() && revision !== owner.revision) entry.dirty = true;
             if (current() && revision === owner.revision) {
               owner.jobs = data.jobs || [];
@@ -249,6 +258,7 @@
               owner.myUserId = scope.user;
               owner.loaded = true;
               owner.dataRange = key;
+              owner.dataLoadedAt = Date.now();
               owner.loadError = '';
               persistCalendar(owner,scope);
             }
@@ -410,10 +420,10 @@
       if (root.TK_JOB_WORK && typeof root.TK_JOB_WORK.openCalendar === 'function') root.TK_JOB_WORK.openCalendar();
       else notify('Staff calendar (actual hours) is not available yet.');
     });
-    host.querySelector('[data-tkjc="today"]').addEventListener('click', () => { state.anchor = new Date(); load(); });
-    host.querySelector('[data-tkjc="prev"]').addEventListener('click', () => { shiftAnchor(-1); load(); });
-    host.querySelector('[data-tkjc="next"]').addEventListener('click', () => { shiftAnchor(1); load(); });
-    host.querySelectorAll('[data-tkjc-view]').forEach((btn) => btn.addEventListener('click', () => { state.view = btn.dataset.tkjcView; load(); }));
+    host.querySelector('[data-tkjc="today"]').addEventListener('click', () => { state.anchor = new Date(); load({ cached: true }); });
+    host.querySelector('[data-tkjc="prev"]').addEventListener('click', () => { shiftAnchor(-1); load({ cached: true }); });
+    host.querySelector('[data-tkjc="next"]').addEventListener('click', () => { shiftAnchor(1); load({ cached: true }); });
+    host.querySelectorAll('[data-tkjc-view]').forEach((btn) => btn.addEventListener('click', () => { state.view = btn.dataset.tkjcView; load({ cached: true }); }));
     host.querySelectorAll('[data-tkjc-section]').forEach((btn) => btn.addEventListener('click', () => {
       state.section = btn.dataset.tkjcSection;
       host.querySelectorAll('[data-tkjc-section]').forEach((item) => {

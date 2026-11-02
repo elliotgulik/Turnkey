@@ -1397,7 +1397,7 @@
 <link rel="stylesheet" href="operations-workspace.css?v=20261018c">
 <link rel="stylesheet" href="workspace-experience.css?v=20261022a">
 <link rel="stylesheet" href="mobile-experience.css?v=20261102k">
-<link rel="stylesheet" href="workspace-design.css?v=20261102k">
+<link rel="stylesheet" href="workspace-design.css?v=20261103a">
 <link rel="stylesheet" href="workspace-help.css?v=20261102a">
 </head>
 <body data-session-checking>
@@ -10412,7 +10412,7 @@ async function loadFromSupabase(){
     for(const invoice of invoices||[]){
       if(invoice?.job_id&&!invoiceByJobId.has(invoice.job_id))invoiceByJobId.set(invoice.job_id,invoice);
     }
-    records=(jobs||[]).map(j=>{
+    records=(jobs||[]).filter(j=>!j.details?.testLeadArchivedAt).map(j=>{
       const c=custById.get(j.customer_id)||{};
       const inv=invoiceByJobId.get(j.id);
       const base=newRecord({
@@ -10420,6 +10420,10 @@ async function loadFromSupabase(){
         address:c.address||'',suburb:c.suburb||'',notes:c.notes||'',source:c.source||''
       });
       return Object.assign(base,j.details||{},{
+        // Contact rows are authoritative. Old job snapshots may contain blank
+        // identity fields; those must not overwrite a recovered profile.
+        name:c.name||j.details?.name||'Customer details unavailable',email:c.email||'',phone:c.phone||'',
+        address:c.address||j.details?.address||'',suburb:c.suburb||'',notes:c.notes||'',source:c.source||j.details?.importedFrom||'',
         stage:j.status||base.stage,createdAt:j.details?.createdAt||j.created_at,
         scheduledDateISO:j.scheduled_date||base.scheduledDateISO,
         scheduledDate:j.scheduled_date?isoToLabel(j.scheduled_date):((j.details&&j.details.scheduledDate)||base.scheduledDate),
@@ -10899,7 +10903,7 @@ function getRequestedServices(r){
 
 /* ===== Live intake: accept quote requests from the customer booking widget ===== */
 function ingestQuoteRequest(payload){
-  if(!payload) return;
+  if(!payload||payload.testLeadArchivedAt) return;
   // Dedup: reject if we already have a record with same submittedAt timestamp
   const sid=payload.submittedAt||null;
   if(sid&&!payload.external_id&&records.some(r=>r._submittedAt===sid))return;
@@ -11050,27 +11054,28 @@ async function retryPendingPhotos(){
 <script src="lead-answer-utils.js?v=20261102-wix-answers"></script>
 <script src="lead-request-view.js?v=20261102-wix-answers"></script>
 <script src="servicem8-pricing-view.js?v=20261102d"></script>
-<script src="sales-platform.js?v=20261102-wix-answers"></script>
+<script src="sales-platform.js?v=20261103a"></script>
 <script type="module" src="measurement-import.js?v=20261017a"></script>
 <script src="pricing-learning-engine.js?v=20261102k"></script>
 <script src="quote-workspace.js?v=20261017a"></script>
 <script src="workspace-cache.js?v=20261102j"></script>
-<script src="conversations.js?v=20261102k"></script>
-<script src="conversations-bridge.js?v=20261102k"></script>
+<script src="conversations.js?v=20261103a"></script>
+<script src="conversations-bridge.js?v=20261103a"></script>
 <script src="servicem8-import.js?v=20261017a"></script>
 <script src="marketing-analytics.js?v=20261102b"></script>
-<footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a> · <span id="tk-app-version">v20261102j</span></footer>
+<footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a> · <span id="tk-app-version">v20261103a</span></footer>
 <script src="extension-quote-link.js?v=20261102k"></script>
 <script src="job-workspace.js?v=20261031a"></script>
-<script src="job-calendar.js?v=20261102j"></script>
+<script src="job-calendar.js?v=20261103a"></script>
 <script src="operations-workspace.js?v=20261102b"></script>
 <script src="operations-bridge.js?v=20261018c"></script>
 <script src="workspace-controls.js?v=20261019a"></script>
-<script src="settings-experience.js?v=20261019d"></script>
+<script src="settings-experience.js?v=20261103a"></script>
 <script src="workspace-experience.js?v=20261019b"></script>
 <script src="nova-lead-manager.js?v=20261102-wix-answers"></script>
 <script src="pricing-learning-ui.js?v=20261102k"></script>
 <script src="mobile-experience.js?v=20261102h"></script>
 <script src="workspace-help.js?v=20261102a"></script>
+<script src="onboarding.js?v=20261103a"></script>
 </body>
 </html>
