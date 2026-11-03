@@ -808,8 +808,10 @@
       const q = state.search.trim().toLowerCase();
       if (q && ![job.customer?.name, job.customer?.address, job.customer?.suburb].filter(Boolean).join(' ').toLowerCase().includes(q)) return;
       if (!matchesStaffFilter(jobStaffIds(job))) return;
-      const dISO = localDateStr(w.start);
-      if (byDay[dISO]) byDay[dISO].push({ kind: 'job', job, w });
+      days.forEach((dISO) => {
+        const dayStart = parseLocalDate(dISO), dayEnd = parseLocalDate(addDaysISO(dISO, 1));
+        if (w.start < dayEnd && w.end > dayStart) byDay[dISO].push({ kind: 'job', job, w });
+      });
     });
     state.blocks.forEach((b) => {
       if (b.user_id && !matchesStaffFilter([b.user_id])) return;
@@ -1381,7 +1383,7 @@
       if(scope.isStale())return;
       if(!state.canManage){notify('Only an owner or manager can manage bookings.');return;}
       if(!findJob(jobId)){notify('This job could not be loaded. Refresh the calendar and try again.');return;}
-      openBookingModal({jobId,dateISO:dateISO||localDateStr(new Date())});
+      openBookingModal({jobId,dateISO});
     },
     async scheduleEvent({ title, notes = '', dateISO, staffId } = {}) {
       const scope = makeScope();

@@ -2497,16 +2497,18 @@ function triggerPush({type,title,message,url,userId}){
 }
 async function saveNotificationPrefs(){
   if(!sb||!currentBusinessId){toast('Something went wrong — try refreshing the page');return;}
+  const scope=captureAccountScope();
   const notifyEmail=document.getElementById('notif-email').value.trim();
-  for(const ev of NOTIFICATION_EVENTS){
-    const enabled=document.getElementById(`notif-${ev.key}`).checked;
-    const pushEl=document.getElementById(`notif-push-${ev.key}`);
-    const payload={business_id:currentBusinessId,event:ev.key,email_enabled:enabled,push_enabled:pushEl?pushEl.checked:true,notify_email:notifyEmail||null};
-    const {data,error}=await sb.from('notification_preferences').upsert(payload,{onConflict:'business_id,event'}).select('*').maybeSingle();
-    if(error)console.error('Save notification preference failed',ev.key,error);
-    else notificationPrefs[ev.key]=data;
-  }
-  toast('Notification preferences saved');
+  const payloads=NOTIFICATION_EVENTS.map(ev=>({business_id:scope.businessId,event:ev.key,email_enabled:document.getElementById(`notif-${ev.key}`).checked,push_enabled:document.getElementById(`notif-push-${ev.key}`)?.checked??true,notify_email:notifyEmail||null}));
+  try{
+    // One statement keeps these related preferences atomic.
+    const {data,error}=await sb.from('notification_preferences').upsert(payloads,{onConflict:'business_id,event'}).select('*');
+    if(!scope.isCurrent())return;
+    if(error)throw error;
+    if(!data||data.length!==payloads.length)throw Error('Notification save was not confirmed');
+    notificationPrefs=Object.fromEntries(data.map(row=>[row.event,row]));
+    toast('Notification preferences saved');
+  }catch(error){if(!scope.isCurrent())return;console.error('Save notification preferences failed',error);toast('Could not save notification preferences — try again');}
 }
 
 /* ===== Push notifications (OneSignal Web Push) =====
@@ -6120,15 +6122,18 @@ async function saveCustomerContact(btn){
 }
 async function saveCustomerNotes(btn){
   const ctx=customerProfileCtx;if(!ctx||!sb)return;
+  const scope=captureAccountScope();
   const notes=document.getElementById('cp-notes').value;
   if(btn){if(btn.disabled)return;btn.disabled=true;btn.textContent='Saving…';}
-  const {error}=await sb.from('customers').update({notes}).eq('id',ctx.customerId);
-  if(btn){btn.disabled=false;btn.textContent='Save notes';}
-  if(error){console.error('Save notes failed',error);toast('Could not save: '+error.message);return;}
-  records.filter(r=>r.customerId===ctx.customerId).forEach(r=>r.notes=notes);
-  saveState();
-  logActivity(ctx.customerId,null,'note','Note updated');
-  toast('Notes saved ✓');
+  try{
+    const {data,error}=await sb.from('customers').update({notes}).eq('id',ctx.customerId).eq('business_id',scope.businessId).select('id').single();
+    if(!scope.isCurrent())return;
+    if(error)throw error;
+    if(data?.id!==ctx.customerId)throw Error('Could not confirm the customer save');
+    records.filter(r=>r.customerId===ctx.customerId).forEach(r=>r.notes=notes);
+    saveState();logActivity(ctx.customerId,null,'note','Note updated');toast('Notes saved ✓');
+  }catch(error){if(scope.isCurrent()){console.error('Save notes failed',error);toast('Could not save notes — try again');}}
+  finally{if(btn){btn.disabled=false;btn.textContent='Save notes';}}
 }
 async function iwLoadCustomerPhotos(){
   const ctx=customerProfileCtx;if(!ctx||!sb)return;
@@ -9503,27 +9508,34 @@ async function calcTravelDistance(destAddr,destSuburb){
 }
 async function saveBusinessProfile(){
   if(!sb||!currentBusinessId)return;
+  const scope=captureAccountScope();
+  const previous=currentBusinessProfile;
   const name=document.getElementById('biz-name-input').value.trim();
   const phone=document.getElementById('biz-phone-input').value.trim();
   const email=document.getElementById('biz-email-input').value.trim();
   const region=document.getElementById('biz-region-input').value.trim();
   const homeAddress=document.getElementById('biz-home-address-input').value.trim();
-  const payload={id:currentBusinessId,name,phone,email,region,home_address:homeAddress};
+  const payload={id:scope.businessId,name,phone,email,region,home_address:homeAddress};
   // Only re-geocode when the region text actually changed, so unrelated
   // name/phone/email edits don't hammer Nominatim on every save.
-  if(region&&region!==(currentBusinessProfile&&currentBusinessProfile.region)){
+  if(region&&region!==(previous&&previous.region)){
+    payload.region_lat=null;payload.region_lng=null;
     const loc=await geocodeRegion(region);
+    if(!scope.isCurrent())return;
     if(loc){payload.region_lat=loc.lat;payload.region_lng=loc.lng;}
   }else if(!region){
     payload.region_lat=null;payload.region_lng=null;
   }
-  if(homeAddress&&homeAddress!==(currentBusinessProfile&&currentBusinessProfile.home_address)){
+  if(homeAddress&&homeAddress!==(previous&&previous.home_address)){
+    payload.home_lat=null;payload.home_lng=null;
     const loc=await geocodeRegion(homeAddress);
+    if(!scope.isCurrent())return;
     if(loc){payload.home_lat=loc.lat;payload.home_lng=loc.lng;}
   }else if(!homeAddress){
     payload.home_lat=null;payload.home_lng=null;
   }
   const {data,error}=await sb.from('businesses').upsert(payload).select('*').maybeSingle();
+  if(!scope.isCurrent())return;
   if(error){console.error('Save business profile failed',error);toast('Could not save business profile — try again');return;}
   currentBusinessProfile=data;
   toast('Business profile saved');
@@ -9532,17 +9544,21 @@ async function saveBusinessProfile(){
 const LOGO_BUCKET='business-logos';
 async function uploadBusinessLogo(file){
   if(!sb||!currentBusinessId||!file)return;
+  const scope=captureAccountScope();
   if(!file.type||!file.type.startsWith('image/')){toast('Logo must be an image file');return;}
   const ext=(file.name.split('.').pop()||'png').toLowerCase().replace(/[^a-z0-9]/g,'')||'png';
-  const path=`${currentBusinessId}/logo.${ext}`;
+  const path=`${scope.businessId}/logo.${ext}`;
   const {error:upErr}=await sb.storage.from(LOGO_BUCKET).upload(path,file,{contentType:file.type,upsert:true});
+  if(!scope.isCurrent())return;
   if(upErr){console.error('Logo upload failed',upErr);toast('Logo upload failed — try again');return;}
   const {data:pub}=sb.storage.from(LOGO_BUCKET).getPublicUrl(path);
   const logoUrl=pub.publicUrl+'?v='+Date.now(); // cache-bust so a re-upload shows immediately
-  const {data,error}=await sb.from('businesses').upsert({id:currentBusinessId,logo_url:logoUrl}).select('*').maybeSingle();
+  const {data,error}=await sb.from('businesses').upsert({id:scope.businessId,logo_url:logoUrl}).select('*').maybeSingle();
+  if(!scope.isCurrent())return;
   if(error){console.error('Save logo url failed',error);toast('Logo uploaded but could not save — try again');return;}
   currentBusinessProfile=data;
   await preloadLogoDataUrl();
+  if(!scope.isCurrent())return;
   toast('Logo updated');
   openSettings();
 }
@@ -11080,7 +11096,7 @@ async function retryPendingPhotos(){
 </script>
 <script src="sales-metrics.js?v=20261017a"></script>
 <script src="pipeline-model.js?v=20261018e"></script>
-<script src="lead-priority.js?v=20261017a"></script>
+<script src="lead-priority.js?v=20261103bugaudit2"></script>
 <script src="meta-import.js?v=20261020a"></script>
 <script src="lead-answer-utils.js?v=20261103answers1"></script>
 <script src="lead-request-view.js?v=20261102-wix-answers"></script>
@@ -11099,13 +11115,13 @@ async function retryPendingPhotos(){
 <footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a> · <span id="tk-app-version">v20261103d</span></footer>
 <script src="extension-quote-link.js?v=20261102k"></script>
 <script src="job-workspace.js?v=20261031a"></script>
-<script src="job-calendar.js?v=20261103b"></script>
-<script src="operations-workspace.js?v=20261102b"></script>
+<script src="job-calendar.js?v=20261103bugaudit2"></script>
+<script src="operations-workspace.js?v=20261103bugaudit2"></script>
 <script src="operations-bridge.js?v=20261018c"></script>
 <script src="workspace-controls.js?v=20261019a"></script>
 <script src="settings-experience.js?v=20261103a"></script>
 <script src="workspace-experience.js?v=20261019b"></script>
-<script src="nova-lead-manager.js?v=20261103workflow1"></script>
+<script src="nova-lead-manager.js?v=20261103bugaudit2"></script>
 <script src="pricing-learning-ui.js?v=20261102k"></script>
 <script src="mobile-experience.js?v=20261102h"></script>
 <script src="workspace-help.js?v=20261102a"></script>

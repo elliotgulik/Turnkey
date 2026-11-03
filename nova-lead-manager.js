@@ -30,7 +30,11 @@
     const outside=['West Auckland','South Auckland','East Auckland','Henderson','Manurewa','Whangaparaoa','Orewa','Silverdale','Papakura','Pukekohe','Howick','Botany','Titirangi','New Lynn','Glen Eden','Te Atatu','Massey','Papatoetoe','Mangere','Manukau'];
     return outside.some(matches)?'outside':'uncertain';
   }
-  function commercial(r){const text=[r.propertyType,r.property_type,r.customerType].join(' ').toLowerCase();return /commercial|business|body corporate|school|industrial/.test(text);}
+  function commercial(r){
+    const propertyAnswers=formAnswers(r).filter(row=>/^(residentialorcommercial|propertytype|customertype)$/.test(row.label.toLowerCase().replace(/[^a-z0-9]/g,''))).map(row=>row.answer);
+    const text=[r.propertyType,r.property_type,r.customerType,...propertyAnswers].map(readableAnswer).join(' ').toLowerCase();
+    return /commercial|business|body corporate|school|industrial/.test(text);
+  }
   function readableAnswer(value){return String(value??'').replace(/_/g,' ').replace(/\s+/g,' ').trim().replace(/^[,;\s]+|[,;\s]+$/g,'');}
   function formAnswers(r){
     const reader=window.TK_LEAD_ANSWERS;
@@ -93,9 +97,13 @@
   function tag(text,cls=''){return `<span class="nlm-tag ${cls}">${esc(text)}</span>`;}
   function drawManager(){
     expose();const host=document.getElementById('view-leads');if(!host)return;loadConfig();
-    const incoming=records.filter(r=>keyStage(r)==='new'),rs=filtered(),sources=[...new Set(incoming.map(sourceName))].sort();
     const business=String(typeof currentBusinessId!=='undefined'?currentBusinessId||'default':'default');
-    if(previewBusiness!==business){previewId=null;previewBusiness=business;}
+    if(previewBusiness!==business){
+      // Filters and open editors belong to the company that opened them.
+      if(previewBusiness!==null){query=source=gradeFilter=salesperson=zone='';stage='open';sort='newest';overdueOnly=false;detailId=null;areaOpen=false;}
+      previewId=null;previewBusiness=business;
+    }
+    const incoming=records.filter(r=>keyStage(r)==='new'),rs=filtered(),sources=[...new Set(incoming.map(sourceName))].sort();
     const selected=rs.find(r=>String(r.id)===previewId)||rs[0];
     previewId=selected?String(selected.id):null;
     host.innerHTML=`<div class="nlm-shell nlm-compact nlm-reference">

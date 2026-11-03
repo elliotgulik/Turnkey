@@ -13,3 +13,19 @@ test('lead dates and overdue followups sort with missing dates last',()=>{
  assert.deepEqual(L.sort(rows,'oldest').map(x=>x.id),['a','c','b','d']);
  assert.deepEqual(L.sort(rows,'followup').map(x=>x.id),['c','a','b','d']);
 });
+
+
+test('arrival sorting skips invalid dates and preserves valid zero timestamps', () => {
+ const rows=[
+  {id:'fallback',requestSubmittedAt:'invalid',receivedAt:'also invalid',createdAt:300},
+  {id:'middle',requestSubmittedAt:200,createdAt:900},
+  {id:'epoch',requestSubmittedAt:0,createdAt:800},
+  {id:'submitted',createdAt:'invalid',submittedAt:100},
+  {id:'snake',created_at:50},
+  {id:'missing',requestSubmittedAt:'invalid'}
+ ];
+ const original=JSON.stringify(rows);
+ assert.deepEqual(L.sort(rows,'newest').map(x=>x.id),['fallback','middle','submitted','snake','epoch','missing']);
+ assert.deepEqual(L.sort(rows,'oldest').map(x=>x.id),['epoch','snake','submitted','middle','fallback','missing']);
+ assert.equal(JSON.stringify(rows),original);
+});

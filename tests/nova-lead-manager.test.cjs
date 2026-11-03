@@ -53,7 +53,7 @@ function statusFixture() {
   }));
   const context = {
     records, money: n => '$' + n, currentBusinessId: 'test',
-    render() {}, switchView() {}, handleAuthedSession() {}, openMoreSheet() {},
+    render() {}, switchView() {}, handleAuthedSession() {}, openMoreSheet() {}, requestAnimationFrame() {},
     document: { activeElement: null, addEventListener(k, fn) { handlers[k] = fn; }, querySelector() { return null; }, getElementById(id) { return id === 'view-leads' ? host : null; } },
     localStorage: { getItem() { return null; }, setItem() {} },
     window: { TK_PIPELINE: require('../pipeline-model.js') },
@@ -61,7 +61,7 @@ function statusFixture() {
   context.window.TK_LEAD_ANSWERS = require('../lead-answer-utils.js');
   vm.runInNewContext(fs.readFileSync('nova-lead-manager.js', 'utf8'), context);
   const manager = context.window.TK_NOVA_LEAD_MANAGER;
-  return { host, records, manager,
+  return { host, records, manager, context, handlers,
     scope(key) { handlers.click({ target: { closest(selector) { return selector === '[data-nlm-scope]' ? { dataset: { nlmScope: key } } : null; } } }); },
   };
 }
@@ -242,4 +242,44 @@ test('cleared alerts stay isolated by user and business and mark unread restores
   assert.deepEqual(f.ids(), [1]);
   f.click('clear-alerts');
   assert.deepEqual(f.ids(), []);
+});
+
+
+test('switching companies clears lead filters and company-specific dialogs before filtering', () => {
+  const f = statusFixture();
+  const click = (action, id) => f.handlers.click({ target: { closest(selector) {
+    return selector === '[data-nlm]' ? { dataset: { nlm: action, id } } : null;
+  } } });
+  f.manager.render();
+  f.handlers.change({ target: { matches: s => s === '[data-nlm-filter]', dataset: { nlmFilter: 'source' }, value: 'ServiceM8' } });
+  click('detail', '0');
+  click('area');
+  assert.match(f.host.innerHTML, /nlm-record-panel/);
+  assert.match(f.host.innerHTML, /nlm-area-dialog/);
+  f.context.currentBusinessId = 'another-company';
+  // Reused local IDs must not reopen a different company's customer drawer.
+  f.records.splice(0, f.records.length, { id: 0, stage: 'new', source: 'Wix', name: 'Company B enquiry' });
+  f.manager.render();
+  assert.match(f.host.innerHTML, /data-nlm-record="0"/);
+  assert.doesNotMatch(f.host.innerHTML, /nlm-record-panel|nlm-area-dialog/);
+  assert.match(f.host.innerHTML, /data-nlm-scope="open" aria-pressed="true"/);
+  // Ordinary rerenders in the same company must still preserve filters.
+  f.handlers.change({ target: { matches: s => s === '[data-nlm-filter]', dataset: { nlmFilter: 'source' }, value: 'ServiceM8' } });
+  f.manager.render();
+  assert.doesNotMatch(f.host.innerHTML, /data-nlm-record="0"/);
+});
+
+test('commercial intake answers receive the commercial grade and match its filter', () => {
+  const m = manager();
+  for (const record of [
+    { notes: 'residential_or_commercial: commercial' },
+    { formAnswers: [{ label: 'Property Type', answer: 'body_corporate' }] },
+    { formAnswers: [{ label: 'Residential or Commercial', answer: 'Commercial' }] },
+  ]) assert.equal(m.grade(record).grade, 'A');
+  assert.equal(m.grade({ formAnswers: [{ label: 'Message', answer: 'Call after business hours' }] }).grade, 'Review');
+  assert.equal(m.grade({ formAnswers: [{ label: 'Property Type', answer: 'Residential' }] }).grade, 'Review');
+  const f = statusFixture();
+  f.records.splice(0, f.records.length, { id: 1, stage: 'new', formAnswers: [{ label: 'Property Type', answer: 'Commercial' }] });
+  f.handlers.change({ target: { matches: s => s === '[data-nlm-filter]', dataset: { nlmFilter: 'grade' }, value: 'A' } });
+  assert.match(f.host.innerHTML, /data-nlm-record="1"/);
 });

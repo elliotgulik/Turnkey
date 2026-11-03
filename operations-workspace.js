@@ -44,6 +44,8 @@
     let view = 'jobs', search = '', filter = 'all', layout = 'table', customer = '';
     const servicem8Completed = r => String(r.serviceM8Status || '').trim().toLowerCase() === 'completed';
     async function loadCompleted(force = false) {
+      const c = context();
+      if (!c.ready || !c.businessId || !c.userId) return;
       if (sm8CompletedLoading || (sm8CompletedLoaded && !force)) return;
       const token = epoch; sm8CompletedLoading = true; sm8CompletedError = ''; refresh();
       try {

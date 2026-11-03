@@ -2,8 +2,13 @@
 (function(root){
   'use strict';
   const value=r=>{const v=Number(r.total)>0?Number(r.total):Number(r.opportunityValue);return Number.isFinite(v)&&v>0?v:null;};
-  const timestamp=v=>{if(!v)return null;const n=typeof v==='number'?v:Date.parse(v);return Number.isFinite(n)?n:null;};
-  const received=r=>timestamp(r.requestSubmittedAt||r.receivedAt||r.createdAt||r.submittedAt||r.created_at);
+  const timestamp=v=>{if(v==null||v==='')return null;const n=typeof v==='number'?v:Date.parse(v);return Number.isFinite(n)?n:null;};
+  const received=r=>{
+    for(const v of [r.requestSubmittedAt,r.receivedAt,r.createdAt,r.submittedAt,r.created_at]){
+      const n=timestamp(v);if(n!==null)return n;
+    }
+    return null;
+  };
   function grade(r){const n=value(r);return n===null?{label:'Value not estimated',description:'Enter an opportunity value or save a quote.'}:{label:n>=2000?'High value':n>=750?'Medium value':'Small job',description:'Indicative customer value including GST: small below $750, medium $750–$1,999, high $2,000+. Uses saved quote total when available, otherwise your opportunity estimate. Not a conversion prediction.'};}
   function sort(records,key='newest'){
     return records.slice().sort((a,b)=>{
