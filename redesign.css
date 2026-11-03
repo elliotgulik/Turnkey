@@ -1,0 +1,480 @@
+/* TurnKey visual contract — load after every existing application stylesheet.
+   Presentation only: no generated copy, visibility changes (except the mobile
+   sidebar), stage ordering, map geometry, or calendar event-colour overrides.
+   avoid-ai-design-ignore: SD8 — signal teal is the specified brand colour. */
+
+:root {
+  /* Repeat legacy aliases here because earlier module styles redefine them. */
+  --ink: var(--tk-ink);
+  --ink-soft: var(--tk-muted);
+  --ink-faint: var(--tk-muted);
+  --paper: var(--tk-ground);
+  --surface: var(--tk-surface);
+  --surface-2: var(--tk-ground);
+  --line: var(--tk-line);
+  --teal: var(--tk-signal);
+  --accent: var(--tk-signal);
+  --radius: var(--tk-r-surface);
+  --radius-sm: var(--tk-r-control);
+  --font: var(--tk-font, 'Barlow', sans-serif);
+  --sale-ink: var(--tk-ink);
+  --sale-muted: var(--tk-muted);
+  --sale-line: var(--tk-line);
+  --sale-accent: var(--tk-signal);
+  --sale-surface: var(--tk-surface);
+  --sale-soft: var(--tk-ground);
+  --ux-ink: var(--tk-ink);
+  --ux-muted: var(--tk-muted);
+  --ux-border: var(--tk-line);
+  --ux-wash: var(--tk-ground);
+  --ux-teal: var(--tk-signal);
+  --control-radius: var(--tk-r-control);
+  --panel-radius: var(--tk-r-surface);
+  --control-height: 40px;
+  --line-soft: var(--tk-rule);
+  --teal-bright: var(--tk-signal-deep);
+  --teal-wash: var(--tk-ground);
+  --accent-wash: var(--tk-ground);
+  --coral: var(--tk-alert);
+  --warn: var(--tk-alert);
+  --shadow: none;
+  --shadow-lg: 0 16px 48px rgb(10 28 43 / 16%);
+}
+
+body, body.font-serif, body.font-rounded {
+  margin: 0;
+  background: var(--tk-ground);
+  color: var(--tk-ink);
+  font-family: var(--tk-font, 'Barlow', sans-serif);
+  font-size: 15px;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+}
+button, input, select, textarea { font-family: inherit; }
+h1, h2, h3, .view-head h2, .panel h4,
+.m-val, .sale-kpi strong, .stat-val, .cp-stat-v, .nlm-summary b,
+.nlm-value-cell, .sale-card-value strong, .col-total, .col-sum,
+.qt-input, .qt-dollar, .est-rec-amt, .est-range, .qw-preview-total,
+.total-row .v, .price-row.total, .quote-total, .rv-total b,
+.tkm-cards strong, .pl-numbers dd, .goal-nums > span:first-child {
+  font-family: var(--tk-font-display, 'Barlow Semi Condensed', sans-serif);
+  font-weight: 600;
+  letter-spacing: normal;
+  font-variant-numeric: tabular-nums;
+}
+h1, .hero h1, .mc-head h1, .sale-head h2, .view-head h2,
+.nlm-header h2, .cv-head h2, .tko-workspace h2 {
+  font-size: 34px;
+  line-height: 1.15;
+  letter-spacing: normal;
+  color: var(--tk-ink);
+}
+h2 { font-size: 28px; }
+h3 { font-size: 22px; }
+.sidebar-brand h1 { font-size: 17px; }
+.sale-head p, .view-head p, .nlm-header p, .cv-head p,
+.sale-muted, .tkj-sub, .tkm-panel p, .pl-card p, .pl-dialog p {
+  color: var(--tk-muted);
+}
+
+/* Exhaustive existing uppercase selectors, including inline policy labels.
+   Literal uppercase strings remain untouched. */
+.sidebar-label, .req-svc-title, .panel h4, .sales-table th, .demo-tag,
+.cp-stat-l, .cp-photo-tag, .cp-outstanding .l, .booked-tag, .booked-item .l,
+.fc-wx-badge, .est-h, .contact-table th, .more-group-label, .dd-h,
+.jf-next-label, .assume-h, .dp-label, .doc-table th, .dt-h,
+.tkjc-sidebar-group, .tkjc-dispatch-kicker, .tkjc-dispatch-grid h4,
+.tkj-photo-label, .ux-select-group, .ux-result-group,
+.tk-settings-experience .sx-eyebrow, .nlm-filters label > span,
+.nlm-stage-select span, .sel-summary-title, .review-heading,
+.terms-detail-body h5, .terms-detail h5, .zoom-label, .est-label, .psum-title,
+.sale-eyebrow, .nlm-eyebrow, .pl-eyebrow, .tkm-panel header span,
+.tkj-panel-modal header span,
+[style*="text-transform:uppercase"], [style*="text-transform: uppercase"] {
+  text-transform: none !important;
+  letter-spacing: normal !important;
+}
+
+/* Shell: keep the workspace and all navigation items in their original order. */
+.app { max-width: none; margin: 0; }
+.app main { max-width: 1280px; padding: 32px 40px 96px; margin: 0; }
+nav.tabs { width: 232px; background: var(--tk-surface); border-right: 1px solid var(--tk-line); }
+nav.tabs button, .sidebar-settings { border-radius: var(--tk-r-control); }
+nav.tabs button.active, .sidebar-nav button.lead-manager-nav.active {
+  background: var(--tk-tint); color: var(--tk-signal-deep); box-shadow: none;
+}
+nav.tabs button:not(.active), .sidebar-nav button.lead-manager-nav:not(.active) {
+  color: var(--tk-muted); background: transparent; box-shadow: none;
+}
+nav.tabs button:hover, .sidebar-settings:hover { background: var(--tk-ground); }
+nav.tabs button.active:hover { background: var(--tk-tint); }
+.ux-workspace-bar { background: var(--tk-ground); border-color: var(--tk-line); backdrop-filter: none; }
+.sale-head, .view-head, .nlm-header { margin-bottom: 24px; gap: 16px; }
+.nlm-shell { max-width: none; margin: 0; padding: 0 0 32px; }
+
+/* Controls: styling does not infer or promote new primary actions. */
+.btn, .app .btn, .overlay .btn, dialog .btn, .nlm-action,
+.tk-conversations button, .cch button, .tko-workspace button,
+.tkm-panel button, .tkjc-nav button, .tkjc-views button,
+.tkjc-chip, .mini-btn, .addr-go, .tkm-btn, .qw-steps button {
+  min-height: 40px;
+  border-radius: var(--tk-r-control);
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: normal;
+  box-shadow: none;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease, transform 120ms ease;
+}
+.btn.ghost, .app .btn.ghost, .overlay .btn.ghost, dialog .btn.ghost,
+.nlm-action, .tkm-btn, .tk-conversations button, .cch button {
+  background: var(--tk-surface); border: 1px solid var(--tk-line); color: var(--tk-ink);
+}
+.btn.primary, .btn.accent, .app .btn.primary, .app .btn.accent,
+.overlay .btn.primary, .overlay .btn.accent, dialog .btn.primary, dialog .btn.accent,
+.nlm-action.primary, .tk-conversations .cv-primary, .cch button.cch-primary,
+.sale-next.quote-launch-btn, .tkm-btn-accent, .addr-go,
+.tkm-filters button[data-action="sync"], .reset-card > button, .primary-link {
+  background: var(--tk-signal); border-color: var(--tk-signal); color: white; box-shadow: none;
+}
+.btn.ghost:hover, .app .btn.ghost:hover, .overlay .btn.ghost:hover,
+dialog .btn.ghost:hover, .nlm-action:hover, .tk-conversations button:hover,
+.cch button:hover, .tko-workspace button:hover { background: var(--tk-ground); color: var(--tk-ink); border-color: var(--tk-line); }
+.btn.primary:hover, .btn.accent:hover, .app .btn.primary:hover, .app .btn.accent:hover,
+.overlay .btn.primary:hover, .overlay .btn.accent:hover, dialog .btn.primary:hover,
+dialog .btn.accent:hover, .nlm-action.primary:hover, .tk-conversations .cv-primary:hover,
+.cch button.cch-primary:hover, .tkm-btn-accent:hover, .addr-go:hover,
+.reset-card > button:hover, .primary-link:hover {
+  background: var(--tk-signal-deep); border-color: var(--tk-signal-deep); color: white;
+}
+.btn.danger, .tkjc-dialog-actions button[data-tkjc="remove"].btn.danger {
+  color: var(--tk-alert); background: var(--tk-surface); border: 1px solid var(--tk-line);
+}
+.btn:active:not(:disabled), .nlm-action:active, .tkm-btn:active:not(:disabled) { transform: translateY(1px); }
+button:disabled, .btn:disabled, [aria-disabled="true"] { opacity: .5; }
+button:disabled, .btn:disabled { cursor: not-allowed; }
+body :is(button, a, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--tk-signal) !important; outline-offset: 2px;
+}
+body input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not(.ux-native-select),
+body select:not(.ux-native-select), body textarea {
+  border-color: var(--tk-line); border-radius: var(--tk-r-control);
+  background-color: var(--tk-surface); color: var(--tk-ink); box-shadow: none;
+}
+.ux-select-trigger { border-radius: var(--tk-r-control) !important; border-color: var(--tk-line) !important; box-shadow: none !important; color: var(--tk-ink) !important; }
+input::placeholder, textarea::placeholder { color: var(--tk-muted); }
+input[type="checkbox"], input[type="radio"] { accent-color: var(--tk-signal); }
+.seg, .seg-btn, .sale-filters, .sale-layout-switch, .nlm-scopes,
+.nlm-scopes button, .cch-filters, .cch-filters button, .qw-map-modes,
+.qw-map-modes button, .tkjc-views, .ux-pricing-tabs button { border-radius: var(--tk-r-control); }
+.seg-btn.sel, .nlm-scopes button[aria-pressed="true"], .tkjc-views button.active,
+.cch-filters button[aria-pressed="true"], .qw-map-modes button[aria-pressed="true"],
+.sale-scope-tabs .btn[aria-pressed="true"], .ux-pricing-tabs button.active,
+.tkm-mode-toggle button.active, .tkm-view-toggle button.active {
+  background: var(--tk-ground); color: var(--tk-ink); border-color: var(--tk-line); box-shadow: none;
+}
+
+/* White ruled surfaces across sales, operations, settings and public forms. */
+.panel, .sale-panel, .rate-card, .settings-card, .conn-card, .dash-card,
+.stat, .sale-filters, .sale-detail-summary, .tkjc-sidebar, .tkjc-main,
+.tkjc-toolbar, .cv-layout, .cv-composer, .cch-workspace,
+.pl-card, .qf-workflow, .qw-pricing-controls, .qw-import-zone,
+.assume-box, .review-card, .profit-summary, .card, .reset-card,
+.psum, .svc-list, .price-bd, .sel-summary, .terms-detail, .terms-detail-body,
+.tkm-inline, .tkm-attribution, .tkm-panel details,
+.tk-settings-experience .settings-group, .tk-settings-experience .sx-empty,
+.tko-workspace > section, .tko-workspace .tko-controls {
+  background-color: var(--tk-surface); border: 1px solid var(--tk-line);
+  border-radius: var(--tk-r-surface); box-shadow: none;
+}
+.sale-panel:hover, .panel:hover, .customer-card:hover, .sale-card:hover,
+.nlm-card:hover, .mc-card:hover, .wk-job:hover { box-shadow: none; transform: none; }
+.conn-card.live, .conn-card.locked, .tk-setup-guide, .tkj-work-card {
+  background: var(--tk-surface); border-color: var(--tk-line);
+  border-radius: var(--tk-r-surface); box-shadow: none;
+}
+.nlm-card.nlm-fit-a, .nlm-card.nlm-fit-b, .nlm-card.nlm-fit-c,
+.nlm-card.nlm-fit-review { background: var(--tk-surface); }
+.nlm-card[data-nlm-record]:hover { background: var(--tk-ground); }
+.tk-setup-number, .tk-setup-guide .done .tk-setup-number {
+  background: transparent; color: var(--tk-muted); border-radius: var(--tk-r-control);
+}
+.tk-setup-guide li, .tkj-work-entry-list article { border-color: var(--tk-rule); }
+.tkj-work-stats strong, .tkm-inline-grid strong {
+  font-family: var(--tk-font-display); font-weight: 600; color: var(--tk-ink);
+}
+.sale-kpis, .cp-stats, .tkm-cards, .nlm-summary {
+  gap: 0; border: 1px solid var(--tk-line); border-radius: var(--tk-r-surface);
+  background: var(--tk-surface); box-shadow: none;
+}
+.sale-kpi, .cp-stat, .tkm-cards article, .nlm-summary button {
+  border: 0; border-radius: 0; border-inline-end: 1px solid var(--tk-rule);
+  background: transparent; box-shadow: none; padding: 16px;
+}
+.sale-kpi strong, .tkm-cards strong { font-size: 28px; color: var(--tk-ink); }
+.sale-kpi strong:has(.sale-muted), .sale-kpi strong.sale-muted { font-family: var(--tk-font); font-size: 15px; color: var(--tk-muted); }
+.sale-bars i { background: var(--tk-signal); border-radius: 0; }
+.sale-bars i:nth-of-type(n + 2) { background: var(--tk-rail-current); }
+.bar-chart .bcol .bar { background: var(--tk-signal); border-radius: 0; }
+.metric { background: var(--tk-surface); border-color: var(--tk-line); border-radius: var(--tk-r-surface); box-shadow: none; }
+.tkj-work-stats, .tkm-inline-grid {
+  gap: 0; background: var(--tk-surface); border: 1px solid var(--tk-line); border-radius: var(--tk-r-surface);
+}
+.tkj-work-stats > div, .tkm-inline-grid article {
+  background: transparent; border: 0; border-inline-end: 1px solid var(--tk-rule); border-radius: 0; box-shadow: none;
+}
+
+/* Lists stay lists, pipeline columns keep their existing track arrangement. */
+.nlm-list, .customer-grid, .sale-lead-grid, .goal-grid, .perk-ladder,
+.cv-drafts, .pl-lines, .pl-history, .tkj-log-list, .tkj-equipment-list {
+  gap: 0; background: var(--tk-surface); border: 1px solid var(--tk-line); border-radius: var(--tk-r-surface);
+}
+.customer-grid, #view-leads .sale-lead-grid, .goal-grid { grid-template-columns: minmax(0, 1fr); }
+.customer-card, .goal-card, .goal-card.done, .perk, .perk.hit,
+.nlm-card, .nlm-card:hover, #view-leads .sale-opportunity,
+.pl-lines article, .pl-history article, .tkj-log-row,
+.tk-conversations .cv-drafts > button {
+  margin: 0; border: 0; border-bottom: 1px solid var(--tk-rule);
+  border-radius: 0; background: transparent; box-shadow: none;
+}
+.customer-card:last-child, .goal-card:last-child, .perk:last-child,
+.nlm-card:last-child, .pl-lines article:last-child, .pl-history article:last-child,
+.tkj-log-row:last-child, .tk-conversations .cv-drafts > button:last-child { border-bottom: 0; }
+.sale-column, #view-pipeline .sale-column, .board.seven .col, .tko-workspace .tko-column {
+  background: var(--tk-surface); border: 1px solid var(--tk-line);
+  border-radius: var(--tk-r-surface); box-shadow: none;
+}
+.sale-column > header, #view-pipeline .sale-column > header { border-color: var(--tk-rule); }
+.sale-column > header small, #view-pipeline .sale-column > header small {
+  font-family: var(--tk-font-display); font-size: 22px; font-weight: 600; color: var(--tk-ink);
+}
+.sale-column .sale-card, #view-pipeline .sale-column .sale-opportunity,
+.tko-workspace .tko-column article {
+  border: 0; border-bottom: 1px solid var(--tk-rule); border-radius: 0;
+  margin: 0; background: var(--tk-surface); box-shadow: none;
+}
+.sale-column .sale-card:last-child, .tko-workspace .tko-column article:last-child { border-bottom: 0; }
+.nlm-card.selected, .nlm-card[aria-selected="true"], .cv-row.selected,
+.cch-list .cch-thread.selected { background: var(--tk-tint); color: var(--tk-signal-deep); box-shadow: none; }
+.nlm-alert-row.unread { border-left: 0; font-weight: 600; }
+.cv-thread, .cch-reader, .cv-message { background: var(--tk-surface); }
+.cv-message { border: 0; border-bottom: 1px solid var(--tk-rule); border-radius: 0; box-shadow: none; margin: 0; padding-block: 20px; }
+.cv-message.sent { border-left: 0; }
+.cv-row, .cch-list .cch-thread { border-color: var(--tk-rule); }
+.cv-direction, .cch-direction, .cv-connected { background: transparent; color: var(--tk-muted); }
+.tk-conversations, .cch, .tko-workspace, .tkj-dialog, .tkj-panel-modal,
+.tkjc-dialog, .tkm-overlay, .tkm-panel { font-family: var(--tk-font); color: var(--tk-ink); }
+.tk-conversations { --cv-wash: var(--tk-ground); --cv-border: var(--tk-line); --cv-muted: var(--tk-muted); }
+.tk-settings-experience .sx-nav button[aria-current="page"] { background: var(--tk-tint); color: var(--tk-signal-deep); border-color: var(--tk-line); }
+.tk-settings-experience .sx-quick button { color: var(--tk-ink); }
+.tk-settings-experience .sx-cards button, .tk-settings-experience .settings-group[open] > summary { background: var(--tk-surface); }
+.tk-settings-experience .sx-nav button:hover, .tk-settings-experience .sx-quick button:hover,
+.tk-settings-experience .sx-cards button:hover { background: var(--tk-ground); border-color: var(--tk-line); }
+
+/* Status labels retain every word and count; colour blocks are decorative. */
+.sale-state, [data-sale-state].sale-state, .sale-tags span,
+.nlm-tag, .nlm-tag.stage, .nlm-tag.preferred, .nlm-tag.outside,
+.nlm-tag.uncertain, .nlm-tag.review, .nlm-grade, .nlm-grade[class],
+.nlm-new, .nlm-source-label, .conn-badge, .tko-workspace .tko-status,
+.goal-tick, .pair-save, .pair-chip, .demo-tag, .dur-badge,
+.tkjc-dispatch-status, .price-compare .pc-diff, .sd-verdict,
+.tkjc-weather, .tkjc-fc-weather, .fc-wx-badge, .attn-tag, .attn-tag.bad {
+  background: transparent !important; color: var(--tk-muted) !important;
+  border-color: transparent !important; border-radius: 0; box-shadow: none;
+  font-weight: 600;
+}
+.sale-overdue, .nlm-follow.overdue, .nlm-row-overdue, .overdue,
+.cp-outstanding .l, .profit-warn, .profit-warn.danger, .pc-red,
+.sched-warning.bad, .sched-warning.warn, .tkm-warning, .cch-error,
+.tkm-panel [role="alert"], .qw-transfer-status[role="alert"],
+.tkjc-weather-bad, .tkjc-weather-warn, .sale-followup.sale-overdue, .attn-tag.bad {
+  background: transparent !important; color: var(--tk-alert) !important; box-shadow: none;
+}
+nav.tabs .count, .nlm-heading-count, .nlm-alert-count, .nlm-nav-count,
+.cv-folders span, .sx-count { border-radius: 999px; background: var(--tk-ground); color: var(--tk-muted); }
+.goal-celebrate, .goal-reward, .perk.hit, .conn-keyrow,
+.cv-notice, .qf-workflow, .qw-pricing-controls, .qw-transfer-status,
+.est-box, .assume-adj, .pair-rec, .storey-row, .notes-box, .quote-intro,
+.tkjc-google, .tkj-calendar-summary span { background: var(--tk-surface); border-color: var(--tk-line); color: var(--tk-ink); }
+.goal-fill, .goal-card.done .goal-fill, .progress-fill { background: var(--tk-signal); }
+.goal-pct, .perk.hit .perk-state, .est-h, .est-time, .est-rec-amt,
+.review-heading, .est-label, .booked-tag { color: var(--tk-ink); }
+.ux-result-icon, .selected .ux-result-icon, .auth-hero-benefit .hb-ico {
+  background: transparent; border-color: transparent; color: inherit; box-shadow: none;
+}
+
+/* Remove decorative stripes and all known gradients. Calendar colour keys
+   are intentionally kept on event fills, dots, swatches and agenda borders. */
+.auth-hero { background: var(--tk-ink); }
+.map-box, .qmap-stage { background: var(--tk-ground); }
+.qw-overlay .modal-head { background: var(--tk-surface); }
+.fc-card-block { background-image: none; }
+.cv-notice, .qf-workflow, .tk-lead-request { border-left: 1px solid var(--tk-line); }
+.cv-composer { border-top: 1px solid var(--tk-line); }
+.board.seven .col { border-top: 1px solid var(--tk-line); }
+/* The existing stage path is progress, so its current-step colour remains. */
+#view-detail .sale-stage-path li { border-top-width: 1px; border-color: var(--tk-rule); }
+#view-detail .sale-stage-path [aria-current="step"] { border-top-color: var(--tk-signal); color: var(--tk-signal-deep); }
+
+/* Quote/service and staff tables: same cells and fields, quieter rules. */
+table { border-collapse: collapse; }
+th { color: var(--tk-muted); font-weight: 600; }
+.sale-panel th, .tko-workspace th, .tkm-panel thead { background: var(--tk-surface); }
+.sale-panel td, .tko-workspace td, .tkm-panel td, .tkm-panel th,
+.sales-table th, .contact-table th, .contact-table td, .svc-row,
+.svc-line, .rate-tier, .assume-row, .kv, .ps-row, .est-r.est-total,
+.rv-line, .price-row, .tkj-log-row, .more-row { border-color: var(--tk-rule); }
+.svc-line { border-radius: 0; box-shadow: none; background: var(--tk-surface); }
+.rate-tier input[type="number"], .sale-settings-row input[type="number"],
+.qw-margin-row input, .ri input, .pa-pct input, .svc-line input[type="number"],
+.pl-card input[type="number"] { text-align: right; }
+.area-price, .svc-row .amt, .est-line-v, .est-total-row, .rv-total b { font-family: var(--tk-font-display); font-weight: 600; text-align: right; }
+.est-card { background: var(--tk-surface); border: 1px solid var(--tk-line); border-radius: var(--tk-r-surface); box-shadow: 0 8px 28px rgb(10 28 43 / 10%); }
+.est-box { box-shadow: 0 8px 28px rgb(10 28 43 / 10%); }
+.builder > .side { min-width: 0; }
+.auth-card, .mc-card { border-color: var(--tk-line); border-radius: var(--tk-r-surface); box-shadow: none; }
+.auth-card h1 { font-size: 28px; }
+.head.banner { background: var(--tk-surface); border-bottom: 1px solid var(--tk-line); }
+.head.banner .biz-name { color: var(--tk-ink); }
+.head.banner .biz-sub { color: var(--tk-muted); }
+.mc-card:hover { border-color: var(--tk-line); background: var(--tk-ground); }
+.tkm-topbar, .tkm-footer, .tkm-camera-controls, .tkm-edit-controls,
+.tkm-property-controls { background: var(--tk-surface); border-color: var(--tk-line); }
+.tkm-mode-toggle, .tkm-view-toggle { background: var(--tk-ground); }
+.reset-card .secondary { background: var(--tk-surface); color: var(--tk-ink); border: 1px solid var(--tk-line); }
+#reset-status, #reset-status.error { background: transparent; color: var(--tk-muted); }
+#reset-status.error { color: var(--tk-alert); }
+body > main:not(.reset-card) {
+  max-width: 1200px; margin: 32px 40px; padding: 32px;
+  background: var(--tk-surface); border: 1px solid var(--tk-line); border-radius: var(--tk-r-surface);
+}
+
+/* FullCalendar chrome only. Never set event background/border/text variables:
+   they encode source/status/staff semantics supplied by the calendar module. */
+.fc {
+  --fc-border-color: var(--tk-rule);
+  --fc-page-bg-color: var(--tk-surface);
+  --fc-neutral-bg-color: var(--tk-ground);
+  --fc-neutral-text-color: var(--tk-muted);
+  --fc-today-bg-color: var(--tk-ground);
+  --fc-button-bg-color: var(--tk-surface);
+  --fc-button-text-color: var(--tk-ink);
+  --fc-button-border-color: var(--tk-line);
+  --fc-button-hover-bg-color: var(--tk-ground);
+  --fc-button-hover-border-color: var(--tk-line);
+  --fc-button-active-bg-color: var(--tk-ground);
+  --fc-button-active-border-color: var(--tk-line);
+  font-family: var(--tk-font);
+}
+.fc .fc-col-header-cell-cushion, .fc .fc-daygrid-day-number { color: var(--tk-muted); }
+.tkjc-sidebar-list { gap: 0; }
+.tkjc-sidebar-row { border: 0; border-bottom: 1px solid var(--tk-rule); border-radius: 0; box-shadow: none; }
+.tkjc-chip.sel { background: var(--tk-ground); color: var(--tk-ink); border-color: var(--tk-line); }
+.sop-step { min-height: 48px; }
+
+/* Every existing modal shell, including independently rendered modules. */
+.modal, .overlay .modal, dialog, #sales-dialog, .ux-command,
+.tkj-dialog, .tkj-panel-modal, .tkjc-dialog, .tkm-panel,
+.pl-dialog, .nlm-detail, .auth-mfa-settings {
+  border: 1px solid var(--tk-line); border-radius: var(--tk-r-surface);
+  background-color: var(--tk-surface); color: var(--tk-ink);
+  font-family: var(--tk-font); box-shadow: 0 16px 48px rgb(10 28 43 / 18%);
+}
+.modal-head, .modal-foot, .qw-overlay .modal-foot, .sale-dialog-head,
+.nlm-detail > header, .ux-command-head, .ux-command-foot { background: var(--tk-surface); border-color: var(--tk-rule); }
+.modal-head h3, .overlay .modal-head h3, .sale-dialog-head h2, .tkj-dialog h3, .tkj-panel-modal h2,
+.tkjc-dialog h3, .tkm-panel > header h2, .pl-dialog > header h2,
+.nlm-detail > header h3, .ux-command h2 { font-size: 17px; line-height: 1.5; letter-spacing: normal; }
+.modal .x, dialog .x, .nlm-close { border-radius: var(--tk-r-control); background: var(--tk-ground); color: var(--tk-muted); }
+.ux-select-panel, .tk-help-text, .nlm-tools > div, .toast,
+.intake-flash, .qmap-zoom button, .qe-zoom button {
+  box-shadow: 0 8px 28px rgb(10 28 43 / 16%);
+}
+.ux-select-panel, .tk-help-text, .nlm-tools > div { background: var(--tk-surface); border-color: var(--tk-line); border-radius: var(--tk-r-surface); }
+.ux-select-option:hover, .ux-select-option.ux-option-focus, .ux-command-result:hover,
+.ux-command-result.selected { background: var(--tk-ground); color: var(--tk-ink); }
+.more-row { min-height: 52px; }
+
+@media (max-width: 760px) {
+  /* The sidebar is the sole visibility override in this stylesheet. */
+  nav.tabs { display: none; }
+  .app main { max-width: 100%; padding: 16px 16px calc(100px + env(safe-area-inset-bottom, 0px)); }
+  h1, .hero h1, .mc-head h1, .sale-head h2, .view-head h2,
+  .nlm-header h2, .cv-head h2, .tko-workspace h2 { font-size: 28px; text-align: left; }
+  .sidebar-brand h1 { font-size: 17px; }
+  .sale-head, .view-head, .nlm-header { gap: 12px; margin-bottom: 16px; }
+  .sale-head > *, .view-head > *, .nlm-header > * { min-width: 0; max-width: 100%; }
+  .nlm-header-actions { flex-wrap: wrap; }
+  .bottom-nav, #bottom-nav {
+    height: max(84px, calc(60px + env(safe-area-inset-bottom, 0px)));
+    min-height: 84px;
+    padding: 8px max(4px, env(safe-area-inset-right, 0px)) max(8px, env(safe-area-inset-bottom, 0px)) max(4px, env(safe-area-inset-left, 0px));
+    background: var(--tk-surface); border-top: 1px solid var(--tk-line);
+    box-shadow: 0 -4px 20px rgb(10 28 43 / 6%); backdrop-filter: none;
+  }
+  #bottom-nav button { min-height: 56px; color: var(--tk-muted); background: transparent; border-radius: var(--tk-r-control); font-size: 12px; gap: 4px; }
+  #bottom-nav button.active { color: var(--tk-signal-deep); background: transparent; box-shadow: none; }
+  #bottom-nav .bn-create { border-radius: var(--tk-r-control) !important; box-shadow: none; }
+  #bottom-nav .nlm-nav-count { background: var(--tk-ground); color: var(--tk-muted); }
+  .btn, .app .btn, .overlay .btn, dialog .btn, .btn.sm,
+  .app .btn.sm, .overlay .btn.sm, .nlm-action,
+  .tk-conversations button, .cch button, .tko-actions button,
+  .sale-card .ux-select-trigger, .modal .x, dialog .x, .nlm-close {
+    min-height: 44px !important;
+  }
+  .modal .x, dialog .x, .nlm-close { min-width: 44px; }
+  .sale-head .btn.primary, .sale-head .btn.accent, .view-head .btn.primary,
+  .view-head .btn.accent, .nlm-header-actions > .btn.primary,
+  .modal .btn.primary, .modal .btn.accent, dialog .btn.primary, dialog .btn.accent,
+  .actions .btn.primary, .builder .btn.primary, .cv-head .cv-primary,
+  .tkj-dialog-actions .btn.primary, .tkjc-dialog-actions .btn.primary {
+    width: 100%; min-height: 48px !important; flex-basis: 100%; grid-column: 1 / -1;
+  }
+  .sale-actions, .vh-actions, .modal-foot, .tkj-dialog-actions,
+  .tkjc-dialog-actions { flex-wrap: wrap; min-width: 0; }
+  .sale-kpi, .cp-stat, .tkm-cards article { padding: 12px; border-bottom: 1px solid var(--tk-rule); }
+  .sale-kpi strong { font-size: 28px; }
+  .panel, .sale-panel, .rate-card, .conn-card, .pl-card { padding: 16px; }
+  /* No pipeline grid/track/ordering override: retain mobile-experience.css. */
+  .sale-scope-tabs, .sale-stage-jump, .cv-folders, .nlm-scopes {
+    flex-wrap: nowrap; overflow-x: auto; max-width: 100%; gap: 4px;
+  }
+  .sale-scope-tabs > *, .sale-stage-jump > *, .cv-folders > *, .nlm-scopes > * { flex-shrink: 0; }
+  .overlay, #doc-preview-overlay, .tkj-overlay, .tkjc-overlay, .tkm-overlay,
+  .nlm-detail-backdrop { align-items: flex-end; padding: 12px 0 0; }
+  .overlay .modal, .qw-overlay .modal.wide, #doc-preview-overlay .modal-doc,
+  .tkj-dialog, .tkj-panel-modal, .tkjc-dialog, .tkm-panel, .nlm-detail,
+  dialog:not(.ux-select-panel), #sales-dialog, .pl-dialog {
+    width: 100%; max-width: 100%; max-height: calc(var(--tk-visual-height, 100dvh) - 12px);
+    border-radius: var(--tk-r-sheet) var(--tk-r-sheet) 0 0;
+    margin-inline: 0;
+  }
+  dialog:not(.ux-select-panel), #sales-dialog, .pl-dialog { margin-top: auto; margin-bottom: 0; }
+  .nlm-detail { height: auto; }
+  .tkj-dialog, .tkj-panel-modal, .tkjc-dialog, .tkm-panel, .pl-dialog { padding: 16px; }
+  .overlay .modal-head, .overlay .modal-body, .overlay .modal-foot { padding: 16px; }
+  .modal-foot { padding-bottom: max(16px, env(safe-area-inset-bottom, 0px)); }
+  .modal-body, .nlm-detail-scroll { min-height: 0; overscroll-behavior: contain; }
+  .sale-table-wrap, .sale-leads-table-wrap, .tkm-scroll, .doc-scroll,
+  .tko-workspace > section, .panel:has(> table), .sale-panel:has(> table) {
+    max-width: 100%; overflow-x: auto;
+  }
+  .tko-workspace tr { border: 0; border-bottom: 1px solid var(--tk-rule); border-radius: 0; margin: 0; }
+  .sop-step { min-height: 48px; }
+  #view-job .btn, .tkj-actions .btn { min-height: 48px !important; }
+  .wrap { max-width: 100%; }
+  body > main:not(.reset-card) { margin: 16px; padding: 20px 16px; }
+  .card .body, .card .head { padding: 20px 16px; }
+  .qmeta, .review-kv, .svc-row, .total-row { gap: 12px; }
+  .form-grid, .builder { min-width: 0; }
+  .tkm-topbar, .tkm-footer, .tkm-property-controls { padding-inline: 12px; }
+  .tkm-actions .tkm-btn-accent { min-height: 48px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition-duration: 0s !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+}
