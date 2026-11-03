@@ -41,6 +41,7 @@
  change.addEventListener('submit',async e=>{
   e.preventDefault();if(busy||!ready||!change.reportValidity())return;
   const password=$('reset-password').value;
+  if(password.length<10){message('Password needs to be at least 10 characters.',true);return;}
   if(password!==$('reset-confirm').value){message('The passwords don’t match. Please enter them again.',true);$('reset-confirm').focus();return;}
   const button=$('reset-save');setBusy(true,button,'Saving password…');message('');
   try{
