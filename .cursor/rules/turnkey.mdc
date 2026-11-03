@@ -6,28 +6,38 @@ alwaysApply: true
 
 # TurnKey CRM
 
-You are working on TurnKey, a CRM with React + Vite frontend, Supabase backend, and Netlify deployment.
+TurnKey is a field-service CRM for pressure-washing businesses.
 
 ## Architecture
 
-- Frontend talks directly to Supabase via `@supabase/supabase-js`
-- Database schema lives in `supabase/migrations/`
-- Types are in `src/lib/database.types.ts` (regenerate with `npm run db:types`)
-- Netlify serves the Vite SPA from `dist/` with SPA redirects in `netlify.toml`
+- The frontend is plain HTML, JavaScript and CSS with no frontend build step.
+- `index.html` is the staff workspace; `booking.html` and `quote.html` are public.
+- Frontend modules, shared engines and CSS live at the repository root.
+- New UI goes in its own module, not `index.html`.
+- `backend/` is the Express backend for integrations and secret-bearing work.
+- Supabase provides Postgres, Auth, Storage and RLS.
+- `supabase/migrations/` is the source of truth for database schema changes.
+- Netlify serves static files. `scripts/build-static.js` prepares assets and
+  `scripts/generate-config.js` generates `window.TURNKEY_CONFIG` in `config.js`.
 
-## Code style
+## Shared logic and security
 
-- TypeScript strict mode
-- Use `@/` imports
-- Keep pages in `src/pages/`, shared UI in `src/components/`
-- Minimal scope changes — match existing patterns
+- Reuse `pricing-engine.js`, `cost-engine.js` and `sales-engine.js`.
+- Public pricing must never include internal costs or margins.
+- Escape every interpolated value from DB or user data before inserting HTML,
+  including attributes; use local escaping helpers or `textContent`.
+- Preserve `TK_POLICIES.renderPolicyHtml` output as policy HTML.
+- Never expose service-role keys or backend secrets in frontend code or commits.
+- Every new table needs RLS and explicit policies for business isolation.
+- Add schema changes as new migrations; do not use legacy SQL as the schema.
 
-## Supabase rules
+## Working conventions
 
-- Every new table needs RLS enabled and explicit policies
-- Never expose service role keys to the frontend
-- Migrations are the source of truth for schema
-
-## Multi-tool workflow
-
-This repo is shared across Cursor, Claude Code, and ChatGPT. Before large changes, check `docs/DEVELOPMENT.md` for the agreed workflow. Update `CLAUDE.md` when architecture changes.
+- Preserve existing behavior outside the request and match nearby patterns.
+- Use scoped searches with up to 30 lines of context for `index.html` and files
+  over 400 lines; never read those files whole.
+- Other workers may share this checkout; stage only your own task files.
+- Honor local-only instructions: no push, PR or remote service changes.
+- Frontend checks: `node --test tests/*.test.cjs`.
+- Backend checks: `npm --prefix backend test`.
+- Follow task-specific check requirements and report skipped checks.

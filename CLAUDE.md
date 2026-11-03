@@ -1,102 +1,50 @@
 # TurnKey CRM
 
-TurnKey is a field-service CRM for pressure-washing businesses. **The live app
-in this repo is plain HTML/JS with no build step** (`index.html`, `booking.html`,
-`quote.html`) on Supabase + Netlify. The React + Vite sections below describe a
-planned rewrite that is not in this repo yet.
+TurnKey is a field-service CRM for pressure-washing businesses.
 
-## Engines (single sources of truth, loaded by index.html)
+## Actual architecture
 
-- `pricing-engine.js` (`TK_PRICING`) — customer-facing rates and quote totals.
-  Loaded by public pages too, so it must never contain cost or margin data.
-- `cost-engine.js` (`TK_COST`) — internal cost to deliver: wages, chemicals,
-  travel, equipment, consumables and monthly overheads spread per job.
-  Prices are GST-inclusive; margin and recommended price are computed on
-  ex-GST revenue (`COST_INPUTS.gstRegistered`). index.html only.
-- `sales-engine.js` (`TK_SALES`) — Sales Manager stats: cohort funnel by lead
-  arrival date, lead-source spend/return, lost reasons, speed to quote.
-  index.html only.
+- The frontend is plain HTML, JavaScript and CSS, with no frontend build step.
+- `index.html` is the staff workspace; `booking.html` and `quote.html` are public pages.
+- Frontend modules, shared engines and styles live at the repository root.
+- New UI goes in its own module, not `index.html`.
+- `backend/` contains the Express backend and integrations that need secrets.
+- Supabase provides Postgres, Auth, Storage and row-level security (RLS).
+- `supabase/migrations/` is the source of truth for database schema changes.
+- Netlify serves static assets. `scripts/build-static.js` prepares deployment
+  assets; `scripts/generate-config.js` generates runtime configuration.
 
-Lost quotes use the existing `cancelled` stage plus `lostAt`/`lostReason`;
-`isLost()` tells them apart from won jobs that were later cancelled. Per-business
-settings (rates, costs, overheads, productivity, source spend) persist in
-`businesses.pricing_config`.
+## Shared engines
 
-## Stack
+- `pricing-engine.js` (`TK_PRICING`) owns customer-facing rates and totals.
+  Public pages load it: never put internal cost or margin data in this engine.
+- `cost-engine.js` (`TK_COST`) owns internal delivery costs and overheads.
+  Prices include GST; margin calculations use revenue excluding GST.
+- `sales-engine.js` (`TK_SALES`) owns funnel, source-return and sales statistics.
+- Business pricing and cost settings persist in `businesses.pricing_config`.
+- Lost quotes use `cancelled` plus `lostAt`/`lostReason`; use `isLost()` to
+  distinguish them from won jobs cancelled later.
 
-- **Frontend**: React 19, TypeScript, Vite, React Router
-- **Backend**: Supabase (Postgres, Auth, RLS, migrations)
-- **Hosting**: Netlify (static SPA + redirects)
-- **Dev tools**: Cursor (primary IDE), Claude Code (terminal agent), ChatGPT (second opinion / planning)
+## Configuration and security
 
-## Project layout
+- Pages read `window.TURNKEY_CONFIG` from `config.js`.
+- Runtime environment variables include `TURNKEY_BACKEND_URL`,
+  `TURNKEY_SUPABASE_URL`, `TURNKEY_SUPABASE_ANON_KEY` and `TURNKEY_MAPS_KEY`.
+- Keep real credentials in deployment environment variables, never in commits.
+- Never expose service-role keys or backend secrets in frontend modules.
+- Enable RLS and explicit tenant-aware policies on every new table.
+- Add schema changes as new files in `supabase/migrations/`.
+- Escape every interpolated value when inserting DB or user data into HTML,
+  including attributes. Use local escaping helpers or `textContent`.
+- Keep `TK_POLICIES.renderPolicyHtml` output as rendered policy HTML.
 
-```
-src/
-  components/   # shared UI
-  pages/        # route-level views
-  lib/          # supabase client, generated types
-  types/        # app-level types
-supabase/
-  migrations/   # SQL schema changes
-  config.toml   # local Supabase config
-```
+## Working conventions
 
-## Commands
-
-```bash
-npm install
-npm run dev              # http://localhost:5173
-npm run build            # production build
-supabase start           # local Supabase (requires Supabase CLI)
-supabase db push         # apply migrations to linked project
-npm run db:types         # regenerate TypeScript types from DB
-```
-
-## Environment
-
-The actual frontend (`index.html`, `booking.html`, `quote.html`) is plain
-JS/HTML with no build step — it reads runtime config from `window.TURNKEY_CONFIG`,
-populated by `config.js`. `config.js` is itself generated at Netlify build time
-by `scripts/generate-config.js` (the build command in `netlify.toml`) from
-these environment variables, set in Netlify → Site settings → Environment
-variables (see `.env.example` for local reference):
-
-- `TURNKEY_BACKEND_URL`
-- `TURNKEY_SUPABASE_URL`
-- `TURNKEY_SUPABASE_ANON_KEY`
-- `TURNKEY_MAPS_KEY` — Google Maps (Static Maps + Geocoding + Places). Optional:
-  if unset, the app falls back to a free OpenStreetMap view. Restrict the key
-  by HTTP referrer in Google Cloud Console rather than keeping it secret.
-
-If the three required vars aren't all set, the build leaves the committed
-`config.js` untouched rather than overwriting it with blanks. `TURNKEY_MAPS_KEY`
-is handled separately: a build missing just that one var still deploys
-normally and *preserves whatever mapsKey is already in the current config.js*
-instead of blanking it — so a working Maps key never silently disappears just
-because one build's environment didn't happen to pass it through.
-
-Never commit service role keys or real API key values — only the committed
-`config.js`'s empty placeholders are checked in; real values live in Netlify's
-environment variables.
-
-## Conventions
-
-- Use `@/` path alias for imports from `src/`
-- Add schema changes as new files in `supabase/migrations/`
-- Regenerate `src/lib/database.types.ts` after migration changes
-- Keep RLS policies on every table
-- Prefer Supabase client calls from React; use Edge Functions only when you need secrets server-side
-
-## Current scope
-
-- Contacts CRUD (name, email, company, phone, notes)
-- Dashboard with recent contacts
-- Auth-ready schema (RLS requires authenticated users)
-
-## Next features (suggested)
-
-- Supabase Auth (email login)
-- Deals / pipeline stages
-- Activity log per contact
-- Organizations and per-user data isolation
+- Preserve behavior outside the requested change; follow nearby module patterns.
+- Do not read `index.html` or files over 400 lines whole; use scoped searches
+  and at most 30 lines of context around relevant matches.
+- Coordinate shared work and stage only files belonging to your task.
+- For a local-only task, never push, open a PR, or change remote services.
+- Frontend checks: `node --test tests/*.test.cjs`.
+- Backend checks: `npm --prefix backend test`.
+- Run the checks required by the task; report results and skipped checks.
