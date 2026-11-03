@@ -1,3 +1,4 @@
+@import url("https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Semi+Condensed:wght@500;600;700&display=swap");
 /* Design tokens copied verbatim from index.html's :root (see index.html:46-96)
    — TurnKey has no shared theme file to import (no build step, no Tailwind),
    so every page that needs the look copies the block by hand; this is that
@@ -217,3 +218,84 @@
 .tk-measurement-correction { border-top: 1px solid var(--tk-border, #cbd5e1); margin-top: 10px; padding-top: 8px; }
 .tk-learning-line .tk-select { max-width: 100%; }
 .tk-root [hidden] { display: none !important; }
+
+/* Shared visual contract, scoped to this extension surface. CSS only. */
+:host, .tk-root {
+  --tk-ground:#f3f5f5; --tk-surface:#fff; --tk-ink:#0a1c2b;
+  --tk-muted:#53626c; --tk-line:#d5dde1; --tk-rule:#e6ebee;
+  --tk-signal:#0f7d6b; --tk-signal-deep:#0b5f52; --tk-tint:#e2f0ec;
+  --tk-rail-current:#8fc4ba; --tk-alert:#a3462a;
+  --tk-r-control:6px; --tk-r-surface:10px; --tk-r-sheet:14px;
+  --tk-font:"Barlow",sans-serif; --tk-font-display:"Barlow Semi Condensed",sans-serif;
+  --tk-size-1:12px; --tk-size-2:13px; --tk-size-3:15px; --tk-size-4:17px;
+  --tk-size-5:22px; --tk-size-6:28px; --tk-size-7:34px; --tk-leading:1.5;
+  --tk-space-1:4px; --tk-space-2:8px; --tk-space-3:12px; --tk-space-4:16px;
+  --tk-space-6:24px; --tk-space-8:32px; --tk-space-12:48px;
+  --tk-floating-shadow:0 10px 32px rgba(10,28,43,.12);
+  --ink:var(--tk-ink); --ink-soft:var(--tk-muted); --ink-faint:var(--tk-muted);
+  --paper:var(--tk-ground); --surface:var(--tk-surface); --surface-2:var(--tk-ground);
+  --line:var(--tk-line); --line-soft:var(--tk-rule);
+  --teal:var(--tk-signal); --teal-bright:var(--tk-signal-deep); --teal-wash:var(--tk-tint);
+  --accent:var(--tk-signal); --accent-wash:var(--tk-tint);
+  --radius:var(--tk-r-surface); --radius-sm:var(--tk-r-control);
+  --shadow:none; --shadow-lg:var(--tk-floating-shadow);
+  --m-sales:var(--tk-signal); --m-sales-wash:var(--tk-ground);
+  --m-ops:var(--tk-ink); --m-ops-wash:var(--tk-ground);
+  --m-pricing:var(--tk-ink); --m-pricing-wash:var(--tk-ground);
+  --m-money:var(--tk-ink); --m-money-wash:var(--tk-ground);
+  --m-dash:var(--tk-ink); --m-dash-wash:var(--tk-ground);
+  --m-insight:var(--tk-ink); --m-insight-wash:var(--tk-ground);
+  --m-cal:var(--tk-signal); --m-cal-wash:var(--tk-ground);
+  --m-goal:var(--tk-ink); --m-goal-wash:var(--tk-ground);
+  /* Semantic colours retained for existing calendar events and status meaning. */
+  --navy:#13344b; --navy-wash:#eef2f6; --amber:#9a7a32; --amber-wash:#f6f2e9;
+  --coral:var(--tk-alert); --coral-wash:#f7efec; --blue:#2f5d82; --blue-wash:#eef3f8;
+  --purple:#4a4f7a; --purple-wash:#f0f1f6;
+  --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px; --space-5:20px;
+  --space-6:24px; --space-8:32px; --space-10:40px; --space-12:48px; --space-16:64px;
+}
+
+:host, .tk-root { font-family:var(--tk-font); font-size:15px; line-height:1.5; font-variant-numeric:tabular-nums; }
+.tk-root :is(button,input,select,textarea) { font-family:inherit; border-radius:var(--tk-r-control); }
+.tk-root :is(label,.tk-section-label,.tk-logo) { text-transform:none; letter-spacing:normal; }
+.tk-root :is(h3,h4,.tk-price-total,.tk-created-total,.tk-meas-value) { font-family:var(--tk-font-display); font-weight:600; color:var(--tk-ink); }
+.tk-modal-head h3 { font-size:17px; }
+.tk-btn, .tk-category-btn, .tk-select, .tk-input, .tk-qty-input { min-height:40px; }
+.tk-btn { background:var(--tk-surface); border-color:var(--tk-line); color:var(--tk-ink); transition:background-color 120ms ease,transform 120ms ease; }
+.tk-btn-accent { background:var(--tk-signal); color:white; border-color:var(--tk-signal); }
+.tk-btn-accent:hover:not(:disabled) { background:var(--tk-signal-deep); }
+.tk-root :is(button,input,select,textarea):focus-visible { outline:2px solid var(--tk-signal); outline-offset:2px; }
+.tk-btn:active:not(:disabled) { transform:translateY(1px); }
+.tk-toolbar, .tk-modal { border-radius:var(--tk-r-surface); }
+.tk-lines, .tk-measurements, .tk-customer-results { gap:0; background:var(--tk-surface); }
+.tk-line-row, .tk-meas-row, .tk-customer-result, .tk-learning-line { background:var(--tk-surface); border:0; border-bottom:1px solid var(--tk-rule); border-radius:0; margin:0; padding:12px 0; box-shadow:none; }
+.tk-quote-assumptions { border-color:var(--tk-line); border-radius:var(--tk-r-surface); background:var(--tk-surface); }
+.tk-price-block { padding:16px; background:var(--tk-surface); border:1px solid var(--tk-line); border-radius:var(--tk-r-surface); box-shadow:var(--tk-floating-shadow); }
+.tk-price-block [data-role="itemised-prices"] .tk-price-line { background:var(--tk-surface); border-radius:0; border-bottom:1px solid var(--tk-rule); padding:8px 0; }
+.tk-price-line strong, .tk-price-total span:last-child { color:var(--tk-ink); font-family:var(--tk-font-display); font-weight:600; text-align:right; }
+.tk-customer-chip, .tk-created-badge { background:var(--tk-ground); color:var(--tk-muted); }
+.tk-meas-value, .tk-tracer-readout strong, .tk-status-dot.on { color:var(--tk-ink); }
+.tk-status-dot.on { background:var(--tk-muted); }
+.tk-root ::selection { background:var(--tk-tint); color:var(--tk-signal-deep); }
+.tk-root { scrollbar-color:var(--tk-line) var(--tk-ground); caret-color:var(--tk-signal); }
+@media(max-width:760px) {
+ .tk-toolbar { max-width:calc(100vw - 32px); }
+ .tk-modal-backdrop { align-items:flex-end; padding:12px 0 0; }
+ .tk-modal { width:100%; max-width:100%; max-height:calc(100dvh - 12px); border-radius:var(--tk-r-sheet) var(--tk-r-sheet) 0 0; }
+ .tk-modal-body, .tk-modal-head, .tk-modal-foot { padding:16px; }
+ .tk-modal-foot { flex-wrap:wrap; padding-bottom:max(16px,env(safe-area-inset-bottom)); }
+ .tk-modal-foot .tk-btn-accent { width:100%; min-height:48px; }
+ .tk-btn, .tk-icon-btn, .tk-category-btn, .tk-select, .tk-input, .tk-qty-input, .tk-meas-remove { min-height:44px; }
+ .tk-meas-remove, .tk-icon-btn { min-width:44px; }
+ .tk-line-cat { min-width:0; overflow-wrap:anywhere; }
+ .tk-price-line { gap:12px; flex-wrap:wrap; }
+ .tk-quote-assumptions { grid-template-columns:minmax(0,1fr); }
+}
+@media(prefers-reduced-motion:reduce) { .tk-root *, .tk-root *::before, .tk-root *::after { transition:none!important; animation:none!important; } }
+@media(max-width:760px) {
+ .tk-line-row { gap:12px; }
+ .tk-line-cat { flex:1 1 calc(100% - 40px); }
+ .tk-line-row > .tk-select { flex:1 1 180px; min-width:0; }
+ .tk-line-row .tk-quote-field { min-width:130px; flex:1 1 130px; }
+ .tk-line-qty { min-width:64px; }
+}

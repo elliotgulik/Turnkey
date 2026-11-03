@@ -478,3 +478,10 @@ body > main:not(.reset-card) {
     scroll-behavior: auto !important;
   }
 }
+
+/* Compact header actions must wrap within the phone rather than off its edge. */
+@media(max-width:760px) {
+ .nlm-header-actions { width:100%!important; min-width:0; flex-wrap:wrap!important; justify-content:flex-start; margin:0!important; }
+ .nlm-header-actions > .btn.primary { flex:1 0 100%!important; width:100%; }
+ .nlm-header-actions > .nlm-alert-button, .nlm-tools > summary { min-height:44px; }
+}

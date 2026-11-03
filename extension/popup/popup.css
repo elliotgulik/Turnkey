@@ -1,3 +1,4 @@
+@import url("https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Semi+Condensed:wght@500;600;700&display=swap");
 /* Same token set as content/panel/panel.css (copied from index.html's :root) — kept as a duplicate rather than a shared import since the popup and content-script panel load in separate contexts with no bundler to share a module between them. */
 :root {
   --ink:#0a1c2b; --ink-soft:#5b6b78; --ink-faint:#9aa7b1;
@@ -43,3 +44,54 @@ button { font-family:inherit; cursor:pointer; }
 .tk-row-ok { color:var(--teal); font-weight:600; font-size:12.5px; }
 .tk-back-link { border:none; background:none; color:var(--ink-soft); font-size:12px; padding:0 0 12px; }
 .tk-back-link:hover { color:var(--ink); }
+
+/* Shared visual contract, scoped to this extension surface. CSS only. */
+:root {
+  --tk-ground:#f3f5f5; --tk-surface:#fff; --tk-ink:#0a1c2b;
+  --tk-muted:#53626c; --tk-line:#d5dde1; --tk-rule:#e6ebee;
+  --tk-signal:#0f7d6b; --tk-signal-deep:#0b5f52; --tk-tint:#e2f0ec;
+  --tk-rail-current:#8fc4ba; --tk-alert:#a3462a;
+  --tk-r-control:6px; --tk-r-surface:10px; --tk-r-sheet:14px;
+  --tk-font:"Barlow",sans-serif; --tk-font-display:"Barlow Semi Condensed",sans-serif;
+  --tk-size-1:12px; --tk-size-2:13px; --tk-size-3:15px; --tk-size-4:17px;
+  --tk-size-5:22px; --tk-size-6:28px; --tk-size-7:34px; --tk-leading:1.5;
+  --tk-space-1:4px; --tk-space-2:8px; --tk-space-3:12px; --tk-space-4:16px;
+  --tk-space-6:24px; --tk-space-8:32px; --tk-space-12:48px;
+  --tk-floating-shadow:0 10px 32px rgba(10,28,43,.12);
+  --ink:var(--tk-ink); --ink-soft:var(--tk-muted); --ink-faint:var(--tk-muted);
+  --paper:var(--tk-ground); --surface:var(--tk-surface); --surface-2:var(--tk-ground);
+  --line:var(--tk-line); --line-soft:var(--tk-rule);
+  --teal:var(--tk-signal); --teal-bright:var(--tk-signal-deep); --teal-wash:var(--tk-tint);
+  --accent:var(--tk-signal); --accent-wash:var(--tk-tint);
+  --radius:var(--tk-r-surface); --radius-sm:var(--tk-r-control);
+  --shadow:none; --shadow-lg:var(--tk-floating-shadow);
+  --m-sales:var(--tk-signal); --m-sales-wash:var(--tk-ground);
+  --m-ops:var(--tk-ink); --m-ops-wash:var(--tk-ground);
+  --m-pricing:var(--tk-ink); --m-pricing-wash:var(--tk-ground);
+  --m-money:var(--tk-ink); --m-money-wash:var(--tk-ground);
+  --m-dash:var(--tk-ink); --m-dash-wash:var(--tk-ground);
+  --m-insight:var(--tk-ink); --m-insight-wash:var(--tk-ground);
+  --m-cal:var(--tk-signal); --m-cal-wash:var(--tk-ground);
+  --m-goal:var(--tk-ink); --m-goal-wash:var(--tk-ground);
+  /* Semantic colours retained for existing calendar events and status meaning. */
+  --navy:#13344b; --navy-wash:#eef2f6; --amber:#9a7a32; --amber-wash:#f6f2e9;
+  --coral:var(--tk-alert); --coral-wash:#f7efec; --blue:#2f5d82; --blue-wash:#eef3f8;
+  --purple:#4a4f7a; --purple-wash:#f0f1f6;
+  --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px; --space-5:20px;
+  --space-6:24px; --space-8:32px; --space-10:40px; --space-12:48px; --space-16:64px;
+}
+
+body { font-family:var(--tk-font); font-size:15px; line-height:1.5; font-variant-numeric:tabular-nums; max-width:100vw; }
+.tk-popup { padding:16px; }
+.tk-popup-logo, .tk-connected-name { font-family:var(--tk-font-display); font-weight:600; }
+.tk-field label, .tk-connected-label, .tk-popup-logo { text-transform:none; letter-spacing:normal; color:var(--tk-muted); }
+.tk-field input, .tk-field select, .tk-btn { min-height:44px; font-size:15px; }
+.tk-btn { background:var(--tk-surface); transition:background-color 120ms ease,transform 120ms ease; }
+.tk-btn-accent { background:var(--tk-signal); }
+.tk-btn-accent:hover:not(:disabled) { background:var(--tk-signal-deep); }
+.tk-btn:active:not(:disabled) { transform:translateY(1px); }
+:is(button,input,select):focus-visible { outline:2px solid var(--tk-signal); outline-offset:2px; }
+.tk-row-ok { color:var(--tk-muted); }
+::selection { background:var(--tk-tint); color:var(--tk-signal-deep); }
+body { scrollbar-color:var(--tk-line) var(--tk-ground); caret-color:var(--tk-signal); }
+@media(prefers-reduced-motion:reduce) { * { transition:none!important; animation:none!important; } }
