@@ -1,0 +1,67 @@
+/* PDF reference: readable job sheets, restrained chrome, generous row rhythm. */
+body { font-size:15px; }
+.app main { padding:28px 40px 96px; max-width:1440px; }
+nav.tabs { padding:20px 12px 16px; }
+nav.tabs .sidebar-brand { padding:0 10px 20px; }
+.sidebar-brand h1 { font-size:22px; line-height:1.2; }
+.sidebar-brand .phase { font-size:12px; }
+nav.tabs button { min-height:40px; font-size:15px; padding:8px 12px; }
+nav.tabs button .count { font-size:13px; background:transparent; }
+nav.tabs button .nav-ico { width:16px; height:16px; }
+.sidebar-settings { font-size:15px; min-height:44px; }
+.sale-sidebar-toggle { min-height:28px; font-size:12px; color:var(--tk-muted); margin-bottom:12px; }
+.sidebar-label { font-size:13px; padding-top:24px; padding-bottom:8px; }
+.ux-workspace-bar { position:static; min-height:40px; padding:0; border:0; margin-bottom:24px; background:transparent; }
+.ux-workspace-business { font-size:14px; font-weight:400; }
+.ux-workspace-tools { gap:8px; }
+.ux-search-launch { min-height:40px; font-size:14px; border-radius:6px; }
+.ux-create-launch.btn.primary { min-height:40px; background:var(--tk-surface); color:var(--tk-ink); border:1px solid var(--tk-line); }
+.ux-create-launch.btn.primary:hover { background:var(--tk-ground); }
+.app .view-head h2,.app .sale-head h2,.app .nlm-header h2 { font-size:32px; line-height:1.2; }
+.app :is(.sale-head,.view-head,.nlm-header) { margin-bottom:24px; }
+.app :is(.sale-head,.view-head,.nlm-header) p { font-size:15px; line-height:1.5; }
+.app .btn { font-size:14px; padding:10px 16px; }
+.app :is(.sale-panel,.panel) h3 { font-size:19px; }
+.app :is(.sale-panel,.panel) p { font-size:14px; }
+.app :is(.sale-panel,.panel) table { font-size:14px; }
+.app :is(.sale-panel,.panel) td,.app :is(.sale-panel,.panel) th { padding:12px 16px; }
+.app .sale-kpi strong { font-size:27px; line-height:1.2; }
+.app .sale-kpi { padding:16px 20px; }
+.app .sale-kpi > span { font-size:14px; }
+@media(max-width:760px) {
+ .app main { padding:20px 16px calc(104px + env(safe-area-inset-bottom,0px)); }
+ .ux-workspace-bar { min-height:40px; margin-bottom:20px; }
+ .ux-workspace-business { font-size:14px; }
+ .ux-workspace-tools .ux-create-launch { min-width:44px; min-height:44px; }
+ .app .view-head h2,.app .sale-head h2,.app .nlm-header h2 { font-size:30px; }
+ .app :is(.sale-head,.view-head,.nlm-header) p { font-size:14px; }
+ .app .btn { font-size:14px; min-height:44px; padding:11px 14px; }
+ .app :is(.sale-panel,.panel) { padding:16px; }
+ .bottom-nav,#bottom-nav { height:84px; border-top:1px solid var(--tk-line); box-shadow:none; }
+ #bottom-nav button { font-size:12px; font-weight:600; gap:6px; }
+ #bottom-nav button svg { width:22px; height:22px; }
+}
+@media(min-width:761px) {
+ .ux-workspace-bar { position:fixed; left:12px; bottom:148px; width:208px; margin:0; z-index:22; }
+ .ux-workspace-location { display:none; }
+ .ux-workspace-tools { width:100%; flex-direction:column; align-items:stretch; }
+ .ux-workspace-tools > button { width:100%; justify-content:flex-start; }
+ .sidebar-foot { padding-top:112px; }
+}
+@media(max-width:760px) {
+ .app main { position:relative; }
+ .ux-workspace-bar { position:absolute; right:16px; top:20px; width:96px; margin:0; z-index:22; }
+ .ux-workspace-location { display:none; }
+ .ux-workspace-tools { width:100%; gap:8px; }
+ .ux-workspace-tools .ux-create-launch { width:44px; height:44px; padding:0; font-size:0; }
+ .ux-workspace-tools .ux-create-launch::before { content:'+'; font-size:24px; }
+ .ref-dashboard-head > div:first-child,.app .sale-head > div:first-child,.nlm-header > div:first-child { padding-right:104px; min-height:44px; }
+}
+@media(min-width:761px) {
+ .ux-workspace-bar { top:auto; height:auto; }
+ .ux-workspace-tools .ux-search-launch { min-width:0; }
+ body.sale-sidebar-collapsed .ux-workspace-bar { position:static; width:auto; margin-bottom:16px; }
+}
+@media(max-width:760px) {
+ body .ux-workspace-tools button.ux-create-launch.btn.primary { font-size:0!important; line-height:1; padding:0; }
+}

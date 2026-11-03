@@ -11,3 +11,19 @@ Signature: the stage rail. Six 4px segments (Lead, Quoted, Accepted, Booked, Don
 Desktop: 232px white sidebar (border-right line), content left-aligned in a 1200px column, 32px/40px padding. Page headers keep their existing content; restyle only: h1 in display 34px, existing subtitle in muted text, existing actions on the right.
 Phone (≤760px): no sidebar; the existing bottom tab bar keeps its current tabs, labels and order, restyled to 84px tall incl. safe area, icons with labels, active = signal-deep; page title top-left (display 28px); primary actions full width, 48px tall; touch targets ≥44px.
 Don't change: brand navy #0a1c2b, teal #0f7d6b, the Turnkey mark.
+
+
+## PDF reference revision, 3 November 2026
+
+The user replaced the previous presentation brief with Desktop/Turnkey redesign.pdf.
+Its six pages govern desktop/mobile Dashboard, Leads and Pipeline composition:
+readable 15px body text, restrained navigation, an actionable job-sheet dashboard,
+compact list-first pipeline with the existing board still available, and a desktop
+lead list beside a customer preview. Mobile uses ruled rows with clear next actions
+and a stable bottom bar. Existing records, grades, statuses and metric definitions
+remain authoritative; mock names, totals and inferred tracking in the PDF are not data.
+
+The user explicitly requires grade-coloured leads. This overrides the earlier
+neutral-only badge rule: A uses green, B blue, C purple, review amber, with readable
+tints and written grade labels. No coloured accent stripes are needed. Changes are
+kept local for review; publishing requires fresh approval.

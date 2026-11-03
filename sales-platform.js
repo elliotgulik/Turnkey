@@ -37,7 +37,7 @@
     serial = 0,
     activeId = null,
     mappings = [],
-    pipelineScope="all", pipelineSearch="", pipelineDueOnly=false, pipelineFiltersOpen=false;
+    pipelineScope="all", pipelineSearch="", pipelineDueOnly=false, pipelineFiltersOpen=false, pipelineLayout="list";
   const oldRender = render,
     oldAll = renderAll,
     oldConnections = openConnections,
@@ -253,49 +253,28 @@
   }
   renderDashboard = function () {
     const r = currentReport(),
-      goal = cloudGoals.find(
-        (g) =>
-          g.metric === "revenue" &&
-          Date.parse(g.starts_at) <= Date.now() &&
-          Date.parse(g.ends_at) > Date.now(),
-      ),
+      goal = cloudGoals.find(g => g.metric === "revenue" && Date.parse(g.starts_at) <= Date.now() && Date.parse(g.ends_at) > Date.now()),
       gr = goal ? goalReport(goal) : null;
-    document.getElementById("view-dashboard").innerHTML =
-      header(
-        "Your sales, clearly.",
-        "Capture enquiries. Quote profitably. Win the work.",
-        button("+ New lead", "new") + button("Build a quote", "quote-home"),
-      ) +
-      filters() +
-      notice() +
-      `<div class="sale-kpis">${kpi("Leads received", r.leads, "Arrival date in selected period")}${kpi("New leads awaiting action", r.newLeads, "Selected arrival cohort")}${kpi("Quotes sent", r.quotes, "Quote sent date in period")}${kpi("Quoted value", money(r.quotedValue), "GST-inclusive customer prices")}${kpi("Booked sales", money(r.bookedSales), "Won date in period; not cash received")}${kpi("Lead → won", pct(r.conversion), "Selected lead-arrival cohort")}${kpi("Quote acceptance", pct(r.acceptance), "Quoted leads in arrival cohort")}${kpi("Average quote", moneySafe(r.averageQuote))}${kpi("Estimated gross profit", moneySafe(r.estimatedProfit), `${r.costCoverage.known}/${r.costCoverage.total} won sales have cost/GST snapshots`)}${kpi("Estimated gross margin", pct(r.estimatedMargin), "Ex-GST revenue less estimated cost")}${kpi("Previous-period growth", pct(r.growth), "Equal-length previous period")}${kpi("Sales against target", goal ? pct(gr.bookedSales / Number(goal.target)) : "No active revenue goal", "Goal period, independent of report filter")}</div><div class="sale-grid"><section class="sale-panel"><h3>Revenue performance</h3>${chart(r.series)}</section><section class="sale-panel"><h3>Pipeline at a glance</h3>${table(
-        ["Stage", "Opportunities", "Value"],
-        r.pipeline.map((s) => [
-          stages.find((x) => x.key === s.stage)?.label || s.stage,
-          s.count,
-          money(s.value),
-        ]),
-      )}<p class="sale-muted">Current open pipeline, across all arrival dates.</p></section></div><div class="sale-grid"><section class="sale-panel"><h3>Follow-ups due</h3>${
-        r.overdue.length
-          ? r.overdue
-              .slice(0, 8)
-              .map(
-                (x) =>
-                  `<div class="sale-row"><div><b>${esc(x.name)}</b><small>${esc(dates(x.nextFollowUpAt))}</small></div>${button("Open", "detail", x.id)}</div>`,
-              )
-              .join("")
-          : empty("No overdue follow-ups.")
-      }</section><section class="sale-panel"><h3>Recent sales activity</h3>${
-        r.activity.length
-          ? r.activity
-              .slice(0, 8)
-              .map(
-                (x) =>
-                  `<div class="sale-row"><div><b>${esc(x.record.name)}</b><small>${esc(x.label || x.to || "Updated")} · ${esc(dates(x.at))}</small></div></div>`,
-              )
-              .join("")
-          : empty("Sales activity will appear as opportunities progress.")
-      }</section></div><p class="sale-muted">${r.unknownWinDates ? esc(r.unknownWinDates) + " historical wins have no recorded close date and are excluded from dated booked sales. " : ""}Invoiced revenue and cash received are reported separately in Analytics when ServiceM8 supplies them.</p>`;
+    const headline = money(r.bookedSales) + ' booked' + (r.estimatedMargin == null ? ', margin unavailable.' : ' at an estimated ' + pct(r.estimatedMargin) + ' margin.');
+    const target = goal ? money(gr.bookedSales) + ' of the ' + money(Number(goal.target)) + ' goal booked in the goal period.' : 'No active revenue goal.';
+    const rangeLabel = period === 'custom' ? [custom.start, custom.end].filter(Boolean).join(' to ') : ({today:'Today','7d':'Last 7 days','30d':'Last 30 days','90d':'Last 90 days',month:'This month',year:'This year'}[period] || period);
+    const queue = records.filter(x => isOpen(x) && (P.key(x) === 'new' || isOverdue(x)) || x.stage === 'won' && !x.scheduledDateISO)
+      .sort((a,b) => Number(isOverdue(b)) - Number(isOverdue(a)) || (M.leadTime(a)||Infinity) - (M.leadTime(b)||Infinity));
+    const today = new Date(); today.setHours(0,0,0,0);
+    const nextJob = records.filter(x => x.stage === 'scheduled' && /^\d{4}-\d{2}-\d{2}$/.test(x.scheduledDateISO || '') && referenceJobTime(x) >= (Number.isFinite(x.scheduledStartMin) ? Date.now() : today.getTime()))
+      .sort((a,b) => referenceJobTime(a) - referenceJobTime(b))[0];
+    const funnel = [['Leads in',r.leads],['Contacted',r.contacted],['Quoted',r.cohortQuotes],['Won',r.cohortWins]];
+    document.getElementById('view-dashboard').innerHTML = `<div class="ref-dashboard">
+      <header class="ref-dashboard-head"><div><p class="ref-date">${esc(new Date().toLocaleDateString(undefined,{weekday:'long',day:'numeric',month:'long'}))}, ${esc(rangeLabel)}</p><h2 class="ref-desktop-headline">${esc(headline)}</h2><h2 class="ref-mobile-title">Today</h2><p class="ref-goal">${esc(target)}</p></div><div class="sale-actions">${button('+ New lead','new')}${button('New quote','quote-home')}</div></header>
+      <details class="ref-report-controls"><summary>Report period and grouping</summary>${filters()}</details>${notice()}
+      ${nextJob ? `<section class="ref-next-job"><p>Next scheduled job, ${esc(nextJob.scheduledDate || nextJob.scheduledDateISO)}${Number.isFinite(nextJob.scheduledStartMin) ? ', ' + esc(String(Math.floor(nextJob.scheduledStartMin/60)).padStart(2,'0')+':'+String(nextJob.scheduledStartMin%60).padStart(2,'0')) : ''}</p><h3>${esc(nextJob.name || 'Customer')}</h3><p>${esc(nextJob.address || 'Address to confirm')}</p><p>${esc(servicesLabel(nextJob))}</p><div class="sale-actions">${button('Open job','detail',nextJob.id)}${button('Open calendar','nav','calendar')}</div></section>` : ''}
+      <section class="ref-attention"><div class="ref-section-heading"><h3>Needs you today <span>${queue.length}</span></h3>${button('Open pipeline','nav','pipeline')}</div><div class="ref-rows">${queue.slice(0,8).map(x=>referenceRow(x,true)).join('') || empty('You’re up to date. No new enquiries, overdue follow-ups or accepted quotes awaiting a date.')}</div>${queue.length>8 ? `<p class="sale-muted">Showing 8 of ${queue.length}. ${button('All follow-ups','followups')}${button('Open pipeline','nav','pipeline')}</p>` : ''}</section>
+      <div class="ref-kpi-band">${kpi('Booked sales',money(r.bookedSales),'Won date in selected period')}${kpi('Margin',pct(r.estimatedMargin),`${r.costCoverage.known}/${r.costCoverage.total} won sales costed, ex-GST`)}${kpi('Quotes sent',money(r.quotedValue),r.quotes+' quotes in selected period')}${kpi('Leads in',r.leads,'Arrival date in selected period')}${kpi('Lead to won',pct(r.conversion),'Selected arrival cohort')}${kpi('Average job',moneySafe(r.averageSale),'Won sales in selected period')}</div>
+      <div class="ref-analysis-grid"><section><h3>Where leads progress</h3><p class="sale-muted">Selected lead-arrival cohort, including recorded contact and quote events.</p><div class="ref-funnel">${funnel.map(([label,value])=>`<div><span>${esc(label)}</span><div class="ref-funnel-track"><i style="width:${Math.max(0,Math.min(100,r.leads ? value/r.leads*100 : 0))}%"></i></div><strong>${esc(value)}</strong></div>`).join('')}</div></section><section><h3>Lead sources</h3><p class="sale-muted">Booked revenue per dollar spent, for the arrival cohort.</p>${table(['Source','Leads','Won','Spend','Return'],r.source.map(x=>[x.name,x.leads,x.won,moneySafe(x.spend),x.roas==null?'—':x.roas.toFixed(1)+'×']))}</section></div>
+      <details class="ref-more-metrics"><summary>All sales metrics</summary><div class="ref-kpi-band ref-all-metrics">${kpi("Leads received", r.leads, "Arrival date in selected period")}${kpi("New leads awaiting action", r.newLeads, "Selected arrival cohort")}${kpi("Quotes sent", r.quotes, "Quote sent date in period")}${kpi("Quoted value", money(r.quotedValue), "GST-inclusive customer prices")}${kpi("Booked sales", money(r.bookedSales), "Won date in period; not cash received")}${kpi("Lead → won", pct(r.conversion), "Selected lead-arrival cohort")}${kpi("Quote acceptance", pct(r.acceptance), "Quoted leads in arrival cohort")}${kpi("Average quote", moneySafe(r.averageQuote))}${kpi("Estimated gross profit", moneySafe(r.estimatedProfit), `${r.costCoverage.known}/${r.costCoverage.total} won sales have cost/GST snapshots`)}${kpi("Estimated gross margin", pct(r.estimatedMargin), "Ex-GST revenue less estimated cost")}${kpi("Previous-period growth", pct(r.growth), "Equal-length previous period")}${kpi("Sales against target", goal ? pct(gr.bookedSales / Number(goal.target)) : "No active revenue goal", "Goal period, independent of report filter")}</div></details>
+      <div class="ref-analysis-grid"><section><h3>Revenue performance</h3>${chart(r.series)}</section><section><h3>Pipeline at a glance</h3>${table(['Stage','Opportunities','Value'],r.pipeline.map(x=>[stages.find(s=>s.key===x.stage)?.label||x.stage,x.count,money(x.value)]))}<p class="sale-muted">Current open pipeline, across all arrival dates.</p></section></div>
+      <div class="ref-analysis-grid"><section><h3>Follow-ups due</h3>${r.overdue.slice(0,8).map(x=>`<div class="sale-row"><div><b>${esc(x.name)}</b><small>${esc(dates(x.nextFollowUpAt))}</small></div>${button('Open','detail',x.id)}</div>`).join('')||empty('No overdue follow-ups.')}${button('All follow-ups','followups')}</section><section><h3>Recent sales activity</h3>${r.activity.slice(0,8).map(x=>`<div class="sale-row"><div><b>${esc(x.record.name)}</b><small>${esc(x.label||x.to||'Updated')}, ${esc(dates(x.at))}</small></div></div>`).join('')||empty('Sales activity will appear as opportunities progress.')}</section></div>
+      <p class="sale-muted">${r.unknownWinDates ? esc(r.unknownWinDates)+' historical wins have no recorded close date and are excluded from dated booked sales. ' : ''}Booked sales are not cash received. Invoiced revenue and cash received are reported separately in Analytics when ServiceM8 supplies them.</p></div>`;
   };
   renderSales = function () {
     const r = currentReport();
@@ -503,6 +482,18 @@
       <div class="sale-tags"><span>${esc(r.source || "Manual")}</span><span title="${esc(grade.description)}">${esc(grade.label)}</span><span>${age ? Math.max(0, Math.floor((Date.now() - age) / 86400000)) + "d old" : "Age unknown"}</span></div>
       ${followupLabel(r)}<div class="sale-card-footer">${nextButton(r)}<details class="sale-card-tools"><summary>Manage</summary><div>${salespersonControl(r)}${recordActions(r)}<div class="sale-card-stage">${stageControl(r)}</div></div></details></div></article>`;
   }
+  function referenceJobTime(r) {
+    return new Date(r.scheduledDateISO + 'T00:00:00').getTime() + (Number.isFinite(r.scheduledStartMin) ? r.scheduledStartMin : 0) * 60000;
+  }
+  function referenceRail(r) {
+    const current = r.stage === 'paid' ? 5 : r.stage === 'completed' ? 4 : r.stage === 'scheduled' ? 3 : P.key(r) === 'won' ? 2 : P.key(r) === 'quoted' ? 1 : 0;
+    return `<span class="ref-stage-rail" role="img" aria-label="${esc(stageLabel(r))}${r.stage === 'scheduled' ? ', scheduled' : r.stage === 'paid' ? ', paid' : ''}">${Array.from({length:6},(_,i)=>`<i class="${P.key(r)==='lost' ? '' : i<current?'ref-stage-done':i===current?'ref-stage-current':''}"></i>`).join('')}</span>`;
+  }
+  function referenceRow(r, compact=false) {
+    const value=window.TK_LEADS.value(r), age=M.leadTime(r);
+    const status=isOverdue(r) ? 'Follow-up overdue, '+dates(r.nextFollowUpAt) : r.stage==='scheduled' ? 'Scheduled, '+(r.scheduledDate||r.scheduledDateISO||'date to confirm') : r.stage==='won' ? 'Accepted, arrange delivery' : P.key(r)==='new' ? (age ? 'Enquiry received '+dates(age) : 'New enquiry, date not recorded') : P.key(r)==='quoted' ? (r.quoteSentAt ? 'Quote sent '+dates(r.quoteSentAt) : 'Quote sent') : stageLabel(r);
+    return `<article class="ref-opportunity${compact?' ref-compact-row':''}" data-record="${esc(r.id)}"><div class="ref-row-customer">${recordHeading(r)}<small>${esc(r.address||r.suburb||'Property address needed')}</small></div><p class="ref-row-services">${esc(servicesLabel(r))}</p>${referenceRail(r)}<p class="ref-row-status${isOverdue(r)?' ref-urgent':''}">${esc(status)}</p><div class="ref-row-value"><strong>${esc(window.TK_SM8_PRICING?.total(r,value==null?'Not estimated':money(value))||(value==null?'Not estimated':money(value)))}</strong><small>${esc(stageLabel(r))}</small></div><div class="ref-row-action">${compact?(P.key(r)==='new'?button('Build quote','quote',r.id):stepButton(r)):stepButton(r)}</div>${compact?'':`<details class="ref-row-manage"><summary>Manage</summary><div>${salespersonControl(r)}${recordActions(r)}${stageControl(r)}${button('Set follow-up / add notes','sales-plan',r.id)}${window.TK_LEAD_REQUEST?.render(r)||''}${window.TK_SM8_PRICING?.render(r,{compact:true})||''}</div></details>`}</article>`;
+  }
   function resultBar(count, total, filtered, action, context) {
     return `<div class="sale-results"><p role="status" aria-live="polite" aria-atomic="true">Showing <strong>${count}</strong> of <strong>${total}</strong> opportunities <span>· ${esc(context)}</span></p>${button('Reset filters', action, '', filtered ? '' : 'disabled')}</div>`;
   }
@@ -518,16 +509,18 @@
     if (pipelineSearch.trim()) list = list.filter(r => [r.name, r.address, r.email, r.phone, r.source].join(' ').toLowerCase().includes(pipelineSearch.trim().toLowerCase()));
     if (pipelineDueOnly) list = list.filter(isOverdue);
     const filterCount = Number(Boolean(pipelineSearch.trim())) + Number(pipelineDueOnly) + Number(['completed', 'lost'].includes(pipelineScope));
-    document.getElementById('view-pipeline').innerHTML = header('Sales pipeline', 'See where every opportunity stands and give each customer a clear next step.', button('Build a quote', 'quote-home') + `<details class="nlm-tools"><summary>Pipeline tools</summary><div>${button('+ New lead', 'new')}${button('Follow-ups', 'followups')}${button('Activity & replies', 'activity')}${button('Pipeline settings', 'stages')}</div></details>`) +
-      `<div class="sale-pipeline-toolbar">${scopeButtons('pipeline-scope', pipelineScope, [['all', 'All active', pipelineRecords.filter(r=>!['completed','lost'].includes(uiStage(r))).length], ['open', 'Open opportunities', pipelineRecords.filter(isOpen).length], ['won', 'Quote confirmed', records.filter(r => uiStage(r) === 'won').length]])}<button type="button" id="pipeline-filter-toggle" class="btn ghost sale-pipeline-filter-toggle" data-sale-action="pipeline-filters" aria-expanded="${pipelineFiltersOpen}" aria-controls="pipeline-filter-panel">Filters${filterCount ? ` <span class="sale-filter-count" aria-label="${filterCount} active filters">${filterCount}</span>` : ''}</button><div id="pipeline-filter-panel" class="sale-pipeline-filter-panel" data-open="${pipelineFiltersOpen}"><details class="sale-past-jobs"><summary>${pipelineScope==='completed'?'Completed':pipelineScope==='lost'?'Cancelled':'Past jobs'} <span>${pipelineRecords.filter(r=>['completed','lost'].includes(uiStage(r))).length}</span><span aria-hidden="true">⌄</span></summary><div class="sale-past-menu">${scopeButtons('pipeline-scope',pipelineScope,[['completed','Completed',pipelineRecords.filter(r=>uiStage(r)==='completed').length],['lost','Cancelled',pipelineRecords.filter(r=>uiStage(r)==='lost').length]])}</div></details>
+    const summaryGroups = [['Preparing quotes', list.filter(r=>P.key(r)==='contacted')], ['Quotes out',list.filter(r=>P.key(r)==='quoted')], ['Accepted, not scheduled',list.filter(r=>r.stage==='won')], ['Scheduled',list.filter(r=>r.stage==='scheduled')]];
+    document.getElementById('view-pipeline').innerHTML = `<div class="ref-pipeline">` + header('Pipeline', list.length + ' opportunities, ' + money(list.reduce((n,r)=>n+(window.TK_SM8_PRICING?.amount(r) ?? window.TK_LEADS.value(r) ?? 0),0)) + ' in this view.', `<div class="ref-view-toggle" role="group" aria-label="Pipeline layout">${button('List','pipeline-layout','list',`aria-pressed="${pipelineLayout==='list'}"`)}${button('Board','pipeline-layout','board',`aria-pressed="${pipelineLayout==='board'}"`)}</div>` + button('New quote', 'quote-home') + `<details class="nlm-tools"><summary>Pipeline tools</summary><div>${button('+ New lead', 'new')}${button('Follow-ups', 'followups')}${button('Activity & replies', 'activity')}${button('Pipeline settings', 'stages')}</div></details>`) +
+      `<div class="ref-kpi-band ref-pipeline-summary">${summaryGroups.map(([label,rs])=>kpi(label,money(rs.reduce((n,r)=>n+(window.TK_SM8_PRICING?.amount(r) ?? window.TK_LEADS.value(r) ?? 0),0)),rs.length+' opportunities in this view')).join('')}</div>` +
+      `<div class="sale-pipeline-toolbar"><button type="button" id="pipeline-filter-toggle" class="btn ghost sale-pipeline-filter-toggle" data-sale-action="pipeline-filters" aria-expanded="${pipelineFiltersOpen}" aria-controls="pipeline-filter-panel">Filters${filterCount ? ` <span class="sale-filter-count" aria-label="${filterCount} active filters">${filterCount}</span>` : ''}</button><div id="pipeline-filter-panel" class="sale-pipeline-filter-panel" data-open="${pipelineFiltersOpen}">${scopeButtons('pipeline-scope', pipelineScope, [['all', 'All active', pipelineRecords.filter(r=>!['completed','lost'].includes(uiStage(r))).length], ['open', 'Open opportunities', pipelineRecords.filter(isOpen).length], ['won', 'Quote confirmed', records.filter(r => uiStage(r) === 'won').length]])}<details class="sale-past-jobs"><summary>${pipelineScope==='completed'?'Completed':pipelineScope==='lost'?'Cancelled':'Past jobs'} <span>${pipelineRecords.filter(r=>['completed','lost'].includes(uiStage(r))).length}</span><span aria-hidden="true">⌄</span></summary><div class="sale-past-menu">${scopeButtons('pipeline-scope',pipelineScope,[['completed','Completed',pipelineRecords.filter(r=>uiStage(r)==='completed').length],['lost','Cancelled',pipelineRecords.filter(r=>uiStage(r)==='lost').length]])}</div></details>
       ${field('Search pipeline', `<input id="pipeline-search" type="search" value="${esc(pipelineSearch)}" placeholder="Customer, address or source">`)}<label class="sale-check"><input type="checkbox" id="pipeline-due" ${pipelineDueOnly ? 'checked' : ''}> Follow-ups overdue</label></div></div>` +
       resultBar(list.length, pipelineRecords.length, pipelineScope !== 'all' || pipelineSearch || pipelineDueOnly, 'pipeline-reset', pipelineDueOnly ? 'Overdue follow-ups' : pipelineScope === 'all' ? 'Active stages' : pipelineScope === 'open' ? 'Open opportunities' : uiStages().find(s => s.key === pipelineScope)?.label || pipelineScope) +
-      `<nav class="sale-stage-jump" aria-label="Jump to stage">${scopeStages.map(s => `<button class="btn ghost sm" data-sale-action="pipeline-jump" data-id="${s.key}">${esc(s.label)} · ${list.filter(r => uiStage(r) === s.key).length}</button>`).join('')}</nav><p class="sale-board-hint">Open a customer name for details. Move an opportunity with its Sales stage menu or drag it to a stage.</p>` +
+      `<nav class="sale-stage-jump" aria-label="Jump to stage">${scopeStages.map(s => `<button class="btn ghost sm" data-sale-action="pipeline-jump" data-id="${s.key}">${esc(s.label)} · ${list.filter(r => uiStage(r) === s.key).length}</button>`).join('')}</nav><p class="sale-board-hint">Open a customer name for details. Use Manage to change the Sales stage.${pipelineLayout==='board'?' You can also drag an opportunity to a stage.':''}</p>` +
       (!list.length ? `<div class="sale-no-results">${empty('No matching opportunities. Reset filters to see your pipeline.')}${button('Reset filters', 'pipeline-reset')}</div>` : '') +
-      `<div class="sale-kanban" style="--pipeline-columns:${scopeStages.length}">${scopeStages.map(s => {
+      `<div class="${pipelineLayout==='board'?'sale-kanban':'ref-pipeline-list'}" style="--pipeline-columns:${scopeStages.length}">${scopeStages.map(s => {
         const rs = list.filter(r => uiStage(r) === s.key);
-        return `<section class="sale-column" id="pipeline-${s.key}" ${s.key === 'completed' ? '' : `data-drop-stage="${s.key}"`}><header><h3>${esc(s.label)} <span>${rs.length}</span></h3><small>${esc(money(rs.reduce((n, r) => n + (window.TK_SM8_PRICING?.amount(r) ?? window.TK_LEADS.value(r) ?? 0), 0)))}</small><p>${esc(s.description || defaults.find(d => d.key === s.key)?.description || '')}</p></header>${rs.map(card).join('') || empty('No opportunities in this stage')}</section>`;
-      }).join('')}</div>`;
+        return `<section class="${pipelineLayout==='board'?'sale-column':'ref-pipeline-group'}" id="pipeline-${esc(s.key)}" ${s.key === 'completed' ? '' : `data-drop-stage="${esc(s.key)}"`}><header><h3>${esc(s.label)} <span>${rs.length}</span></h3><small>${esc(money(rs.reduce((n, r) => n + (window.TK_SM8_PRICING?.amount(r) ?? window.TK_LEADS.value(r) ?? 0), 0)))}</small><p>${esc(s.description || defaults.find(d => d.key === s.key)?.description || '')}</p></header>${pipelineLayout==='board' ? rs.map(card).join('') || empty('No opportunities in this stage') : `<div class="ref-rows">${rs.map(r=>referenceRow(r)).join('')||empty('No opportunities in this stage')}</div>`}</section>`;
+      }).join('')}</div></div>`;
     refreshCustomerSummary();
     renderLeads();
   };
@@ -1137,6 +1130,7 @@
       if(a==='followup-record'){document.getElementById('sales-dialog')?.close();openDetail(r.id);return;}
       if(a==='followup-email'){document.getElementById('sales-dialog')?.close();openComposeModal({to:r.email||'',subject:r.quoteSentAt?'Following up on your quote':'Your enquiry',customerId:r.customerId,jobId:r.jobId,opportunityId:String(r.id)});return;}
       if(['followup-tomorrow','followup-three','followup-done'].includes(a)){let date=null;if(a!=='followup-done'){const next=new Date();next.setDate(next.getDate()+(a==='followup-three'?3:1));next.setHours(9,0,0,0);date=next.toISOString();}await saveFollowup(r,date,a==='followup-done'?'Follow-up completed':'Follow-up rescheduled');return;}
+      if(a==='pipeline-layout'){pipelineLayout=b.dataset.id==='board'?'board':'list';render();document.querySelector(`#view-pipeline [data-sale-action="pipeline-layout"][data-id="${pipelineLayout}"]`)?.focus();return;}
       if(a==='pipeline-filters'){pipelineFiltersOpen=!pipelineFiltersOpen;render();document.querySelector('[data-sale-action="pipeline-filters"]')?.focus();return;}
       if(a==='pipeline-reset'){pipelineScope='all';pipelineSearch='';pipelineDueOnly=false;render();const focusId=window.matchMedia('(max-width: 640px)').matches&&!pipelineFiltersOpen?'pipeline-filter-toggle':'pipeline-search';document.getElementById(focusId)?.focus();return;}
       if(a==='leads-reset'){search='';sourceFilter='';stageFilter='';leadSort='newest';leadsDueOnly=false;renderLeads();document.getElementById('sale-search')?.focus();return;}

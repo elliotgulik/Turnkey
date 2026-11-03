@@ -1,0 +1,148 @@
+/* PDF composition for Dashboard and Pipeline. Loaded after redesign.css.
+   Values, workflow scopes and actions come from the existing sales engines. */
+.ref-dashboard, .ref-pipeline { color: var(--tk-ink, #0a1c2b); min-width: 0; }
+.ref-dashboard-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 24px; }
+.ref-dashboard-head > div:first-child { max-width: 850px; min-width: 0; }
+.ref-dashboard .ref-desktop-headline { font-size: 36px; line-height: 1.15; margin: 6px 0 8px; text-wrap: balance; }
+.ref-date, .ref-goal { margin: 0; color: var(--tk-muted, #53626c); }
+.ref-mobile-title { display: none; }
+.ref-dashboard-head .sale-actions { flex-shrink: 0; }
+.ref-report-controls { margin: 0 0 28px; }
+.ref-report-controls > summary, .ref-more-metrics > summary { width: fit-content; color: var(--tk-muted); cursor: pointer; padding: 8px 0; }
+.ref-report-controls .sale-filters { margin: 12px 0; }
+.ref-section-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 8px; }
+.ref-section-heading h3, .ref-analysis-grid h3 { margin: 0; font-size: 20px; }
+.ref-section-heading h3 span { color: var(--tk-muted); font-weight: 400; }
+.ref-rows { border: 1px solid var(--tk-line, #d5dde1); border-radius: 10px; background: var(--tk-surface, #fff); }
+.ref-opportunity { display: grid; grid-template-columns: minmax(140px, 1.35fr) minmax(130px, 1.25fr) minmax(85px, .7fr) minmax(145px, 1.15fr) minmax(85px, .55fr) minmax(110px, .7fr); align-items: center; gap: 12px 20px; padding: 14px 20px; border-bottom: 1px solid var(--tk-rule, #e6ebee); }
+.ref-opportunity:last-child { border-bottom: 0; }
+.ref-opportunity > * { min-width: 0; }
+.ref-opportunity p { margin: 0; line-height: 1.35; }
+.ref-opportunity .sale-record-open { padding: 0; min-height: 32px; text-align: left; font-size: 16px; line-height: 1.25; font-weight: 600; }
+.ref-row-customer small, .ref-row-value small { display: block; color: var(--tk-muted); line-height: 1.3; overflow-wrap: anywhere; }
+.ref-row-services, .ref-row-status { color: var(--tk-muted); font-size: 14px; overflow-wrap: anywhere; }
+.ref-row-status.ref-urgent { color: var(--tk-alert, #a3462a); }
+.ref-stage-rail { display: flex; gap: 4px; width: 100%; }
+.ref-stage-rail i { flex: 1; height: 4px; border-radius: 2px; background: var(--tk-rule, #e6ebee); }
+.ref-stage-rail .ref-stage-done { background: var(--tk-signal, #0f7d6b); }
+.ref-stage-rail .ref-stage-current { background: var(--tk-rail-current, #8fc4ba); }
+.ref-row-value { text-align: right; }
+.ref-row-value strong { font-size: 17px; overflow-wrap: anywhere; }
+.ref-row-action { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.ref-row-action .btn { min-height: 40px; white-space: normal; text-align: center; }
+.ref-row-action .quote-launch-btn svg { display: none; }
+.ref-row-manage { grid-column: 1 / -1; justify-self: stretch; }
+.ref-row-manage > summary { cursor: pointer; color: var(--tk-muted); font-size: 14px; width: fit-content; margin-left: auto; padding: 4px 0; }
+.ref-row-manage[open] > div { border-top: 1px solid var(--tk-rule); padding-top: 16px; display: flex; align-items: start; flex-wrap: wrap; gap: 16px; }
+.ref-row-manage .sale-record-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.ref-compact-row { grid-template-columns: minmax(140px, 1.4fr) minmax(180px, 1.5fr) minmax(90px, .8fr) minmax(80px, .5fr) minmax(140px, 1fr); }
+.ref-compact-row .ref-row-services, .ref-compact-row .ref-row-value small { display: none; }
+.ref-compact-row .ref-row-status { grid-column: 2; grid-row: 1; }
+.ref-compact-row .ref-stage-rail { grid-column: 3; grid-row: 1; }
+.ref-kpi-band { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); margin: 32px 0; background: var(--tk-surface, #fff); border: 1px solid var(--tk-line); border-radius: 10px; }
+.ref-kpi-band .sale-kpi { padding: 16px 20px; min-width: 0; margin: 0; }
+.ref-kpi-band .sale-kpi:last-child { border-right: 0; }
+.ref-kpi-band .sale-kpi strong { font-size: 30px; line-height: 1.2; margin: 3px 0; overflow-wrap: anywhere; }
+.ref-kpi-band .sale-kpi span, .ref-kpi-band .sale-kpi small { color: var(--tk-muted); }
+.ref-kpi-band .sale-kpi small { line-height: 1.35; }
+.ref-analysis-grid { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 36px; margin: 36px 0; }
+.ref-analysis-grid > section { min-width: 0; }
+.ref-analysis-grid section > .sale-muted { margin: 4px 0 16px; }
+.ref-analysis-grid .sale-table-wrap { border: 0; border-radius: 0; background: transparent; }
+.ref-analysis-grid .sale-table { background: transparent; }
+.ref-analysis-grid .sale-table th, .ref-analysis-grid .sale-table td { background: transparent; padding: 10px 8px; border-bottom: 1px solid var(--tk-rule); }
+.ref-analysis-grid .sale-table th:first-child, .ref-analysis-grid .sale-table td:first-child { padding-left: 0; }
+.ref-funnel { display: grid; gap: 12px; }
+.ref-funnel > div { display: grid; grid-template-columns: 100px minmax(0,1fr) 36px; align-items: center; gap: 16px; }
+.ref-funnel strong { text-align: right; }
+.ref-funnel-track { height: 22px; background: var(--tk-rule); border-radius: 3px; overflow: hidden; }
+.ref-funnel-track i { display: block; height: 100%; background: var(--tk-rail-current); }
+.ref-funnel > div:last-child i { background: var(--tk-signal); }
+.ref-all-metrics { grid-template-columns: repeat(4, minmax(0,1fr)); margin-top: 12px; }
+.ref-all-metrics .sale-kpi { border-bottom: 1px solid var(--tk-rule); }
+.ref-more-metrics { margin-top: 24px; }
+.ref-next-job { display: none; }
+.ref-pipeline .sale-eyebrow { display: none; }
+.ref-pipeline .sale-head { align-items: center; }
+.ref-view-toggle { display: inline-flex; align-items: stretch; border: 1px solid var(--tk-line); border-radius: 6px; overflow: hidden; }
+.ref-view-toggle .btn { border: 0; border-radius: 0; margin: 0; min-height: 42px; }
+.ref-view-toggle .btn[aria-pressed="true"] { background: var(--tk-tint); color: var(--tk-signal-deep); }
+.ref-pipeline-list { display: grid; gap: 32px; margin-top: 24px; }
+.ref-pipeline-group { min-width: 0; scroll-margin-top: 24px; }
+.ref-pipeline-group > header { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 12px; margin-bottom: 8px; }
+.ref-pipeline-group > header h3 { font-size: 20px; margin: 0; }
+.ref-pipeline-group > header h3 span { color: var(--tk-muted); font-weight: 400; }
+.ref-pipeline-group > header small { font-size: 16px; color: var(--tk-muted); }
+.ref-pipeline-group > header p { flex-basis: 100%; color: var(--tk-muted); margin: 0 0 4px; font-size: 14px; }
+.ref-dashboard :is(button,a,summary,input,select):focus-visible, .ref-pipeline :is(button,a,summary,input,select):focus-visible { outline: 2px solid var(--tk-signal); outline-offset: 3px; }
+.ref-dashboard ::selection, .ref-pipeline ::selection { background: var(--tk-tint); color: var(--tk-signal-deep); }
+@media (max-width: 1150px) {
+  .ref-opportunity { grid-template-columns: minmax(130px,1.3fr) minmax(85px,.7fr) minmax(120px,1fr) 85px minmax(100px,.8fr); gap: 10px 14px; }
+  .ref-opportunity .ref-row-services { display: none; }
+  .ref-compact-row .ref-row-status { grid-column: 3; }
+  .ref-compact-row .ref-stage-rail { grid-column: 2; }
+  .ref-kpi-band { grid-template-columns: repeat(3,minmax(0,1fr)); }
+  .ref-kpi-band .sale-kpi { border-bottom: 1px solid var(--tk-rule); }
+  .ref-dashboard-head { align-items: start; }
+}
+@media (max-width: 760px) {
+  .ref-dashboard-head { flex-wrap: wrap; gap: 16px; margin-bottom: 16px; }
+  .ref-dashboard .ref-desktop-headline { display: none; }
+  .ref-dashboard .ref-mobile-title { display: block; font-size: 32px; line-height: 1.15; margin: 4px 0; }
+  .ref-goal { font-size: 14px; }
+  .ref-dashboard-head .sale-actions { width: 100%; }
+  .ref-dashboard-head .sale-actions .btn { flex: 1; }
+  .ref-report-controls { margin-bottom: 20px; }
+  .ref-next-job { display: block; padding: 20px; border: 1px solid var(--tk-line); border-radius: 10px; background: var(--tk-surface); margin: 0 0 24px; }
+  .ref-next-job h3 { margin: 6px 0 0; font-size: 25px; }
+  .ref-next-job p { margin: 0; color: var(--tk-muted); }
+  .ref-next-job .sale-actions { margin-top: 16px; }
+  .ref-next-job .sale-actions .btn { flex: 1; min-height: 48px; }
+  .ref-section-heading h3 { font-size: 22px; }
+  .ref-section-heading > .btn { min-height: 44px; }
+  .ref-opportunity, .ref-compact-row { grid-template-columns: minmax(0,1fr) minmax(80px,auto); gap: 12px; padding: 18px 16px; }
+  .ref-opportunity .ref-row-customer { grid-column: 1; grid-row: 1; }
+  .ref-opportunity .sale-record-open { min-height: 32px; font-size: 19px; }
+  .ref-opportunity .ref-row-value { grid-column: 2; grid-row: 1; align-self: start; padding-top: 4px; }
+  .ref-opportunity .ref-row-value strong { font-size: 19px; }
+  .ref-opportunity .ref-row-value small { font-size: 14px; }
+  .ref-opportunity .ref-stage-rail { grid-column: 1 / -1; grid-row: 2; }
+  .ref-stage-rail i { height: 4px; }
+  .ref-opportunity .ref-row-status { grid-column: 1; grid-row: 3; font-size: 15px; }
+  .ref-opportunity .ref-row-action { grid-column: 2; grid-row: 3; align-self: center; }
+  .ref-row-action .btn { min-height: 44px; font-size: 15px; padding: 8px 10px; }
+  .ref-row-manage > summary { min-height: 44px; display: flex; align-items: center; }
+  .ref-row-manage[open] > div { display: grid; }
+  .ref-row-manage .sale-person-control, .ref-row-manage .sale-field { width: 100%; }
+  .ref-kpi-band { margin: 24px 0; }
+  .ref-kpi-band .sale-kpi { padding: 14px 10px; }
+  .ref-kpi-band .sale-kpi strong { font-size: 25px; }
+  .ref-kpi-band .sale-kpi span, .ref-kpi-band .sale-kpi small { font-size: 14px; }
+  .ref-analysis-grid { grid-template-columns: minmax(0,1fr); gap: 28px; margin: 28px 0; }
+  .ref-all-metrics { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .ref-funnel > div { grid-template-columns: 80px minmax(0,1fr) 30px; gap: 10px; }
+  .ref-pipeline .sale-head .sale-actions { gap: 10px; }
+  .ref-pipeline .ref-view-toggle .btn { min-height: 44px; width: auto; }
+  .ref-pipeline-group > header h3 { font-size: 22px; }
+  .ref-pipeline-list { gap: 28px; }
+}
+
+.ref-pipeline-summary { grid-template-columns: repeat(4, minmax(0,1fr)); margin-top: 20px; margin-bottom: 24px; }
+@media (max-width: 760px) { .ref-pipeline-summary { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+/* Keep explanations clear of metric labels and trim mobile chrome. */
+.ref-kpi-band .sale-kpi:has(>.tk-inline-help) { padding-right:38px; }
+.ref-compact-row { padding-block:12px; }
+.ref-row-action .btn.primary { background:var(--tk-signal); color:white; }
+@media(max-width:760px) {
+ .ref-pipeline-summary { display:none; }
+ .ref-pipeline .sale-head .sale-actions { display:flex; flex-wrap:wrap; width:100%; }
+ .ref-pipeline .sale-head [data-sale-action="quote-home"] { width:auto; flex-basis:auto; min-height:44px!important; }
+ .ref-pipeline > .tk-inline-help { float:right; margin-top:-44px; }
+ .ref-pipeline .sale-pipeline-toolbar { margin-top:16px; }
+ .ref-kpi-band .sale-kpi { padding-right:36px; }
+ .ref-row-customer small { margin-top:4px; }
+}
+.ref-kpi-band .sale-kpi:has(>.tk-inline-help) { padding:16px 12px; }
+.ref-kpi-band .sale-kpi > span { display:block; padding-right:24px; }
+.ref-kpi-band .sale-kpi > strong { font-size:25px; white-space:nowrap; overflow-wrap:normal; }
+@media(max-width:760px) { .ref-kpi-band .sale-kpi > strong { font-size:22px; } }
