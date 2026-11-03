@@ -664,6 +664,9 @@ if(!window.TURNKEY_CONFIG){
 // defined in the shared TK_PRICING.SERVICES (CRM/historical jobs still use
 // them); windows.hex/.label are kept here only for the Request Windows
 // Quote button's styling.
+function escapeHtml(v){
+  return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
 const SERVICES = {
   driveway: {label:'Driveway / Patio Cleaning', unit:'m²', rate:TK_PRICING.SERVICES.driveway.rate,  kind:'area',      color:'var(--c-driveway)', hex:'#c2683a'},
   housewash:{label:'House Wash',             unit:'m',  rate:TK_PRICING.SERVICES.housewash.rate, kind:'perimeter', color:'var(--c-housewash)', hex:'#2f7d8f'},
@@ -787,7 +790,7 @@ try{const u=new URL(location.href);const m=u.searchParams.get('mode');if(m==='ma
       }
       if(biz.logo_url){
         const slot=document.getElementById('biz-logo-slot');
-        if(slot)slot.innerHTML=`<img src="${biz.logo_url.replace(/"/g,'&quot;')}" alt="" style="width:100%;height:100%;object-fit:cover">`;
+        if(slot)slot.innerHTML=`<img src="${escapeHtml(biz.logo_url)}" alt="" style="width:100%;height:100%;object-fit:cover">`;
       }
       const contactEl=document.getElementById('biz-contact');
       if(contactEl&&biz.phone)contactEl.textContent=biz.phone;
@@ -822,7 +825,7 @@ function renderTermsDetail(bizName,policies){
     const f=TK_POLICIES.FIELDS.find(x=>x.key===key);
     const raw=TK_POLICIES.withBizName(TK_POLICIES.getField(policies,key),name);
     if(!raw)return '';
-    return `<h5>${f.label}</h5>${TK_POLICIES.renderPolicyHtml(raw)}`;
+    return `<h5>${escapeHtml(f.label)}</h5>${TK_POLICIES.renderPolicyHtml(raw)}`;
   }).join('');
 }
 function toggleTermsDetail(){
@@ -1229,7 +1232,7 @@ function toggleQuickService(key){
 function selSummaryHtml(labels,windowsOn){
   const title='<div class="sel-summary-title">Your selected services</div>';
   if(!labels.length&&!windowsOn)return title+'<div class="sel-summary-empty">No services selected yet</div>';
-  const items=labels.map(l=>`<div class="sel-summary-item">${l}</div>`).join('');
+  const items=labels.map(l=>`<div class="sel-summary-item">${escapeHtml(l)}</div>`).join('');
   const addon=windowsOn?'<div class="sel-summary-item addon">Windows quote requested</div>':'';
   return title+'<div class="sel-summary-list">'+items+addon+'</div>';
 }
@@ -1592,7 +1595,7 @@ function renderAreas(){
       ?`<polyline points="${pts}" fill="none" stroke="${hex}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>`
       :`<polygon points="${pts}" fill="${hex}33" stroke="${hex}" stroke-width="3" stroke-linejoin="round"/>`;
     return `${shape}
-      <g><rect x="${cx-30}" y="${cy-13}" width="60" height="26" rx="13" fill="#fff" opacity=".92"/><text x="${cx}" y="${cy+5}" text-anchor="middle" font-size="14" font-weight="700" fill="${hex}">${a.size}${unit}</text></g>`;
+      <g><rect x="${cx-30}" y="${cy-13}" width="60" height="26" rx="13" fill="#fff" opacity=".92"/><text x="${cx}" y="${cy+5}" text-anchor="middle" font-size="14" font-weight="700" fill="${hex}">${escapeHtml(a.size)}${unit}</text></g>`;
   }).join('');
   // Geocoded property location — reprojected through the same lat/lng→SVG
   // math as the drawn areas, so it stays correctly anchored to the actual
@@ -1613,7 +1616,7 @@ function renderList(){
     const v=SERVICES[a.svc];
     return `<div class="area-item">
       <span class="area-sw" style="background:${v.hex}"></span>
-      <div class="area-info"><div class="area-svc">${v.label}${a.storeys&&a.storeys>1?' ('+STOREY_TYPES[a.storeys].label+')':''}</div><div class="area-size">${a.size} ${v.unit} × ${TK_FORMAT.money(effectiveRate(a))}/${v.unit}</div></div>
+      <div class="area-info"><div class="area-svc">${v.label}${a.storeys&&a.storeys>1?' ('+STOREY_TYPES[a.storeys].label+')':''}</div><div class="area-size">${escapeHtml(a.size)} ${v.unit} × ${TK_FORMAT.money(effectiveRate(a))}/${v.unit}</div></div>
       <div class="area-price">~${TK_FORMAT.money(a.size*effectiveRate(a))}</div>
       <button class="area-rm" onclick="removeArea(${a.id})">×</button>
     </div>`;
@@ -1889,7 +1892,7 @@ function renderReview(payload){
   document.getElementById('review-addr').textContent=c.address||'—';
 
   document.getElementById('review-services').innerHTML=payload.requestedServices.length
-    ?payload.requestedServices.map(l=>`<li>${l}</li>`).join('')
+    ?payload.requestedServices.map(l=>`<li>${escapeHtml(l)}</li>`).join('')
     :'<li class="review-empty">No services selected</li>';
 
   // Raw customer-typed notes only — payload.customer.notes already has the
@@ -1903,7 +1906,7 @@ function renderReview(payload){
   const addSection=document.getElementById('review-additional-section');
   if(addRows.length){
     addSection.classList.remove('hidden');
-    document.getElementById('review-additional').innerHTML=addRows.map(r=>`<li>${r}</li>`).join('');
+    document.getElementById('review-additional').innerHTML=addRows.map(r=>`<li>${escapeHtml(r)}</li>`).join('');
   }else{
     addSection.classList.add('hidden');
   }
@@ -1913,7 +1916,7 @@ function renderReview(payload){
     propSection.classList.remove('hidden');
     document.getElementById('review-prop-addr').textContent=c.address||'—';
     document.getElementById('review-mapped-areas').innerHTML=payload.areas.map(a=>
-      `<li>${a.label} — approx. ${a.size}${a.unit}</li>`
+      `<li>${escapeHtml(a.label)} — approx. ${escapeHtml(a.size)}${escapeHtml(a.unit)}</li>`
     ).join('');
   }else{
     propSection.classList.add('hidden');
@@ -1966,13 +1969,13 @@ function showSuccess(p){
   // Windows never gets a fake price whichever flow it rode in on — always
   // its own "no price yet" line, separate from any real mapped total.
   const windowsRow=p.windowsRequested?`<div class="rrow"><span class="rk">Additional request</span><span>Window cleaning — pending assessment</span></div>`:'';
-  const addrRow=`<div class="rrow"><span class="rk">Address</span><span>${p.customer.address||'—'}</span></div>`;
-  const contactRow=`<div class="rrow"><span class="rk">We'll contact</span><span>${p.customer.phone||p.customer.email}</span></div>`;
+  const addrRow=`<div class="rrow"><span class="rk">Address</span><span>${escapeHtml(p.customer.address||'—')}</span></div>`;
+  const contactRow=`<div class="rrow"><span class="rk">We'll contact</span><span>${escapeHtml(p.customer.phone||p.customer.email)}</span></div>`;
   if(p.areas&&p.areas.length){
     // Priced rows already list every requested service with its own price —
     // a second plain "services requested" list right above would just
     // repeat the same names with no new information.
-    const rows=p.areas.map(a=>`<div class="rrow"><span class="rk">${a.label} · ${a.size}${a.unit}</span><span>${TK_FORMAT.money(a.price||0)}</span></div>`).join('');
+    const rows=p.areas.map(a=>`<div class="rrow"><span class="rk">${escapeHtml(a.label)} · ${escapeHtml(a.size)}${escapeHtml(a.unit)}</span><span>${TK_FORMAT.money(a.price||0)}</span></div>`).join('');
     document.getElementById('recap').innerHTML=rows+
       `<div class="rrow"><span class="rk">Estimated range</span><span style="font-weight:600">${TK_FORMAT.money(p.estimateRange.min)}–${TK_FORMAT.money(p.estimateRange.max)}</span></div>`+
       windowsRow+addrRow+contactRow;
@@ -1982,7 +1985,7 @@ function showSuccess(p){
     // drawn) — nothing priced, so the plain services list IS the
     // confirmation of what was requested.
     const servicesList=p.requestedServices.length
-      ?`<div class="rrow" style="display:block"><span class="rk" style="display:block;margin-bottom:8px">Services requested</span><ul class="review-list plain">${p.requestedServices.map(l=>`<li>${l}</li>`).join('')}</ul></div>`
+      ?`<div class="rrow" style="display:block"><span class="rk" style="display:block;margin-bottom:8px">Services requested</span><ul class="review-list plain">${p.requestedServices.map(l=>`<li>${escapeHtml(l)}</li>`).join('')}</ul></div>`
       :'';
     document.getElementById('recap').innerHTML=servicesList+windowsRow+addrRow+contactRow;
     document.getElementById('success-msg').textContent=`Thanks ${p.customer.name.split(' ')[0]||''}! We will review your request and get back to you shortly.`;

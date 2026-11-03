@@ -163,6 +163,9 @@ const STATE_ICONS={
   search:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><line x1="20" y1="20" x2="15.3" y2="15.3"/></svg>',
   warn:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l9.5 16.5H2.5z"/><line x1="12" y1="10" x2="12" y2="14.5"/><circle cx="12" cy="17.3" r="0.6" fill="currentColor" stroke="none"/></svg>'
 };
+function escapeHtml(v){
+  return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
 function money(n){return TK_FORMAT.money(n);}
 function fmtDur(min){if(!min)return '';const h=Math.floor(min/60),m=Math.round(min%60);return h?(h+'h'+(m?' '+m+'m':'')):(m+'m');}
 function fmtDate(iso){try{return new Date(iso).toLocaleDateString('en-NZ',{day:'numeric',month:'short',year:'numeric'});}catch(e){return '';}}
@@ -194,7 +197,7 @@ let currentQuote=null;
 const token=getToken();
 
 function renderState(icon,title,body,cls){
-  document.getElementById('card').innerHTML=`<div class="state ${cls||''}"><div class="ico">${icon}</div><h2>${title}</h2><p>${body}</p></div>`;
+  document.getElementById('card').innerHTML=`<div class="state ${escapeHtml(cls||'')}"><div class="ico">${icon}</div><h2>${escapeHtml(title)}</h2><p>${escapeHtml(body)}</p></div>`;
 }
 
 /* ===== read-only property map — same projection/measurement formulas as
@@ -274,7 +277,7 @@ function pubShapeSvg(area){
   const d=pts.map((p,i)=>(i===0?'M':'L')+p.x+','+p.y).join(' ')+(svc&&svc.shape==='closed'?' Z':'');
   const fill=svc&&svc.shape==='closed'?color+'2e':'none';
   const cx=pts.reduce((s,p)=>s+p.x,0)/pts.length, cy=pts.reduce((s,p)=>s+p.y,0)/pts.length;
-  const label=[(svc&&svc.label)||area.service,area.measurement].filter(Boolean).join(' · ').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const label=escapeHtml([(svc&&svc.label)||area.service,area.measurement].filter(Boolean).join(' · '));
   return `<path d="${d}" fill="${fill}" stroke="${color}" stroke-width="2.5" stroke-linejoin="round"/>`+
     `<text x="${cx}" y="${cy}" text-anchor="middle" font-size="11" font-weight="700" fill="#fff" stroke="${color}" stroke-width="3" paint-order="stroke" style="font-family:-apple-system,sans-serif">${label}</text>`;
 }
@@ -336,7 +339,7 @@ function pubInitPan(){
 function pubMapLegend(areas){
   const seen={};
   areas.forEach(a=>{const svc=TK_PRICING.SERVICES[a.service];if(svc)seen[a.service]=svc;});
-  return Object.values(seen).map(svc=>`<span><i style="background:${svc.color}"></i>${svc.label}</span>`).join('');
+  return Object.values(seen).map(svc=>`<span><i style="background:${svc.color}"></i>${escapeHtml(svc.label)}</span>`).join('');
 }
 // No mapped outline for this quote (quick-quote/windows-only requests, or
 // older quotes drawn before the map tool existed) — previously left
@@ -347,10 +350,10 @@ function pubMountFallbackImage(cust,areaPolys){
   const zone=document.getElementById('qmap-zone'); if(!zone)return;
   const mapsKey=(window.TURNKEY_CONFIG&&window.TURNKEY_CONFIG.mapsKey)||'';
   const outline=window.TK_MAP_SNAPSHOT&&TK_MAP_SNAPSHOT.buildSvgUrl(areaPolys);
-  if(outline){zone.innerHTML=`<div class="qmap-fallback measured-outline"><img src="${outline}" alt="Measured property outline; no aerial imagery"></div>`;return;}
+  if(outline){zone.innerHTML=`<div class="qmap-fallback measured-outline"><img src="${escapeHtml(outline)}" alt="Measured property outline; no aerial imagery"></div>`;return;}
   const addr=TK_FORMAT.address(cust);
   const url=(window.TK_MAP_SNAPSHOT&&mapsKey&&addr)?TK_MAP_SNAPSHOT.buildUrl(null,mapsKey,{size:'640x400',scale:2,fallbackAddress:addr}):null;
-  zone.innerHTML=url?`<div class="qmap-fallback"><img src="${url}" alt="Property photo" loading="lazy"></div>`:'';
+  zone.innerHTML=url?`<div class="qmap-fallback"><img src="${escapeHtml(url)}" alt="Property photo" loading="lazy"></div>`:'';
 }
 function pubMountMap(areaPolys){
   const withGeo=pubAreasWithGeo(areaPolys);
@@ -369,7 +372,7 @@ function pubMountMap(areaPolys){
   // Unanchored sketches cannot be placed on the satellite layer. Keep
   // them visible separately rather than dropping them beside mapped areas.
   const sketch=TK_MAP_SNAPSHOT.buildSvgUrl((areaPolys||[]).filter(a=>!pubAreasWithGeo([a]).length));
-  if(sketch)zone.insertAdjacentHTML('beforeend',`<div class="qmap-fallback measured-outline"><img src="${sketch}" alt="Additional measured outline; no aerial imagery"></div>`);
+  if(sketch)zone.insertAdjacentHTML('beforeend',`<div class="qmap-fallback measured-outline"><img src="${escapeHtml(sketch)}" alt="Additional measured outline; no aerial imagery"></div>`);
   const fit=pubComputeFit(withGeo);
   if(fit){PMAP.origLat=fit.lat;PMAP.origLng=fit.lng;pubInitPan();pubReloadAt(fit.lat,fit.lng,fit.zoom);}
 }
@@ -381,11 +384,11 @@ function pubPropertySummary(services){
   if(!services||!services.length)return '';
   const rows=services.map(s=>{
     const svc=TK_PRICING.SERVICES[s.svc]; if(!svc)return '';
-    return `<div class="psum-row"><span class="n">${svc.label}</span><span class="v">${s.qty} ${svc.unit}</span></div>`;
+    return `<div class="psum-row"><span class="n">${escapeHtml(svc.label)}</span><span class="v">${escapeHtml(s.qty)} ${escapeHtml(svc.unit)}</span></div>`;
   }).join('');
   const checks=services.map(s=>{
     const svc=TK_PRICING.SERVICES[s.svc]; if(!svc)return '';
-    return `<div class="svc-check"><span class="tick">✓</span>${svc.label}</div>`;
+    return `<div class="svc-check"><span class="tick">✓</span>${escapeHtml(svc.label)}</div>`;
   }).join('');
   return `<div class="psum">
     <div class="psum-title">Property summary</div>
@@ -403,7 +406,7 @@ function pubPriceBreakdown(q){
       :(s.svc==='housewash'&&s.storeys&&TK_PRICING.STOREY_TYPES[s.storeys])?TK_PRICING.STOREY_TYPES[s.storeys].label
       :(s.svc==='fence'&&s.sides&&TK_PRICING.FENCE_SIDES[s.sides])?TK_PRICING.FENCE_SIDES[s.sides].label:'';
     const sub=s.fixedPrice!=null?'Fixed price':(s.qty+' '+svc.unit+' × '+TK_FORMAT.money(TK_PRICING.effectiveRate(s))+'/'+svc.unit+(note?' · '+note:''));
-    return `<div class="svc-row"><span class="n">${svc.label}<span class="note">${sub}</span></span><span class="amt">${money(TK_PRICING.lineTotal(s))}</span></div>`;
+    return `<div class="svc-row"><span class="n">${escapeHtml(svc.label)}<span class="note">${escapeHtml(sub)}</span></span><span class="amt">${money(TK_PRICING.lineTotal(s))}</span></div>`;
   }).join('')||'<div class="svc-row"><span class="n">Service details</span><span class="q">as discussed</span></div>';
   const gstSplit=TK_PRICING.gstFromInclusive(q.amount);
   const bd=[];
@@ -429,9 +432,9 @@ function renderQuote(q){
   document.body.classList.remove('font-serif','font-rounded');
   if(biz.fontStyle==='serif'||biz.fontStyle==='rounded')document.body.classList.add('font-'+biz.fontStyle);
   const bannerHeader=biz.headerStyle==='banner';
-  const notesHtml=q.notes?`<div class="notes-box">${q.notes.replace(/</g,'&lt;')}</div>`:'';
+  const notesHtml=q.notes?`<div class="notes-box">${escapeHtml(q.notes)}</div>`:'';
   const introHtml=q.status!=='accepted'&&q.status!=='declined'&&biz.quoteIntroMessage
-    ?`<div class="quote-intro">${biz.quoteIntroMessage.replace(/</g,'&lt;').replace(/\n/g,'<br>')}</div>`:'';
+    ?`<div class="quote-intro">${escapeHtml(biz.quoteIntroMessage).replace(/\n/g,'<br>')}</div>`:'';
   const addrLine=TK_FORMAT.address(cust);
   const durMin=parseInt(q.estimatedDurationMin,10);
   const durBadge=durMin?`<div class="dur-badge">⏱ Estimated ${fmtDur(durMin)} on site</div>`:'';
@@ -451,15 +454,15 @@ function renderQuote(q){
     const f=TK_POLICIES.FIELDS.find(x=>x.key===key);
     const raw=TK_POLICIES.withBizName(TK_POLICIES.getField(policies,key),bizName);
     if(!raw)return '';
-    return `<h5>${f.label}</h5>${TK_POLICIES.renderPolicyHtml(raw)}`;
+    return `<h5>${escapeHtml(f.label)}</h5>${TK_POLICIES.renderPolicyHtml(raw)}`;
   }).join(''):'';
-  const termsLineHtml=agreementText?`<div class="terms-line"><p>${agreementText.replace(/</g,'&lt;')}</p>${termsDetailHtml?`<details><summary>View full terms</summary><div class="terms-detail">${termsDetailHtml}</div></details>`:''}</div>`:'';
+  const termsLineHtml=agreementText?`<div class="terms-line"><p>${escapeHtml(agreementText)}</p>${termsDetailHtml?`<details><summary>View full terms</summary><div class="terms-detail">${termsDetailHtml}</div></details>`:''}</div>`:'';
 
   let actionsHtml='';
   if(q.status==='accepted'){
     actionsHtml=`<div class="state accepted" style="padding:20px 0 0"><div class="ico">${STATE_ICONS.check}</div><h2 style="font-size:18px">Quote Approved</h2><p>Thank you for accepting your quote. We've received your approval and will contact you shortly to confirm your booking.</p></div>`;
   }else if(q.status==='declined'){
-    actionsHtml=`<div class="state declined" style="padding:20px 0 0"><div class="ico">${STATE_ICONS.dash}</div><h2 style="font-size:16px">You said you're not ready yet</h2><p>No problem — changed your mind? Call or email ${biz.name||'us'} any time${biz.phone||biz.email?' — '+(biz.phone||biz.email):''}.</p></div>`;
+    actionsHtml=`<div class="state declined" style="padding:20px 0 0"><div class="ico">${STATE_ICONS.dash}</div><h2 style="font-size:16px">You said you're not ready yet</h2><p>No problem — changed your mind? Call or email ${escapeHtml(biz.name||'us')} any time${escapeHtml(biz.phone||biz.email?' — '+(biz.phone||biz.email):'')}.</p></div>`;
   }else{
     actionsHtml=`
       <div class="actions">
@@ -477,15 +480,15 @@ function renderQuote(q){
 
   document.getElementById('card').innerHTML=`
     <div class="head${bannerHeader?' banner':''}">
-      ${biz.logoUrl?`<img src="${biz.logoUrl.replace(/"/g,'&quot;')}" alt="">`:''}
-      <div class="biz-name">${biz.name||'Your service provider'}</div>
-      <div class="biz-sub">${biz.phone||biz.email||''}</div>
+      ${biz.logoUrl?`<img src="${escapeHtml(biz.logoUrl)}" alt="">`:''}
+      <div class="biz-name">${escapeHtml(biz.name||'Your service provider')}</div>
+      <div class="biz-sub">${escapeHtml(biz.phone||biz.email||'')}</div>
     </div>
     <div class="body">
-      ${(q.quoteNumber||q.validUntil)?`<div class="qmeta">${q.quoteNumber?`<span>Quote <b>${q.quoteNumber}</b></span>`:'<span></span>'}${q.validUntil?`<span>Valid until <b>${fmtDate(q.validUntil)}</b></span>`:''}</div>`:''}
-      <div class="greeting">Quote for ${cust.name||'you'}</div>
-      ${addrLine?`<div class="addr">${addrLine}</div>`:''}
-      ${(()=>{const s=window.TK_FORMAT&&TK_FORMAT.submitted(q.createdAt);return s?`<div class="submitted">Submitted ${s.full}</div>`:'';})()}
+      ${(q.quoteNumber||q.validUntil)?`<div class="qmeta">${q.quoteNumber?`<span>Quote <b>${escapeHtml(q.quoteNumber)}</b></span>`:'<span></span>'}${q.validUntil?`<span>Valid until <b>${escapeHtml(fmtDate(q.validUntil))}</b></span>`:''}</div>`:''}
+      <div class="greeting">Quote for ${escapeHtml(cust.name||'you')}</div>
+      ${addrLine?`<div class="addr">${escapeHtml(addrLine)}</div>`:''}
+      ${(()=>{const s=window.TK_FORMAT&&TK_FORMAT.submitted(q.createdAt);return s?`<div class="submitted">Submitted ${escapeHtml(s.full)}</div>`:'';})()}
       ${durBadge}
       ${introHtml}
       <div id="qmap-zone"></div>
