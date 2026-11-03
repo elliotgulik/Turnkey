@@ -427,3 +427,25 @@ nav.tabs button.active{box-shadow:none}
  .tk-settings-experience .sx-content>h4{font-size:14px}
  .sale-card .sale-person-control select,.sale-card .ux-select-trigger{min-width:0;width:100%;max-width:100%;text-overflow:ellipsis}
 }
+
+/* Lead fit is labelled as well as coloured; owner colours identify people only. */
+.nlm-card[data-nlm-record]{cursor:pointer}
+.nlm-card.nlm-fit-a{background:#f1f9f4}
+.nlm-card.nlm-fit-b{background:#f3f7fd}
+.nlm-card.nlm-fit-c{background:#f8f5fb}
+.nlm-card.nlm-fit-review{background:#fff9ed}
+.nlm-card[data-nlm-record]:hover{background:#eaf3f1}
+.nlm-card[data-nlm-record]:focus-visible{outline:2px solid var(--teal);outline-offset:-3px}
+.nlm-compact .nlm-grade,.nlm-detail .nlm-grade{height:auto;min-height:26px;padding:4px 8px;font-size:11px;line-height:1.35;white-space:nowrap}
+.nlm-grade.grade-a{background:#d6efdf;color:#165c36}
+.nlm-grade.grade-b{background:#dceaff;color:#204f89}
+.nlm-grade.grade-c{background:#eae0f6;color:#644082}
+.nlm-grade.grade-review{background:#ffebbd;color:#744609}
+.nlm-card .nlm-owner-link{display:inline-flex;align-items:center;max-width:100%;padding:4px 8px;border-radius:5px;font-weight:650;line-height:1.4;white-space:normal;overflow-wrap:anywhere;margin-top:6px;min-height:28px}
+.nlm-owner-link[data-owner-tone="0"]{background:#deebff;color:#264d85}
+.nlm-owner-link[data-owner-tone="1"]{background:#f0e3fa;color:#653b80}
+.nlm-owner-link[data-owner-tone="2"]{background:#fce1dc;color:#8b3525}
+.nlm-owner-link[data-owner-tone="3"]{background:#d6efed;color:#185b56}
+.nlm-owner-link[data-owner-tone="4"]{background:#f9ebca;color:#704b10}
+.nlm-owner-link[data-owner-tone="5"]{background:#e6e7fc;color:#43447c}
+.nlm-owner-link[data-owner-tone="unassigned"]{background:#edf0f2;color:#51606c;font-weight:500}
