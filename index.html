@@ -15,6 +15,7 @@ location.replace('/reset-password.html'+location.search+location.hash);
 </script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="auth-mfa.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
 <script src="config.js?v=20261017a"></script>
 <script src="session-flow.js?v=20261019a"></script>
@@ -1443,7 +1444,7 @@ location.replace('/reset-password.html'+location.search+location.hash);
     <img class="auth-mark" src="icon-192.png" alt="" width="44" height="44">
     <h1>Set a new password</h1>
     <p class="auth-sub">Choose a new password for your account.</p>
-    <div class="field"><label>New password</label><input id="auth-new-password" type="password" placeholder="At least 6 characters" autocomplete="new-password" onkeydown="if(event.key==='Enter')handlePasswordRecoverySubmit()"></div>
+    <div class="field"><label>New password</label><input id="auth-new-password" type="password" placeholder="At least 10 characters" autocomplete="new-password" onkeydown="if(event.key==='Enter')handlePasswordRecoverySubmit()"></div>
     <div id="auth-recovery-msg" class="auth-msg"></div>
     <button class="btn primary block" id="auth-recovery-btn" onclick="handlePasswordRecoverySubmit()">Save new password</button>
   </div>
@@ -8358,6 +8359,7 @@ function openSettings(){
   const calConnected=hasGoogleCal||icalConns.length>0;
   document.getElementById('settings-body').innerHTML=`
     <div class="settings-search"><label for="settings-search-input">Find a setting</label><input id="settings-search-input" type="search" placeholder="Search pricing, team, calendar…" oninput="filterSettings(this.value)"></div>
+    ${canEditBusiness?settingsGroup('Account security',`<div class="conn-card"><div class="conn-name">Two-factor sign-in</div><p>Manage your authenticator for this account.</p><button class="btn ghost" onclick="TK_MFA.settings()">Manage two-factor sign-in</button></div>`):''}
     ${settingsGroup('Business',`
     <div class="conn-card ${biz.name?'live':''}">
       <div class="conn-top"><span class="conn-name">Business profile</span><span class="conn-badge ${biz.name?'on':'off'}">${biz.name?'● SET':'not set yet'}</span></div>
@@ -9148,6 +9150,8 @@ async function handleAuthedSession(session){
     if(version===businessSessionVersion){showAuth();records=[];currentBusinessId=null;currentUserRole='technician';window.TK_OPERATIONS?.reset();setAuthMsg(e.message);}
     return;
   }
+  if(version!==businessSessionVersion||currentUserId!==session.user.id)return;
+  try{if(!await window.TK_MFA.requireFor(session,profile.role))return;}catch(e){showAuth();setAuthMsg(e.message);return;}
   if(version!==businessSessionVersion||currentUserId!==session.user.id)return;
   if(currentBusinessId!==profile.businessId){
     records=[];goals=[];seq=1;goalSeq=1;followSeq=1;
@@ -10840,7 +10844,7 @@ if(sb){
     window.TK_CURRENT_SESSION=event==='SIGNED_OUT'?null:session;
     if(event==='PASSWORD_RECOVERY'){authRecoveryActive=true;appSessionGate.reset();++businessSessionVersion;businessStateReady=false;showPasswordRecovery();return;}
     if(!authRecoveryActive&&(event==='SIGNED_IN'||event==='INITIAL_SESSION')&&session)void appSessionGate.start(session).catch(()=>{if(!businessStateReady){showAuth();setAuthMsg('Could not load your workspace. Please try again.');}});
-    if(event==='SIGNED_OUT'){window.TK_WORKSPACE_CACHE?.clearAll();appSessionGate.reset();++businessSessionVersion;businessStateReady=false;clearTimeout(supabaseSyncTimer);goals=[];goalSeq=1;seq=1;followSeq=1;window.TK_SALES_PLATFORM?.reset();unsubscribeRealtime();stopLastSeenHeartbeat();records=[];currentBusinessId=null;currentUserId=null;currentUserRole='owner';staff=[];pendingInvites=[];render();renderAll();showAuth();}
+    if(event==='SIGNED_OUT'){window.TK_MFA?.reset();window.TK_WORKSPACE_CACHE?.clearAll();appSessionGate.reset();++businessSessionVersion;businessStateReady=false;clearTimeout(supabaseSyncTimer);goals=[];goalSeq=1;seq=1;followSeq=1;window.TK_SALES_PLATFORM?.reset();unsubscribeRealtime();stopLastSeenHeartbeat();records=[];currentBusinessId=null;currentUserId=null;currentUserRole='owner';staff=[];pendingInvites=[];render();renderAll();showAuth();}
   });
 }else{
   showAuth();
