@@ -5,17 +5,19 @@ const assert=require('node:assert/strict');
 const root=path.resolve(__dirname,'..');
 (async()=>{
  const browser=await chromium.launch({headless:true});
- async function setup({session=false,failRequest=false,failUpdate=false,hash='',url='/reset-password.html'}={}){
+ async function setup({session=false,failRequest=false,failUpdate=false,hash='',email='elliot@example.test',suppressRecovery=false,url='/reset-password.html'}={}){
   const context=await browser.newContext({viewport:{width:390,height:844}});
-  await context.addInitScript(({session,failRequest,failUpdate})=>{
+  await context.addInitScript(({session,failRequest,failUpdate,email,suppressRecovery})=>{
    window.testCalls={send:[],update:[]};
+   window.testUser=session?{id:email,email}:null;let authCallback,recovered=false;window.changeTestAccount=user=>{window.testUser=user;authCallback(user?'SIGNED_IN':'SIGNED_OUT',user?{user}:null);};
    window.supabase={createClient(){return {auth:{
-    onAuthStateChange(){return {data:{subscription:{unsubscribe(){}}}};},
-    getSession:async()=>({data:{session:session?{user:{id:'fixture'}}:null},error:null}),
+    onAuthStateChange(callback){authCallback=callback;return {data:{subscription:{unsubscribe(){}}}};},
+    getSession:async()=>{if(!recovered&&!suppressRecovery&&location.hash.includes('type=recovery')){recovered=true;authCallback('PASSWORD_RECOVERY',{user:window.testUser});}return {data:{session:window.testUser?{user:window.testUser}:null},error:null};},
+    getUser:async()=>({data:{user:window.testUser},error:null}),
     resetPasswordForEmail:async(email,options)=>{window.testCalls.send.push({email,options});if(failRequest)throw Error('Network unavailable');return {error:null};},
     updateUser:async value=>{window.testCalls.update.push(value);return {error:failUpdate?{message:'Password must differ from the old password'}:null};}
    }}}};
-  },{session,failRequest,failUpdate});
+  },{session,failRequest,failUpdate,email,suppressRecovery});
   await context.route('**/*',async route=>{
    const u=new URL(route.request().url());
    if(u.hostname==='cdn.jsdelivr.net')return route.fulfill({contentType:'text/javascript',body:''});
@@ -44,6 +46,19 @@ const root=path.resolve(__dirname,'..');
   await page.getByLabel('Confirm new password').fill('fixture-password-1');await page.getByLabel('Show passwords').check();assert.equal(await page.getByLabel('New password',{exact:true}).getAttribute('type'),'text');
   await page.getByRole('button',{name:'Save new password'}).click();await page.getByRole('heading',{name:'Password updated'}).waitFor();assert.equal(await page.evaluate(()=>testCalls.update.length),1);await context.close();
 
+  for(const email of ['elliot@example.test','luca@example.test']){
+   ({context,page}=await setup({session:true,email,hash:'#type=recovery&access_token=fixture'}));
+   await page.getByText('Choose a new password for '+email+'.',{exact:true}).waitFor();
+   await page.reload();await page.getByRole('heading',{name:'Choose a new password'}).waitFor();
+   await page.evaluate(()=>changeTestAccount({id:'different-user',email:'different@example.test'}));
+   await page.getByRole('alert').filter({hasText:'session changed'}).waitFor();
+   assert.equal(await page.locator('#reset-change').isVisible(),false);assert.equal(await page.evaluate(()=>testCalls.update.length),0);await context.close();
+  }
+  ({context,page}=await setup({session:true,suppressRecovery:true,hash:'#type=recovery&access_token=invalid'}));
+  await page.getByRole('alert').filter({hasText:'expired'}).waitFor();assert.equal(await page.locator('#reset-change').isVisible(),false);await context.close();
+  ({context,page}=await setup({session:true,hash:'#type=recovery&access_token=fixture'}));
+  await page.getByRole('heading',{name:'Choose a new password'}).waitFor();await page.evaluate(()=>changeTestAccount(null));
+  await page.getByRole('alert').waitFor();assert.equal(await page.locator('#reset-request').isVisible(),true);await context.close();
   ({context,page}=await setup({session:true}));assert.equal(await page.locator('#reset-change').isVisible(),false);await context.close();
   ({context,page}=await setup({hash:'#error=access_denied&error_code=otp_expired'}));await page.getByRole('alert').filter({hasText:'expired'}).waitFor();assert.equal(new URL(page.url()).hash,'');assert.equal(await page.locator('#reset-request').isVisible(),true);await context.close();
   ({context,page}=await setup({failRequest:true}));await page.getByLabel('Email address').fill('owner@example.test');await page.getByRole('button',{name:'Send reset link',exact:true}).click();await page.getByRole('alert').filter({hasText:'Network unavailable'}).waitFor();assert.equal(await page.locator('#reset-send').isEnabled(),true);await context.close();
