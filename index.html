@@ -10844,7 +10844,9 @@ if(sb){
     window.TK_CURRENT_SESSION=event==='SIGNED_OUT'?null:session;
     if(event==='PASSWORD_RECOVERY'){authRecoveryActive=true;appSessionGate.reset();++businessSessionVersion;businessStateReady=false;showPasswordRecovery();return;}
     if(!authRecoveryActive&&(event==='SIGNED_IN'||event==='INITIAL_SESSION')&&session)void appSessionGate.start(session).catch(()=>{if(!businessStateReady){showAuth();setAuthMsg('Could not load your workspace. Please try again.');}});
-    if(event==='SIGNED_OUT'){window.TK_MFA?.reset();window.TK_WORKSPACE_CACHE?.clearAll();appSessionGate.reset();++businessSessionVersion;businessStateReady=false;clearTimeout(supabaseSyncTimer);goals=[];goalSeq=1;seq=1;followSeq=1;window.TK_SALES_PLATFORM?.reset();unsubscribeRealtime();stopLastSeenHeartbeat();records=[];currentBusinessId=null;currentUserId=null;currentUserRole='owner';staff=[];pendingInvites=[];render();renderAll();showAuth();}
+    if(event==='SIGNED_OUT'){
+      try{for(const key of [businessStoreKey(),STORE_KEY+':legacy-unassigned',STORE_KEY,'turnkey-nova-lead-manager-v1',...Object.keys(localStorage).filter(k=>k.startsWith('turnkey-setup-guide:'))])localStorage.removeItem(key);}catch{}
+      window.TK_MFA?.reset();window.TK_WORKSPACE_CACHE?.clearAll();appSessionGate.reset();++businessSessionVersion;businessStateReady=false;clearTimeout(supabaseSyncTimer);goals=[];goalSeq=1;seq=1;followSeq=1;window.TK_SALES_PLATFORM?.reset();unsubscribeRealtime();stopLastSeenHeartbeat();records=[];currentBusinessId=null;currentUserId=null;currentUserRole='owner';staff=[];pendingInvites=[];render();renderAll();showAuth();}
   });
 }else{
   showAuth();
