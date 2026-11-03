@@ -21,7 +21,8 @@ function database(tables = {}) {
           return q;
         },
         eq(k, v) {
-          filters.push((r) => k === "snapshot->>accepted" ? String(r.snapshot?.accepted) === v
+          filters.push((r) => k === "pricing_config" && typeof v === "string" ? JSON.stringify(r[k]) === v
+            : k === "snapshot->>accepted" ? String(r.snapshot?.accepted) === v
             : k === "lease_until" && r[k] && v ? Date.parse(r[k]) === Date.parse(v) : r[k] === v);
           return q;
         },
@@ -146,6 +147,7 @@ function setup(
   const app = {
     get: (p, ...h) => routes.set("GET " + p, h),
     post: (p, ...h) => routes.set("POST " + p, h),
+    put: (p, ...h) => routes.set("PUT " + p, h),
     use: (p, ...h) => routes.set("USE " + p, h),
   };
   const worker = installSalesPlatform(app, {
@@ -2030,4 +2032,123 @@ test('full import: original arrival and saved quote creation dates remain usable
   assert.equal(res.body.quotes,1,'only the real sent date counts; quote creation is not a sent date');
   assert.equal(res.body.dateCoverage.unknownLeadDates,0);
   assert.equal(res.body.dateCoverage.unknownQuoteDates,2);
+});
+
+
+test('metrics exclude database-trigger import win dates but retain independently dated approval',async()=>{
+ const inserted='2026-10-15T00:00:00Z',stamp=Date.parse(inserted);
+ const jobs=[{id:id(4991),business_id:'A',status:'completed',created_at:inserted,details:{importedFrom:'servicem8',wonAt:stamp+0.137,total:88000}},
+ {id:id(4992),business_id:'A',status:'completed',created_at:inserted,details:{importedFrom:'servicem8',wonAt:stamp,acceptedAt:'2026-10-05T00:00:00Z',total:500}}];
+ const {route}=setup(database({jobs}));const res=await route('GET','/api/sales/metrics',{businessId:'A',query:metricsRange});
+ assert.equal(res.statusCode,200);assert.equal(res.body.bookedSales,500);assert.equal(res.body.unknownWinDates,1);
+});
+
+const followupSettingsPath = '/api/sales/followup-settings';
+const followupSteps = () => [{id:'step_1',delayDays:2,subject:'Hi {customer_name}',body:'From {business_name}: {quote_link}\n<Thanks>'}];
+function automaticFollowupFixture(options={}) {
+ const sender=id(601),customerId=id(602),jobId=id(603),quoteId=id(604),anchor=Date.now()-3*86400000;
+ const config={enabled:true,steps:followupSteps(),senderUserId:sender,enabledAt:new Date(anchor-86400000).toISOString()};
+ const job={id:jobId,business_id:'A',customer_id:customerId,quote_id:quoteId,status:'quoted',details:{quoteSentAt:anchor}};
+ const db=database({businesses:[{id:'A',name:'Wash & Co',pricing_config:{rates:{house:5},followups:config}}],
+  users:[{id:sender,business_id:'A',role:'owner'}],customers:[{id:customerId,business_id:'A',name:'Jane Smith',email:'jane@example.test',followups_disabled:false}],
+  jobs:[job],quotes:[{id:quoteId,business_id:'A',status:'sent',public_token:'public-token'}],
+  integration_tasks:[],conversation_drafts:[],emails:[]});
+ const sends=[],incoming=[],auth={accessToken:'test-token',account:{id:id(605),business_id:'A',user_id:sender,email_address:'owner@example.test',last_sync_at:new Date(anchor-86400000).toISOString()}};
+ const provider={listMessageIds:async()=>incoming.map(m=>m.id),getMessage:async(_,key)=>incoming.find(m=>m.id===key),
+  sendMessage:async(_,message)=>{sends.push(message);if(options.sendError)throw options.sendError;return {id:'sent-1',threadId:'thread-1'};}};
+ const f=setup(db,undefined,{emailProvider:provider,getValidAccessToken:async()=>auth});
+ async function schedule(){await f.worker.scheduleAutomaticFollowups();for(const [i,t] of db.tables.integration_tasks.entries())t.id||=id(610+i);await new Promise(r=>setImmediate(r));}
+ async function deliver(){claimMock(db);await f.worker.tick();}
+ return {...f,db,sends,incoming,auth,config,job,sender,customerId,quoteId,schedule,deliver,provider};
+}
+test('follow-up settings validate strict enablement/cadence/messages and preserve pricing with serialized CAS',async()=>{
+ const f=automaticFollowupFixture(),req={businessId:'A',userId:id(601)};
+ assert.deepEqual((await f.route('GET',followupSettingsPath,req)).body,{enabled:true,steps:followupSteps()});
+ const before=structuredClone(f.db.tables.businesses[0].pricing_config);
+ for(const body of [{enabled:'true',steps:followupSteps()},{enabled:true,steps:[]},
+  {enabled:true,steps:[...followupSteps(),{...followupSteps()[0],id:'other'}]},
+  {enabled:true,steps:[{...followupSteps()[0],subject:'Bad\r\nBcc: victim@example.test'}]},
+  {enabled:true,steps:[{...followupSteps()[0],body:'{CUSTOMER_NAME}'}]},
+  {enabled:true,steps:[{...followupSteps()[0],delayDays:0}]}]){
+  assert.equal((await f.route('PUT',followupSettingsPath,{...req,body})).statusCode,400);
+ }
+ assert.deepEqual(f.db.tables.businesses[0].pricing_config,before);
+ const result=await f.route('PUT',followupSettingsPath,{...req,body:{enabled:true,steps:followupSteps()}});
+ assert.equal(result.statusCode,200);assert.deepEqual(f.db.tables.businesses[0].pricing_config.rates,{house:5});
+ assert.equal(f.db.tables.businesses[0].pricing_config.followups.enabledAt,before.followups.enabledAt);
+ assert.equal(result.body.senderUserId,undefined);assert.equal(result.body.enabledAt,undefined);
+ f.db.tables.users[0].role='staff';
+ assert.equal((await f.route('PUT',followupSettingsPath,{...req,body:{enabled:false,steps:[]}})).statusCode,403);
+ assert.equal((await f.route('GET',followupSettingsPath,{businessId:'B'})).statusCode,404);
+});
+test('newly enabled follow-ups exclude historical quotes and re-enabling resets activation',async()=>{
+ const f=automaticFollowupFixture(),req={businessId:'A',userId:f.sender};
+ await f.route('PUT',followupSettingsPath,{...req,body:{enabled:false,steps:followupSteps()}});
+ await f.route('PUT',followupSettingsPath,{...req,body:{enabled:true,steps:followupSteps()}});
+ assert(Date.parse(f.db.tables.businesses[0].pricing_config.followups.enabledAt)>f.job.details.quoteSentAt);
+ await f.schedule();assert.equal(f.db.tables.integration_tasks.length,0);assert.equal(f.sends.length,0);
+});
+test('automatic follow-ups dedupe concurrent scheduling and delivery, render safe HTML and correct public links',async()=>{
+ const f=automaticFollowupFixture();await Promise.all([f.schedule(),f.schedule()]);
+ assert.equal(f.db.tables.integration_tasks.length,1);
+ await f.deliver();await f.deliver();
+ assert.equal(f.sends.length,1);assert.equal(f.sends[0].to,'jane@example.test');
+ assert.equal(f.sends[0].subject,'Hi Jane');assert.match(f.sends[0].bodyText,/quote\.html\?t=public-token/);
+ assert.match(f.sends[0].bodyHtml,/Wash &amp; Co/);assert.match(f.sends[0].bodyHtml,/&lt;Thanks&gt;/);
+ assert.equal(f.db.tables.conversation_drafts[0].status,'sent');assert.equal(f.db.tables.emails[0].direction,'sent');
+ assert.equal(f.db.tables.integration_tasks[0].state,'succeeded');
+});
+test('queued follow-ups recheck opt-out, replies, terminal stages, quote acceptance and tenant ownership before sending',async()=>{
+ for(const mutate of [
+  f=>{f.db.tables.customers[0].followups_disabled=true;},f=>{f.job.details.clientResponded=true;},
+  ...['won','scheduled','cancelled','completed','paid','lost','accepted'].map(status=>f=>{f.job.status=status;}),
+  f=>{f.db.tables.quotes[0].status='accepted';},f=>{f.db.tables.quotes[0].status='declined';},
+  f=>{f.config.enabled=false;},f=>{f.config.steps[0].body='';},f=>{f.db.tables.customers[0].business_id='B';},
+  f=>{f.db.tables.users[0].role='staff';},f=>{f.job.details.quoteSentAt=null;},
+  f=>{f.db.tables.emails.push({id:id(699),business_id:'A',customer_id:null,direction:'received',from_address:'Jane <jane@example.test>',sent_at:new Date().toISOString()});},
+ ]){
+  const f=automaticFollowupFixture();await f.schedule();mutate(f);await f.deliver();assert.equal(f.sends.length,0);
+ }
+});
+test('mailbox sync catches unindexed inbound replies and fails closed when Gmail is unavailable',async()=>{
+ const f=automaticFollowupFixture();await f.schedule();
+ // No customer match is needed: the synced address itself stops the follow-up.
+ f.incoming.push({id:'reply-1',from:'Jane <jane@example.test>',to:'owner@example.test',date:new Date().toISOString(),isSentByUs:false,subject:'Please call'});
+ // The shared sync uses ilike to link customers. Keep this test unlinked.
+ const original=f.db.from.bind(f.db);f.db.from=table=>{const q=original(table);q.ilike=()=>q.eq('id','no-match');return q;};
+ await f.deliver();assert.equal(f.sends.length,0);assert.equal(f.db.tables.emails[0].direction,'received');
+ const g=automaticFollowupFixture();await g.schedule();g.auth.account.business_id='B';await g.deliver();assert.equal(g.sends.length,0);
+});
+test('unknown delivery or post-send persistence failure cannot cause a retry to send twice',async()=>{
+ for(const mode of ['unknown','save-failed','index-failed']){
+  const f=automaticFollowupFixture(mode==='unknown'?{sendError:Error('timeout')}:{});await f.schedule();
+  if(mode==='save-failed')f.db.fail=(table,op,value)=>table==='conversation_drafts'&&op==='update'&&value.status==='sent';
+  if(mode==='index-failed')f.db.fail=(table,op)=>table==='emails'&&op==='upsert';
+  await f.deliver();f.db.fail=null;await f.deliver();assert.equal(f.sends.length,1,mode);
+  assert(['sending','unknown','sent'].includes(f.db.tables.conversation_drafts[0].status));
+ }
+});
+test('definitive Gmail rejection retries through the same permanent guard',async()=>{
+ const error=Object.assign(Error('rejected'),{code:'SEND_REJECTED'}),f=automaticFollowupFixture({sendError:error});
+ await f.schedule();await f.deliver();assert.equal(f.db.tables.conversation_drafts[0].status,'draft');
+ await f.deliver();assert.equal(f.sends.length,2);
+});
+
+test('simultaneous workers cannot both send a reclaimed automatic follow-up',async()=>{
+ const f=automaticFollowupFixture();await f.schedule();
+ const task=f.db.tables.integration_tasks[0];task.state='running';task.lease_token=id(650);task.attempts=1;
+ let claims=0;
+ // Model two workers holding the same logical task after overlapping claims.
+ f.db.rpc=async()=>({data:claims++<2?[structuredClone(task)]:[]});
+ const other=setup(f.db,undefined,{emailProvider:f.provider,getValidAccessToken:async()=>f.auth});
+ await Promise.all([f.worker.tick(),other.worker.tick()]);
+ assert.equal(f.sends.length,1);assert.equal(f.db.tables.conversation_drafts.length,1);
+});
+test('an opt-out arriving during send-guard acquisition prevents provider delivery',async()=>{
+ const f=automaticFollowupFixture();await f.schedule();
+ f.db.fail=(table,op,value)=>{
+  if(table==='conversation_drafts'&&op==='update'&&value.status==='sending')f.db.tables.customers[0].followups_disabled=true;
+  return false;
+ };
+ await f.deliver();assert.equal(f.sends.length,0);
 });

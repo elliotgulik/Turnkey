@@ -27,8 +27,19 @@
   const stage = (r) => (won(r) ? "won" : lost(r) ? "lost" : r.stage);
   const leadTime = (r) => time(r.requestSubmittedAt) || time(r.createdAt);
   const quoteTime = (r) => time(r.quoteSentAt);
-  const winTime = (r) =>
-    time(r.wonAt) || time(r.approvedAt) || time(r.acceptedAt);
+  const winTime = (r) => {
+    const stamped = time(r.wonAt), approved = time(r.approvedAt) || time(r.acceptedAt);
+    const imported = !!String(r.importedFrom || '').trim();
+    const rawInserted = r.databaseCreatedAt || r.created_at;
+    // Legacy jobs.created_at is timestamp without time zone, stored in UTC.
+    // Parse that explicitly instead of shifting imports by the viewer's zone.
+    const inserted = time(typeof rawInserted === 'string' && /^\d{4}-\d{2}-\d{2}[T ]/.test(rawInserted) && !/(Z|[+-]\d{2}:?\d{2})$/i.test(rawInserted) ? rawInserted.replace(' ', 'T') + 'Z' : rawInserted);
+    // sales_job_prepare stamps INSERTed historical wins with now(). That is
+    // an import event, not evidence of when the customer accepted the sale.
+    if (imported && stamped != null && inserted != null && Math.abs(stamped - inserted) < 1000)
+      return approved;
+    return stamped || approved;
+  };
   const ratio = (a, b) => (b ? a / b : null);
   const sm8Pricing = (r) =>
     r && (r.serviceM8Pricing || (r.details && r.details.serviceM8Pricing));

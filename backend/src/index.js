@@ -1393,7 +1393,7 @@ app.post('/api/ai/marketing', requireBusiness, marketingRateLimit, async (req, r
   }
 })
 
-installSalesPlatform(app,{db:authClient,requireBusiness,sendNotification})
+installSalesPlatform(app,{db:authClient,requireBusiness,sendNotification,getValidAccessToken})
 installConversations(app,{db:authClient,requireBusiness,getValidAccessToken})
 installEmailSync(app,{db:authClient,requireBusiness,getValidAccessToken,gmail,sendNotification})
 installMarketingRoutes(app,{db:authClient,requireBusiness,getMetaRetrievalToken:async(businessId)=>{

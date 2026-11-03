@@ -145,11 +145,16 @@
     const base = backendUrl();
     if (!base) throw Error("Connect your TurnKey backend to use this feature.");
     const userId = typeof currentUserId !== 'undefined' ? currentUserId : null;
+    const businessId = typeof currentBusinessId !== 'undefined' ? currentBusinessId : null;
+    const sessionVersion = typeof businessSessionVersion !== 'undefined' ? businessSessionVersion : null;
     const validSession = (session) => userId && session?.user?.id === userId &&
       typeof session.access_token === 'string' && session.access_token.trim() &&
       Number.isFinite(session.expires_at) && session.expires_at * 1000 > Date.now() + 60000;
     const checkUser = () => {
       if (!userId || currentUserId !== userId) throw Error("Please sign in again.");
+      if (businessId !== (typeof currentBusinessId !== 'undefined' ? currentBusinessId : null) ||
+          sessionVersion !== (typeof businessSessionVersion !== 'undefined' ? businessSessionVersion : null))
+        throw Error("Your business session changed. Reopen settings and try again.");
     };
     async function bounded(run, ms, message, controller) {
       let timer;
@@ -246,10 +251,11 @@
       ? `<div class="sale-table-wrap"><table class="sale-table"><thead><tr>${headers.map((x) => `<th>${esc(x)}</th>`).join("")}</tr></thead><tbody>${rows.map((row) => `<tr>${row.map((x) => `<td>${esc(x)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`
       : empty("No data in this period.");
   }
-  function notice() {
+  function notice(report) {
     const source=metrics?.pricing;
     return (migrationError?`<div class="sale-notice" role="status">${esc(migrationError)}. Existing records and quoting tools remain available.</div>`:'')+
-      (source?`<p class="sale-metric-source">${esc(source.source)} · ${Number(source.currentTotals)||0} of ${Number(source.linked)||0} linked jobs have a current total${source.unknownTotals?`; ${Number(source.unknownTotals)} totals unavailable`:''}. Original accepted quotes are preserved.</p>`:'');
+      (source?`<p class="sale-metric-source">${esc(source.source)} · ${Number(source.currentTotals)||0} of ${Number(source.linked)||0} linked jobs have a current total${source.unknownTotals?`; ${Number(source.unknownTotals)} totals unavailable`:''}. Original accepted quotes are preserved.</p>`:'')+
+      (report?.unknownWinDates>0?`<p class="sale-metric-source" role="status">${esc(report.unknownWinDates)} historical ${report.unknownWinDates===1?'job has':'jobs have'} no verified sale date and ${report.unknownWinDates===1?'is':'are'} excluded from dated booked sales.</p>`:'');
   }
   renderDashboard = function () {
     const r = currentReport(),
@@ -269,7 +275,7 @@
         button("+ New lead", "new") + button("Build a quote", "quote-home"),
       ) +
       filters() +
-      notice() +
+      notice(r) +
       `<details class="sale-urgent-dropdown" ${dashboardUrgentOpen?'open':''}><summary>Urgent &amp; next actions <span>${urgent.length}</span></summary><div class="ref-rows">${urgent.slice(0,10).map(r=>referenceRow(r,true)).join('')||empty('No urgent items awaiting action.')}</div>${urgent.length>10?button('Open pipeline','nav','pipeline'):''}</details>` +
       `<div class="sale-kpis">${kpi("Leads received", r.leads, "Arrival date in selected period")}${kpi("New leads awaiting action", r.newLeads, "Selected arrival cohort")}${kpi("Quotes sent", r.quotes, "Quote sent date in period")}${kpi("Quoted value", money(r.quotedValue), "GST-inclusive customer prices")}${kpi("Booked sales", money(r.bookedSales), "Won date in period; not cash received")}${kpi("Lead → won", pct(r.conversion), "Selected lead-arrival cohort")}${kpi("Quote acceptance", pct(r.acceptance), "Quoted leads in arrival cohort")}${kpi("Average quote", moneySafe(r.averageQuote))}${kpi("Estimated gross profit", moneySafe(r.estimatedProfit), `${r.costCoverage.known}/${r.costCoverage.total} won sales have cost/GST snapshots`)}${kpi("Estimated gross margin", pct(r.estimatedMargin), "Ex-GST revenue less estimated cost")}${kpi("Previous-period growth", pct(r.growth), "Equal-length previous period")}${kpi("Sales against target", goal ? pct(gr.bookedSales / Number(goal.target)) : "No active revenue goal", "Goal period, independent of report filter")}</div><div class="sale-grid"><section class="sale-panel"><h3>Revenue performance</h3>${chart(r.series)}</section><section class="sale-panel"><h3>Pipeline at a glance</h3>${table(
         ["Stage", "Opportunities", "Value"],
@@ -298,7 +304,7 @@
               )
               .join("")
           : empty("Sales activity will appear as opportunities progress.")
-      }</section></div><p class="sale-muted">${r.unknownWinDates ? esc(r.unknownWinDates) + " historical wins have no recorded close date and are excluded from dated booked sales. " : ""}Invoiced revenue and cash received are reported separately in Analytics when ServiceM8 supplies them.</p>`;
+      }</section></div><p class="sale-muted">Invoiced revenue and cash received are reported separately in Analytics when ServiceM8 supplies them.</p>`;
   };
   renderSales = function () {
     const r = currentReport();
@@ -309,7 +315,7 @@
         button("Export report", "export") + button("Record ad spend", "spend")+button("Marketing performance", "marketing"),
       ) +
       filters() +
-      notice() +
+      notice(r) +
       `<div class="sale-kpis">${kpi("Booked sales", money(r.bookedSales))}${kpi("Quoted revenue", money(r.quotedValue))}${kpi("Invoiced revenue", moneySafe(r.invoicedRevenue), "Linked ServiceM8 jobs only; availability stated below")}${kpi("Collected revenue", moneySafe(r.collectedRevenue), "Recorded payments, not quote approvals")}${kpi("Average sale", moneySafe(r.averageSale))}${kpi("Time to first response", r.responseHours == null ? "Unavailable" : r.responseHours.toFixed(1) + " hours")}${kpi("Average days to close", r.closeDays == null ? "Unavailable" : r.closeDays.toFixed(1))}${kpi("Quotes below target", r.belowTarget)}</div><section class="sale-panel"><h3>Sales funnel · lead arrival cohort</h3>${table(
         ["Step", "Count", "Share of received leads"],
         [
@@ -417,7 +423,7 @@
     return { action: "quote", label: "Build quote", note: "Open the property in Earth to measure and prepare a quote." };
   }
   function followupsOff(r){return r.followupsDisabled===true||!!r.customerId&&records.some(x=>x.customerId===r.customerId&&x.followupsDisabled===true);}
-  function followupControl(r){if(!r)return '';return `<label class="sale-check sale-followup-preference"><input type="checkbox" data-customer-followups="${esc(r.id)}" ${followupsOff(r)?'checked':''}><span>Follow-ups off for this customer</span></label><small class="sale-muted">Automatic follow-up emails are paused for everyone. Manual emails remain available.</small>`;}
+  function followupControl(r){if(!r)return '';return `<label class="sale-check sale-followup-preference"><input type="checkbox" data-customer-followups="${esc(r.id)}" ${followupsOff(r)?'checked':''}><span>Follow-ups off for this customer</span></label><small class="sale-muted">Automatic quote follow-ups require saved, enabled business settings and stop when the customer replies or the quote is accepted or cancelled. Manual emails remain available.</small>`;}
   async function setFollowupsDisabled(id,disabled){
     const r=record(id),biz=currentBusinessId,version=businessSessionVersion,client=(typeof sb!=='undefined'?sb:null)||window.TK_SUPABASE_CLIENT;
     if(!r||!client||!biz)throw Error('Sign in to save this preference.');
@@ -754,6 +760,91 @@
     modal('Build a quote in Google Earth', `<p>Choose a customer to open their property in Google Earth. Measurements, pricing and expenses return to their TurnKey file.</p><label class="sale-field"><span>Search customers</span><input id="sale-quote-search" type="search" value="${esc(query)}" placeholder="Name, phone, email or address"></label><div id="sale-quote-results">${quotePickerRows(query)}</div><hr><form id="sale-quote-new"><h3>New customer</h3>${field('Name','<input name="name" required maxlength="160" autocomplete="name">')}${field('Phone','<input name="phone" maxlength="80" autocomplete="tel">')}${field('Email','<input name="email" type="email" maxlength="254" autocomplete="email">')}${field('Property address','<input name="address" required maxlength="500" autocomplete="street-address">')}<button class="btn accent quote-launch-btn" type="submit">Create customer &amp; open Google Earth</button></form>`);
     document.getElementById('sale-quote-search')?.focus();
   }
+  // Only the settings endpoint persists automation. Editing this form never sends mail.
+  let followupEditorSerial = 0;
+  const canEditFollowupSettings = () => typeof currentUserRole !== 'undefined' && ['owner','manager'].includes(currentUserRole);
+  function newFollowupStep(delayDays = 2) {
+    return {id:'step_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,10),delayDays,
+      subject:'Following up on your quote from {business_name}',
+      body:'Hi {customer_name},\n\nJust checking whether you have any questions about your quote. You can view it here:\n{quote_link}\n\nReply to this email if we can help.\n\n{business_name}'};
+  }
+  function readFollowupDraft(form) {
+    return {enabled:form.elements.namedItem('enabled').checked,steps:Array.from(form.querySelectorAll('[data-followup-step]'),row=>({
+      id:row.dataset.followupStep,delayDays:Number(row.querySelector('[name="delayDays"]').value),
+      subject:row.querySelector('[name="subject"]').value,body:row.querySelector('[name="body"]').value,
+    }))};
+  }
+  function validateFollowupDraft(draft) {
+    if(!draft||typeof draft.enabled!=='boolean'||!Array.isArray(draft.steps)||draft.steps.length>6)throw Error('Add up to six follow-up steps.');
+    if(draft.enabled&&!draft.steps.length)throw Error('Add at least one step before enabling automatic follow-ups.');
+    let previous=0;const ids=new Set();
+    const steps=draft.steps.map((step,i)=>{
+      if(typeof step.id!=='string'||!step.id||ids.has(step.id))throw Error('Each follow-up step needs its own identifier. Reopen settings and try again.');
+      ids.add(step.id);
+      if(!Number.isInteger(step.delayDays)||step.delayDays<1||step.delayDays>365||step.delayDays<=previous)throw Error('Step '+(i+1)+': choose a whole day from 1 to 365, later than the previous step.');
+      previous=step.delayDays;
+      const subject=String(step.subject||'').trim(),body=String(step.body||'').trim();
+      if(!subject||subject.length>200||/[\r\n]/.test(subject))throw Error('Step '+(i+1)+': enter a subject of 1–200 characters on one line.');
+      if(!body||body.length>10000)throw Error('Step '+(i+1)+': enter a message of 1–10,000 characters.');
+      for(const text of [subject,body])for(const token of text.matchAll(/\{\{?\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}?/g))if(!['customer_name','business_name','quote_link'].includes(token[1]))throw Error('Step '+(i+1)+': unsupported placeholder '+token[0]+'. Use customer_name, business_name or quote_link.');
+      return {id:step.id,delayDays:step.delayDays,subject,body};
+    });
+    return {enabled:draft.enabled,steps};
+  }
+  function followupSettingsForm(draft) {
+    const editable=canEditFollowupSettings();
+    return `<form id="sale-followup-settings-form"><p>Send a sequence of emails after a quote is sent. Each delay is measured from the original quote email, not from the previous step. Only quotes sent after automatic follow-ups are enabled are eligible; earlier quotes are excluded.</p><p class="sale-followup-safety">Follow-ups stop after a customer reply, acceptance, cancellation or completion. Customers with follow-ups switched off are excluded.</p><p>Emails use the connected Gmail account of the owner or manager who saves these settings. Connect Gmail in Email settings before enabling.</p><p id="sale-followup-saved-status" role="status">${draft.enabled?'Saved automatic follow-ups are enabled.':'Automatic follow-ups are off.'} Changes take effect only after you press Save.</p>${editable?'':'<p>Only an owner or manager can change these business settings.</p>'}<fieldset class="sale-followup-editor" ${editable?'':'disabled'}><label class="sale-check"><input name="enabled" type="checkbox" ${draft.enabled?'checked':''}><span>Enable automatic quote follow-up emails</span></label><p class="sale-muted">Personalise with <code>{customer_name}</code>, <code>{business_name}</code> and <code>{quote_link}</code>. Messages are plain text.</p><div class="sale-followup-steps">${draft.steps.map((step,i)=>`<fieldset class="sale-followup-step" data-followup-step="${esc(step.id)}"><legend>Step ${i+1}</legend>${field('Days after quote was sent',`<input name="delayDays" type="number" min="1" max="365" step="1" required value="${esc(step.delayDays)}">`)}${field('Email subject',`<input name="subject" required maxlength="200" value="${esc(step.subject)}">`)}${field('Email message',`<textarea name="body" rows="6" required maxlength="10000">${esc(step.body)}</textarea>`)}${button('Remove step '+(i+1),'followup-step-remove',step.id)}</fieldset>`).join('')||'<p>No steps configured. Add a step to create your first follow-up email.</p>'}</div><div class="sale-actions">${button('Add follow-up step','followup-step-add','',draft.steps.length>=6?'disabled':'')}<button class="btn accent" type="submit">Save follow-up settings</button></div></fieldset></form>`;
+  }
+  async function openFollowupSettings() {
+    closeModal('settings-overlay');
+    const call=++followupEditorSerial,scope=peopleScope();
+    modal('Automatic quote follow-ups','<p id="sale-followup-settings-loading" role="status">Loading saved business settings…</p>');
+    const dialog=document.getElementById('sales-dialog');
+    try {
+      const saved=await api('/api/sales/followup-settings');
+      if(call!==followupEditorSerial||scope!==peopleScope()||!dialog.open||!document.getElementById('sale-followup-settings-loading'))return;
+      const draft={enabled:saved.enabled===true,steps:Array.isArray(saved.steps)?saved.steps:[]};
+      dialog.querySelector('#sale-followup-settings-loading').outerHTML=followupSettingsForm(draft);
+      const form=document.getElementById('sale-followup-settings-form');
+      form.dataset.scope=scope;
+      form.elements.namedItem('enabled')?.focus();
+    } catch(err) {
+      if(call!==followupEditorSerial||scope!==peopleScope()||!dialog.open||!document.getElementById('sale-followup-settings-loading'))return;
+      dialog.querySelector('#sale-followup-settings-loading').outerHTML='<p>Saved settings could not be loaded. Close this window and try again.</p>';
+      error(err);
+    }
+  }
+  function editFollowupSteps(action,id) {
+    const form=document.getElementById('sale-followup-settings-form');
+    if(!form||!canEditFollowupSettings()||form.dataset.scope!==peopleScope()||form.querySelector('.sale-followup-editor').disabled)return;
+    const draft=readFollowupDraft(form);
+    if(action==='followup-step-add') {
+      if(draft.steps.length>=6)throw Error('You can add up to six follow-up steps.');
+      draft.steps.push(newFollowupStep(draft.steps.length?Math.min(365,(draft.steps.at(-1).delayDays||0)+2):2));
+    } else draft.steps=draft.steps.filter(step=>step.id!==id);
+    const scope=form.dataset.scope;
+    form.outerHTML=followupSettingsForm(draft);
+    const next=document.getElementById('sale-followup-settings-form');next.dataset.scope=scope;
+    next.querySelector('#sale-followup-saved-status').textContent='Unsaved changes. Press Save to apply your sequence.';
+    const rows=next.querySelectorAll('[data-followup-step]');
+    (action==='followup-step-add'?rows[rows.length-1]?.querySelector('input'):next.querySelector('[data-sale-action="followup-step-add"]'))?.focus();
+  }
+  async function saveFollowupSettings(form) {
+    if(!canEditFollowupSettings())throw Error('Only an owner or manager can save follow-up settings.');
+    const scope=peopleScope();
+    if(!currentBusinessId||form.dataset.scope!==scope)throw Error('Your business session changed. Reopen follow-up settings.');
+    const draft=validateFollowupDraft(readFollowupDraft(form));
+    const editor=form.querySelector('.sale-followup-editor');
+    if(editor.disabled)return;
+    editor.disabled=true;
+    const dialog=document.getElementById('sales-dialog');
+    const alert=dialog.querySelector('#sales-dialog-error');if(alert)alert.textContent='';
+    try {
+      await api('/api/sales/followup-settings',{method:'PUT',body:JSON.stringify(draft)});
+      if(scope!==peopleScope()||!form.isConnected)return;
+      dialog.close();toast(draft.enabled?'Automatic quote follow-ups saved and enabled.':'Follow-up settings saved. Automatic emails are off.');
+    } finally {if(scope===peopleScope()&&form.isConnected)editor.disabled=false;}
+  }
   function openStageSettings() {
     modal('Pipeline settings', `<form id="sale-stages-form"><p>Rename and reorder stages to fit your sales process. Built-in stages keep their identity for reporting. A custom stage can be deleted after all its opportunities have been moved elsewhere.</p>${stages.map((s,i) => `<div class="sale-settings-row"><b>${esc(s.key)}</b><input name="label-${esc(s.key)}" value="${esc(s.label)}" required maxlength="50"><input aria-label="${esc(s.label)} probability" name="prob-${esc(s.key)}" type="number" min="0" max="100" value="${Math.round((settings.probabilities?.[s.key] || 0) * 100)}"><button type="button" class="btn ghost sm" data-sale-action="stage-move" data-stage="${esc(s.key)}" data-delta="-1" aria-label="Move ${esc(s.label)} up" ${i===0?'disabled':''}>↑</button><button type="button" class="btn ghost sm" data-sale-action="stage-move" data-stage="${esc(s.key)}" data-delta="1" aria-label="Move ${esc(s.label)} down" ${i===stages.length-1?'disabled':''}>↓</button>${defaults.some(d=>d.key===s.key)?'':'<button type="button" class="btn ghost sm" data-sale-action="stage-remove" data-stage="'+esc(s.key)+'">Delete</button>'}</div>`).join('')}<button type="button" class="btn ghost" data-sale-action="stage-add">＋ Add custom stage</button>${field("Quote follow-up reminder after days", `<input name="days" type="number" min="1" max="365" value="${settings.followup_days || 2}">`)}<button class="btn accent">Save settings</button></form>`);
   }
@@ -905,6 +996,7 @@
     oldSettings();
     const body = document.getElementById("settings-body");
     body.insertAdjacentHTML('beforeend',settingsGroup('Pipeline',`<p>Configure stage names, order and sales probabilities for your business.</p>${button('Manage pipeline stages','stages')}`));
+    body.insertAdjacentHTML('beforeend',settingsGroup('Automatic quote follow-ups',`<p>Choose when to follow up on quotes and write a different email for each step. Automatic emails stay off until you save and enable them.</p>${button('Manage automatic follow-ups','followup-settings')}`));
   };
   const oldSaveLead = saveLead;
   saveLead = function () {
@@ -1158,6 +1250,8 @@
     const a = b.dataset.saleAction,
       r = record(b.dataset.id);
     try {
+      if(a==='followup-settings'){await openFollowupSettings();return;}
+      if(a==='followup-step-add'||a==='followup-step-remove'){editFollowupSteps(a,b.dataset.id);return;}
       if(a==='followups'){followupScope='due';openFollowups();return;}
       if(a==='followup-scope'){followupScope=b.dataset.id;openFollowups();return;}
       if(a==='activity'){openNotificationCentre();return;}
@@ -1468,6 +1562,11 @@
   });
   document.addEventListener("submit", async (e) => {
     const form = e.target;
+    if(form.id==='sale-followup-settings-form') {
+      e.preventDefault();
+      try{await saveFollowupSettings(form);}catch(err){if(form.isConnected&&form.dataset.scope===peopleScope())error(err);}
+      return;
+    }
     if (form.id === 'sale-quote-new') {
       e.preventDefault();
       const f=new FormData(form),name=String(f.get('name')||'').trim();
@@ -1564,6 +1663,7 @@
     }
   });
   document.addEventListener('input',e=>{if(e.target.id==='sale-quote-search'){const host=document.getElementById('sale-quote-results');if(host)host.innerHTML=quotePickerRows(e.target.value);}});
+  document.addEventListener('input',e=>{const form=e.target.closest('#sale-followup-settings-form');if(form){const status=form.querySelector('#sale-followup-saved-status');if(status)status.textContent='Unsaved changes. Press Save to apply your sequence.';}});
   // Match mobile selection and initial server-side login landing.
   document
     .querySelector('#bottom-nav [data-view="pipeline"]')
@@ -1582,6 +1682,7 @@
   });
   window.TK_SALES_PLATFORM = {
     loadPeople, salespeople, salespersonControl, assignSalesperson, openFollowups, followupRows, followupControl, followupsOff, setFollowupsDisabled,
+    openFollowupSettings,
     request: api,
     moveStage: async (id, key) => move(record(id), key),
     transferQuote: async (id) => {
@@ -1603,6 +1704,7 @@
       cloudGoals = [];
       spend = [];
       settings = {};
+      ++followupEditorSerial;
       metrics = null;
       mappings = [];
       migrationError = "";

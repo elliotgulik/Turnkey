@@ -11,7 +11,7 @@ function crm(e,storage=new Map()){
   SERVICES:{roof:{label:'Roof',unit:'m²',rate:8}},currentBusinessId:'A',businessStateReady:true,
   records:[],seq:1,goals:[],goalSeq:1,followSeq:1,docTemplate:{},salesSourceSpend:{},recordBusinesses:new WeakMap(),
   localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v)},
-  businessStoreKey:()=> 'A',preserveLegacyState(){},scheduleSupabaseSync(){},renderPricing(){},toast(){},console});
+  currentBusinessProfile:null,captureAccountScope:()=>({businessId:'A',isCurrent:()=>true}),businessStoreKey:()=> 'A',preserveLegacyState(){},scheduleSupabaseSync(){},renderPricing(){},toast(){},console});
  for(const name of ['saveState','loadState','savePricingConfig','applyPricingConfig','setSvcChemical','setSvcChemicalUsage','setChemPrice'])vm.runInContext(functionSource(name),c);
  return c;
 }
@@ -46,7 +46,7 @@ test('legacy softWash/degreaser values survive while explicit no-chemical select
 });
 test('CRM editors persist choices to local reload and business config; Earth uses identical costs; accepted snapshots stay unchanged',async()=>{
  const storage=new Map(),e=engine(),c=crm(e,storage);let remote;
- c.sb={from:table=>{assert.equal(table,'businesses');return {upsert:async row=>{remote=plain(row);return {error:null};}};}};
+ c.sb={from:table=>{assert.equal(table,'businesses');let payload;const q={select(){return q},eq(){return q},is(){return q},update(row){payload=row;return q},maybeSingle(){return Promise.resolve({data:{pricing_config:remote?.pricing_config||{}}})},then(resolve){if(payload)remote={id:'A',...plain(payload)};return Promise.resolve({data:[{id:'A'}]}).then(resolve)}};return q;}};
  const snapshot=plain(e.costBreakdown([{svc:'roof',qty:100}]));c.records=[{stage:'accepted',estimatedCost:snapshot.cost,costSnapshot:snapshot}];
  const accepted=JSON.stringify(c.records);
  c.setSvcChemical('roof','softWash',false);c.setSvcChemical('roof','mossMould',true);c.setSvcChemicalUsage('roof','mossMould','0.02');

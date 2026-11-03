@@ -1349,7 +1349,7 @@ location.replace('/reset-password.html'+location.search+location.hash);
 
 </style>
 <link rel="stylesheet" href="pricing-learning.css?v=20261101h">
-<link rel="stylesheet" href="sales-platform.css?v=20261102g">
+<link rel="stylesheet" href="sales-platform.css?v=20261103followups1">
 <link rel="stylesheet" href="nova-lead-manager.css?v=20261102e">
 <link rel="stylesheet" href="quote-workspace.css?v=20261017a">
 <link rel="stylesheet" href="conversations.css?v=20261102k">
@@ -6554,6 +6554,7 @@ function setCostInput(key,val){COST_INPUTS[key]=parseFloat(val)||0;saveState();s
 // and never silently resets.
 async function savePricingConfig(){
   if(!sb||!currentBusinessId)return;
+  const scope=captureAccountScope();
   const config={
     rates:Object.fromEntries(Object.entries(SERVICES).map(([k,v])=>[k,v.rate])),
     chemicals:Object.fromEntries(Object.entries(CHEMICALS).map(([k,v])=>[k,v.perL])),
@@ -6563,8 +6564,23 @@ async function savePricingConfig(){
     sourceSpend:Object.assign({},salesSourceSpend),
     novaLeadManager:(typeof window!=='undefined'?window.TK_NOVA_LEAD_MANAGER?.getConfig?.():null)||null
   };
-  const {error}=await sb.from('businesses').upsert({id:currentBusinessId,pricing_config:config});
-  if(error)console.error('Save pricing config failed',error);
+  try{
+    for(let attempt=0;attempt<3;attempt++){
+      const {data:row,error:readError}=await sb.from('businesses').select('pricing_config').eq('id',scope.businessId).maybeSingle();
+      if(!scope.isCurrent())return;
+      if(readError)throw readError;
+      if(!row)throw Error('Business profile not found');
+      const merged={...(row.pricing_config||{}),...config};
+      let write=sb.from('businesses').update({pricing_config:merged}).eq('id',scope.businessId);
+      write=row.pricing_config==null?write.is('pricing_config',null):write.eq('pricing_config',JSON.stringify(row.pricing_config));
+      const {data,error}=await write.select('id');
+      if(!scope.isCurrent())return;
+      if(error)throw error;
+      if(data?.length){if(currentBusinessProfile)currentBusinessProfile.pricing_config=merged;return;}
+    }
+    throw Error('Settings changed while saving. Try again.');
+  }catch(error){if(scope.isCurrent()){console.error('Save pricing config failed',error);toast('Could not save pricing settings — try again');}}
+
 }
 function applyPricingConfig(config){
   TK_COST.applyChemicalConfig(config||{});
@@ -10452,7 +10468,7 @@ async function loadFromSupabase(){
         // job. Over weeks of normal use this is exactly how one customer
         // ends up with 144 "quotes" in their profile for what was really
         // one quote, edited many times across many sessions.
-        _customerMissing:!c.id||!String(c.name||'').trim(),followupsDisabled:c.followups_disabled===true,customerId:j.customer_id||null,jobId:j.id,quoteId:j.quote_id||null,invoiceId:inv?inv.id:null,assignedStaffId:j.assigned_to||null,
+        databaseCreatedAt:j.created_at,_customerMissing:!c.id||!String(c.name||'').trim(),followupsDisabled:c.followups_disabled===true,customerId:j.customer_id||null,jobId:j.id,quoteId:j.quote_id||null,invoiceId:inv?inv.id:null,assignedStaffId:j.assigned_to||null,
         paymentStatus:inv?(inv.payment_status||base.paymentStatus):base.paymentStatus,
         paymentMethod:inv?(inv.payment_method||base.paymentMethod):base.paymentMethod,
         dueDate:inv?(inv.due_date||base.dueDate):base.dueDate,
@@ -11094,7 +11110,7 @@ async function retryPendingPhotos(){
   }
 }
 </script>
-<script src="sales-metrics.js?v=20261103analyticsreview1"></script>
+<script src="sales-metrics.js?v=20261103importdates1"></script>
 <script src="pipeline-model.js?v=20261018e"></script>
 <script src="lead-priority.js?v=20261103bugaudit2"></script>
 <script src="meta-import.js?v=20261020a"></script>
@@ -11102,7 +11118,7 @@ async function retryPendingPhotos(){
 <script src="lead-request-view.js?v=20261102-wix-answers"></script>
 <script src="servicem8-pricing-view.js?v=20261102d"></script>
 <script src="lead-identity.js?v=20261103b"></script>
-<script src="sales-platform.js?v=20261103workflow1"></script>
+<script src="sales-platform.js?v=20261103followups1"></script>
 <script type="module" src="measurement-import.js?v=20261017a"></script>
 <script src="pricing-learning-engine.js?v=20261102k"></script>
 <script src="quote-workspace.js?v=20261017a"></script>

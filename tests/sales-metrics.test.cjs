@@ -258,3 +258,26 @@ test("verified ServiceM8 zero does not fall back to a stale opportunity estimate
  const r=M.report([{...lead,total:0,opportunityValue:800,serviceM8Pricing:{total:0}}],{range,now,probabilities:{new:0.25}});
  assert.equal(r.openValue,0);assert.equal(r.pipeline[0].value,0);assert.equal(r.forecast,0);
 });
+
+
+test("import-trigger win stamps cannot count historical completed work as recent booked sales",()=>{
+ const r=M.report([{...lead,stage:'completed',importedFrom:'servicem8',databaseCreatedAt:new Date(at).toISOString(),wonAt:at+0.137,serviceM8Pricing:{total:88000}}],{range,now});
+ assert.equal(r.bookedSales,0);assert.equal(r.unknownWinDates,1);assert.equal(r.series.length,0);
+});
+test("real approval and later win dates remain reportable for imported jobs",()=>{
+ const historical={...lead,stage:'completed',importedFrom:'servicem8',databaseCreatedAt:new Date(at).toISOString(),wonAt:at,acceptedAt:at+1000,total:500};
+ assert.equal(M.report([historical],{range,now}).bookedSales,500);
+ assert.equal(M.report([{...historical,acceptedAt:null,wonAt:at+60000}],{range,now}).bookedSales,500);
+});
+
+
+test("legacy UTC database timestamps without a timezone still identify import-generated wins",()=>{
+ const inserted='2026-11-02 07:06:41.990952',stamp=Date.parse('2026-11-02T07:06:41.990Z');
+ assert.equal(M.winTime({importedFrom:'servicem8',databaseCreatedAt:inserted,wonAt:stamp+0.952}),null);
+});
+
+
+test("CSV history has the same insert-trigger date exclusion as ServiceM8 imports",()=>{
+ const stamp=Date.parse('2026-10-16T06:07:26.688Z');
+ assert.equal(M.winTime({importedFrom:'generic',databaseCreatedAt:'2026-10-16 06:07:26.688137',wonAt:stamp+0.137}),null);
+});

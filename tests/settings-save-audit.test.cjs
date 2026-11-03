@@ -37,3 +37,10 @@ test('notes reject an unconfirmed save and restore the button after a rejected r
 test('confirmed notes save is shared locally only after durable customer update',async()=>{
  const f=setup(()=>({data:{id:'customer-A'}}));vm.runInContext(section('async function saveCustomerNotes(btn){','async function iwLoadCustomerPhotos()'),f.c);await f.c.saveCustomerNotes({disabled:false});assert.equal(f.c.records[0].notes,'New notes');assert.equal(f.c.saved,true);assert.equal(f.c.logged,true);
 });
+test('pricing edits preserve independently saved automatic follow-up settings',async()=>{
+ let reads=0;const f=setup(()=>++reads===1?{data:{pricing_config:{followups:{enabled:true,steps:[{id:'first'}]},otherFeature:{keep:true}}}}:{data:[{id:'A'}]});
+ Object.assign(f.c,{SERVICES:{house:{rate:4}},CHEMICALS:{},COST_INPUTS:{},TK_COST:{OVERHEADS:{},chemicalConfig:()=>({svcCost:{}})},salesSourceSpend:{},window:{}});
+ vm.runInContext(section('async function savePricingConfig(){','function applyPricingConfig(config)'),f.c);await f.c.savePricingConfig();
+ const update=f.calls.find(x=>x[0]==='update')[1];assert.equal(update.pricing_config.followups.enabled,true);assert.equal(update.pricing_config.otherFeature.keep,true);assert.equal(update.pricing_config.rates.house,4);
+ const comparison=f.calls.find(x=>x[0]==='eq'&&x[1]==='pricing_config')[2];assert.equal(typeof comparison,'string');assert.equal(JSON.parse(comparison).followups.enabled,true);
+});

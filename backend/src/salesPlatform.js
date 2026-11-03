@@ -1,4 +1,6 @@
 import crypto from "node:crypto";
+import * as gmailProvider from "./providers/gmail.js";
+import { createMailboxSync } from "./emailSync.js";
 import { syncHandoffContacts } from "./handoffContacts.js";
 import { createRequire } from "node:module";
 import { encryptToken, decryptToken } from "./crypto.js";
@@ -216,6 +218,8 @@ export function installSalesPlatform(
     env = process.env,
     fetchImpl = fetch,
     oauthProvider = serviceM8Provider,
+    emailProvider = gmailProvider,
+    getValidAccessToken,
   },
 ) {
   const backend = (env.PUBLIC_BACKEND_URL || "").replace(/\/$/, ""),
@@ -2031,6 +2035,163 @@ export function installSalesPlatform(
       if (!["42P01", "PGRST202", "PGRST205"].includes(error.code)) console.error("[ServiceM8 reconciliation]", error.code || error.name);
     } finally { scheduling = false; }
   }
+  // Settings live in the existing pricing JSON; no new columns or task kinds.
+  // No defaults opt a business into customer sends.
+  const followupView = config => ({ enabled: config?.enabled === true,
+    steps: Array.isArray(config?.steps) ? config.steps : [] });
+  function validateFollowups(input) {
+    if (!input || typeof input.enabled !== "boolean" || !Array.isArray(input.steps) || input.steps.length > 6 ||
+        (input.enabled && !input.steps.length)) throw fail("Choose up to six follow-up steps and explicitly enable or disable automatic sending.");
+    let previous = 0;
+    const ids = new Set();
+    const steps = input.steps.map(step => {
+      if (!step || typeof step.id !== "string" || !/^[a-zA-Z0-9_-]{1,64}$/.test(step.id) || ids.has(step.id) ||
+          !Number.isInteger(step.delayDays) || step.delayDays <= previous || step.delayDays > 365 ||
+          typeof step.subject !== "string" || !step.subject.trim() || step.subject.length > 200 || /[\r\n]/.test(step.subject) ||
+          typeof step.body !== "string" || !step.body.trim() || step.body.length > 10000)
+        throw fail("Each step needs a unique ID, increasing days from 1 to 365, a subject (up to 200 characters), and a message (up to 10000 characters).");
+      const tokens = (step.subject + " " + step.body).match(/\{\{?\s*[a-z_]+\s*\}\}?/gi) || [];
+      if (tokens.some(token => !["customer_name", "business_name", "quote_link"].includes(token.replace(/[{}\s]/g, ""))))
+        throw fail("Supported message fields: {customer_name}, {business_name}, {quote_link}.");
+      previous = step.delayDays; ids.add(step.id);
+      return { id: step.id, delayDays: step.delayDays, subject: step.subject.trim(), body: step.body.trim() };
+    });
+    return { enabled: input.enabled, steps };
+  }
+  app.get("/api/sales/followup-settings", requireBusiness, wrap(async (req, res) => {
+    const business = await unwrap(db.from("businesses").select("pricing_config").eq("id", req.businessId).maybeSingle());
+    if (!business) throw fail("Business not found.", 404);
+    res.json(followupView(business.pricing_config?.followups));
+  }));
+  app.put("/api/sales/followup-settings", requireBusiness, admin, wrap(async (req, res) => {
+    const validated = validateFollowups(req.body);
+    // Compare the whole JSON value so a concurrent rates/settings edit is never lost.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const business = await unwrap(db.from("businesses").select("pricing_config").eq("id", req.businessId).maybeSingle());
+      if (!business) throw fail("Business not found.", 404);
+      const old = business.pricing_config?.followups;
+      const settings = { ...validated, senderUserId: req.userId,
+        enabledAt: validated.enabled ? (old?.enabled === true && Number.isFinite(Date.parse(old.enabledAt)) ? old.enabledAt : new Date().toISOString()) : null };
+      let write = db.from("businesses").update({ pricing_config: { ...(business.pricing_config || {}), followups: settings } }).eq("id", req.businessId);
+      write = business.pricing_config == null ? write.is("pricing_config", null) : write.eq("pricing_config", JSON.stringify(business.pricing_config));
+      if ((await unwrap(write.select("id"))).length) return res.json(followupView(settings));
+    }
+    throw fail("Business settings changed while saving. Reload and retry.", 409);
+  }));
+  const followupAnchor = job => {
+    const raw = job?.details?.quoteSentAt;
+    const at = typeof raw === "number" ? raw : typeof raw === "string" ? Date.parse(raw) : NaN;
+    return Number.isFinite(at) && at > 0 ? at : null;
+  };
+  const followupKey = (job, step) => "customer-followup:" + job.id + ":" + followupAnchor(job) + ":" + step.id;
+  function activeFollowups(business) {
+    const raw = business?.pricing_config?.followups;
+    if (raw?.enabled !== true || !SM.uuid(raw.senderUserId) || !Number.isFinite(Date.parse(raw.enabledAt))) return null;
+    try { return { ...validateFollowups(raw), senderUserId: raw.senderUserId, enabledAt: raw.enabledAt }; } catch { return null; }
+  }
+  // The parent installs the existing OAuth helper; missing wiring fails closed.
+  const followupToken = getValidAccessToken || (async () => null);
+  const syncFollowupMailbox = createMailboxSync({ db, gmail: emailProvider, getValidAccessToken: followupToken });
+  async function followupContext(businessId, jobId, stepId) {
+    const [business, job] = await Promise.all([
+      unwrap(db.from("businesses").select("id,name,pricing_config").eq("id", businessId).maybeSingle()),
+      unwrap(db.from("jobs").select("id,business_id,customer_id,quote_id,status,details").eq("business_id", businessId).eq("id", jobId).maybeSingle()),
+    ]);
+    const config = activeFollowups(business), anchor = followupAnchor(job);
+    if (!config || !job || !["quoted", "followup"].includes(job.status) || !anchor || anchor < Date.parse(config.enabledAt) || anchor > Date.now() ||
+        job.details?.clientResponded || job.details?.approvedAt || !job.customer_id || !job.quote_id) return null;
+    const [customer, quote, sender] = await Promise.all([
+      unwrap(db.from("customers").select("*").eq("business_id", businessId).eq("id", job.customer_id).maybeSingle()),
+      unwrap(db.from("quotes").select("id,status,public_token").eq("business_id", businessId).eq("id", job.quote_id).maybeSingle()),
+      unwrap(db.from("users").select("role").eq("business_id", businessId).eq("id", config.senderUserId).maybeSingle()),
+    ]);
+    if (!customer || customer.followups_disabled === true || !/^[^\s<>@,;]+@[^\s<>@,;]+\.[^\s<>@,;]+$/.test(customer.email || "") ||
+        !quote || !["sent", "viewed"].includes(quote.status) || !sender || !["owner", "manager"].includes(sender.role)) return null;
+    // When enabling an old quote, send only the latest due step, avoiding a
+    // burst of every historical message. Identity stays stable across edits.
+    const step = config.steps.filter(s => anchor + s.delayDays * 86400000 <= Date.now()).at(-1);
+    if (!step || (stepId && step.id !== stepId)) return null;
+    for (let offset = 0; ; offset += 1000) {
+      const replies = await unwrap(db.from("emails").select("customer_id,from_address").eq("business_id", businessId)
+        .eq("direction", "received").gt("sent_at", new Date(anchor).toISOString()).order("id").range(offset, offset + 999));
+      if (replies.some(mail => mail.customer_id === customer.id ||
+          String(mail.from_address || "").match(/<([^>]+)>/)?.[1]?.trim().toLowerCase() === customer.email.toLowerCase() ||
+          String(mail.from_address || "").trim().toLowerCase() === customer.email.toLowerCase())) return null;
+      if (replies.length < 1000) break;
+    }
+    const vars = { customer_name: customer.name?.split(" ")[0] || "there", business_name: business.name || "Your Business",
+      quote_link: quote.public_token ? frontend + "/quote.html?t=" + encodeURIComponent(quote.public_token) : "" };
+    if (!vars.quote_link && /\{\{?\s*quote_link\s*\}\}?/.test(step.subject + step.body)) return null;
+    const fill = value => value.replace(/\{\{?\s*([a-z_]+)\s*\}\}?/g, (_, key) => vars[key]);
+    const message = { to: customer.email, subject: fill(step.subject), bodyText: fill(step.body) };
+    if (/[\r\n]/.test(message.subject) || message.subject.length > 998) return null;
+    return { config, business, job, customer, step, message };
+  }
+  async function sendAutomaticFollowup(task) {
+    let context = await followupContext(task.business_id, task.payload.jobId, task.payload.stepId);
+    if (!context || task.dedupe_key !== followupKey(context.job, context.step)) return;
+    // Refresh the mailbox before the last eligibility read; failed sync fails
+    // closed, including replies not yet linked to this customer in the CRM.
+    await syncFollowupMailbox(task.business_id, context.config.senderUserId);
+    const auth = await followupToken(task.business_id, context.config.senderUserId, "gmail");
+    if (!auth || auth.account.business_id !== task.business_id || auth.account.user_id !== context.config.senderUserId)
+      throw fail("Connect the follow-up sender's Gmail account.", 409);
+    context = await followupContext(task.business_id, task.payload.jobId, task.payload.stepId);
+    if (!context || task.dedupe_key !== followupKey(context.job, context.step) || auth.account.user_id !== context.config.senderUserId) return;
+    const draftId = SM.stableUuid("automatic-followup", task.business_id, task.dedupe_key);
+    const scopeDraft = query => query.eq("id", draftId).eq("business_id", task.business_id).eq("user_id", context.config.senderUserId);
+    await unwrap(db.from("conversation_drafts").upsert({ id: draftId, business_id: task.business_id,
+      user_id: context.config.senderUserId, payload: { ...context.message, opportunityId: context.job.id }, status: "draft" },
+      { onConflict: "id", ignoreDuplicates: true }));
+    // Reuse Conversations' permanent send guard, beyond the queue's expiring
+    // lease. A crashed/ambiguous send remains 'sending'/'unknown', never resent.
+    const claimed = await unwrap(scopeDraft(db.from("conversation_drafts").update({ status: "sending", payload: context.message,
+      updated_at: new Date().toISOString() })).eq("status", "draft").select("id"));
+    if (!claimed.length) return;
+    const currentTask = await unwrap(db.from("integration_tasks").select("id").eq("id", task.id)
+      .eq("business_id", task.business_id).eq("state", "running").eq("lease_token", task.lease_token).maybeSingle());
+    if (!currentTask) return;
+    const finalContext = await followupContext(task.business_id, task.payload.jobId, task.payload.stepId);
+    if (!finalContext || task.dedupe_key !== followupKey(finalContext.job, finalContext.step) ||
+        canonical(finalContext.message) !== canonical(context.message) ||
+        canonical(finalContext.config) !== canonical(context.config)) return;
+    const escape = value => String(value).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    const bodyHtml = '<div style="white-space:pre-wrap">' + escape(context.message.bodyText) + '</div>';
+    let sent;
+    try {
+      sent = await emailProvider.sendMessage(auth.accessToken, { from: auth.account.email_address, ...context.message, bodyHtml });
+      if (!sent?.id) throw Error("Missing delivery confirmation");
+    } catch (error) {
+      await unwrap(scopeDraft(db.from("conversation_drafts").update({ status: error.code === "SEND_REJECTED" ? "draft" : "unknown" })));
+      throw fail(error.code === "SEND_REJECTED" ? "Gmail rejected the automatic follow-up; it will retry." : "Follow-up delivery is unknown. Check Gmail Sent before sending manually.", 503);
+    }
+    // Post-delivery indexing failures cannot clear the permanent sending guard.
+    await unwrap(scopeDraft(db.from("conversation_drafts").update({ status: "sent", sent_message_id: sent.id })));
+    await unwrap(db.from("emails").upsert({ business_id: task.business_id, customer_id: context.customer.id,
+      account_id: auth.account.id, provider_message_id: sent.id, thread_id: sent.threadId || null, direction: "sent",
+      from_address: auth.account.email_address, to_addresses: context.message.to, subject: context.message.subject,
+      body_text: context.message.bodyText, body_html: bodyHtml, snippet: context.message.bodyText.slice(0, 140), sent_at: new Date().toISOString() },
+      { onConflict: "account_id,provider_message_id" }));
+  }
+  async function scheduleAutomaticFollowups() {
+    for (let offset = 0; ; offset += 1000) {
+      const businesses = await unwrap(db.from("businesses").select("id,name,pricing_config").order("id").range(offset, offset + 999));
+      for (const business of businesses) {
+        const config = activeFollowups(business);
+        if (!config) continue;
+        const jobs = await allRows(db, "jobs", business.id, "id,status,details");
+        for (const job of jobs) {
+          const anchor = followupAnchor(job);
+          if (!["quoted", "followup"].includes(job.status) || !anchor || anchor < Date.parse(config.enabledAt) ||
+              !config.steps.some(step => anchor + step.delayDays * 86400000 <= Date.now())) continue;
+          const context = await followupContext(business.id, job.id);
+          if (context) await enqueue(business.id, "reminder", followupKey(context.job, context.step),
+            { automaticCustomerFollowup: true, jobId: job.id, stepId: context.step.id });
+        }
+      }
+      if (businesses.length < 1000) break;
+    }
+  }
   async function customerFollowupsAllowed(businessId,job){if(!job?.customer_id)return true;const customer=await unwrap(db.from('customers').select('id,followups_disabled').eq('business_id',businessId).eq('id',job.customer_id).maybeSingle());return !!customer&&customer.followups_disabled!==true;}
   let running = false;
   async function tick() {
@@ -2046,6 +2207,7 @@ export function installSalesPlatform(
           else if (task.kind === "handoff") await transfer(task);
           else if (task.kind === "refresh_job")
             await refreshRemote(task.business_id, task.payload.uuid);
+          else if (task.kind === "reminder" && task.payload.automaticCustomerFollowup === true) await sendAutomaticFollowup(task);
           else if (task.kind === "reminder") {
             const job=await unwrap(db.from('jobs').select('id,customer_id,status,details').eq('business_id',task.business_id).eq('id',task.payload.jobId).maybeSingle());
             const due=job?.details?.nextFollowUpAt;
@@ -2164,6 +2326,7 @@ export function installSalesPlatform(
     if (reminderRunning) return;
     reminderRunning = true;
     try {
+      await scheduleAutomaticFollowups();
       const jobs = await unwrap(
         db
           .from("jobs")
@@ -2251,6 +2414,7 @@ export function installSalesPlatform(
         return {
           ...j.details,
           jobId: j.id,
+          databaseCreatedAt: j.created_at,
           quoteId: j.quote_id || j.details?.quoteId || null,
           serviceM8JobUuid: link?.external_uuid || j.details?.serviceM8JobUuid || null,
           stage: link?.snapshot?.status === "Unsuccessful" ? "lost" : j.status,
@@ -2336,6 +2500,8 @@ export function installSalesPlatform(
   );
   return {
     tick,
+    reminders,
+    scheduleAutomaticFollowups,
     scheduleReconciliation,
     stop: () => {
       clearTimeout(reconciliationStartup);
