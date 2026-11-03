@@ -29,6 +29,15 @@
         ],
         "createdAt": "2026-11-03T01:40:37.257Z",
         "reason": "Agent verified: enrollment sets the QR image src from Supabase immediately after constructing the form; this is dynamic credential imagery, not a placeholder."
+      },
+      {
+        "rule": "dark-glow",
+        "value": "*",
+        "files": [
+          "reset-password.html"
+        ],
+        "createdAt": "2026-11-03T02:08:03.511Z",
+        "reason": "Agent verified: recovery renders on a light background and its reset-card has box-shadow:none in the final redesign layer. Finding comes from unused shared navy elevation tokens; no colored glow is rendered."
       }
     ]
   }
