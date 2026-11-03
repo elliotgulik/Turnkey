@@ -28,3 +28,5 @@ extension/dist/
 
 # Local design review screenshots; not deployed
 .local-ui-preview/
+
+.design-shots/
