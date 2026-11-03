@@ -103,6 +103,37 @@ test('queued competing signups cannot consume one invite twice', async t => {
   assert.equal((await rows(db, 'select count(*)::int n from public.invites where accepted_at is not null'))[0].n, 1)
 })
 
+test('confirmation never claims a foreign email or an already accepted invitation', async t => {
+  const db = await setup(t)
+  await invite(db, 'someone-else@example.com', 'owner')
+  await invite(db, 'staff@example.com', 'manager')
+  await db.query("update public.invites set accepted_at='2026-02-01' where email='staff@example.com'")
+  await signup(db)
+  await confirm(db)
+  assert.deepEqual(await rows(db, 'select business_id,role from public.users'), [{ business_id: id(1), role: 'owner' }])
+  assert.equal((await rows(db, 'select count(*)::int n from public.invites where accepted_at is null'))[0].n, 1)
+})
+
+test('confirmation cannot move an existing staff member or elevate their role', async t => {
+  const db = await setup(t)
+  await signup(db)
+  await db.query("update public.users set business_id='team',role='technician' where id=$1", [id(1)])
+  await invite(db, 'staff@example.com', 'owner', 'second-team')
+  await confirm(db)
+  assert.deepEqual(await rows(db, 'select business_id,role from public.users'), [{ business_id: 'team', role: 'technician' }])
+  assert.equal((await rows(db, 'select accepted_at from public.invites'))[0].accepted_at, null)
+})
+
+test('an invitation into the provisional business never deletes that business', async t => {
+  const db = await setup(t)
+  await signup(db)
+  await invite(db, 'staff@example.com', 'manager', id(1))
+  await confirm(db)
+  assert.deepEqual(await rows(db, 'select business_id,role from public.users'), [{ business_id: id(1), role: 'manager' }])
+  assert.equal((await rows(db, 'select id from public.businesses where id=$1', [id(1)])).length, 1)
+  assert.ok((await rows(db, 'select accepted_at from public.invites'))[0].accepted_at)
+})
+
 test('migration is repeatable, has one confirmation trigger, and blocks untrusted execution', async t => {
   const db = await setup(t)
   await db.exec(migration)

@@ -83,7 +83,7 @@ async function resolveBusiness(accessToken) {
     .eq('id', userData.user.id)
     .maybeSingle()
 
-  if (profileErr || !profile) return null
+  if (profileErr || typeof profile?.business_id !== 'string' || !profile.business_id.trim()) return null
   return { businessId: profile.business_id, userId: userData.user.id }
 }
 
@@ -171,7 +171,14 @@ async function requireBusiness(req, res, next) {
     return res.status(401).json({ error: 'Missing Authorization bearer token' })
   }
 
-  const resolved = await resolveBusiness(token)
+  let resolved
+  try {
+    resolved = await resolveBusiness(token)
+  } catch {
+    // Express 4 does not forward rejected async middleware promises. Fail
+    // closed without exposing auth-service errors or credentials to callers.
+    return res.status(503).json({ error: 'Could not validate session' })
+  }
 
   if (!resolved) {
     return res.status(401).json({ error: 'Invalid session' })
@@ -774,7 +781,19 @@ app.post('/api/email/send', requireBusiness, async (req, res) => {
   const { to, subject, bodyText, bodyHtml, customerId, threadId, inReplyTo, references, attachment, quoteId, invoiceId, type } = req.body || {}
   if (!to || !subject) return res.status(400).json({ error: 'Missing to/subject' })
   let custId = customerId || null
+  let referencesValidated = false
   try {
+    // The service-role client bypasses RLS: check every supplied reference
+    // before refreshing provider tokens, sending mail, or recording activity.
+    for (const [table, id] of [['customers', customerId], ['quotes', quoteId], ['invoices', invoiceId]]) {
+      if (!id) continue
+      if (typeof id !== 'string') return res.status(400).json({ error: 'Invalid email reference' })
+      const { data, error } = await authClient.from(table).select('id')
+        .eq('business_id', req.businessId).eq('id', id).maybeSingle()
+      if (error) throw error
+      if (!data) return res.status(404).json({ error: 'Email reference not found' })
+    }
+    referencesValidated = true
     const auth = await getValidAccessToken(req.businessId, req.userId, 'gmail')
     if (!auth) return res.status(400).json({ error: 'Connect your Gmail account first (Connections)' })
 
@@ -808,7 +827,7 @@ app.post('/api/email/send', requireBusiness, async (req, res) => {
     res.json({ ok: true, id: sent.id, threadId: sent.threadId })
   } catch (err) {
     console.error('POST /api/email/send', err)
-    if (type) {
+    if (type && referencesValidated) {
       await authClient.from('email_logs').insert({
         business_id: req.businessId, customer_id: custId, quote_id: quoteId || null, invoice_id: invoiceId || null,
         type, recipient: to, subject, body: bodyText || bodyHtml || null, sent_at: null, status: 'failed'
@@ -1190,6 +1209,13 @@ app.post('/api/payments/create-link', requireBusiness, async (req, res) => {
   try {
     const { amountCents, description, invoiceId } = req.body || {}
     if (!amountCents || amountCents < 50) return res.status(400).json({ error: 'A valid amount (in cents, minimum 50) is required' })
+    if (invoiceId) {
+      if (typeof invoiceId !== 'string') return res.status(400).json({ error: 'Invalid invoice reference' })
+      const { data, error } = await authClient.from('invoices').select('id')
+        .eq('business_id', req.businessId).eq('id', invoiceId).maybeSingle()
+      if (error) throw error
+      if (!data) return res.status(404).json({ error: 'Invoice not found' })
+    }
     const authHeader = 'Basic ' + Buffer.from(STRIPE_SECRET_KEY + ':').toString('base64')
 
     // Stripe Payment Links need a Price object first (one-off, inline price).
@@ -1218,7 +1244,11 @@ app.post('/api/payments/create-link', requireBusiness, async (req, res) => {
     if (!linkRes.ok) throw new Error('Stripe payment link creation failed: ' + await linkRes.text())
     const link = await linkRes.json()
 
-    if (invoiceId) await authClient.from('invoices').update({ payment_link_url: link.url }).eq('id', invoiceId)
+    if (invoiceId) {
+      const { error } = await authClient.from('invoices').update({ payment_link_url: link.url })
+        .eq('business_id', req.businessId).eq('id', invoiceId)
+      if (error) throw error
+    }
     res.json({ ok: true, url: link.url })
   } catch (err) {
     console.error('POST /api/payments/create-link', err)

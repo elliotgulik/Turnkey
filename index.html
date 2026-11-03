@@ -18,7 +18,7 @@ location.replace('/reset-password.html'+location.search+location.hash);
 </script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" integrity="sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.6" integrity="sha384-GyhLKJoRcMXYwIJUTyx0/uSPYliVPdRYYXJm3G6zyMjKShNs8jLM7WaLpk8Vr4W/" crossorigin="anonymous"></script>
-<script src="auth-mfa.js"></script>
+<script src="auth-mfa.js?v=20261103accounts1"></script>
 <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js" integrity="sha384-B1OFx8Gy9GjPu8UbUyXbGQpzll9ubAUQ9agInFJ8NnD7nYG1u/CLR+Sqr5yifl4q" crossorigin="anonymous"></script>
 <script src="config.js?v=20261017a"></script>
 <script src="session-flow.js?v=20261019a"></script>
@@ -2333,14 +2333,17 @@ const EMAIL_TEMPLATE_DEFAULTS={
 let emailTemplates={quote:null,invoice:null};
 async function loadEmailTemplates(){
   if(!sb||!currentBusinessId)return;
-  const {data,error}=await sb.from('email_templates').select('*').eq('business_id',currentBusinessId);
+  const scope=captureAccountScope();
+  const {data,error}=await sb.from('email_templates').select('*').eq('business_id',scope.businessId);
+  if(!scope.isCurrent())return;
   if(error){console.error('Load email templates failed',error);return;}
   for(const type of ['quote','invoice']){
     const found=(data||[]).find(t=>t.type===type);
     if(found)emailTemplates[type]=found;
     else{
-      const seed=Object.assign({business_id:currentBusinessId,type},EMAIL_TEMPLATE_DEFAULTS[type]);
+      const seed=Object.assign({business_id:scope.businessId,type},EMAIL_TEMPLATE_DEFAULTS[type]);
       const {data:created,error:seedErr}=await sb.from('email_templates').upsert(seed,{onConflict:'business_id,type'}).select('*').maybeSingle();
+      if(!scope.isCurrent())return;
       if(!seedErr)emailTemplates[type]=created;
     }
   }
@@ -2450,7 +2453,9 @@ const NOTIFICATION_EVENTS=[
 let notificationPrefs={};
 async function loadNotificationPrefs(){
   if(!sb||!currentBusinessId)return;
-  const {data,error}=await sb.from('notification_preferences').select('*').eq('business_id',currentBusinessId);
+  const scope=captureAccountScope();
+  const {data,error}=await sb.from('notification_preferences').select('*').eq('business_id',scope.businessId);
+  if(!scope.isCurrent())return;
   if(error){console.error('Load notification preferences failed',error);return;}
   const byKey={};
   (data||[]).forEach(row=>{byKey[row.event]=row;});
@@ -6143,6 +6148,7 @@ async function iwLoadCustomerPhotos(){
    ===================================================================== */
 let inboxThreads=[];let inboxOpenThread=null;
 async function renderInbox(){
+  const scope=captureAccountScope();
   const zone=document.getElementById('view-inbox');
   if(!sb||!currentBusinessId){zone.innerHTML='<div class="empty-state"><div class="sm">Sign in to view your inbox.</div></div>';return;}
   if(!emailAccount){
@@ -6155,7 +6161,8 @@ async function renderInbox(){
     <div id="inbox-body"><div class="empty-state"><div class="sm">Loading…</div></div></div>`;
   // Explicit business_id filter as defense-in-depth alongside RLS — same
   // reasoning as loadFromSupabase()'s customers/jobs/invoices fix.
-  const {data,error}=await sb.from('emails').select('*').eq('business_id',currentBusinessId).order('sent_at',{ascending:false}).limit(200);
+  const {data,error}=await sb.from('emails').select('*').eq('business_id',scope.businessId).order('sent_at',{ascending:false}).limit(200);
+  if(!scope.isCurrent())return;
   if(error){document.getElementById('inbox-body').innerHTML='<div class="empty-state"><div class="sm">Could not load emails — try again, or contact support if it keeps happening.</div></div>';console.error('Load emails failed',error);return;}
   const byThread={};
   (data||[]).forEach(e=>{const key=e.thread_id||e.id;if(!byThread[key])byThread[key]=[];byThread[key].push(e);});
@@ -8546,12 +8553,12 @@ let emailAccount=null; // this signed-in user's own connected Gmail account, or 
 // database save successful log) and what this query sees is immediately
 // visible instead of just "it shows Not Connected" with no further signal.
 async function loadEmailAccountStatus(){
-  if(!sb||!currentUserId){console.log('[Connections] loadEmailAccountStatus skipped — no sb client or no currentUserId',{hasSb:!!sb,currentUserId});return;}
-  console.log('[Connections] querying email_accounts_status',{userId:currentUserId,businessId:currentBusinessId,provider:'gmail'});
-  const {data,error}=await sb.from('email_accounts_status').select('*').eq('user_id',currentUserId).eq('provider','gmail').maybeSingle();
-  if(error)console.error('[Connections] email_accounts_status query FAILED',{userId:currentUserId,businessId:currentBusinessId,error});
-  else console.log('[Connections] email_accounts_status query result',{userId:currentUserId,found:!!data,email:data?data.email_address:null,rowBusinessId:data?data.business_id:null});
-  if(!error)emailAccount=data||null;
+  if(!sb||!currentUserId||!currentBusinessId)return;
+  const scope=captureAccountScope();
+  const {data,error}=await sb.from('email_accounts_status').select('*').eq('business_id',scope.businessId).eq('user_id',scope.userId).eq('provider','gmail').maybeSingle();
+  if(!scope.isCurrent())return;
+  if(error){console.error('Load email account status failed',error);return;}
+  emailAccount=data&&data.business_id===scope.businessId&&data.user_id===scope.userId?data:null;
 }
 // A fetch() to /api/*/oauth/start can fail for two very different reasons
 // that both land in the same catch block: (1) the request never reached the
@@ -8599,8 +8606,9 @@ let calendarConnections=[]; let googleCalendarConfigured=false;
 let calendarBusyBlocks=[];
 async function loadCalendarBusyBlocks(){
   if(!sb||!currentBusinessId)return;
-  const {data,error}=await sb.from('calendar_events').select('*').eq('business_id',currentBusinessId).gte('end_time',new Date().toISOString());
-  if(!error)calendarBusyBlocks=data||[];
+  const scope=captureAccountScope();
+  const {data,error}=await sb.from('calendar_events').select('*').eq('business_id',scope.businessId).gte('end_time',new Date().toISOString());
+  if(scope.isCurrent()&&!error)calendarBusyBlocks=data||[];
 }
 function busyBlocksForDate(iso){
   return calendarBusyBlocks.filter(b=>{
@@ -8613,13 +8621,14 @@ function busyBlocksForDate(iso){
 // STRIPE_SECRET_KEY, the Settings/Connections UI just never reflected that.
 let stripeStatus={configured:false,webhookConfigured:false};
 async function loadStripeStatus(){
+  const scope=captureAccountScope();
   const url=backendUrl();
   const {data:{session}}=await sb.auth.getSession();
-  if(!url||!session)return;
+  if(!url||!session||!scope.isCurrent()||session.user.id!==scope.userId)return;
   try{
     const res=await fetch(`${url}/api/payments/status`,{headers:{Authorization:'Bearer '+session.access_token}});
     const j=await res.json();
-    if(res.ok)stripeStatus={configured:!!j.configured,webhookConfigured:!!j.webhookConfigured};
+    if(res.ok&&scope.isCurrent())stripeStatus={configured:!!j.configured,webhookConfigured:!!j.webhookConfigured};
   }catch(e){console.error('Load Stripe status failed',e);}
 }
 /* ===== Wix + Meta lead webhooks: both land straight into the existing
@@ -8735,13 +8744,14 @@ async function disconnectMeta(){
   metaStatus={connected:false,pageId:null};openConnections();toast('Meta Page disconnected');
 }
 async function loadCalendarConnections(){
+  const scope=captureAccountScope();
   const url=backendUrl();
   const {data:{session}}=await sb.auth.getSession();
-  if(!url||!session)return;
+  if(!url||!session||!scope.isCurrent()||session.user.id!==scope.userId)return;
   try{
     const res=await fetch(`${url}/api/calendar/connections`,{headers:{Authorization:'Bearer '+session.access_token}});
     const j=await res.json();
-    if(res.ok){calendarConnections=j.connections||[];googleCalendarConfigured=!!j.googleConfigured;}
+    if(res.ok&&scope.isCurrent()){calendarConnections=j.connections||[];googleCalendarConfigured=!!j.googleConfigured;}
   }catch(e){console.error('Load calendar connections failed',e);}
 }
 async function connectGoogleCalendarOAuth(){
@@ -9039,6 +9049,9 @@ async function handleForgotPassword(){
 }
 async function handlePasswordRecoverySubmit(){
   if(!sb)return;
+  const recoveryVersion=businessSessionVersion,recoveryUser=window.TK_CURRENT_SESSION?.user?.id;
+  const isCurrentRecovery=()=>authRecoveryActive&&recoveryVersion===businessSessionVersion&&recoveryUser===window.TK_CURRENT_SESSION?.user?.id;
+  if(!recoveryUser||!isCurrentRecovery()){showAuth();setAuthMsg('Request a fresh password reset link.');return;}
   const password=document.getElementById('auth-new-password').value;
   if(!password||password.length<10){setRecoveryMsg('Password needs to be at least 10 characters');return;}
   document.getElementById('auth-recovery-btn').disabled=true;
@@ -9046,10 +9059,12 @@ async function handlePasswordRecoverySubmit(){
   let error,session;
   try{
     ({error}=await sb.auth.updateUser({password}));
+    if(!isCurrentRecovery())return;
     if(error){setRecoveryMsg(friendlyAuthError(error.message));return;}
     setRecoveryMsg('Password updated — signing you in…',true);
     ({data:{session}}=await sb.auth.getSession());
-  }catch(e){setRecoveryMsg(friendlyAuthError(e?.message||'Could not save the password. Check your connection and try again.'));return;}
+    if(!isCurrentRecovery())return;
+  }catch(e){if(!isCurrentRecovery())return;setRecoveryMsg(friendlyAuthError(e?.message||'Could not save the password. Check your connection and try again.'));return;}
   finally{document.getElementById('auth-recovery-btn').disabled=false;}
   // The session this recovery flow already has is a real, valid one —
   // Supabase's PASSWORD_RECOVERY event just labels it differently, and that
@@ -9059,12 +9074,12 @@ async function handlePasswordRecoverySubmit(){
   // blank overlay with no path back into the app — this is the actual
   // fix, not just the message.
   if(session){
-    setTimeout(()=>{ document.getElementById('auth-card-recovery').style.display='none';authRecoveryActive=false;appSessionGate.start(session); },700);
+    setTimeout(()=>{if(!isCurrentRecovery()||session.user.id!==recoveryUser)return;document.getElementById('auth-card-recovery').style.display='none';authRecoveryActive=false;appSessionGate.start(session);},700);
   }else{
     // No session for some reason (expired recovery link, etc.) — fall
     // back to a normal sign-in screen with the new password already usable,
     // rather than leaving the user stuck on a blank overlay.
-    setTimeout(()=>{ showAuth(); setAuthMsg('Password updated — sign in with your new password.',true); },700);
+    setTimeout(()=>{if(!isCurrentRecovery())return;authRecoveryActive=false;showAuth();setAuthMsg('Password updated — sign in with your new password.',true);},700);
   }
 }
 async function handleSignUp(){
@@ -9094,6 +9109,16 @@ let currentUserRole='owner';
 // Auth events already supply the current session. API clients can use this
 // in-memory snapshot instead of competing for Supabase's session lock.
 window.TK_CURRENT_SESSION=null;
+function captureAccountScope(){
+  const businessId=currentBusinessId,userId=currentUserId,version=businessSessionVersion;
+  return {businessId,userId,isCurrent:()=>businessId===currentBusinessId&&userId===currentUserId&&version===businessSessionVersion};
+}
+function clearAccountConnections(){
+  emailAccount=null;emailTemplates={quote:null,invoice:null};notificationPrefs={};inboxThreads=[];inboxOpenThread=null;
+  calendarConnections=[];calendarBusyBlocks=[];googleCalendarConfigured=false;
+  stripeStatus={configured:false,webhookConfigured:false};wixStatus={connected:false};metaStatus={connected:false,pageId:null};
+  currentBusinessProfile=null;cachedLogoDataUrl=null;
+}
 async function resolveProfile(userId){
   const {data,error}=await sb.from('users').select('business_id,role').eq('id',userId).maybeSingle();
   if(error)throw new Error('Could not load your business profile. Please try signing in again.');
@@ -9112,6 +9137,7 @@ async function handleAuthedSession(session){
   businessStateReady=false;
   clearTimeout(supabaseSyncTimer);
   showWorkspaceLoading();
+  if(currentUserId!==session.user.id){window.TK_MFA?.reset();clearAccountConnections();}
   currentUserId=session.user.id;
   let profile;
   try{profile=await resolveProfile(session.user.id);}catch(e){
@@ -9119,9 +9145,10 @@ async function handleAuthedSession(session){
     return;
   }
   if(version!==businessSessionVersion||currentUserId!==session.user.id)return;
-  try{if(!await window.TK_MFA.requireFor(session,profile.role))return;}catch(e){showAuth();setAuthMsg(e.message);return;}
+  try{if(!await window.TK_MFA.requireFor(session,profile.role))return;}catch(e){if(version===businessSessionVersion){showAuth();setAuthMsg(e.message);}return;}
   if(version!==businessSessionVersion||currentUserId!==session.user.id)return;
   if(currentBusinessId!==profile.businessId){
+    clearAccountConnections();
     records=[];goals=[];seq=1;goalSeq=1;followSeq=1;
     staff=[];pendingInvites=[];currentBusinessProfile=null;
     window.TK_SALES_PLATFORM?.reset();
@@ -9231,12 +9258,14 @@ let staff=[];
 let pendingInvites=[];
 async function loadStaffAndInvites(){
   if(!sb||!currentBusinessId)return;
-  // Explicit business_id filter as defense-in-depth alongside RLS — same
-  // reasoning as loadFromSupabase()'s customers/jobs/invoices fix.
-  const {data:s,error:se}=await sb.from('users').select('*').eq('business_id',currentBusinessId).order('created_at',{ascending:true});
+  const scope=captureAccountScope();
+  const canInvite=currentUserRole==='owner'||currentUserRole==='manager';
+  const {data:s,error:se}=await sb.from('users').select('*').eq('business_id',scope.businessId).order('created_at',{ascending:true});
+  if(!scope.isCurrent())return;
   if(!se)staff=s||[];
-  if(currentUserRole==='owner'||currentUserRole==='manager'){
-    const {data:inv,error:ie}=await sb.from('invites').select('*').eq('business_id',currentBusinessId).is('accepted_at',null).order('created_at',{ascending:true});
+  if(canInvite){
+    const {data:inv,error:ie}=await sb.from('invites').select('*').eq('business_id',scope.businessId).is('accepted_at',null).order('created_at',{ascending:true});
+    if(!scope.isCurrent())return;
     if(!ie)pendingInvites=inv||[];
   }else pendingInvites=[];
 }
@@ -9336,11 +9365,17 @@ async function removeStaff(id){
    predates that trigger, so no manual backfill is ever needed. ===== */
 async function loadBusinessProfile(){
   if(!sb||!currentBusinessId)return;
-  const {data,error}=await sb.from('businesses').select('*').eq('id',currentBusinessId).maybeSingle();
+  const scope=captureAccountScope();
+  const {data,error}=await sb.from('businesses').select('*').eq('id',scope.businessId).maybeSingle();
+  if(!scope.isCurrent())return;
   if(error){console.error('Load business profile failed',error);return;}
   if(data){currentBusinessProfile=data;applyPricingConfig(data.pricing_config);applyWorkflowConfig(data.workflow_config);return;}
-  const {data:created,error:cErr}=await sb.from('businesses').upsert({id:currentBusinessId}).select('*').maybeSingle();
-  if(cErr){console.error('Backfill business profile failed',cErr);return;} // e.g. schema not migrated yet
+  // Only an owner can provision a missing company profile; staff must not
+  // attempt owner-only writes during sign-in.
+  if(currentUserRole!=='owner')return;
+  const {data:created,error:cErr}=await sb.from('businesses').upsert({id:scope.businessId}).select('*').maybeSingle();
+  if(!scope.isCurrent())return;
+  if(cErr){console.error('Backfill business profile failed',cErr);return;}
   currentBusinessProfile=created;
 }
 // Quote/invoice PDFs need the logo as a data URL (jsPDF can't fetch a remote
@@ -10801,20 +10836,26 @@ const appSessionGate=TK_SESSION_FLOW.create({
   initialize:session=>handleAuthedSession(session),
   beforeInitialize:userId=>{if(currentUserId&&currentUserId!==userId){++businessSessionVersion;businessStateReady=false;showWorkspaceLoading();}}
 });
+let authEventRevision=0;
 if(sb){
+  const startupRevision=authEventRevision;
   sb.auth.getSession().then(({data:{session},error})=>{
+    if(startupRevision!==authEventRevision)return;
     if(error)throw error;
     if(authRecoveryActive)return;
     if(session)return appSessionGate.start(session);
     if(!appSessionGate.isPending()&&!businessStateReady)showAuth();
-  }).catch(()=>{if(!businessStateReady){showAuth();setAuthMsg('Could not restore your session. Check your connection and try again.');}});
+  }).catch(()=>{if(startupRevision===authEventRevision&&!businessStateReady){showAuth();setAuthMsg('Could not restore your session. Check your connection and try again.');}});
   sb.auth.onAuthStateChange((event,session)=>{
+    if(['SIGNED_IN','INITIAL_SESSION','SIGNED_OUT','PASSWORD_RECOVERY'].includes(event))++authEventRevision;
     window.TK_CURRENT_SESSION=event==='SIGNED_OUT'?null:session;
-    if(event==='PASSWORD_RECOVERY'){authRecoveryActive=true;appSessionGate.reset();++businessSessionVersion;businessStateReady=false;showPasswordRecovery();return;}
+    if(event==='INITIAL_SESSION'&&!session&&!authRecoveryActive&&!appSessionGate.isPending()&&!businessStateReady)showAuth();
+    if(event==='PASSWORD_RECOVERY'){window.TK_MFA?.reset();authRecoveryActive=true;appSessionGate.reset();++businessSessionVersion;businessStateReady=false;showPasswordRecovery();return;}
     if(!authRecoveryActive&&(event==='SIGNED_IN'||event==='INITIAL_SESSION')&&session)void appSessionGate.start(session).catch(()=>{if(!businessStateReady){showAuth();setAuthMsg('Could not load your workspace. Please try again.');}});
     if(event==='SIGNED_OUT'){
+      authRecoveryActive=false;
       try{for(const key of [businessStoreKey(),STORE_KEY+':legacy-unassigned',STORE_KEY,'turnkey-nova-lead-manager-v1',...Object.keys(localStorage).filter(k=>k.startsWith('turnkey-setup-guide:'))])localStorage.removeItem(key);}catch{}
-      window.TK_MFA?.reset();window.TK_WORKSPACE_CACHE?.clearAll();appSessionGate.reset();++businessSessionVersion;businessStateReady=false;clearTimeout(supabaseSyncTimer);goals=[];goalSeq=1;seq=1;followSeq=1;window.TK_SALES_PLATFORM?.reset();unsubscribeRealtime();stopLastSeenHeartbeat();records=[];currentBusinessId=null;currentUserId=null;currentUserRole='owner';staff=[];pendingInvites=[];render();renderAll();showAuth();}
+      window.TK_MFA?.reset();window.TK_WORKSPACE_CACHE?.clearAll();appSessionGate.reset();clearAccountConnections();++businessSessionVersion;businessStateReady=false;clearTimeout(supabaseSyncTimer);goals=[];goalSeq=1;seq=1;followSeq=1;window.TK_SALES_PLATFORM?.reset();unsubscribeRealtime();stopLastSeenHeartbeat();records=[];currentBusinessId=null;currentUserId=null;currentUserRole='owner';staff=[];pendingInvites=[];render();renderAll();showAuth();}
   });
 }else{
   showAuth();

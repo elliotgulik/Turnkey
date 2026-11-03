@@ -55,7 +55,7 @@ test('startup waits for database load and no longer loads an unscoped cache',()=
 });
 test('auth clears the old business before waiting and never reveals an obsolete session',async()=>{
  let finishLoad;let shown=0;let hidden=0;
- const ctx=context({records:[{name:'A customer'}],goals:[{label:'A goal'}],currentUserId:'user-A',supabaseSyncTimer:null,clearTimeout(){},showWorkspaceLoading(){hidden++},showAuth(){hidden++},showApp(){shown++},resolveProfile:async()=>({businessId:'B',role:'owner'}),window:{TK_MFA:{requireFor:async()=>true},TK_SALES_PLATFORM:{reset(){}}},loadState(){return false},applyRoleVisibility(){},loadFromSupabase:()=>new Promise(resolve=>finishLoad=resolve)});
+ const ctx=context({records:[{name:'A customer'}],goals:[{label:'A goal'}],currentUserId:'user-A',supabaseSyncTimer:null,clearAccountConnections(){},clearTimeout(){},showWorkspaceLoading(){hidden++},showAuth(){hidden++},showApp(){shown++},resolveProfile:async()=>({businessId:'B',role:'owner'}),window:{TK_MFA:{reset(){},requireFor:async()=>true},TK_SALES_PLATFORM:{reset(){}}},loadState(){return false},applyRoleVisibility(){},loadFromSupabase:()=>new Promise(resolve=>finishLoad=resolve)});
  vm.runInContext(section('async function handleAuthedSession(session){','// Real "last active'),ctx);
  const auth=ctx.handleAuthedSession({user:{id:'user-B'}});
  await new Promise(resolve=>setImmediate(resolve));

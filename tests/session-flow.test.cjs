@@ -15,3 +15,15 @@ test('a failed load can retry, without a permanently locked pending session',asy
  let count=0;const gate=create({isReady:()=>false,initialize:()=>{if(++count===1)throw Error('Offline');}});
  await assert.rejects(gate.start({user:{id:'a'}}),/Offline/);await gate.start({user:{id:'a'}});assert.equal(count,2);
 });
+test('auth notification returns before initialization invokes session APIs',async()=>{
+ let authLock=true,calls=0;
+ const gate=create({isReady:()=>false,initialize:async()=>{assert.equal(authLock,false,'session APIs must run outside the auth callback lock');calls++;}});
+ const callback=()=>{void gate.start({user:{id:'staff'}});};
+ assert.equal(callback(),undefined);assert.equal(calls,0);authLock=false;
+ await gate.start({user:{id:'staff'}});assert.equal(calls,1);
+});
+test('a newer queued account replaces an older queued account',async()=>{
+ const queue=[],calls=[],gate=create({isReady:()=>false,defer:fn=>new Promise(resolve=>queue.push(()=>resolve(fn()))),initialize:session=>calls.push(session.user.id)});
+ const first=gate.start({user:{id:'owner'}}),second=gate.start({user:{id:'staff'}});
+ queue.shift()();queue.shift()();await Promise.all([first,second]);assert.deepEqual(calls,['staff']);
+});
