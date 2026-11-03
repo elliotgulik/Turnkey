@@ -14,6 +14,7 @@ fs.mkdirSync(target, { recursive: true });
 const assets = [
   "index.html",
   "tokens.css",
+  "redesign.css",
   "auth-mfa.js",
   "auth-mfa.css",
   "reset-password.html",

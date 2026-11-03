@@ -1,52 +1,35 @@
-/* Shared tokens extracted from the original app; values unchanged. */
-:root{
-    /* cool, restrained navy/teal system */
-    --ink:#0a1c2b;            /* near-black navy for primary text */
-    --ink-soft:#5b6b78;       /* secondary text */
-    --ink-faint:#9aa7b1;      /* tertiary / labels */
-    --paper:#fbfcfd;          /* app background, very soft cool white */
-    --surface:#ffffff;        /* cards */
-    --surface-2:#f4f6f8;      /* subtle fills */
-    --line:#e9edf1;           /* hairlines */
-    --line-soft:#f0f3f6;
-    --teal:#0f7d6b;           /* primary accent */
-    --teal-bright:#13a085;
-    --teal-wash:#eef7f5;
-    /* per-module accents (light touch) */
-    --m-sales:#0f7d6b;     --m-sales-wash:#eaf6f3;
-    --m-ops:#c2683a;       --m-ops-wash:#fbf0e9;
-    --m-pricing:#b08a1e;   --m-pricing-wash:#f8f2e0;
-    --m-money:#2f7d8f;     --m-money-wash:#e9f3f6;
-    --m-dash:#3a5e9c;      --m-dash-wash:#edf1f9;
-    --m-insight:#7a5bbf;   --m-insight-wash:#f2eefb;
-    --m-cal:#2c7a6b;       --m-cal-wash:#e7f4f0;
-    --m-goal:#b85a86;      --m-goal-wash:#f9edf3;
-    /* status tones */
-    --navy:#13344b;
-    --navy-wash:#eef2f6;
-    --amber:#9a7a32;
-    --amber-wash:#f6f2e9;
-    --coral:#b5573e;
-    --coral-wash:#f7efec;
-    --blue:#2f5d82;
-    --blue-wash:#eef3f8;
-    --purple:#4a4f7a;
-    --purple-wash:#f0f1f6;
-    --radius:16px; --radius-sm:11px;
-    --shadow:0 1px 1px rgba(10,28,43,.03),0 6px 20px rgba(10,28,43,.05);
-    --shadow-lg:0 10px 40px rgba(10,28,43,.10);
-    /* accent for the currently-active module (set per-view in JS) */
-    --accent:#0f7d6b; --accent-wash:#eaf6f3;
-    /* Spacing scale — a 4px base grid. New spacing decisions should pick
-       from this instead of an arbitrary px value; it's what keeps card
-       padding, gaps and margins feeling like one system instead of
-       independently-guessed numbers. Existing rules across this stylesheet
-       predate this scale and mostly aren't rewritten to consume it yet —
-       retrofitting ~1000 lines of already-shipped, visually-tuned CSS
-       without a visual-regression setup to catch what breaks is a bigger
-       risk than the inconsistency it would fix; this is the foundation for
-       doing that gradually, not a claim that it's already finished. */
-    --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px;
-    --space-5:20px; --space-6:24px; --space-8:32px; --space-10:40px;
-    --space-12:48px; --space-16:64px;
-  }
+/* TurnKey visual contract. Legacy names remain compatible with existing modules. */
+:root {
+  --tk-ground:#f3f5f5; --tk-surface:#fff; --tk-ink:#0a1c2b;
+  --tk-muted:#53626c; --tk-line:#d5dde1; --tk-rule:#e6ebee;
+  --tk-signal:#0f7d6b; --tk-signal-deep:#0b5f52; --tk-tint:#e2f0ec;
+  --tk-rail-current:#8fc4ba; --tk-alert:#a3462a;
+  --tk-r-control:6px; --tk-r-surface:10px; --tk-r-sheet:14px;
+  --tk-font:"Barlow",sans-serif; --tk-font-display:"Barlow Semi Condensed",sans-serif;
+  --tk-size-1:12px; --tk-size-2:13px; --tk-size-3:15px; --tk-size-4:17px;
+  --tk-size-5:22px; --tk-size-6:28px; --tk-size-7:34px; --tk-leading:1.5;
+  --tk-space-1:4px; --tk-space-2:8px; --tk-space-3:12px; --tk-space-4:16px;
+  --tk-space-6:24px; --tk-space-8:32px; --tk-space-12:48px;
+  --tk-floating-shadow:0 10px 32px rgba(10,28,43,.12);
+  --ink:var(--tk-ink); --ink-soft:var(--tk-muted); --ink-faint:var(--tk-muted);
+  --paper:var(--tk-ground); --surface:var(--tk-surface); --surface-2:var(--tk-ground);
+  --line:var(--tk-line); --line-soft:var(--tk-rule);
+  --teal:var(--tk-signal); --teal-bright:var(--tk-signal-deep); --teal-wash:var(--tk-tint);
+  --accent:var(--tk-signal); --accent-wash:var(--tk-tint);
+  --radius:var(--tk-r-surface); --radius-sm:var(--tk-r-control);
+  --shadow:none; --shadow-lg:var(--tk-floating-shadow);
+  --m-sales:var(--tk-signal); --m-sales-wash:var(--tk-ground);
+  --m-ops:var(--tk-ink); --m-ops-wash:var(--tk-ground);
+  --m-pricing:var(--tk-ink); --m-pricing-wash:var(--tk-ground);
+  --m-money:var(--tk-ink); --m-money-wash:var(--tk-ground);
+  --m-dash:var(--tk-ink); --m-dash-wash:var(--tk-ground);
+  --m-insight:var(--tk-ink); --m-insight-wash:var(--tk-ground);
+  --m-cal:var(--tk-signal); --m-cal-wash:var(--tk-ground);
+  --m-goal:var(--tk-ink); --m-goal-wash:var(--tk-ground);
+  /* Semantic colours retained for existing calendar events and status meaning. */
+  --navy:#13344b; --navy-wash:#eef2f6; --amber:#9a7a32; --amber-wash:#f6f2e9;
+  --coral:var(--tk-alert); --coral-wash:#f7efec; --blue:#2f5d82; --blue-wash:#eef3f8;
+  --purple:#4a4f7a; --purple-wash:#f0f1f6;
+  --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px; --space-5:20px;
+  --space-6:24px; --space-8:32px; --space-10:40px; --space-12:48px; --space-16:64px;
+}
