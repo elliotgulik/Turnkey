@@ -54,58 +54,9 @@ location.replace('/reset-password.html'+location.search+location.hash);
 <meta property="og:image" content="icon-512.png">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary">
+<link rel="stylesheet" href="tokens.css">
 <style>
-  :root{
-    /* cool, restrained navy/teal system */
-    --ink:#0a1c2b;            /* near-black navy for primary text */
-    --ink-soft:#5b6b78;       /* secondary text */
-    --ink-faint:#9aa7b1;      /* tertiary / labels */
-    --paper:#fbfcfd;          /* app background, very soft cool white */
-    --surface:#ffffff;        /* cards */
-    --surface-2:#f4f6f8;      /* subtle fills */
-    --line:#e9edf1;           /* hairlines */
-    --line-soft:#f0f3f6;
-    --teal:#0f7d6b;           /* primary accent */
-    --teal-bright:#13a085;
-    --teal-wash:#eef7f5;
-    /* per-module accents (light touch) */
-    --m-sales:#0f7d6b;     --m-sales-wash:#eaf6f3;
-    --m-ops:#c2683a;       --m-ops-wash:#fbf0e9;
-    --m-pricing:#b08a1e;   --m-pricing-wash:#f8f2e0;
-    --m-money:#2f7d8f;     --m-money-wash:#e9f3f6;
-    --m-dash:#3a5e9c;      --m-dash-wash:#edf1f9;
-    --m-insight:#7a5bbf;   --m-insight-wash:#f2eefb;
-    --m-cal:#2c7a6b;       --m-cal-wash:#e7f4f0;
-    --m-goal:#b85a86;      --m-goal-wash:#f9edf3;
-    /* status tones */
-    --navy:#13344b;
-    --navy-wash:#eef2f6;
-    --amber:#9a7a32;
-    --amber-wash:#f6f2e9;
-    --coral:#b5573e;
-    --coral-wash:#f7efec;
-    --blue:#2f5d82;
-    --blue-wash:#eef3f8;
-    --purple:#4a4f7a;
-    --purple-wash:#f0f1f6;
-    --radius:16px; --radius-sm:11px;
-    --shadow:0 1px 1px rgba(10,28,43,.03),0 6px 20px rgba(10,28,43,.05);
-    --shadow-lg:0 10px 40px rgba(10,28,43,.10);
-    /* accent for the currently-active module (set per-view in JS) */
-    --accent:#0f7d6b; --accent-wash:#eaf6f3;
-    /* Spacing scale — a 4px base grid. New spacing decisions should pick
-       from this instead of an arbitrary px value; it's what keeps card
-       padding, gaps and margins feeling like one system instead of
-       independently-guessed numbers. Existing rules across this stylesheet
-       predate this scale and mostly aren't rewritten to consume it yet —
-       retrofitting ~1000 lines of already-shipped, visually-tuned CSS
-       without a visual-regression setup to catch what breaks is a bigger
-       risk than the inconsistency it would fix; this is the foundation for
-       doing that gradually, not a claim that it's already finished. */
-    --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px;
-    --space-5:20px; --space-6:24px; --space-8:32px; --space-10:40px;
-    --space-12:48px; --space-16:64px;
-  }
+
   *{box-sizing:border-box;margin:0;padding:0}
   html{-webkit-text-size-adjust:100%}
   body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','SF Pro Text','Helvetica Neue',Helvetica,Arial,sans-serif;background:var(--paper);color:var(--ink);line-height:1.47;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
