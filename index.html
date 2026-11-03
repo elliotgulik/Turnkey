@@ -8446,8 +8446,8 @@ function openConnections(){
   document.getElementById('conn-body').innerHTML=`
     <div class="conn-card ${emailAccount?'live':''}">
       <div class="conn-top"><span class="conn-name">Gmail — inbox &amp; sending</span><span class="conn-badge ${emailAccount?'on':'off'}">${emailAccount?'● CONNECTED':'not connected'}</span></div>
-      ${emailAccount?
-        `<p><b>Connected as ${emailAccount.email_address}.</b> Emails to/from your customers show up in their profile and the Inbox tab. Each teammate connects their own account.</p><button class="btn ghost sm" onclick="disconnectGmailAccount()">Disconnect</button>`:
+      ${emailAccount?.status==='needs_reconnect'?`<p role="alert"><b>Reconnect Gmail.</b> Google access has expired or been revoked. Your saved messages are still here.</p><button class="btn accent sm" onclick="connectGmailOAuth()">Reconnect Gmail</button>`:emailAccount?
+        `<p><b>Connected as ${escapeHtmlSafe(emailAccount.email_address)}.</b> Emails to/from your customers show up in their profile and the Inbox tab. Each teammate connects their own account.</p><button class="btn ghost sm" onclick="disconnectGmailAccount()">Disconnect</button>`:
         `<p>Connect Gmail to send and receive customer emails right inside Turnkey — quotes, invoices, replies, all automatically linked to the right customer.</p><button class="btn accent sm" onclick="connectGmailOAuth()">Connect Gmail</button>`}
     </div>
     <div class="conn-card ${hasGoogleCal||icalConns.length?'live':''}">

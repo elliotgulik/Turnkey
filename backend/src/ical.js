@@ -1,3 +1,8 @@
+import { lookup as dnsLookup } from 'node:dns/promises'
+import { request as httpsRequest } from 'node:https'
+import { isIP } from 'node:net'
+import { Readable } from 'node:stream'
+
 // Minimal iCalendar (RFC 5545) parser for read-only availability blocking —
 // enough to turn an iCloud/Google/Outlook "public calendar" ICS feed URL into
 // busy-time rows in calendar_events. Deliberately not a full RFC 5545 engine:
@@ -120,10 +125,109 @@ export function parseIcs(text) {
   return out
 }
 
-export async function fetchIcs(url) {
-  const res = await fetch(url, { headers: { 'User-Agent': 'TurnKey/1.0 (calendar sync)' } })
-  if (!res.ok) throw new Error('Fetch failed: HTTP ' + res.status)
-  const text = await res.text()
-  if (!/BEGIN:VCALENDAR/i.test(text)) throw new Error('Not a valid iCalendar feed')
-  return parseIcs(text)
+// Use a dedicated HTTPS transport: native fetch does not accept a DNS lookup
+// hook. Pin the validated address at socket creation while retaining the URL's
+// hostname for TLS certificate verification, SNI and the HTTP Host header.
+export function pinnedFetch(url, { headers, signal, lookup }) {
+  return new Promise((resolve, reject) => {
+    const req = httpsRequest(url, { headers, signal, lookup, agent: false }, res => {
+      resolve({
+        ok: res.statusCode >= 200 && res.statusCode < 300,
+        status: res.statusCode,
+        headers: new Headers(Object.entries(res.headers).flatMap(([key, value]) =>
+          value == null ? [] : [[key, Array.isArray(value) ? value.join(', ') : value]])),
+        body: Readable.toWeb(res)
+      })
+    })
+    req.on('error', reject)
+    req.end()
+  })
+}
+
+function unsafeAddress(address) {
+  const family = isIP(address)
+  if (family === 4) {
+    const [a, b] = address.split('.').map(Number)
+    return a === 0 || a === 10 || a === 127 || (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) || (a === 169 && b === 254)
+  }
+  if (family !== 6 || address.includes('%')) return true
+  // URL normalises dotted IPv4 tails to hex, so mapped forms share one path.
+  const canonical = new URL('https://[' + address + ']').hostname.slice(1, -1)
+  const [left, right] = canonical.split('::')
+  const head = left ? left.split(':') : []
+  const tail = right ? right.split(':') : []
+  const words = (right !== undefined ? [...head, ...Array(8 - head.length - tail.length).fill('0'), ...tail] : head).map(w => parseInt(w, 16))
+  if (words.slice(0, 5).every(w => w === 0) && (words[5] === 0xffff || words[5] === 0)) {
+    return unsafeAddress([words[6] >> 8, words[6] & 255, words[7] >> 8, words[7] & 255].join('.'))
+  }
+  return (words[0] & 0xffc0) === 0xfe80 || (words[0] & 0xfe00) === 0xfc00
+}
+
+export async function fetchIcs(url, { lookup = dnsLookup, fetch: fetchFeed = pinnedFetch, timeoutMs = 10000 } = {}) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(new Error('Calendar fetch timed out')), timeoutMs)
+  const { signal } = controller
+  const run = async () => {
+    let target = new URL(url)
+    for (let hop = 0; ; hop++) {
+      signal.throwIfAborted()
+      if (target.protocol !== 'https:' || target.username || target.password) throw new Error('A public HTTPS calendar URL is required')
+      const hostname = target.hostname.replace(/^\[|\]$/g, '')
+      const addresses = await lookup(hostname, { all: true })
+      signal.throwIfAborted()
+      if (!addresses.length || addresses.some(a => unsafeAddress(a.address))) throw new Error('Calendar host is not public')
+      const pinned = addresses[0]
+      const res = await fetchFeed(target.href, {
+        headers: { 'User-Agent': 'TurnKey/1.0 (calendar sync)' }, redirect: 'manual', signal,
+        lookup(_hostname, options, callback) {
+          // No second DNS query: every connection uses an already checked IP.
+          if (typeof options === 'function') { callback = options; options = {} }
+          if (options?.all) callback(null, [pinned])
+          else callback(null, pinned.address, pinned.family)
+        }
+      })
+      if ([301, 302, 303, 307, 308].includes(res.status)) {
+        await res.body?.cancel()
+        if (hop >= 3) throw new Error('Too many calendar redirects')
+        const location = res.headers.get('location')
+        if (!location) throw new Error('Calendar redirect has no location')
+        target = new URL(location, target)
+        continue
+      }
+      if (!res.ok) { await res.body?.cancel(); throw new Error('Fetch failed: HTTP ' + res.status) }
+      if (Number(res.headers.get('content-length')) > 2 * 1024 * 1024) {
+        await res.body?.cancel()
+        throw new Error('Calendar feed exceeds 2 MB')
+      }
+      if (!res.body) throw new Error('Empty calendar feed')
+      const reader = res.body.getReader()
+      const chunks = []
+      let size = 0
+      try {
+        while (true) {
+          signal.throwIfAborted()
+          const { done, value } = await reader.read()
+          if (done) break
+          size += value.byteLength
+          if (size > 2 * 1024 * 1024) throw new Error('Calendar feed exceeds 2 MB')
+          chunks.push(Buffer.from(value))
+        }
+      } finally { await reader.cancel(); reader.releaseLock() }
+      const text = Buffer.concat(chunks).toString('utf8')
+      if (!/BEGIN:VCALENDAR/i.test(text)) throw new Error('Not a valid iCalendar feed')
+      return parseIcs(text)
+    }
+  }
+  let onAbort
+  try {
+    return await Promise.race([run(), new Promise((_, reject) => {
+      onAbort = () => reject(signal.reason)
+      signal.addEventListener('abort', onAbort, { once: true })
+    })])
+  } finally {
+    clearTimeout(timer)
+    signal.removeEventListener('abort', onAbort)
+    controller.abort()
+  }
 }

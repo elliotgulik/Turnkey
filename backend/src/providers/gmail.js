@@ -55,7 +55,7 @@ export async function refreshAccessToken(refreshToken) {
       grant_type: 'refresh_token'
     })
   })
-  if (!res.ok) throw new Error('Gmail token refresh failed: ' + await res.text())
+  if (!res.ok) throw Object.assign(new Error('Gmail token refresh failed: ' + await res.text()), { status: res.status })
   return res.json() // {access_token, expires_in, scope, token_type}
 }
 

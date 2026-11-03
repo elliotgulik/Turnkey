@@ -71,6 +71,7 @@ const authClient = createClient(
 // Gmail" click — see the OAuth start routes' try/catch for how that used to
 // surface as a generic, misleading "check your internet" error.)
 const OAUTH_STATE_SECRET = process.env.OAUTH_STATE_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY
+if (!process.env.OAUTH_STATE_SECRET) console.warn('[OAuth] OAUTH_STATE_SECRET is unset; using the service-role key fallback. Set a dedicated secret.')
 
 async function resolveBusiness(accessToken) {
   const { data: userData, error: userErr } = await authClient.auth.getUser(accessToken)
@@ -101,9 +102,18 @@ const metaLeadSync=createMetaLeadSync({db:authClient,addLead:payload=>storage.ad
  title:'New Meta lead received',message:name+' submitted a lead ad on Facebook/Instagram',url:'/index.html?open=leads'})});
 
 app.set('trust proxy', 1) // needed for req.ip to reflect the real client (behind Render's proxy), not the proxy itself
-app.use((req,res,next)=>{
-  if((req.path.startsWith('/api/servicem8')||req.path.startsWith('/api/sales/servicem8')))return cors({origin:(process.env.FRONTEND_URL||'https://turnkeycrm.net').replace(/\/$/,''),credentials:true})(req,res,next)
-  return cors()(req,res,next)
+const frontendOrigin = new URL(process.env.FRONTEND_URL || 'https://turnkeycrm.net').origin
+const publicCors = cors()
+const privateCors = cors({ credentials: true, origin(origin, callback) {
+  const allowed = !origin || origin === frontendOrigin ||
+    /^chrome-extension:\/\/[a-z]{32}$/.test(origin) || /^http:\/\/localhost:\d+$/.test(origin)
+  callback(null, allowed)
+} })
+app.use((req, res, next) => {
+  const publicRoute = /^\/api\/leads(?:\/|$)/.test(req.path) ||
+    req.path.startsWith('/api/notifications/quote-') || req.path === '/api/payments/webhook' ||
+    /^\/api\/servicem8\/webhook(?:\/|$)/.test(req.path)
+  return (publicRoute ? publicCors : privateCors)(req, res, next)
 })
 // Parse Wix before the general upload parser so public form submissions are bounded.
 installWixBodyParser(app)
@@ -116,7 +126,12 @@ app.use('/api/servicem8/webhook', express.json({limit:'256kb',verify:(req,res,bu
 // re-stringified body, even if the content is logically identical). Capturing
 // it here avoids the usual express.raw()-before-express.json() route-order
 // dance for one route — every other route just ignores req.rawBody.
-app.use(express.json({ limit: '25mb', verify: (req, res, buf) => { req.rawBody = buf } }))
+const rawBody = (req, res, buf) => { req.rawBody = buf }
+const uploadJson = express.json({ limit: '25mb', verify: rawBody })
+// Exact POST paths only: other lead/email endpoints retain the global bound.
+app.post('/api/leads', uploadJson)
+app.post('/api/email/send', uploadJson)
+app.use(express.json({ limit: '1mb', verify: rawBody }))
 
 // Lightweight in-memory rate limiter for the one truly public write route
 // (POST /api/leads — no auth by design, since a customer submitting a quote
@@ -124,11 +139,11 @@ app.use(express.json({ limit: '25mb', verify: (req, res, buf) => { req.rawBody =
 // app's actual deployment shape (one Render instance); it resets on restart
 // and won't share state across horizontally-scaled instances, which is an
 // acceptable, documented limitation rather than a full distributed limiter.
-function rateLimit({ windowMs, max }) {
+function rateLimit({ windowMs, max, key = req => req.ip || 'unknown' }) {
   const hits = new Map() // ip -> [timestamps]
   return (req, res, next) => {
     const now = Date.now()
-    const ip = req.ip || 'unknown'
+    const ip = key(req)
     const timestamps = (hits.get(ip) || []).filter((t) => now - t < windowMs)
     if (timestamps.length >= max) {
       return res.status(429).json({ error: 'Too many requests — please try again shortly' })
@@ -168,15 +183,31 @@ async function requireBusiness(req, res, next) {
 }
 
 
-app.get('/api/health', (_req, res) => {
-  res.json({
-    ok: true,
-    storage: STORAGE,
-    timestamp: new Date().toISOString()
-  })
+// Deep checks use the caller's tenant; plain health remains unauthenticated.
+app.get('/api/health', (req, res, next) => req.query.deep === '1' ? requireBusiness(req, res, next) : next(), async (req, res) => {
+  if (req.query.deep !== '1') return res.json({ ok: true, storage: STORAGE, timestamp: new Date().toISOString() })
+  async function check(run) {
+    const controller = new AbortController()
+    let timer
+    try {
+      return !!(await Promise.race([
+        Promise.resolve().then(() => run(controller.signal)),
+        new Promise(resolve => { timer = setTimeout(() => { controller.abort(); resolve(false) }, 3000) })
+      ]))
+    } catch { return false } finally { clearTimeout(timer) }
+  }
+  const [supabase, gmailReady, calendar, meta, stripe] = await Promise.all([
+    check(async signal => {
+      const { data, error } = await authClient.from('businesses').select('id').eq('id', req.businessId).abortSignal(signal).maybeSingle()
+      return !error && !!data
+    }),
+    check(() => gmail.isConfigured() && !!process.env.EMAIL_TOKEN_KEY),
+    check(() => googleCalendar.isConfigured() && !!process.env.EMAIL_TOKEN_KEY),
+    check(() => isMetaConfigured()),
+    check(() => isStripeConfigured())
+  ])
+  res.set('Cache-Control', 'no-store').json({ supabase, gmail: gmailReady, calendar, meta, stripe })
 })
-
-
 // The old whole-app /api/state (GET/POST) has been removed — it stored one
 // unscoped row keyed by a single shared SYNC_KEY, with no business_id at
 // all, so any business's key could overwrite every other business's entire
@@ -591,10 +622,21 @@ async function getValidAccessToken(businessId, userId, providerName) {
   const provider = PROVIDERS[providerName]
   const { data: acct, error } = await authClient.from('email_accounts').select('*')
     .eq('business_id', businessId).eq('user_id', userId).eq('provider', providerName).maybeSingle()
-  if (error || !acct) return null
+  if (error || !acct || acct.status === 'needs_reconnect') return null
   let accessToken = decryptToken(acct.access_token_enc)
   if (Date.now() > new Date(acct.token_expiry).getTime() - 60000) {
-    const refreshed = await provider.refreshAccessToken(decryptToken(acct.refresh_token_enc))
+    let refreshed
+    try {
+      refreshed = await provider.refreshAccessToken(decryptToken(acct.refresh_token_enc))
+    } catch (err) {
+      if (err.status === 401 || /\binvalid_grant\b/.test(err.message || '')) {
+        const { error } = await authClient.from('email_accounts').update({ status: 'needs_reconnect', updated_at: new Date().toISOString() })
+          .eq('id', acct.id).eq('business_id', businessId).eq('user_id', userId)
+        if (error) throw error
+        return null
+      }
+      throw err
+    }
     accessToken = refreshed.access_token
     await authClient.from('email_accounts').update({
       access_token_enc: encryptToken(accessToken),
@@ -697,7 +739,7 @@ app.get('/api/email/oauth/callback/:provider', async (req, res) => {
     }
     const { error } = await authClient.from('email_accounts').upsert({
       business_id: claims.businessId, user_id: claims.userId, provider: providerName,
-      email_address: tok.email,
+      email_address: tok.email, status: 'ok',
       access_token_enc: encryptToken(tok.access_token),
       refresh_token_enc: refreshTokenEnc,
       token_expiry: new Date(Date.now() + (tok.expires_in || 3600) * 1000).toISOString(),
@@ -935,7 +977,7 @@ app.post('/api/calendar/push-job', requireBusiness, async (req, res) => {
 
 app.post('/api/calendar/ical/connect', requireBusiness, async (req, res) => {
   const url = String(req.body?.url || '').trim()
-  if (!/^https?:\/\//.test(url)) return res.status(400).json({ error: 'A valid https:// feed URL is required' })
+  if (!/^https:\/\//.test(url)) return res.status(400).json({ error: 'A valid https:// feed URL is required' })
   try {
     const events = await fetchIcs(url) // validate the feed actually parses before saving it
     const { data: conn, error } = await authClient.from('calendar_connections').upsert({
@@ -1053,8 +1095,9 @@ async function sendAutomationEmail(businessId, job, key, invoice) {
 app.post('/api/automations/run-due', async (req, res) => {
   const cronKey = process.env.AUTOMATION_CRON_KEY || ''
   if (!cronKey) return res.status(501).json({ error: 'AUTOMATION_CRON_KEY not configured — set it in the backend environment to enable this sweep' })
-  const provided = req.get('X-Automation-Key') || req.query.key
-  if (provided !== cronKey) return res.status(401).json({ error: 'Invalid automation key' })
+  const provided = Buffer.from(req.get('X-Automation-Key') || '')
+  const expected = Buffer.from(cronKey)
+  if (provided.length !== expected.length || !crypto.timingSafeEqual(provided, expected)) return res.status(401).json({ error: 'Invalid automation key' })
   try {
     const results = { day_before_reminder: 0, job_tomorrow_push: 0, job_today_push: 0, invoice_overdue: 0, errors: 0 }
     const today = new Date(); today.setUTCHours(0, 0, 0, 0)
@@ -1288,9 +1331,14 @@ app.post('/api/payments/webhook', async (req, res) => {
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || ''
 const isAiConfigured = () => !!ANTHROPIC_API_KEY
 
-app.post('/api/ai/marketing', requireBusiness, async (req, res) => {
+const marketingRateLimit = rateLimit({ windowMs: 60 * 60 * 1000, max: 20, key: req => req.businessId })
+app.post('/api/ai/marketing', requireBusiness, marketingRateLimit, async (req, res) => {
   if (!isAiConfigured()) return res.status(501).json({ error: 'AI assistant is not configured on this server yet — ask whoever manages your TurnKey deployment to add ANTHROPIC_API_KEY' })
   try {
+    const { data: staff, error } = await authClient.from('users').select('role')
+      .eq('id', req.userId).eq('business_id', req.businessId).maybeSingle()
+    if (error) throw error
+    if (!staff || !['owner', 'manager'].includes(staff.role)) return res.status(403).json({ error: 'Owner or manager access required' })
     const { contentType, brief, businessContext } = req.body || {}
     if (!contentType) return res.status(400).json({ error: 'A content type is required' })
     const system = 'You are a marketing copywriter for small local service businesses (exterior cleaning, roofing, ' +
@@ -1302,7 +1350,7 @@ app.post('/api/ai/marketing', requireBusiness, async (req, res) => {
       headers: { 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: 'claude-sonnet-5', max_tokens: 700, system,
-        messages: [{ role: 'user', content: `Business details:\n${JSON.stringify(businessContext || {}).slice(0, 4000)}\n\nWrite a: ${contentType}${brief ? '\n\nAdditional brief: ' + String(brief).slice(0, 1000) : ''}` }]
+        messages: [{ role: 'user', content: `Business details:\n${JSON.stringify(businessContext || {}).slice(0, 4000)}\n\nWrite a: ${String(contentType).slice(0, 100)}${brief ? '\n\nAdditional brief: ' + String(brief).slice(0, 1000) : ''}` }]
       })
     })
     if (!aiRes.ok) throw new Error('Anthropic API call failed: ' + await aiRes.text())
