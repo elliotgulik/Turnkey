@@ -2257,6 +2257,14 @@ export function installSalesPlatform(
           name: c.name,
           source: c.source,
           total: links.length ? (pricing ? serviceM8Number(pricing.total) : null) : q?.amount ?? j.details?.total ?? 0,
+          // Once a job is unlinked or its snapshot fails the uuid/generation/
+          // tenant check above, only the verified `pricing` (or nothing) may be
+          // read as the current ServiceM8 total downstream (by sales-metrics.js)
+          // — the raw, unverified details.serviceM8Pricing from the initial
+          // spread must never reach it, or a wrong-tenant/stale/mismatched or
+          // no-longer-linked price could be reported as this job's booked
+          // revenue.
+          serviceM8Pricing: pricing || undefined,
           // A snapshot's tax basis is unknown; historical costs/GST cannot imply
           // a current margin. These are report-only overrides, never stored edits.
           ...(links.length ? { opportunityValue: pricing ? serviceM8Number(pricing.total) : 0,

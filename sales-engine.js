@@ -15,9 +15,14 @@ window.TK_SALES = (function(){
 
   function leadAt(r){ return r.requestSubmittedAt || r.createdAt || null; }
   function isWonR(r){ return WON_STAGES.includes(r.stage); }
-  // A lost quote sits on the 'cancelled' stage and was never won; a won job
-  // that was later cancelled is NOT a lost sale.
-  function isLostR(r){ return r.stage==='cancelled' && (!!r.lostAt || !(r.wonAt || r.approvedAt)); }
+  // Lost: explicit 'lost' stage (e.g. ServiceM8 Unsuccessful), or cancelled
+  // without a prior win. A won job later cancelled is NOT a lost sale unless
+  // lostAt records it as one.
+  function isLostR(r){
+    if(r.stage==='lost') return true;
+    if(r.stage!=='cancelled') return false;
+    return !!r.lostAt || !(r.wonAt || r.approvedAt || r.acceptedAt);
+  }
   function isOpenR(r){ return OPEN_STAGES.includes(r.stage); }
   function wasQuoted(r){ return !!r.quoteSentAt || isWonR(r) || (isLostR(r) && (r.total||0) > 0); }
   function sourceOf(r){

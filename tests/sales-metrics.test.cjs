@@ -1,5 +1,8 @@
 const { test } = require("node:test"),
   assert = require("node:assert/strict"),
+  fs = require("node:fs"),
+  path = require("node:path"),
+  vm = require("node:vm"),
   M = require("../sales-metrics.js");
 const now = Date.UTC(2026, 9, 15, 12),
   at = now - 86400000,
@@ -81,4 +84,167 @@ test("completed and paid jobs remain revenue wins", () => {
   const report = M.report(jobs, { range, now });
   assert.equal(report.bookedSales, 230);
   assert.equal(report.conversion, 1);
+});
+
+test("unknown totals do not dilute average sale as free jobs", () => {
+  const r = M.report(
+    [
+      { ...lead, id: 1, stage: "won", wonAt: at, total: 200 },
+      { ...lead, id: 2, stage: "won", wonAt: at, total: null },
+    ],
+    { range, now },
+  );
+  assert.equal(r.bookedSales, 200);
+  assert.equal(r.averageSale, 200);
+});
+
+test("quoted value uses frozen line snapshots, not live ServiceM8 totals", () => {
+  const r = M.report(
+    [
+      {
+        ...lead,
+        stage: "won",
+        wonAt: at,
+        quoteSentAt: at,
+        total: 900,
+        serviceM8Pricing: { total: 900 },
+        estimatedCost: 200,
+        gstRegistered: true,
+        services: [
+          { svc: "house", priceSnapshot: 500 },
+          { svc: "drive", priceSnapshot: 75 },
+        ],
+      },
+    ],
+    { range, now },
+  );
+  assert.equal(r.quotedValue, 575);
+  assert.equal(r.bookedSales, 900);
+  assert.equal(r.estimatedProfit, null);
+  assert.equal(r.costCoverage.known, 0);
+});
+
+test("zero ServiceM8 totals remain booked zeros and keep profit unavailable", () => {
+  const r = M.report(
+    [
+      {
+        ...lead,
+        stage: "won",
+        wonAt: at,
+        total: 575,
+        serviceM8Pricing: { total: 0 },
+        estimatedCost: 200,
+        gstRegistered: true,
+      },
+    ],
+    { range, now },
+  );
+  assert.equal(r.bookedSales, 0);
+  assert.equal(r.averageSale, 0);
+  assert.equal(r.estimatedProfit, null);
+});
+
+test("cancelled never-won quotes count as lost; prior wins do not", () => {
+  assert.equal(M.lost({ stage: "cancelled", total: 115 }), true);
+  assert.equal(M.lost({ stage: "cancelled", wonAt: at, total: 115 }), false);
+  assert.equal(M.lost({ stage: "lost", total: 115 }), true);
+  const r = M.report(
+    [
+      {
+        ...lead,
+        id: 1,
+        stage: "cancelled",
+        quoteSentAt: at,
+        total: 115,
+        lostReason: "price",
+      },
+      {
+        ...lead,
+        id: 2,
+        stage: "cancelled",
+        wonAt: at - 1000,
+        total: 200,
+      },
+    ],
+    { range, now },
+  );
+  assert.equal(r.lostReasons.length, 1);
+  assert.equal(r.lostReasons[0].leads, 1);
+  assert.equal(r.bookedSales, 0);
+  assert.equal(r.conversion, 0);
+});
+
+test("duplicate intake copies collapse to one lead", () => {
+  const r = M.report(
+    [
+      {
+        jobId: "a",
+        businessId: "A",
+        createdAt: at,
+        stage: "new",
+        total: 0,
+        externalSource: "wix",
+        externalId: "sub1",
+        source: "Wix",
+      },
+      {
+        jobId: "b",
+        businessId: "A",
+        createdAt: at,
+        stage: "quoted",
+        quoteSentAt: at,
+        total: 465,
+        externalSource: "wix",
+        externalId: "sub1",
+        source: "Wix",
+      },
+    ],
+    { range, now },
+  );
+  assert.equal(r.leads, 1);
+  assert.equal(r.quotes, 1);
+  assert.equal(r.quotedValue, 465);
+});
+
+test("missing service costs stay unavailable rather than zero", () => {
+  const r = M.report(
+    [
+      {
+        ...lead,
+        stage: "won",
+        wonAt: at,
+        services: [{ svc: "house", priceSnapshot: 115 }],
+      },
+    ],
+    { range, now },
+  );
+  assert.equal(r.services[0].costKnown, false);
+  assert.equal(r.services[0].cost, null);
+});
+
+test("duplicate dedup still works in the browser, where sales-metrics.js's own <script> tag loads before lead-identity.js's", () => {
+  // index.html loads these as plain (non-module) <script> tags in this exact
+  // order: sales-metrics.js, ..., lead-identity.js. Reproduce that ordering
+  // with no CommonJS `module`/`require` in scope (unlike this test file's own
+  // Node environment), so a regression that only resolves TK_LEAD_IDENTITY
+  // once, at sales-metrics.js's own load time, can't hide behind require().
+  const sandbox = { window: {}, console };
+  vm.runInNewContext(
+    fs.readFileSync(path.join(__dirname, "../sales-metrics.js"), "utf8"),
+    sandbox,
+  );
+  vm.runInNewContext(
+    fs.readFileSync(path.join(__dirname, "../lead-identity.js"), "utf8"),
+    sandbox,
+  );
+  const browserM = sandbox.window.TK_METRICS;
+  const r = browserM.report(
+    [
+      { jobId: "a", businessId: "A", createdAt: at, stage: "new", total: 0, externalSource: "wix", externalId: "sub1", source: "Wix" },
+      { jobId: "b", businessId: "A", createdAt: at, stage: "quoted", quoteSentAt: at, total: 465, externalSource: "wix", externalId: "sub1", source: "Wix" },
+    ],
+    { range, now },
+  );
+  assert.equal(r.leads, 1);
+  assert.equal(r.quotedValue, 465);
 });
