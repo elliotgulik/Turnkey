@@ -58,6 +58,9 @@ main {
   color: var(--sale-muted);
   margin: 0 0 14px;
 }
+.sale-field > span {
+  color: var(--ink-soft);
+}
 .sale-filters .sale-field {
   margin: 0;
 }
