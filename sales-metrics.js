@@ -43,6 +43,13 @@
     }
     return known(r.total);
   };
+  // New enquiries have total:0 before a quote is built. Their opportunity
+  // estimate still belongs in the pipeline; a current SM8 zero stays zero.
+  const pipelineAmount = (r) => {
+    if (sm8Pricing(r)) return bookedAmount(r);
+    const saved = known(r.total), estimate = known(r.opportunityValue);
+    return saved > 0 ? saved : estimate ?? saved;
+  };
   // Quoted amount: frozen line snapshots when complete; else the saved total.
   // Never substitutes a live ServiceM8 job total for the historical quote —
   // there is no scalar "frozen total" field, only per-line priceSnapshot.
@@ -198,7 +205,7 @@
     const probabilities = opts.probabilities || {};
     const forecast = open.reduce((s, x) => {
       const p = probabilities[stage(x)];
-      const value = known(x.total ?? x.opportunityValue) || 0;
+      const value = pipelineAmount(x) || 0;
       return (
         s +
         value *
@@ -306,7 +313,7 @@
         name,
         leads: rs.length,
         revenue: rs.reduce((s, x) => {
-          const v = known(x.total ?? x.opportunityValue);
+          const v = pipelineAmount(x);
           return v == null ? s : s + v;
         }, 0),
       })),
@@ -320,13 +327,13 @@
         stage: key,
         count: rs.length,
         value: rs.reduce((s, x) => {
-          const v = known(x.total ?? x.opportunityValue);
+          const v = pipelineAmount(x);
           return v == null ? s : s + v;
         }, 0),
       })),
       forecast,
       openValue: open.reduce((s, x) => {
-        const v = known(x.total ?? x.opportunityValue);
+        const v = pipelineAmount(x);
         return v == null ? s : s + v;
       }, 0),
       overdue: open.filter(

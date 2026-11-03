@@ -248,3 +248,13 @@ test("duplicate dedup still works in the browser, where sales-metrics.js's own <
   assert.equal(r.leads, 1);
   assert.equal(r.quotedValue, 465);
 });
+
+
+test("unquoted zero defaults retain estimates in pipeline and forecast", () => {
+ const r=M.report([{...lead,total:0,opportunityValue:800}],{range,now,probabilities:{new:0.25}});
+ assert.equal(r.openValue,800);assert.equal(r.pipeline[0].value,800);assert.equal(r.forecast,200);
+});
+test("verified ServiceM8 zero does not fall back to a stale opportunity estimate", () => {
+ const r=M.report([{...lead,total:0,opportunityValue:800,serviceM8Pricing:{total:0}}],{range,now,probabilities:{new:0.25}});
+ assert.equal(r.openValue,0);assert.equal(r.pipeline[0].value,0);assert.equal(r.forecast,0);
+});
