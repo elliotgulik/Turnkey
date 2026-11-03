@@ -1436,7 +1436,7 @@ location.replace('/reset-password.html'+location.search+location.hash);
     <div class="field" id="auth-password-field"><label>Password</label><input id="auth-password" type="password" placeholder="••••••••" autocomplete="current-password" onkeydown="if(event.key==='Enter')handleSignIn()"></div>
     <div id="auth-msg" class="auth-msg"></div>
     <button class="btn primary block" id="auth-signin-btn" onclick="handleSignIn()">Sign in</button>
-    <button class="btn ghost block" id="auth-signup-btn" onclick="handleSignUp()">Create account</button>
+    <button class="btn ghost block" id="auth-signup-btn" hidden onclick="handleSignUp()">Create account</button>
     <button class="auth-forgot" id="auth-forgot-btn" onclick="handleForgotPassword()">Forgot your password?</button>
   </div>
   <div class="auth-card" id="auth-card-recovery" style="display:none">
@@ -8999,6 +8999,7 @@ let currentBusinessProfile=null;
 let supabaseSyncTimer=null;
 
 function showAuth(){
+  document.getElementById('auth-signup-btn').hidden=window.TURNKEY_CONFIG?.allowSignup!==true;
   document.body.removeAttribute('data-session-checking');
   document.getElementById('auth-overlay').style.display='grid';
   document.querySelector('.app').style.display='none';
@@ -9116,6 +9117,7 @@ async function handlePasswordRecoverySubmit(){
   }
 }
 async function handleSignUp(){
+  if(window.TURNKEY_CONFIG?.allowSignup!==true){setAuthMsg('Account registration is closed. Ask your company owner for an invitation.');return;}
   if(!sb){setAuthMsg('Turnkey isn\u2019t finished setting up yet \u2014 contact support');return;}
   const email=document.getElementById('auth-email').value.trim();
   const password=document.getElementById('auth-password').value;

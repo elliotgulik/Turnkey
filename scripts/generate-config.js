@@ -71,6 +71,7 @@ if (!onesignalAppId) {
 
 const content = `// Auto-generated at build time — do not edit on Netlify deploys.
 window.TURNKEY_CONFIG = window.TURNKEY_CONFIG || {
+  allowSignup: ${process.env.TURNKEY_ALLOW_SIGNUP === 'true'},
   backendUrl: ${JSON.stringify(backendUrl)},
   supabaseUrl: ${JSON.stringify(supabaseUrl)},
   supabaseAnonKey: ${JSON.stringify(supabaseAnonKey)},

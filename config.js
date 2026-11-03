@@ -11,6 +11,7 @@
 window.TURNKEY_CONFIG = window.TURNKEY_CONFIG || {
   // Set to your deployed backend URL (no trailing slash), e.g.:
   // backendUrl: 'https://turnkey-backend-xxxx.onrender.com',
+  allowSignup: false,
   backendUrl: 'https://turnkeynova.onrender.com',
   supabaseUrl: 'https://rcighpmdrutnghsqhzlr.supabase.co',
   supabaseAnonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJjaWdocG1kcnV0bmdoc3FoemxyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4NTQ1MzAsImV4cCI6MjA5ODQzMDUzMH0.Pvzvkxqe65SNTS4aRydo-HTkx6EMPglP1PR1ii4wOho',
