@@ -150,3 +150,96 @@ test('full Wix answers remain visible and explicit services do not collapse into
  assert.deepEqual(Array.from(m.formAnswers(r),row=>row.label),r.formAnswers.map(row=>row.label));
  assert.equal(m.formAnswers(r)[3].answer,'Every 4 Months');
 });
+
+function alertFixture() {
+  const now = Date.now(), store = new Map(), handlers = {}, counts = {};
+  const list = { innerHTML: '' }, overlay = { open: false, classList: { contains() { return overlay.open; } } };
+  const records = [
+    { id: 1, stage: 'new', createdAt: now - 1000 },
+    { id: 2, stage: 'new', createdAt: now - 2000 },
+    { id: 3, stage: 'new', createdAt: now - 3 * 86400000 },
+    { id: 4, stage: 'new', createdAt: now - 1000, firstResponseAt: now },
+    { id: 5, stage: 'contacted', createdAt: now - 1000 },
+  ];
+  for (const id of ['cnt-leads', 'lead-alert-count', '.nlm-alert-count', '.nlm-nav-count']) counts[id] = {};
+  const context = {
+    records, currentBusinessId: 'biz-a', currentUserId: 'user-a',
+    render() {}, switchView() {}, handleAuthedSession() {}, openMoreSheet() {},
+    openModal() { overlay.open = true; }, closeModal() { overlay.open = false; },
+    document: {
+      addEventListener(key, fn) { handlers[key] = fn; },
+      querySelector(selector) { return counts[selector] || null; },
+      getElementById(id) { return id === 'lead-alert-list' ? list : id === 'lead-alert-overlay' ? overlay : counts[id] || null; },
+    },
+    localStorage: { getItem(key) { return store.get(key) ?? null; }, setItem(key, value) { store.set(key, value); } },
+    window: { TK_PIPELINE: require('../pipeline-model.js') },
+  };
+  vm.runInNewContext(fs.readFileSync('nova-lead-manager.js', 'utf8'), context);
+  return {
+    context, records, store, counts, list, overlay, manager: context.window.TK_NOVA_LEAD_MANAGER,
+    ids() { return [...list.innerHTML.matchAll(/data-nlm="alert" data-id="(\d+)"/g)].map(m => Number(m[1])); },
+    click(action, id) {
+      handlers.click({ target: { closest(selector) { return selector === '[data-nlm]' ? { dataset: { nlm: action, id } } : null; } } });
+    },
+  };
+}
+
+test('opening the bell keeps unread alerts; opening one removes only that alert and updates all badges', () => {
+  const f = alertFixture(), original = JSON.stringify(f.records);
+  f.click('notifications');
+  assert.deepEqual(f.ids(), [1, 2]);
+  assert.equal(f.store.size, 0);
+  assert.match(f.list.innerHTML, /data-nlm="clear-alerts">Clear all/);
+  f.click('alert', '1');
+  assert.equal(f.overlay.open, false);
+  assert.deepEqual(f.ids(), [2]);
+  for (const badge of Object.values(f.counts)) assert.equal(badge.textContent, '1');
+  f.click('notifications');
+  assert.deepEqual(f.ids(), [2]);
+  assert.equal(JSON.stringify(f.records), original);
+  f.manager.setRead(f.records[0], false);
+  assert.deepEqual(f.ids(), [1, 2]);
+});
+
+test('clear all marks only current recent unread alerts, preserves records and read markers, and allows new arrivals', () => {
+  const f = alertFixture(), original = JSON.stringify(f.records);
+  f.manager.setRead(f.records[2], true);
+  const key = [...f.store.keys()][0], previous = JSON.parse(f.store.get(key));
+  f.click('notifications');
+  f.click('clear-alerts');
+  assert.deepEqual(f.ids(), []);
+  assert.match(f.list.innerHTML, /No new leads/);
+  assert.doesNotMatch(f.list.innerHTML, /data-nlm="clear-alerts"/);
+  for (const badge of Object.values(f.counts)) assert.equal(badge.textContent, '0');
+  assert.equal(f.counts['lead-alert-count'].hidden, true);
+  const saved = JSON.parse(f.store.get(key));
+  assert.equal(Object.keys(saved).length, 3);
+  for (const [id, at] of Object.entries(previous)) assert.equal(saved[id], at);
+  assert.equal(f.manager.isRead(f.records[3]), false);
+  assert.equal(f.manager.isRead(f.records[4]), false);
+  assert.equal(JSON.stringify(f.records), original);
+  f.records.push({ id: 6, stage: 'new', createdAt: Date.now() - 1 });
+  f.click('notifications');
+  assert.deepEqual(f.ids(), [6]);
+  assert.equal(f.manager.pendingLeads(Date.now() + 3 * 86400000).length, 0);
+});
+
+test('cleared alerts stay isolated by user and business and mark unread restores an alert', () => {
+  const f = alertFixture();
+  f.click('notifications');
+  f.click('clear-alerts');
+  f.context.currentUserId = 'user-b';
+  f.click('notifications');
+  assert.deepEqual(f.ids(), [1, 2]);
+  f.context.currentUserId = 'user-a';
+  f.context.currentBusinessId = 'biz-b';
+  f.click('notifications');
+  assert.deepEqual(f.ids(), [1, 2]);
+  f.context.currentBusinessId = 'biz-a';
+  f.click('notifications');
+  assert.deepEqual(f.ids(), []);
+  f.manager.setRead(f.records[0], false);
+  assert.deepEqual(f.ids(), [1]);
+  f.click('clear-alerts');
+  assert.deepEqual(f.ids(), []);
+});
