@@ -1,0 +1,85 @@
+{
+  "manifest_version": 3,
+  "name": "TurnKey — Google Earth Instant Quote",
+  "version": "0.2.11",
+  "description": "Measure a property on Google Earth, price it with your TurnKey rates, and create the quote without leaving the map.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "background": {
+    "service_worker": "background/service-worker.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://earth.google.com/*"],
+      "js": ["content/content.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://turnkeycrm.net/*",
+        "http://localhost/*",
+        "http://localhost:5173/*",
+        "http://localhost:8888/*",
+        "http://127.0.0.1/*",
+        "http://127.0.0.1:5173/*",
+        "http://127.0.0.1:8888/*"
+      ],
+      "js": ["content/bridge/customer-launch.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "content/panel/*.js",
+        "content/panel/panel.css",
+        "api/*.js",
+        "vendor/*.js"
+      ],
+      "matches": ["https://earth.google.com/*"]
+    },
+    {
+      "resources": ["geometry.js"],
+      "matches": [
+        "https://turnkeycrm.net/*",
+        "http://localhost/*",
+        "http://localhost:5173/*",
+        "http://localhost:8888/*",
+        "http://127.0.0.1/*",
+        "http://127.0.0.1:5173/*",
+        "http://127.0.0.1:8888/*"
+      ]
+    }
+  ],
+  "permissions": ["storage", "activeTab", "scripting"],
+  "host_permissions": [
+    "https://turnkeycrm.net/*",
+    "http://localhost/*",
+    "http://localhost:5173/*",
+    "http://localhost:8888/*",
+    "http://127.0.0.1/*",
+    "http://127.0.0.1:5173/*",
+    "http://127.0.0.1:8888/*"
+  ],
+  "optional_host_permissions": [
+    "https://rcighpmdrutnghsqhzlr.supabase.co/*",
+    "https://turnkeynova.onrender.com/*"
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
+}

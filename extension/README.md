@@ -1,3 +1,14 @@
+## Production and local development manifests
+
+`extension/manifest.json` and `chrome-extension/manifest.json` allow production
+origins only. Their original manifests, including local development origins,
+are preserved alongside them as `manifest.dev.json`.
+
+For local development, copy the relevant extension folder to a separate local
+folder, replace that copy's `manifest.json` with `manifest.dev.json`, and load
+that folder unpacked in Chrome. Keep the production manifests for packaging.
+`chrome-extension/measurement.js` remains required by `scripts/build-static.js`.
+
 ## Version 0.2.11: return to Earth and automatic price feedback
 
 After **Finish**, the measurement workspace returns to the original Earth tab and closes only after Earth accepts the measurement. If navigation fails, the saved measurement stays accepted and the page explains how to return manually.
@@ -139,7 +150,7 @@ mistake (see `quote.js`'s `renderServiceOptions()`).
 1. The Earth content script asks the **background service worker** to open
    the workspace (`TK_OPEN_WORKSPACE`). The worker checks the connected
    site's origin against a small allowlist it can actually inject into
-   (`https://turnkeycrm.net` + local dev origins — see
+   (`https://turnkeycrm.net`; local dev origins need `manifest.dev.json` — see
    `BRIDGE_ALLOWED_ORIGINS` in `background/service-worker.js`, kept in sync
    with `manifest.json`'s `web_accessible_resources` for `geometry.js`); a
    self-hosted site outside that list gets a clear error up front instead of
@@ -228,8 +239,8 @@ bridge to `import()` `geometry.js` on the workspace tab's own origin) is a
 static manifest list — unlike `host_permissions`, it can't be extended at
 runtime when an operator types in a custom site URL. Opening the workspace
 on an unlisted origin fails with a clear message rather than opening a tab
-that can never complete. Production (`https://turnkeycrm.net`) and common
-local-dev origins are covered; extending this to arbitrary self-hosted
+that can never complete. Production (`https://turnkeycrm.net`) is covered by `manifest.json`; common
+local-dev origins require `manifest.dev.json`; extending this to arbitrary self-hosted
 sites would need either a build step that regenerates the manifest per
 deployment, or `externally_connectable`-style trust of arbitrary sites,
 which this extension deliberately avoids.

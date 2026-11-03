@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "TurnKey Measurement Import",
+  "version": "1.0.0",
+  "description": "Review your exported KML/GeoJSON measurements and explicitly send them to TurnKey.",
+  "permissions": ["activeTab"],
+  "action": { "default_popup": "popup.html" },
+  "content_scripts": [{
+    "matches": ["https://turnkeycrm.net/*", "http://localhost/*", "https://localhost/*"],
+    "js": ["content.js"],
+    "run_at": "document_idle"
+  }],
+  "web_accessible_resources": [{
+    "resources": ["measurement.js"],
+    "matches": ["https://turnkeycrm.net/*", "http://localhost/*", "https://localhost/*"]
+  }]
+}

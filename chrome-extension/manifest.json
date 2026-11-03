@@ -6,12 +6,12 @@
   "permissions": ["activeTab"],
   "action": { "default_popup": "popup.html" },
   "content_scripts": [{
-    "matches": ["https://turnkeycrm.net/*", "http://localhost/*", "https://localhost/*"],
+    "matches": ["https://turnkeycrm.net/*"],
     "js": ["content.js"],
     "run_at": "document_idle"
   }],
   "web_accessible_resources": [{
     "resources": ["measurement.js"],
-    "matches": ["https://turnkeycrm.net/*", "http://localhost/*", "https://localhost/*"]
+    "matches": ["https://turnkeycrm.net/*"]
   }]
 }
