@@ -20,6 +20,15 @@
         ],
         "createdAt": "2026-11-02T22:05:53.927Z",
         "reason": "Codex decided: password recovery intentionally matches the existing TurnKey typography rather than introducing a separate visual identity."
+      },
+      {
+        "rule": "broken-image",
+        "value": "*",
+        "files": [
+          "auth-mfa.js"
+        ],
+        "createdAt": "2026-11-03T01:40:37.257Z",
+        "reason": "Agent verified: enrollment sets the QR image src from Supabase immediately after constructing the form; this is dynamic credential imagery, not a placeholder."
       }
     ]
   }

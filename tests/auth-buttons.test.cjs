@@ -22,7 +22,7 @@ function setup(method) {
   const ctx = vm.createContext({
     sb: { auth: method },
     document: { getElementById: id => elements.get(id) },
-    window: { location: { origin: 'https://turnkeycrm.net', pathname: '/index.html', assign: url=>messages.push(url) } },
+    window: { TURNKEY_CONFIG:{allowSignup:true}, location: { origin: 'https://turnkeycrm.net', pathname: '/index.html', assign: url=>messages.push(url) } },
     setAuthMsg: message => messages.push(message),
     setRecoveryMsg: message => messages.push(message),
     toast() {},
@@ -67,4 +67,11 @@ test('password recovery button unlocks when saving or session lookup rejects', a
   await failingSession.ctx.handlePasswordRecoverySubmit();
   assert.equal(failingSession.elements.get('auth-recovery-btn').disabled, false);
   assert.match(failingSession.messages.at(-1), /offline/i);
+});
+
+
+test('signup is disabled unless explicitly enabled and rejects short new passwords',async()=>{
+ let calls=0;const f=setup({signUp:async()=>{calls++;return {error:null};}});
+ f.ctx.window.TURNKEY_CONFIG.allowSignup=false;await f.ctx.handleSignUp();assert.equal(calls,0);assert.match(f.messages.at(-1),/registration is closed/);
+ f.ctx.window.TURNKEY_CONFIG.allowSignup=true;f.elements.get('auth-password').value='short';await f.ctx.handleSignUp();assert.equal(calls,0);assert.match(f.messages.at(-1),/10 characters/);
 });

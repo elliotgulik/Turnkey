@@ -15,6 +15,7 @@ const assets = [
   "index.html",
   "tokens.css",
   "auth-mfa.js",
+  "auth-mfa.css",
   "reset-password.html",
   "reset-password.js",
   "reset-password.css",

@@ -41,7 +41,7 @@ test('a stale generation cannot clear or replace the newer snapshot',async()=>{
  assert.equal(r._mapSnapshotDataUrl,'new');
 });
 test('public filtering accepts geographic-only shapes and text shows saved measurement, never private fields',()=>{
- const {c}=harness();c.TK_PRICING.SERVICES.driveway.label='Driveway <customer>';
+ const {c}=harness();vm.runInContext(pub.slice(pub.indexOf('function escapeHtml(v){'),pub.indexOf('\n}',pub.indexOf('function escapeHtml(v){'))+2),c);c.TK_PRICING.SERVICES.driveway.label='Driveway <customer>';
  const extract=(source,start,end)=>source.slice(source.indexOf(start),source.indexOf(end,source.indexOf(start)));
  vm.runInContext(extract(pub,'function pubAreasWithGeo(', '\nfunction pubLatLngToSvg(')+extract(pub,'function pubShapeSvg(', '\nfunction pubRenderAreas('),c);
  const normalized=c.pubAreasWithGeo(areas());assert.equal(normalized.length,1);

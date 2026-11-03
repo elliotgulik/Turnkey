@@ -8,5 +8,5 @@ test('customer profile edits and persists the lead source field', () => {
   assert.match(profile, /id="cp-source"/);
   assert.match(save, /source:document\.getElementById\('cp-source'\)\.value\.trim\(\)/);
   assert.match(save, /\.from\('customers'\)\.update\(payload\)/);
-  assert.match(save, /records\.filter\(r=>r\.customerId===ctx\.customerId\)\.forEach\(r=>Object\.assign\(r,payload\)\)/);
+  assert.match(save, /records\.filter\(r=>r\.customerId===ctx\.customerId\)\.forEach\(r=>Object\.assign\(r,payload,\{_customerMissing:false\}\)\)/);
 });

@@ -55,6 +55,7 @@ location.replace('/reset-password.html'+location.search+location.hash);
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary">
 <link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="auth-mfa.css">
 <style>
 
   *{box-sizing:border-box;margin:0;padding:0}
@@ -5072,8 +5073,8 @@ function openTemplateEditor(){
     </div>
     <div class="field-row"><div class="field"><label>Phone</label><input id="tpl-phone" placeholder="021 000 0000" value="${t.phone||''}"></div><div class="field"><label>Email</label><input id="tpl-email" placeholder="hello@yourbusiness.co.nz" value="${t.email||''}"></div></div>
     <div class="field"><label>GST number <span style="color:var(--ink-faint);font-weight:400">(optional — leave blank if not GST-registered)</span></label><input id="tpl-gst" placeholder="123-456-789" value="${t.gstNo||''}"></div>
-    <div class="field"><label>Quote terms</label><textarea id="tpl-qterms" rows="3">${t.quoteTerms||''}</textarea></div>
-    <div class="field"><label>Invoice / payment terms</label><textarea id="tpl-iterms" rows="3">${t.invoiceTerms||''}</textarea></div>
+    <div class="field"><label>Quote terms</label><textarea id="tpl-qterms" rows="3">${escapeHtmlSafe(t.quoteTerms||'')}</textarea></div>
+    <div class="field"><label>Invoice / payment terms</label><textarea id="tpl-iterms" rows="3">${escapeHtmlSafe(t.invoiceTerms||'')}</textarea></div>
     <div class="field"><label>Footer line</label><input id="tpl-footer" value="${(t.footer||'').replace(/"/g,'&quot;')}"></div>
     <p style="font-size:12px;color:var(--ink-faint);margin:18px 0 -4px">Below is the actual <b>email</b> sent when you click Send Quote / Send Invoice (separate from the PDF style above — the PDF itself is attached automatically, nothing to download). Use <code>{{customer_name}}</code>, <code>{{business_name}}</code>, <code>{{address}}</code>, <code>{{quote_total}}</code>, <code>{{invoice_total}}</code>, <code>{{job_date}}</code>, <code>{{services}}</code>, <code>{{payment_link}}</code> and <code>{{quote_link}}</code> anywhere in these reusable fields. Customer details fill automatically; edits in the email composer affect only that message.</p>
     ${tplEmailSection('quote')}
@@ -5410,7 +5411,7 @@ function openDetail(id){
                duplicate-address rendering this panel used to have. -->
           <div class="contact-rows">
             <a class="contact-row" href="tel:${telSafe(r.phone)}"><span class="ci"></span><div><div class="cl">Phone</div><div class="cv">${escapeHtmlSafe(r.phone||'—')}</div></div></a>
-            <a class="contact-row" href="mailto:${r.email||''}"><span class="ci"></span><div><div class="cl">Email</div><div class="cv">${r.email||'—'}</div></div></a>
+            <a class="contact-row" href="mailto:${escapeHtmlSafe(r.email||'')}"><span class="ci"></span><div><div class="cl">Email</div><div class="cv">${escapeHtmlSafe(r.email||'—')}</div></div></a>
           </div>
           <div style="display:flex;gap:8px;margin-top:12px">
             <button class="btn ghost sm" onclick="pickCustomerPhoto(${id})">${r.hasCustomerPhoto?'Photo attached — replace':'Add customer photo'}</button>
@@ -5447,7 +5448,7 @@ function openDetail(id){
         <div class="panel"><h4>Lead source</h4>
           <div class="kv"><span class="k">Found via</span><span class="v">${r.source||'—'}</span></div>
           <div class="kv"><span class="k">Returning customer</span><span class="v">${r.repeat==='yes'?'Yes':'No'}</span></div>
-          <div class="kv"><span class="k">Notes</span><span class="v">${r.jobNotes||r.notes||'—'}</span></div>
+          <div class="kv"><span class="k">Notes</span><span class="v">${escapeHtmlSafe(r.jobNotes||r.notes||'—')}</span></div>
           ${r.preferredDate?`<div class="kv"><span class="k">Customer's preferred day</span><span class="v">${r.preferredDate}${r.preferredWindow&&r.preferredWindow!=='Anytime'?' · '+r.preferredWindow:''}</span></div>`:''}
         </div>
       </div>
@@ -6385,7 +6386,7 @@ async function renderOpsMapOSM(box,withAddr){
   geocoded.forEach(g=>{
     const p=project(g.lat,g.lng);
     const leftPct=(p.x-originX)/TILES*100, topPct=(p.y-originY)/TILES*100;
-    pins+=`<div class="map-pin" style="left:${leftPct}%;top:${topPct}%;transform:translate(-50%,-100%) rotate(-45deg);background:${PIN_COLORS[g.idx%5]}" title="${g.name.replace(/"/g,'&quot;')}"><span>${g.idx+1}</span></div>`;
+    pins+=`<div class="map-pin" style="left:${leftPct}%;top:${topPct}%;transform:translate(-50%,-100%) rotate(-45deg);background:${PIN_COLORS[g.idx%5]}" title="${escapeHtmlSafe(g.name)}"><span>${g.idx+1}</span></div>`;
   });
   box.style.cssText='position:relative;overflow:hidden';
   box.innerHTML=`<div style="position:absolute;inset:0">${tiles}</div>${pins}`;
@@ -7284,7 +7285,7 @@ function renderJobTimeline(r){
     const meta=e.status?JOB_STATUS_META[e.status]:null;
     const label=meta?meta.label:(e.note?'Note':'Update');
     const when=new Date(e.at).toLocaleString('en-NZ',{hour:'numeric',minute:'2-digit',day:'numeric',month:'short'});
-    return `<div class="dd-row"><span><b>${when}</b> · ${label}${e.byName?' · '+e.byName:''}${e.note&&meta?' — '+e.note:e.note?': '+e.note:''}</span></div>`;
+    return `<div class="dd-row"><span><b>${when}</b> · ${escapeHtmlSafe(label)}${e.byName?' · '+escapeHtmlSafe(e.byName):''}${e.note&&meta?' — '+escapeHtmlSafe(e.note):e.note?': '+escapeHtmlSafe(e.note):''}</span></div>`;
   }).join('');
 }
 
@@ -8106,7 +8107,7 @@ function renderGoals(){
     const tgt=g.metric==='revenue'?money(g.target):g.metric==='repeatRate'?g.target+'%':g.target;
     return `<div class="goal-card ${g.done?'done':''}">
       <div class="goal-top">
-        <div class="goal-label">${g.label}${g.done?' <span class="goal-tick">\u2713 reached</span>':''}</div>
+        <div class="goal-label">${escapeHtmlSafe(g.label)}${g.done?' <span class="goal-tick">\u2713 reached</span>':''}</div>
         <button class="goal-rm" onclick="removeGoal(${g.id})" title="Remove">\u00d7</button>
       </div>
       <div class="goal-prog"><div class="goal-fill" style="width:${p.pct}%"></div></div>
@@ -10148,7 +10149,7 @@ function sm8RenderValidatePreview(){
   const custTable=`<div class="panel" style="margin-top:14px"><h4>Customers <span class="demo-tag">${s.customers.length}</span></h4>
     <div style="overflow-x:auto"><table class="contact-table" style="min-width:520px">
       <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Address</th></tr></thead>
-      <tbody>${custSample.map(c=>`<tr><td>${escapeHtmlSafe(c.name)}</td><td>${c.email||'—'}</td><td>${c.phone||'—'}</td><td>${c.address||'—'}</td></tr>`).join('')}</tbody>
+      <tbody>${custSample.map(c=>`<tr><td>${escapeHtmlSafe(c.name)}</td><td>${escapeHtmlSafe(c.email||'—')}</td><td>${escapeHtmlSafe(c.phone||'—')}</td><td>${escapeHtmlSafe(c.address||'—')}</td></tr>`).join('')}</tbody>
     </table></div>${s.customers.length>5?`<p style="font-size:11px;color:var(--ink-faint);margin-top:6px">+ ${s.customers.length-5} more not shown</p>`:''}</div>`;
   const jobTable=s.jobs.length?`<div class="panel" style="margin-top:14px"><h4>Jobs <span class="demo-tag">${s.jobs.length}</span></h4>
     <div style="overflow-x:auto"><table class="contact-table" style="min-width:520px">
@@ -10303,7 +10304,7 @@ function iwRenderRun(){
     return `<div class="kv"><span class="k">${ent.label}</span><span class="v">${e.inserted} imported${e.duplicates?` · ${e.duplicates} duplicate${e.duplicates!==1?'s':''} skipped`:''}${e.errors?` · <span style="color:var(--coral)">${e.errors} error${e.errors!==1?'s':''}</span>`:''}</span></div>`;
   }).join('');
   const errList=(r.errors||[]).length?`<div class="panel" style="margin-top:14px"><h4>Error report <span class="demo-tag">${r.errors.length}</span></h4>
-    <div style="max-height:220px;overflow-y:auto">${r.errors.map(e=>`<div class="iw-err-row"><b>${e.entity}</b>${e.ref?' ('+e.ref+')':''} — ${e.message}</div>`).join('')}</div></div>`:'';
+    <div style="max-height:220px;overflow-y:auto">${r.errors.map(e=>`<div class="iw-err-row"><b>${escapeHtmlSafe(e.entity)}</b>${e.ref?' ('+escapeHtmlSafe(e.ref)+')':''} — ${escapeHtmlSafe(e.message)}</div>`).join('')}</div></div>`:'';
   const sm8Extra=iwIsSm8()&&importWizard.sm8?(()=>{
     const v=importWizard.sm8.validation;
     const items=[];

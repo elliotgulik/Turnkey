@@ -20,5 +20,5 @@ test('historical imports do not trigger the original intake customer email',()=>
  const s=fs.readFileSync('index.html','utf8');
  assert.match(s,/if\(!payload\.historicalImport\)sendLifecycleEmail\(rec,'new_lead'\)/);
  assert.match(s,/if\(!payload\.historicalImport\)notifyOwner\('new_lead'/);
- assert.match(s,/if\(sid&&!payload\.external_id&&records\.some/);
+ assert.match(s,/window\.TK_LEAD_IDENTITY\?\.sameIntake\(r,payload,currentBusinessId\)/); assert.match(s,/if\(matches\.length===1\)return matches\[0\]/);
 });

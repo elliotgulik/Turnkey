@@ -33,9 +33,9 @@
   dialog.innerHTML='<div class="auth-card"><h2>Two-factor sign-in</h2><p>Protect your account with an authenticator app.</p><div data-content></div><p role="status" data-message></p><button class="btn ghost block" data-close>Close</button></div>';
   document.body.append(dialog);dialog.querySelector('[data-close]').onclick=()=>dialog.close();
   dialog.addEventListener('close',()=>{dialog.remove();dialog=null;enrollment=null;},{once:true});dialog.showModal();
-  const host=dialog.querySelector('[data-content]'),message=dialog.querySelector('[data-message]');
+  const panel=dialog,host=panel.querySelector('[data-content]'),message=panel.querySelector('[data-message]');
   try{
-   const list=await factors();if(!dialog)return;
+   const list=await factors();if(dialog!==panel)return;
    host.innerHTML=list.length?'<p>Your authenticator is connected.</p><button class="btn ghost block" data-remove>Remove authenticator</button>':'<button class="btn primary block" data-enroll>Set up authenticator</button>';
    if(list.length)host.querySelector('[data-remove]').onclick=async e=>{
     e.target.disabled=true;
@@ -45,7 +45,7 @@
    else host.querySelector('[data-enroll]').onclick=async e=>{
     e.target.disabled=true;
     try{
-     const {data,error}=await auth().mfa.enroll({factorType:'totp',friendlyName:'TurnKey authenticator'});if(error)throw error;if(!dialog)return;enrollment=data.id;
+     const {data,error}=await auth().mfa.enroll({factorType:'totp',friendlyName:'TurnKey authenticator'});if(error)throw error;if(dialog!==panel){await auth().mfa.unenroll({factorId:data.id});return;}enrollment=data.id;
      host.innerHTML='<p>Scan this QR code in your authenticator, then enter its code.</p><img data-qr alt="Scan in your authenticator app" width="220" height="220"><form><div class="field"><label for="mfa-enroll-code">Six-digit code</label><input id="mfa-enroll-code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required></div><button class="btn primary block" type="submit">Verify authenticator</button></form>';
      host.querySelector('[data-qr]').src=data.totp.qr_code;
      host.querySelector('form').onsubmit=async event=>{event.preventDefault();const button=event.target.querySelector('button');button.disabled=true;try{await verify(enrollment,$('mfa-enroll-code').value.trim());enrollment=null;host.replaceChildren();message.textContent='Two-factor sign-in is enabled.';}catch(error){errorText(message,error);}finally{button.disabled=false;}};
