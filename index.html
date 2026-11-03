@@ -1532,7 +1532,7 @@ location.replace('/reset-password.html'+location.search+location.hash);
       <div class="field"><label>How did they find you?</label><select id="l-source"><option>Google search</option><option>Facebook</option><option>Referral</option><option>Repeat customer</option><option>Flyer / local</option><option>Other</option></select></div>
       <div class="field"><label>Returning customer?</label><select id="l-repeat"><option value="no">No — new</option><option value="yes">Yes — repeat</option></select></div>
     </div>
-    <div class="field"><label>Job notes</label><textarea id="l-notes" rows="2" placeholder="e.g. Big mossy driveway about 120sqm, plus gutters look blocked"></textarea></div>
+    <div class="field"><label>Job notes</label><textarea id="l-notes" aria-describedby="job-notes-visibility" rows="2" placeholder="e.g. Big mossy driveway about 120sqm, plus gutters look blocked"></textarea><small id="job-notes-visibility">Shown to the customer on their quote.</small></div>
     <!-- Only shown when opened from Calendar's "+ Create Job" — see
          openCalendarJobModal(). Same underlying newRecord()/Supabase save as
          every other lead/job path (saveLead()) — this is not a second
