@@ -6449,8 +6449,8 @@ function renderPricing(){
       <div class="rate-card">
         <div class="rc-head"><div><div class="rc-name">${escapeHtmlSafe(v.label)}</div><div class="rc-basis">Priced by ${v.basis}</div></div></div>
         <div class="rate-tiers">
-          ${v.usesRoofType?Object.entries(ROOF_TYPES).map(([rk,rv])=>`<div class="rate-tier"><label>${rv.label}</label><div class="ri"><span>$</span><input type="number" value="${(v.rate*rv.mult).toFixed(0)}" onchange="setRoofRate('${k}','${rk}',this.value)"><span>/${v.unit}</span></div></div>`).join('')
-          :`<div class="rate-tier"><label>Standard rate</label><div class="ri"><span>$</span><input type="number" value="${v.rate}" onchange="setRate('${k}',this.value)"><span>/${v.unit}</span></div></div>`}
+          ${v.usesRoofType?Object.entries(ROOF_TYPES).map(([rk,rv])=>`<div class="rate-tier"><label>${rv.label}</label><div class="ri"><span>$</span><input aria-label="${escapeHtmlSafe(v.label)} — ${escapeHtmlSafe(rv.label)} rate" type="number" value="${(v.rate*rv.mult).toFixed(0)}" onchange="setRoofRate('${k}','${rk}',this.value)"><span>/${v.unit}</span></div></div>`).join('')
+          :`<div class="rate-tier"><label>Standard rate</label><div class="ri"><span>$</span><input aria-label="${escapeHtmlSafe(v.label)} standard rate" type="number" value="${v.rate}" onchange="setRate('${k}',this.value)"><span>/${v.unit}</span></div></div>`}
         </div>
       </div>`).join('')}
     <div class="panel" style="margin-top:8px"><h4>Chemical costs <span class="demo-tag">per litre</span></h4>
@@ -6458,7 +6458,7 @@ function renderPricing(){
       ${Object.entries(CHEMICALS).map(([ck,cv])=>`
         <div class="rate-tier" style="padding:9px 0;border-bottom:1px solid var(--line-soft)">
           <label>${cv.label}${cv.perL===null?' — supplier cost not set':''}</label>
-          <div class="ri"><span>$</span><input type="number" step="0.10" min="0" placeholder="Not set" value="${cv.perL===null?'':cv.perL.toFixed(2)}" onchange="setChemPrice('${ck}',this.value)"><span>/L</span></div>
+          <div class="ri"><span>$</span><input aria-label="${escapeHtmlSafe(cv.label||ck)} chemical price per litre" type="number" step="0.10" min="0" placeholder="Not set" value="${cv.perL===null?'':cv.perL.toFixed(2)}" onchange="setChemPrice('${ck}',this.value)"><span>/L</span></div>
         </div>`).join('')}
       <div style="margin-top:16px">
         <div style="font-size:11px;font-weight:600;letter-spacing:.02em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:9px">Usage per service</div>
@@ -6472,16 +6472,16 @@ function renderPricing(){
     </div>
     <div class="panel" style="margin-top:14px"><h4>Labour, travel &amp; overheads</h4>
       <p style="font-size:13px;color:var(--ink-soft);margin:-4px 0 14px">Every number behind "cost to deliver" on a quote — nothing here is fixed, tune it to how your business actually runs.</p>
-      <div class="rate-tier" style="padding:9px 0;border-bottom:1px solid var(--line-soft)"><label>Crew wage</label><div class="ri"><span>$</span><input type="number" value="${COST_INPUTS.wage}" onchange="setCostInput('wage',this.value)"><span>/hr per person</span></div></div>
-      <div class="rate-tier" style="padding:9px 0;border-bottom:1px solid var(--line-soft)"><label>Crew size</label><div class="ri"><input type="number" value="${COST_INPUTS.crew}" onchange="setCostInput('crew',this.value)"><span>people on a typical job</span></div></div>
-      <div class="rate-tier" style="padding:9px 0;border-bottom:1px solid var(--line-soft)"><label>Setup / pack-down</label><div class="ri"><input type="number" value="${COST_INPUTS.setupMin}" onchange="setCostInput('setupMin',this.value)"><span>min per job</span></div></div>
-      <div class="rate-tier" style="padding:9px 0;border-bottom:1px solid var(--line-soft)"><label>Fuel cost</label><div class="ri"><span>$</span><input type="number" step="0.01" value="${COST_INPUTS.fuelPerKm}" onchange="setCostInput('fuelPerKm',this.value)"><span>/km</span></div></div>
-      <div class="rate-tier" style="padding:9px 0;border-bottom:1px solid var(--line-soft)"><label>Avg round-trip drive</label><div class="ri"><input type="number" value="${COST_INPUTS.avgKm}" onchange="setCostInput('avgKm',this.value)"><span>km per job</span></div></div>
-      <div class="rate-tier" style="padding:9px 0;border-bottom:1px solid var(--line-soft)"><label>Equipment</label><div class="ri"><span>$</span><input type="number" value="${COST_INPUTS.equipmentPerJob}" onchange="setCostInput('equipmentPerJob',this.value)"><span>/job (wear &amp; maintenance)</span></div></div>
-      <div class="rate-tier" style="padding:9px 0;border-bottom:1px solid var(--line-soft)"><label>Consumables</label><div class="ri"><span>$</span><input type="number" value="${COST_INPUTS.consumablesPerJob}" onchange="setCostInput('consumablesPerJob',this.value)"><span>/job (PPE, misc supplies)</span></div></div>
-      <div class="rate-tier" style="padding:9px 0;border-bottom:1px solid var(--line-soft)"><label>Target profit margin</label><div class="ri"><input type="number" value="${Math.round(COST_INPUTS.targetMargin*100)}" onchange="setCostInput('targetMargin',this.value/100)"><span>%${COST_INPUTS.gstRegistered?' of ex-GST revenue':''} — drives the recommended price on every quote</span></div></div>
-      <div class="rate-tier" style="padding:9px 0"><label>Minimum call-out</label><div class="ri"><span>$</span><input type="number" value="${COST_INPUTS.calloutMin}" onchange="setCostInput('calloutMin',this.value)"><span>lowest recommended price, however small the job</span></div></div>
-      <div class="rate-tier" style="padding:9px 0;border-top:1px solid var(--line-soft)"><label>GST registered</label><div class="ri"><input type="checkbox" ${COST_INPUTS.gstRegistered?'checked':''} onchange="setCostFlag('gstRegistered',this.checked)" style="width:auto"><span>quoted prices include 15% GST — margin is worked out on what you keep</span></div></div>
+      <div class="rate-tier" style="padding:9px 0;border-bottom:1px solid var(--line-soft)"><label>Crew wage</label><div class="ri"><span>$</span><input aria-label="Crew hourly wage" type="number" value="${COST_INPUTS.wage}" onchange="setCostInput('wage',this.value)"><span>/hr per person</span></div></div>
+      <div class="rate-tier" style="padding:9px 0;border-bottom:1px solid var(--line-soft)"><label>Crew size</label><div class="ri"><input aria-label="Typical crew size" type="number" value="${COST_INPUTS.crew}" onchange="setCostInput('crew',this.value)"><span>people on a typical job</span></div></div>
+      <div class="rate-tier" style="padding:9px 0;border-bottom:1px solid var(--line-soft)"><label>Setup / pack-down</label><div class="ri"><input aria-label="Setup and pack-down minutes" type="number" value="${COST_INPUTS.setupMin}" onchange="setCostInput('setupMin',this.value)"><span>min per job</span></div></div>
+      <div class="rate-tier" style="padding:9px 0;border-bottom:1px solid var(--line-soft)"><label>Fuel cost</label><div class="ri"><span>$</span><input aria-label="Fuel cost per kilometre" type="number" step="0.01" value="${COST_INPUTS.fuelPerKm}" onchange="setCostInput('fuelPerKm',this.value)"><span>/km</span></div></div>
+      <div class="rate-tier" style="padding:9px 0;border-bottom:1px solid var(--line-soft)"><label>Avg round-trip drive</label><div class="ri"><input aria-label="Average round-trip kilometres" type="number" value="${COST_INPUTS.avgKm}" onchange="setCostInput('avgKm',this.value)"><span>km per job</span></div></div>
+      <div class="rate-tier" style="padding:9px 0;border-bottom:1px solid var(--line-soft)"><label>Equipment</label><div class="ri"><span>$</span><input aria-label="Equipment cost per job" type="number" value="${COST_INPUTS.equipmentPerJob}" onchange="setCostInput('equipmentPerJob',this.value)"><span>/job (wear &amp; maintenance)</span></div></div>
+      <div class="rate-tier" style="padding:9px 0;border-bottom:1px solid var(--line-soft)"><label>Consumables</label><div class="ri"><span>$</span><input aria-label="Consumables cost per job" type="number" value="${COST_INPUTS.consumablesPerJob}" onchange="setCostInput('consumablesPerJob',this.value)"><span>/job (PPE, misc supplies)</span></div></div>
+      <div class="rate-tier" style="padding:9px 0;border-bottom:1px solid var(--line-soft)"><label>Target profit margin</label><div class="ri"><input aria-label="Target gross margin percent" type="number" value="${Math.round(COST_INPUTS.targetMargin*100)}" onchange="setCostInput('targetMargin',this.value/100)"><span>%${COST_INPUTS.gstRegistered?' of ex-GST revenue':''} — drives the recommended price on every quote</span></div></div>
+      <div class="rate-tier" style="padding:9px 0"><label>Minimum call-out</label><div class="ri"><span>$</span><input aria-label="Minimum call-out price" type="number" value="${COST_INPUTS.calloutMin}" onchange="setCostInput('calloutMin',this.value)"><span>lowest recommended price, however small the job</span></div></div>
+      <div class="rate-tier" style="padding:9px 0;border-top:1px solid var(--line-soft)"><label>GST registered</label><div class="ri"><input aria-label="GST registered" type="checkbox" ${COST_INPUTS.gstRegistered?'checked':''} onchange="setCostFlag('gstRegistered',this.checked)" style="width:auto"><span>quoted prices include 15% GST — margin is worked out on what you keep</span></div></div>
     </div>
     ${renderOverheadsPanel()}
     ${renderProductivityPanel()}
@@ -6497,11 +6497,11 @@ function renderOverheadsPanel(){
   const since=Date.now()-90*864e5;
   const done90=records.filter(r=>(r.stage==='completed'||r.stage==='paid')&&r.scheduledDateISO&&new Date(r.scheduledDateISO).getTime()>=since).length;
   const actualPerMonth=Math.round(done90/3);
-  const row=(k,o)=>`<div class="rate-tier" style="padding:9px 0;border-bottom:1px solid var(--line-soft)"><label>${o.label}</label><div class="ri"><span>$</span><input type="number" value="${o.perMonth}" onchange="setOverhead('${k}',this.value)"><span>/month</span></div></div>`;
+  const row=(k,o)=>`<div class="rate-tier" style="padding:9px 0;border-bottom:1px solid var(--line-soft)"><label>${o.label}</label><div class="ri"><span>$</span><input aria-label="${escapeHtmlSafe(o.label)} monthly overhead" type="number" value="${o.perMonth}" onchange="setOverhead('${k}',this.value)"><span>/month</span></div></div>`;
   return `<div class="panel" style="margin-top:14px"><h4>Overheads <span class="demo-tag">monthly, ex-GST</span></h4>
     <p style="font-size:13px;color:var(--ink-soft);margin:-4px 0 14px">Costs the business pays every month regardless of jobs. They're spread across your jobs so every quote covers its share.</p>
     ${Object.entries(TK_COST.OVERHEADS).map(([k,o])=>row(k,o)).join('')}
-    <div class="rate-tier" style="padding:9px 0;border-bottom:1px solid var(--line-soft)"><label>Jobs per month</label><div class="ri"><input type="number" min="1" value="${COST_INPUTS.jobsPerMonth}" onchange="setCostInput('jobsPerMonth',this.value);renderPricing()"><span>${done90?`last 90 days averaged ${actualPerMonth}/month`:'how many jobs you typically complete'}</span></div></div>
+    <div class="rate-tier" style="padding:9px 0;border-bottom:1px solid var(--line-soft)"><label>Jobs per month</label><div class="ri"><input aria-label="Jobs per month" type="number" min="1" value="${COST_INPUTS.jobsPerMonth}" onchange="setCostInput('jobsPerMonth',this.value);renderPricing()"><span>${done90?`last 90 days averaged ${actualPerMonth}/month`:'how many jobs you typically complete'}</span></div></div>
     <div class="kv" style="padding-top:10px"><span class="k" style="font-weight:600">Overhead per job</span><span class="v">${monthly>0?`${money(monthly)}/mo ÷ ${COST_INPUTS.jobsPerMonth} = <b>${money(perJob)}</b>`:'Not set — quotes currently ignore overheads'}</span></div>
   </div>`;
 }
@@ -6511,7 +6511,7 @@ function renderProductivityPanel(){
   const rows=Object.entries(SERVICES).map(([k,v])=>{
     const sc=SVC_COST[k]; if(!sc)return '';
     return `<div class="rate-tier" style="padding:9px 0;border-bottom:1px solid var(--line-soft)"><label>${escapeHtmlSafe(v.label)}</label>
-      <div class="ri"><input type="number" min="1" value="${sc.m2ph}" onchange="setSvcCost('${k}','m2ph',this.value)"><span>${v.unit}/hr</span>
+      <div class="ri"><input aria-label="${escapeHtmlSafe(v.label)} productivity per hour" type="number" min="1" value="${sc.m2ph}" onchange="setSvcCost('${k}','m2ph',this.value)"><span>${v.unit}/hr</span>
       </div></div>
       ${Object.entries(CHEMICALS).map(([id,chemical])=>{
         const usage=TK_COST.serviceChemicals(k),selected=Object.hasOwn(usage,id);
