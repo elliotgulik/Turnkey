@@ -92,3 +92,10 @@
  #view-leads .nlm-reference .nlm-header-actions > .btn.primary { width:auto; flex:0 0 auto!important; min-height:44px!important; }
  #view-leads .nlm-reference .nlm-header-actions { justify-content:flex-start; }
 }
+#view-leads .nlm-reference .nlm-answer-group { margin-top:20px; padding-top:16px; border-top:1px solid var(--tk-rule); }
+#view-leads .nlm-reference .nlm-answer-group h4 { margin:0 0 10px; color:var(--tk-ink); font-family:var(--tk-font-display); font-size:17px; font-weight:600; }
+#view-leads .nlm-reference .nlm-answer-group .nlm-form-answers { margin:0; display:grid; gap:12px; }
+#view-leads .nlm-reference .nlm-answer-group .nlm-form-answers > div { display:grid; gap:3px; padding:0; border:0; background:none; }
+#view-leads .nlm-reference .nlm-answer-group dt { color:var(--tk-muted); font-size:13px; }
+#view-leads .nlm-reference .nlm-answer-group dd { margin:0; color:var(--tk-ink); font-size:15px; line-height:1.5; white-space:pre-wrap; overflow-wrap:anywhere; }
+#view-leads .nlm-reference .nlm-answer-clarify { display:block; margin-top:6px; color:var(--tk-muted); font-size:12px; line-height:1.5; }

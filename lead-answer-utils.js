@@ -96,7 +96,48 @@
       return label && answer ? [{label,answer,kind:isServiceField(label)?'service':'context'}] : [];
     });
   }
+  // Presentation only: raw intake answers remain unchanged for ingestion/audits.
+  function presentRecord(record) {
+    const groups = [], seen = new Set();
+    const pretty = (value, contact=false) => {
+      const text = String(value || '').trim();
+      if (contact || /https?:\/\//i.test(text)) return text;
+      const clean = text.replace(/_/g, ' ').replace(/[ \t]+/g, ' ').trim();
+      return clean ? clean[0].toUpperCase() + clean.slice(1) : '';
+    };
+    const add = row => {
+      const key = compact(row.label), answer = row.answer;
+      let group='Additional information', label=humanizeLabel(row.label), contact=false;
+      if (row.kind==='service' || isServiceField(row.label) || key==='customerrequest') { group='Services & property'; label='Requested services'; }
+      else if (/residentialorcommercial|propertytype|customertype/.test(key)) { group='Services & property'; label='Property type'; }
+      else if (/storeys|stories|houselevels|numberoflevels/.test(key)) { group='Services & property'; label='House levels'; }
+      else if (/accessdifficulty|propertyaccess/.test(key)) { group='Services & property'; label='Access'; }
+      else if (/urgency|howsoon|preferredtiming/.test(key)) { group='Timing'; label='Urgency'; }
+      else if (/preferred.*date|preferred.*time|besttimetocall|bookingdate|cleaningfrequency/.test(key)) { group='Timing'; }
+      else if (/^(firstname|lastname|fullname|name|email|phone|phonenumber|mobile|address|jobaddress|selectanaddress)$/.test(key)) { group='Contact details'; contact=true; }
+      else if (/how.*find|referralsource/.test(key)) label='How they found us';
+      else if (/agree|consent|terms/.test(key)) { group='Consent'; }
+      else if (messageKeys.has(key)) label='Customer message';
+      const display=pretty(answer,contact), dedupe=group+'|'+label.toLowerCase()+'|'+display.toLowerCase();
+      if (!display || seen.has(dedupe) || /^(submitted via online quote tool)[.!]?$/i.test(display)) return;
+      seen.add(dedupe);
+      groups.push({group,label,answer:display,needsClarification:label==='Requested services' && /^(outside|inside|both|yes|no)$/i.test(display)});
+    };
+    answersFromSubmission(record?.formAnswers).forEach(add);
+    for (const key of ['notes','jobNotes','salesNotes']) {
+      const text=String(record?.[key]||'').replace(/[ \t]+(?=(?:urgency|residential_or_commercial|property_type|best_time_to_call):)/gi,'\n');
+      answersFromNotes(text).forEach(row=>add(key==='salesNotes'&&row.label==='Notes'?{...row,label:'Sales notes'}:row));
+    }
+    if (!groups.some(row=>row.label==='Requested services')) {
+      for (const value of Array.isArray(record?.requestedServices)?record.requestedServices:[]) {
+        const answer=typeof value==='string'?value:value?.name||value?.label;
+        if(answer)add({label:'Requested services',answer,kind:'service'});
+      }
+    }
+    if(record?.urgency&&!groups.some(row=>row.label==='Urgency'))add({label:'Urgency',answer:record.urgency});
+    return groups;
+  }
   const servicesFromNotes = notes => answersFromNotes(notes).filter(row => row.kind === 'service').map(row => row.answer);
   const servicesFromFields = fields => answersFromFields(fields).filter(row => row.kind === 'service').map(row => row.answer);
-  return { answersFromNotes, answersFromFields, answersFromSubmission, servicesFromNotes, servicesFromFields, humanizeLabel, isServiceField };
+  return { presentRecord, answersFromNotes, answersFromFields, answersFromSubmission, servicesFromNotes, servicesFromFields, humanizeLabel, isServiceField };
 });

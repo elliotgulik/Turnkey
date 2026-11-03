@@ -145,3 +145,24 @@ test('complete Wix submission keeps context, checkboxes and exact labels separat
   assert.equal(rows[4].answer,'Checked');assert.equal(rows[5].answer,'Unchecked');
   assert.equal(rows[3].answer,'Every 4 Months');
 });
+
+test('presentation categorizes actual Meta notes without mistaking question choices for selections', () => {
+  const r={notes:`${question}: Outside\nurgency: as_soon_as_possible\nresidential_or_commercial: residential · Submitted via online quote tool`};
+  assert.deepEqual(U.presentRecord(r),[
+    {group:'Services & property',label:'Requested services',answer:'Outside',needsClarification:true},
+    {group:'Timing',label:'Urgency',answer:'As soon as possible',needsClarification:false},
+    {group:'Services & property',label:'Property type',answer:'Residential',needsClarification:false},
+  ]);
+  assert.equal(U.servicesFromNotes(r.notes)[0],'Outside');
+});
+
+test('presentation merges fields and legacy notes without losing messages or changing raw data', () => {
+ const r={formAnswers:[{label:'Select Services',answer:'House Clean, Roof Treatment'},{label:'Email',answer:'my_email@example.test'},{label:'Urgency',answer:'as_soon_as_possible'}],notes:'urgency: as_soon_as_possible\nresidential_or_commercial: commercial\nMessage: Please call after 5.',salesNotes:'Keys with the neighbour'};
+ const original=JSON.stringify(r),rows=U.presentRecord(r);
+ assert.equal(rows.filter(x=>x.label==='Urgency').length,1);
+ assert.equal(rows.find(x=>x.label==='Email').answer,'my_email@example.test');
+ assert.equal(rows.find(x=>x.label==='Requested services').answer,'House Clean, Roof Treatment');
+ assert.ok(rows.some(x=>x.answer==='Please call after 5.'));
+ assert.ok(rows.some(x=>x.label==='Sales notes'&&x.answer==='Keys with the neighbour'));
+ assert.equal(JSON.stringify(r),original);
+});
