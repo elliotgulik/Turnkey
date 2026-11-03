@@ -1994,7 +1994,17 @@ const LOST_REASONS=[
   {key:'other',label:'Other'}
 ];
 function lostReasonLabel(k){const f=LOST_REASONS.find(x=>x.key===k);return f?f.label:(k||'Not recorded');}
-function escapeHtmlSafe(t){return String(t==null?'':t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function escapeHtmlSafe(t){return String(t==null?'':t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
+function telSafe(v){return String(v||'').replace(/[^+\d]/g,'');}
+function inlineStringSafe(v){return escapeHtmlSafe(JSON.stringify(String(v??'')));}
+function legacyMessageText(message){
+  if(message.body_text)return message.body_text;
+  const template=document.createElement('template');template.innerHTML=message.body_html||'';
+  template.content.querySelectorAll('script,style,iframe,object,noscript').forEach(n=>n.remove());
+  template.content.querySelectorAll('br').forEach(n=>n.replaceWith('\n'));
+  template.content.querySelectorAll('p,div,tr,li,h1,h2,h3').forEach(n=>n.append('\n'));
+  return template.content.textContent.trim()||message.snippet||'';
+}
 function isOpenSale(r){return ['new','contacted','qualified','quoting','quoted','followup'].includes(r.stage)} // still selling
 
 /* ===== Job status: the full customer-facing lifecycle badge, richer than
@@ -2075,7 +2085,7 @@ const SVC_COST=TK_COST.SVC_COST, CHEMICALS=TK_COST.CHEMICALS, COST_INPUTS=TK_COS
 // confirmQuoteSend's duration estimate) get the same shape as before;
 // TK_COST.costBreakdown() is the one real implementation.
 function estimateJob(services,travel,access){return TK_COST.costBreakdown((services||[]).map(s=>({ ...s })),travel,access?{access}:undefined);}
-function fmtDur(min){const h=Math.floor(min/60),m=Math.round(min%60);return h?`${h}h ${m?m+'m':''}`.trim():`${m}m`}
+function fmtDur(min){const h=Math.floor(min/60),m=Math.round(min%60);return h?`${escapeHtmlSafe(h)}h ${m?m+'m':''}`.trim():`${m}m`}
 const DAY_START_MIN = 8*60; // crews start at 8:00am
 function fmtTime(mins){let h=Math.floor(mins/60),m=Math.round(mins%60);const ap=h>=12?'pm':'am';let h12=h%12;if(h12===0)h12=12;return `${h12}:${String(m).padStart(2,'0')}${ap}`;}
 /* ===== Real-date scheduling helpers — the calendar is no longer capped to a
@@ -3069,7 +3079,7 @@ function openNewJobModal(customerId){
   document.getElementById('l-schedule-fields').style.display='';
   document.getElementById('l-save-btn').textContent='Create job';
   const svcSel=document.getElementById('l-svc');
-  svcSel.innerHTML='<option value="">— none yet —</option>'+Object.entries(SERVICES).map(([k,v])=>`<option value="${k}">${v.label}</option>`).join('');
+  svcSel.innerHTML='<option value="">— none yet —</option>'+Object.entries(SERVICES).map(([k,v])=>`<option value="${k}">${escapeHtmlSafe(v.label)}</option>`).join('');
   document.getElementById('l-assign').innerHTML=staffOptionsHtml(true);
   document.getElementById('l-date').value=todayISO();
   document.getElementById('l-status').value='new';
@@ -3275,8 +3285,8 @@ function renderQuoteAttachList(){
   // quote-map area photos) — non-image attachments (PDFs etc) keep the
   // filename chip since there's nothing to thumbnail.
   zone.innerHTML=list.map(a=>isImagePath(a.path)
-    ?`<div class="qa-photo-thumb" data-path="${a.path}" title="${(a.filename||'file').replace(/"/g,'&quot;')}" onclick="viewAttachmentPath('${a.path}')"></div>`
-    :`<span class="seg" style="cursor:pointer" onclick="viewAttachmentPath('${a.path}')">${(a.filename||'file').replace(/</g,'&lt;')}</span>`
+    ?`<div class="qa-photo-thumb" data-path="${escapeHtmlSafe(a.path)}" title="${escapeHtmlSafe(a.filename||'file')}" onclick="viewAttachmentPath(${inlineStringSafe(a.path)})"></div>`
+    :`<span class="seg" style="cursor:pointer" onclick="viewAttachmentPath(${inlineStringSafe(a.path)})">${escapeHtmlSafe(a.filename||'file')}</span>`
   ).join('');
   zone.querySelectorAll('.qa-photo-thumb[data-path]').forEach(async cell=>{
     const url=await signedUrlFor(cell.dataset.path);
@@ -3672,7 +3682,7 @@ function qeRenderSvcPicker(){
   el.innerHTML=Object.entries(SERVICES).filter(([k])=>k!=='windows').map(([k,v])=>{
     const hex=QE_SVC_HEX[k]||'#0f7d6b';
     const active=qe.mode==='draw'&&qe.drawSvc===k;
-    return `<button type="button" class="qe-svc-btn ${active?'sel':''}" style="color:${hex}" onclick="qeStartDraw('${k}')"><span class="sw" style="background:${hex}"></span>+ ${v.label.split(' ')[0]}</button>`;
+    return `<button type="button" class="qe-svc-btn ${active?'sel':''}" style="color:${hex}" onclick="qeStartDraw('${k}')"><span class="sw" style="background:${hex}"></span>+ ${escapeHtmlSafe(v.label.split(' ')[0])}</button>`;
   }).join('');
 }
 const QE_IS_TOUCH=('ontouchstart' in window)||navigator.maxTouchPoints>0;
@@ -3725,7 +3735,7 @@ function qeRenderPanel(){
     <div class="qe-panel-head">
       <div class="qe-panel-title">${svc.label} · ${area.size}${area.unit} · ${money(qeAreaPrice(area))}</div>
       <select onchange="qeChangeAreaService('${area.id}',this.value)" style="font-size:12px">
-        ${Object.entries(SERVICES).filter(([k])=>k!=='windows').map(([k,v])=>`<option value="${k}" ${k===area.service?'selected':''}>${v.label}</option>`).join('')}
+        ${Object.entries(SERVICES).filter(([k])=>k!=='windows').map(([k,v])=>`<option value="${k}" ${k===area.service?'selected':''}>${escapeHtmlSafe(v.label)}</option>`).join('')}
       </select>
     </div>
     <textarea placeholder="Notes for this area (access, hazards, extra prep…)" oninput="qeSaveAreaNotes('${area.id}',this.value)">${(area.notes||'').replace(/</g,'&lt;')}</textarea>
@@ -4165,7 +4175,7 @@ function reviewQuote(){
   const a=quoteAssumptions;
   const marginTone=margin>=50?'good':margin>=40?'ok':'low';
   document.getElementById('review-body').innerHTML=`
-    <div class="rv-line"><span>Client</span><b>${r.name}</b></div>
+    <div class="rv-line"><span>Client</span><b>${escapeHtmlSafe(r.name)}</b></div>
     <div class="rv-line"><span>Services</span><b>${lines.map(l=>SERVICES[l.svc].label.split(' ')[0]+' '+l.qty+SERVICES[l.svc].unit).join(', ')}</b></div>
     <div class="rv-line"><span>Access</span><b>${ACCESS_OPTS[a.access].label}</b></div>
     <div class="rv-line"><span>Premium surface</span><b>${a.premium?'Yes (+12%)':'No'}</b></div>
@@ -4221,25 +4231,25 @@ function renderSvcLines(){
     if(svc.usesRoofType){
       if(!line.roofType)line.roofType='concrete';
       extraRow='<select class="sl-roof" aria-label="Roof material" onchange="draftLines['+i+'].roofType=this.value;draftLines['+i+'].customRate=null;draftLines['+i+'].fixedPrice=null;renderSvcLines()">'+
-        Object.entries(ROOF_TYPES).map(([k,v])=>`<option value="${k}" ${k===line.roofType?'selected':''}>Roof type: ${v.label} (\u00d7${v.mult})</option>`).join('')+'</select>';
+        Object.entries(ROOF_TYPES).map(([k,v])=>`<option value="${k}" ${k===line.roofType?'selected':''}>Roof type: ${escapeHtmlSafe(v.label)} (\u00d7${v.mult})</option>`).join('')+'</select>';
     }
     if(line.svc==='housewash'){
       if(!line.storeys)line.storeys=1;
       extraRow='<label class="sl-detail-control">House levels<select class="sl-roof" aria-label="House levels for house wash service" onchange="draftLines['+i+'].storeys=+this.value;draftLines['+i+'].customRate=null;draftLines['+i+'].fixedPrice=null;renderSvcLines()">'+
-        Object.entries(STOREY_TYPES).map(([k,v])=>`<option value="${k}" ${+k===line.storeys?'selected':''}>${v.label}${k>1?' (\u00d7'+v.mult+')':''}</option>`).join('')+'</select>';
+        Object.entries(STOREY_TYPES).map(([k,v])=>`<option value="${k}" ${+k===line.storeys?'selected':''}>${escapeHtmlSafe(v.label)}${k>1?' (\u00d7'+v.mult+')':''}</option>`).join('')+'</select>';
       extraRow=extraRow+'</label>';
     }
     if(line.svc==='fence'){
       if(!line.sides)line.sides=1;
       extraRow='<label class="sl-detail-control">Fence sides<select class="sl-roof" aria-label="Fence sides to clean" onchange="draftLines['+i+'].sides=+this.value;draftLines['+i+'].customRate=null;draftLines['+i+'].fixedPrice=null;renderSvcLines()">'+
-        Object.entries(FENCE_SIDES).map(([k,v])=>`<option value="${k}" ${+k===line.sides?'selected':''}>${v.label}${+k>1?' (\u00d7'+v.mult+')':''}</option>`).join('')+'</select>';
+        Object.entries(FENCE_SIDES).map(([k,v])=>`<option value="${k}" ${+k===line.sides?'selected':''}>${escapeHtmlSafe(v.label)}${+k>1?' (\u00d7'+v.mult+')':''}</option>`).join('')+'</select>';
       extraRow=extraRow+'</label>';
     }
     const isFixed=line.fixedPrice!=null;
     const isWindows=line.svc==='windows';
     const el=document.createElement('div');el.className='svc-line';
     const svcSelect='<select onchange="draftLines['+i+'].svc=this.value;draftLines['+i+'].customRate=null;draftLines['+i+'].fixedPrice=null;draftLines['+i+'].storeys=null;draftLines['+i+'].roofType=null;draftLines['+i+'].sides=null;renderSvcLines()">'+
-      Object.entries(SERVICES).map(([k,v])=>`<option value="${k}" ${k===line.svc?'selected':''}>${v.label}</option>`).join('')+'</select>';
+      Object.entries(SERVICES).map(([k,v])=>`<option value="${k}" ${k===line.svc?'selected':''}>${escapeHtmlSafe(v.label)}</option>`).join('')+'</select>';
     const qtyField=isWindows
       ?`<div class="sl-windows"><input type="number" min="0" step="1" placeholder="0" value="${line.qty||''}" oninput="draftLines[${i}].qty=this.value;updateQuoteTotal()"><span class="sl-win-hint">panes &nbsp;<span class="sl-win-note">inside+outside\u00a0=\u00a02 per window</span></span></div>`
       :isFixed
@@ -4339,7 +4349,7 @@ function renderAssumptions(){
       <div class="assume-h">Property conditions <span class="assume-hint">Adjust site access and surface care; estimates update instantly.</span></div>
       <div class="assume-row">
         <div class="assume-label">Site access<div class="assume-sub">Changes the price and estimated crew time</div></div>
-        <div class="seg">${Object.entries(ACCESS_OPTS).map(([k,v])=>`<button type="button" class="seg-btn ${quoteAssumptions.access===k?'sel':''}" aria-pressed="${quoteAssumptions.access===k}" title="${v.note}" onclick="setAssumeAccess('${k}')">${v.label}</button>`).join('')}</div>
+        <div class="seg">${Object.entries(ACCESS_OPTS).map(([k,v])=>`<button type="button" class="seg-btn ${quoteAssumptions.access===k?'sel':''}" aria-pressed="${quoteAssumptions.access===k}" title="${v.note}" onclick="setAssumeAccess('${k}')">${escapeHtmlSafe(v.label)}</button>`).join('')}</div>
       </div>
       <div class="assume-row">
         <div class="assume-label">Premium / delicate surface<div class="assume-sub">painted, heritage, or soft-wash-only — +12%</div></div>
@@ -5136,7 +5146,7 @@ function tplLifecycleSection(){
           <button class="btn ghost sm" onclick="restoreLifecycleTemplateDefaults('${k}')">Restore defaults</button>
         </div>
         <div class="field" style="margin-top:8px"><label>Subject</label><input id="lc-${k}-subject" value="${(t.subject||'').replace(/"/g,'&quot;')}"></div>
-        <div class="field"><label>Body</label><textarea id="lc-${k}-body" rows="2">${t.body||''}</textarea></div>
+        <div class="field"><label>Body</label><textarea id="lc-${k}-body" rows="2">${escapeHtmlSafe(t.body||'')}</textarea></div>
       </div>`;
     }).join('')}
   </div>`;
@@ -5249,8 +5259,8 @@ function openSchedule(id,presetISO){
   const pairDay=dayInfo.find(d=>d.sameSuburb&&d.fits);
   const techOptions=staff.map(u=>`<option value="${u.id}" ${r.assignedStaffId===u.id?'selected':''}>${(u.name||u.email||'Unnamed').replace(/</g,'&lt;')}</option>`).join('');
   document.getElementById('sched-body').innerHTML=`
-    <p style="font-size:13.5px;color:var(--ink-soft);margin-bottom:6px">${r.name} · ${r.suburb||'—'} · ~${fmtDur(jobMin)} of work.</p>
-    ${pairDay?`<div class="pair-rec"><b>${pairDay.sameSuburb.name}</b> is already booked in ${r.suburb} on <b>${pairDay.day} ${pairDay.date}</b>. Add this job that day to do two in one trip — saves ~22 min driving and a second callout.</div>`:''}
+    <p style="font-size:13.5px;color:var(--ink-soft);margin-bottom:6px">${escapeHtmlSafe(r.name)} · ${r.suburb||'—'} · ~${fmtDur(jobMin)} of work.</p>
+    ${pairDay?`<div class="pair-rec"><b>${escapeHtmlSafe(pairDay.sameSuburb.name)}</b> is already booked in ${r.suburb} on <b>${pairDay.day} ${pairDay.date}</b>. Add this job that day to do two in one trip — saves ~22 min driving and a second callout.</div>`:''}
     <div class="field"><label>Date</label><input type="date" id="sched-date-input" value="${scheduleChoice}" min="${todayISO()}" onchange="onSchedDateInput(this.value)"></div>
     ${dayInfo.length?`<p style="font-size:12px;color:var(--ink-faint);margin:12px 0 6px">Quick-pick from the live ${dayInfo.length}-day forecast:</p>
     <div class="sched-days">
@@ -5306,7 +5316,7 @@ function updateSchedDayDetail(){
   const over=dayEnd>(17*60); // past 5pm
   if(!existing.length){
     zone.innerHTML=`<div class="day-detail"><div class="dd-h">This day is free</div>
-      <div class="dd-row dd-new"><span><b>${fmtTime(mine.start)}–${fmtTime(mine.end)}</b> · ${r.name} (new)</span><span>${fmtDur(jobMin)}</span></div></div>`;
+      <div class="dd-row dd-new"><span><b>${fmtTime(mine.start)}–${fmtTime(mine.end)}</b> · ${escapeHtmlSafe(r.name)} (new)</span><span>${fmtDur(jobMin)}</span></div></div>`;
     return;
   }
   zone.innerHTML=`<div class="day-detail">
@@ -5328,7 +5338,7 @@ function updateSchedWarn(){
     html+=`<div class="sched-warning warn">No weather data available for this date — you're offline or this region has no history on file yet.</div>`;
   }
   const busy=busyBlocksForDate(scheduleChoice);
-  if(busy.length)html+=`<div class="sched-warning warn">Calendar conflict — ${busy.map(b=>b.title||'busy').join(', ')} on your connected calendar this day.</div>`;
+  if(busy.length)html+=`<div class="sched-warning warn">Calendar conflict — ${busy.map(b=>escapeHtmlSafe(b.title||'busy')).join(', ')} on your connected calendar this day.</div>`;
   zone.innerHTML=html;
 }
 function confirmSchedule(){
@@ -5397,7 +5407,7 @@ function openDetail(id){
   const allDone=checklistOk&&photosOk;
   const approved=lastIdx>=0&&r.sop[lastIdx];
   const svcRows=r.services.map(s=>{const svc=SERVICES[s.svc];const note=lineVariantNote(s);return `<div class="kv"><span class="k">${svc.label} · ${s.qty}${svc.unit}${note?' · '+note:''}</span><span class="v">${money(lineSubtotal(s))}</span></div>`}).join('')||'<div class="kv"><span class="k">No services yet</span><span class="v">—</span></div>';
-  const sopHtml=checklist.steps.map((step,i)=>{const checked=r.sop[i];const locked=i===lastIdx&&!allDone;return `<div class="sop-step ${checked?'checked':''} ${locked?'locked':''}"><button class="sop-check" onclick="toggleSop(${id},${i})" ${locked?'disabled':''}>${checked?'✓':''}</button><span class="sop-num">${i+1}</span><span class="sop-label">${step.t}${step.s?`<small>${step.s}</small>`:''}</span></div>`}).join('');
+  const sopHtml=checklist.steps.map((step,i)=>{const checked=r.sop[i];const locked=i===lastIdx&&!allDone;return `<div class="sop-step ${checked?'checked':''} ${locked?'locked':''}"><button class="sop-check" onclick="toggleSop(${id},${i})" ${locked?'disabled':''}>${checked?'✓':''}</button><span class="sop-num">${i+1}</span><span class="sop-label">${escapeHtmlSafe(step.t)}${step.s?`<small>${escapeHtmlSafe(step.s)}</small>`:''}</span></div>`}).join('');
   let approvalHtml;
   const lockedReasons=[];
   if(!checklistOk)lockedReasons.push('finish the checklist steps');
@@ -5434,7 +5444,7 @@ function openDetail(id){
 
   document.getElementById('view-detail').innerHTML=`
     <a class="back-link" onclick="render();switchView('pipeline')">← Back to pipeline</a>
-    <div class="view-head"><div><h2>${r.name}</h2><p>${TK_FORMAT.address(r,{fallback:'No address on file'})} · ${r.phone||'no phone'}</p></div><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    <div class="view-head"><div><h2>${escapeHtmlSafe(r.name)}</h2><p>${TK_FORMAT.address(r,{fallback:'No address on file'})} · ${r.phone||'no phone'}</p></div><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
       <button class="btn ghost sm" onclick="openCustomerProfile(${id})">Sales details</button>
       ${jobStatusBadge(r)}
       ${canEditJobStatus(r)?`<select style="font-size:12px;padding:4px 8px;border-radius:980px" onchange="setManualStatus(${id},this.value)"><option value="">Change status…</option>${manualStatusOptions(r)}</select>`:''}
@@ -5448,7 +5458,7 @@ function openDetail(id){
                it here (same record, same screen) is exactly the kind of
                duplicate-address rendering this panel used to have. -->
           <div class="contact-rows">
-            <a class="contact-row" href="tel:${(r.phone||'').replace(/\s/g,'')}"><span class="ci"></span><div><div class="cl">Phone</div><div class="cv">${r.phone||'—'}</div></div></a>
+            <a class="contact-row" href="tel:${telSafe(r.phone)}"><span class="ci"></span><div><div class="cl">Phone</div><div class="cv">${escapeHtmlSafe(r.phone||'—')}</div></div></a>
             <a class="contact-row" href="mailto:${r.email||''}"><span class="ci"></span><div><div class="cl">Email</div><div class="cv">${r.email||'—'}</div></div></a>
           </div>
           <div style="display:flex;gap:8px;margin-top:12px">
@@ -5512,7 +5522,7 @@ function openDetail(id){
           <div class="sop-locked"><div class="sl-ico"></div><div class="sl-ttl">The job checklist unlocks once it's booked</div><div class="sl-sub">SOP steps, before/after photos and customer sign-off appear here after you schedule the job — keeping the quote stage clean.</div>${r.services.length?`<button class="btn accent block" style="margin-top:14px" onclick="openSchedule(${id})">Book this job</button>`:`<button class="btn ghost block" style="margin-top:14px" onclick="openQuoteModal(${id})">Build a quote first</button>`}</div>
         </div>`}
         <div class="panel"><h4>Assignment</h4>
-          <div class="kv"><span class="k">Crew</span><span class="v">${r.tech}</span></div>
+          <div class="kv"><span class="k">Crew</span><span class="v">${escapeHtmlSafe(r.tech)}</span></div>
           <div class="kv"><span class="k">GPS check-in</span><span class="v">${r.gps==='checked'?'On site ✓':r.gps==='enroute'?'En route':'Not started'}</span></div>
           ${r.finishedAt&&r.durationMin!=null?`<div class="kv"><span class="k">Job duration</span><span class="v">${fmtDur(r.durationMin)}</span></div>`:''}
           ${r.lostReason?`<div class="kv"><span class="k">Lost — reason</span><span class="v">${escapeHtmlSafe(lostReasonLabel(r.lostReason))}${r.lostNote?' · '+escapeHtmlSafe(r.lostNote):''}</span></div>`:''}
@@ -5694,7 +5704,7 @@ function renderAlertsBar(){
     <div class="alerts-scroll">
       ${alerts.map(a=>`<div class="alert-chip ${a.tone}">
         <span class="ac-ico"></span>
-        <div class="ac-body"><div class="ac-title">${a.title}</div><div class="ac-text">${a.text}</div></div>
+        <div class="ac-body"><div class="ac-title">${escapeHtmlSafe(a.title)}</div><div class="ac-text">${escapeHtmlSafe(a.text)}</div></div>
         <button class="ac-act" onclick="event.stopPropagation();${a.action.fn}">${a.action.label}</button>
       </div>`).join('')}
     </div>
@@ -5835,7 +5845,7 @@ function renderCustomers(){
           <div class="cc-top"><div class="cc-name">${g.name}</div>${g.jobs.length>1?`<span class="pill">${g.jobs.length} jobs</span>`:jobStatusBadge(latest)}</div>
           <div class="cc-sub">${TK_FORMAT.address(g,{fallback:'No address on file'})}</div>
           <div class="cc-contact">
-            ${g.phone?`<a href="tel:${g.phone.replace(/\s/g,'')}" onclick="event.stopPropagation()">${g.phone}</a>`:''}
+            ${g.phone?`<a href="tel:${telSafe(g.phone)}" onclick="event.stopPropagation()">${escapeHtmlSafe(g.phone)}</a>`:''}
             ${g.email?`<a href="mailto:${g.email}" onclick="event.stopPropagation()">${g.email}</a>`:''}
           </div>
         </button>`;
@@ -5862,7 +5872,7 @@ function cardHtml(r){
   if(r.stage==='scheduled'){
     return `<div class="card${flag?' has-flag flag-'+flag.tone:''}" role="button" tabindex="0" onclick="openDetail(${r.id})" onkeydown="if(event.key==='Enter')openDetail(${r.id})">
       ${flag?`<div class="card-flag ${flag.tone}">${flag.label}</div>`:''}
-      <div class="name">${r.name}${invoiceBadge}${jobStatusChip}</div>
+      <div class="name">${escapeHtmlSafe(r.name)}${invoiceBadge}${jobStatusChip}</div>
       <div class="meta">${r.suburb||r.address||'—'}</div>
       ${tags?`<div class="svc-tags">${tags}</div>`:''}
       <div class="foot"><span class="price">${r.total?money(r.total):'No quote'}</span><span class="meta">${r.source||''}</span></div>
@@ -5874,7 +5884,7 @@ function cardHtml(r){
   const submittedLine=r.requestSubmittedAt?(()=>{const s=TK_FORMAT.submitted(r.requestSubmittedAt);return s?`<div class="meta submitted-at">Submitted ${s.full}</div>`:'';})():'';
   return `<button class="card${flag?' has-flag flag-'+flag.tone:''}" onclick="openDetail(${r.id})">
     ${flag?`<div class="card-flag ${flag.tone}">${flag.label}</div>`:''}
-    <div class="name">${r.name}${invoiceBadge}${jobStatusChip}</div>
+    <div class="name">${escapeHtmlSafe(r.name)}${invoiceBadge}${jobStatusChip}</div>
     <div class="meta">${r.suburb||r.address||'—'}</div>
     ${tags?`<div class="svc-tags">${tags}</div>`:''}
     ${submittedLine}
@@ -5996,7 +6006,7 @@ function renderCustomerProfile(){
       <div class="booked-actions">
         <button class="btn ghost sm" onclick="openSchedule(${nextBooked.id})">↻ Reschedule</button>
         ${addr?`<button class="btn ghost sm" onclick="window.open('https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}','_blank')">Navigate</button>`:''}
-        ${c.phone?`<button class="btn ghost sm" onclick="window.location.href='tel:${c.phone.replace(/\s/g,'')}'">Call</button>`:''}
+        ${c.phone?`<button class="btn ghost sm" onclick="window.location.href='tel:${telSafe(c.phone)}'">Call</button>`:''}
         <button class="btn ghost sm" onclick="closeCustomerProfile();openDetail(${nextBooked.id})">Open job</button>
       </div>
     </div>`;
@@ -6045,7 +6055,7 @@ function renderCustomerProfile(){
 
   const jobsHtml=`
     ${upcoming.length?`<div class="panel" style="margin-bottom:14px"><h4>Upcoming work</h4>
-      ${upcoming.map(r=>`<div class="kv"><span class="k">${r.name} — ${r.scheduledDate||'Date TBC'}</span><span class="v">${jobStatusBadge(r)}${r.stage==='scheduled'?` <button class="btn ghost sm" style="padding:2px 9px;font-size:11px" onclick="openSchedule(${r.id})">↻ Reschedule</button>`:''}</span></div>`).join('')}
+      ${upcoming.map(r=>`<div class="kv"><span class="k">${escapeHtmlSafe(r.name)} — ${r.scheduledDate||'Date TBC'}</span><span class="v">${jobStatusBadge(r)}${r.stage==='scheduled'?` <button class="btn ghost sm" style="padding:2px 9px;font-size:11px" onclick="openSchedule(${r.id})">↻ Reschedule</button>`:''}</span></div>`).join('')}
     </div>`:''}
     <div class="panel"><h4>Service history</h4>
       ${jobs.map(r=>`<div class="kv" style="cursor:pointer" onclick="closeCustomerProfile();openDetail(${r.id})"><span class="k">${r.scheduledDate||'Not scheduled'}${r.tech&&r.tech!=='Unassigned'?' · '+r.tech:''}</span><span class="v">${jobStatusBadge(r)} ${r.total?money(r.total):''}</span></div>`).join('')}
@@ -6061,7 +6071,7 @@ function renderCustomerProfile(){
         const pillCls=ds==='paid'?'paid':(ds==='overdue'?'bad':(ds==='partial'?'partial':''));
         const pillLabel=ds==='partial'?'Partially Paid':ds.charAt(0).toUpperCase()+ds.slice(1);
         const balance=paymentBalance(r);
-        return `<div class="kv"><span class="k">${r.name} job${r.scheduledDate?' · '+r.scheduledDate:''}${r.dueDate?' · due '+isoToLabel(r.dueDate):''}${ds==='partial'?' · '+money(balance)+' owing':''}${r.paymentLinkUrl?' · <a href="'+r.paymentLinkUrl+'" target="_blank" style="color:var(--teal)">payment link</a>':''}</span><span class="v">${money(r.total||0)} · <span class="pill ${pillCls}">${pillLabel}</span>${ds!=='paid'?` <button class="btn accent sm" style="padding:2px 10px;font-size:11px" onclick="openPaymentModal(${r.id})">Record payment</button><select style="margin-left:6px;font-size:11px" onchange="setPaymentMethod(${r.id},this.value)"><option value="">Method…</option>${['Cash','Bank transfer','Card','Other'].map(m=>`<option ${r.paymentMethod===m?'selected':''}>${m}</option>`).join('')}</select> <button class="btn ghost sm" style="padding:2px 8px;font-size:11px" onclick="sendPaymentLink(${r.id})">${r.paymentLinkUrl?'New link':'Payment link'}</button>`:(r.paymentMethod?` · ${r.paymentMethod}`:'')}${(r.payments&&r.payments.length)?` · <button class="btn ghost sm" style="padding:2px 8px;font-size:11px" onclick="openPaymentModal(${r.id})">${r.payments.length} payment${r.payments.length>1?'s':''}</button>`:''}</span></div>`;
+        return `<div class="kv"><span class="k">${escapeHtmlSafe(r.name)} job${r.scheduledDate?' · '+r.scheduledDate:''}${r.dueDate?' · due '+isoToLabel(r.dueDate):''}${ds==='partial'?' · '+money(balance)+' owing':''}${r.paymentLinkUrl?' · <a href="'+r.paymentLinkUrl+'" target="_blank" style="color:var(--teal)">payment link</a>':''}</span><span class="v">${money(r.total||0)} · <span class="pill ${pillCls}">${pillLabel}</span>${ds!=='paid'?` <button class="btn accent sm" style="padding:2px 10px;font-size:11px" onclick="openPaymentModal(${r.id})">Record payment</button><select style="margin-left:6px;font-size:11px" onchange="setPaymentMethod(${r.id},this.value)"><option value="">Method…</option>${['Cash','Bank transfer','Card','Other'].map(m=>`<option ${r.paymentMethod===m?'selected':''}>${m}</option>`).join('')}</select> <button class="btn ghost sm" style="padding:2px 8px;font-size:11px" onclick="sendPaymentLink(${r.id})">${r.paymentLinkUrl?'New link':'Payment link'}</button>`:(r.paymentMethod?` · ${r.paymentMethod}`:'')}${(r.payments&&r.payments.length)?` · <button class="btn ghost sm" style="padding:2px 8px;font-size:11px" onclick="openPaymentModal(${r.id})">${r.payments.length} payment${r.payments.length>1?'s':''}</button>`:''}</span></div>`;
       }).join(''):'<div class="empty-state" style="padding:16px"><div class="sm">No invoices yet.</div></div>'}
     </div>`;
 
@@ -6072,7 +6082,7 @@ function renderCustomerProfile(){
 
   const filesHtml=`
     <div class="panel"><h4>Files &amp; attachments</h4>
-      ${files.length?files.map(f=>`<div class="kv" style="cursor:pointer" onclick="viewAttachmentPath('${f.path}')"><span class="k">${f.filename||f.path.split('/').pop()}</span><span class="v">${new Date(f.created_at).toLocaleDateString('en-NZ',{day:'numeric',month:'short'})}</span></div>`).join(''):'<div class="empty-state" style="padding:16px"><div class="sm">No files attached yet — quote attachments and other documents show up here.</div></div>'}
+      ${files.length?files.map(f=>`<div class="kv" style="cursor:pointer" onclick="viewAttachmentPath(${inlineStringSafe(f.path)})"><span class="k">${escapeHtmlSafe(f.filename||f.path.split('/').pop())}</span><span class="v">${new Date(f.created_at).toLocaleDateString('en-NZ',{day:'numeric',month:'short'})}</span></div>`).join(''):'<div class="empty-state" style="padding:16px"><div class="sm">No files attached yet — quote attachments and other documents show up here.</div></div>'}
     </div>`;
 
   const activityHtml=`<div class="panel">
@@ -6090,7 +6100,7 @@ function renderCustomerProfile(){
     <div class="cp-hero">
       <div class="cp-avatar">${initials}</div>
       <div class="cp-hero-main">
-        <div class="cp-name">${c.name} ${jobStatusBadge(latestJob)}</div>
+        <div class="cp-name">${escapeHtmlSafe(c.name)} ${jobStatusBadge(latestJob)}</div>
         <div class="cp-sub">${TK_FORMAT.address(c,{fallback:'No address on file'})}</div>
         ${(c.phone||c.email)?`<div class="cp-hero-contact">${[c.phone,c.email].filter(Boolean).join(' · ')}</div>`:''}
       </div>
@@ -6105,7 +6115,7 @@ function renderCustomerProfile(){
     <div class="cp-quick-actions">
       ${c.phone?`<a class="cp-qa primary" href="tel:${cleanPhone}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/></svg>Call</a>`:''}
       ${c.phone?`<a class="cp-qa" href="sms:${cleanPhone}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-4.5 7.5 8.5 8.5 0 0 1-8.9-.3L3 21l1.9-5.7A8.38 8.38 0 0 1 3 11.5a8.5 8.5 0 0 1 8.5-8.5h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>Text</a>`:''}
-      ${c.email?`<a class="cp-qa" href="mailto:${c.email}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 6-10 7L2 6"/></svg>Email</a>`:''}
+      ${c.email?`<a class="cp-qa" href="mailto:${escapeHtmlSafe(c.email)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 6-10 7L2 6"/></svg>Email</a>`:''}
       <button type="button" class="cp-qa" onclick="closeCustomerProfile();openQuoteModal(${c.id})"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="16" y2="12"/><line x1="4" y1="18" x2="12" y2="18"/></svg>Quote</button>
       ${jobs.some(r=>['completed','paid'].includes(r.stage)&&r.services?.length)?`<button type="button" class="cp-qa" onclick="closeCustomerProfile();generateAndSendDoc('invoice',${jobs.find(r=>['completed','paid'].includes(r.stage)&&r.services?.length).id})">Create invoice</button>`:''}
       <button type="button" class="cp-qa" onclick="openNewJobModal('${ctx.customerId}')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 9l2 2 4-4"/><line x1="8" y1="15" x2="16" y2="15"/></svg>New job</button>
@@ -6204,9 +6214,9 @@ function renderInboxBody(){
     const custName=last.customer_id?(records.find(r=>r.customerId===last.customer_id)?.name):null;
     const who=custName||(last.direction==='sent'?last.to_addresses:last.from_address)||'(unknown)';
     return `<button class="ib-row ${inboxOpenThread===i?'sel':''}" onclick="openThread(${i})">
-      <div class="ib-row-top"><span class="ib-who">${who}</span><span class="ib-when">${new Date(last.sent_at).toLocaleDateString('en-NZ',{day:'numeric',month:'short'})}</span></div>
-      <div class="ib-subj">${last.subject||'(no subject)'}</div>
-      <div class="ib-snip">${last.snippet||''}</div>
+      <div class="ib-row-top"><span class="ib-who">${escapeHtmlSafe(who)}</span><span class="ib-when">${new Date(last.sent_at).toLocaleDateString('en-NZ',{day:'numeric',month:'short'})}</span></div>
+      <div class="ib-subj">${escapeHtmlSafe(last.subject||'(no subject)')}</div>
+      <div class="ib-snip">${escapeHtmlSafe(last.snippet||'')}</div>
     </button>`;
   }).join('');
   const threadHtml=inboxOpenThread!=null?renderThreadPane(inboxThreads[inboxOpenThread]):'<div class="empty-state" style="margin-top:40px"><div class="sm">Select a conversation to read it.</div></div>';
@@ -6219,11 +6229,11 @@ function renderThreadPane(thread){
   const msgs=thread.map(e=>`
     <div class="ib-msg ${e.direction}">
       <div class="ib-msg-head"><b>${e.direction==='sent'?'You':(e.from_address||'Them')}</b><span>${new Date(e.sent_at).toLocaleString('en-NZ',{day:'numeric',month:'short',hour:'numeric',minute:'2-digit'})}</span></div>
-      <div class="ib-msg-body">${e.body_html?e.body_html:`<p>${(e.body_text||e.snippet||'').replace(/\n/g,'<br>')}</p>`}</div>
+      <div class="ib-msg-body">${escapeHtmlSafe(legacyMessageText(e)).replace(/\n/g,'<br>')}</div>
     </div>`).join('');
   return `
     <div class="ib-thread-head">
-      <div><div class="ib-thread-subj">${last.subject||'(no subject)'}</div>${custRecord?`<div class="ib-thread-cust">${custRecord.name}</div>`:'<div class="ib-thread-cust">Not linked to a customer</div>'}</div>
+      <div><div class="ib-thread-subj">${escapeHtmlSafe(last.subject||'(no subject)')}</div>${custRecord?`<div class="ib-thread-cust">${escapeHtmlSafe(custRecord.name)}</div>`:'<div class="ib-thread-cust">Not linked to a customer</div>'}</div>
       ${custRecord?`<div class="cp-actions"><button class="btn ghost sm" onclick="openCustomerProfile(${custRecord.id})">Sales details</button><button class="btn ghost sm" onclick="openQuoteModal(${custRecord.id})">Build quote</button><button class="btn ghost sm" onclick="openNewJobModal('${custRecord.customerId}')">+ New opportunity</button></div>`:''}
     </div>
     <div class="ib-msgs">${msgs}</div>
@@ -6319,13 +6329,13 @@ function renderOps(){
             return `<div class="route-stop ${isTech&&r.assignedStaffId===currentUserId?'mine':''}" style="cursor:pointer" onclick="openDetail(${r.id})">
               <div class="route-num" style="background:${PIN_COLORS[i%5]}22;color:${PIN_COLORS[i%5]}">${i+1}</div>
               <div class="route-info">
-                <div class="rn">${r.name}</div>
-                <div class="ra">${addr||''}${addr?' · ':''}${r.tech}</div>
+                <div class="rn">${escapeHtmlSafe(r.name)}</div>
+                <div class="ra">${addr||''}${addr?' · ':''}${escapeHtmlSafe(r.tech)}</div>
                 <div class="rn-badge">${jobStatusBadge(r)}</div>
               </div>
               <div class="rs-actions">
                 ${notStarted?`<button class="btn accent sm" onclick="event.stopPropagation();startJob(${r.id})">▶ Start</button>`:''}
-                ${r.phone?`<button class="btn ghost sm" onclick="event.stopPropagation();window.location.href='tel:${r.phone.replace(/\s/g,'')}'" title="Call ${r.name}">Call</button>`:''}
+                ${r.phone?`<button class="btn ghost sm" onclick="event.stopPropagation();window.location.href='tel:${telSafe(r.phone)}'" title="Call ${escapeHtmlSafe(r.name)}">Call</button>`:''}
                 ${addr?`<button class="btn ghost sm" onclick="event.stopPropagation();window.open('https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}','_blank')" title="Navigate">Navigate</button>`:''}
                 ${r.stage==='scheduled'?`<button class="btn ghost sm" onclick="event.stopPropagation();openSchedule(${r.id})" title="Reschedule">↻</button>`:''}
               </div>
@@ -6335,7 +6345,7 @@ function renderOps(){
       </div>
       <div>
         <div class="panel" style="margin-bottom:16px"><h4>Map</h4><div class="map-box" id="ops-map-box"><div class="empty-state" style="padding:20px"><div class="sm">Loading…</div></div></div><p style="font-size:12px;color:var(--ink-faint);margin-top:8px">Grouped by suburb${stops.length>1?' to cut back-and-forth driving':''} — not a live-traffic optimized route.</p></div>
-        <div class="panel"><h4>Technician dispatch</h4>${techLoad.length?techLoad.map(tl=>`<div class="kv"><span class="k">${tl.t}</span><span class="v">${tl.jobs} job${tl.jobs!==1?'s':''} today</span></div>`).join(''):'<div class="empty-state" style="padding:16px"><div class="sm">No technicians on the team yet — add one in Team.</div></div>'}</div>
+        <div class="panel"><h4>Technician dispatch</h4>${techLoad.length?techLoad.map(tl=>`<div class="kv"><span class="k">${escapeHtmlSafe(tl.t)}</span><span class="v">${tl.jobs} job${tl.jobs!==1?'s':''} today</span></div>`).join(''):'<div class="empty-state" style="padding:16px"><div class="sm">No technicians on the team yet — add one in Team.</div></div>'}</div>
       </div>
     </div>`;
   renderOpsMap(stops,mapsKey);
@@ -6437,7 +6447,7 @@ function renderPricing(){
     <div class="info-strip"><b>Outcome:</b> quotes stop living in the owner's head. Driveways price by m², house wash by wall area, roof by roof type — change a number here and the quote builder uses it instantly.</div>
     ${Object.entries(SERVICES).map(([k,v])=>`
       <div class="rate-card">
-        <div class="rc-head"><div><div class="rc-name">${v.label}</div><div class="rc-basis">Priced by ${v.basis}</div></div></div>
+        <div class="rc-head"><div><div class="rc-name">${escapeHtmlSafe(v.label)}</div><div class="rc-basis">Priced by ${v.basis}</div></div></div>
         <div class="rate-tiers">
           ${v.usesRoofType?Object.entries(ROOF_TYPES).map(([rk,rv])=>`<div class="rate-tier"><label>${rv.label}</label><div class="ri"><span>$</span><input type="number" value="${(v.rate*rv.mult).toFixed(0)}" onchange="setRoofRate('${k}','${rk}',this.value)"><span>/${v.unit}</span></div></div>`).join('')
           :`<div class="rate-tier"><label>Standard rate</label><div class="ri"><span>$</span><input type="number" value="${v.rate}" onchange="setRate('${k}',this.value)"><span>/${v.unit}</span></div></div>`}
@@ -6500,7 +6510,7 @@ function renderOverheadsPanel(){
 function renderProductivityPanel(){
   const rows=Object.entries(SERVICES).map(([k,v])=>{
     const sc=SVC_COST[k]; if(!sc)return '';
-    return `<div class="rate-tier" style="padding:9px 0;border-bottom:1px solid var(--line-soft)"><label>${v.label}</label>
+    return `<div class="rate-tier" style="padding:9px 0;border-bottom:1px solid var(--line-soft)"><label>${escapeHtmlSafe(v.label)}</label>
       <div class="ri"><input type="number" min="1" value="${sc.m2ph}" onchange="setSvcCost('${k}','m2ph',this.value)"><span>${v.unit}/hr</span>
       </div></div>
       ${Object.entries(CHEMICALS).map(([id,chemical])=>{
@@ -6553,7 +6563,7 @@ function renderPricingStats(){
     const marginSamples=won.map(r=>r.services.find(s=>s.svc===k)).filter(s=>s&&s.estCost!=null&&TK_PRICING.lineTotal(s)>0)
       .map(s=>TK_COST.marginPct(TK_PRICING.lineTotal(s),s.estCost));
     const avgMargin=marginSamples.length?marginSamples.reduce((a,b)=>a+b,0)/marginSamples.length:null;
-    return `<div class="kv"><span class="k">${v.label}</span><span class="v">${withSvc.length} quoted · ${winRate}% won · avg ${avgTotal?money(avgTotal):'—'}${avgMargin!=null?' · '+avgMargin.toFixed(0)+'% margin':''}</span></div>`;
+    return `<div class="kv"><span class="k">${escapeHtmlSafe(v.label)}</span><span class="v">${withSvc.length} quoted · ${winRate}% won · avg ${avgTotal?money(avgTotal):'—'}${avgMargin!=null?' · '+avgMargin.toFixed(0)+'% margin':''}</span></div>`;
   }).filter(Boolean);
   return `<div class="panel" style="margin-top:14px"><h4>Per-service performance</h4>
     ${headline}
@@ -6834,7 +6844,7 @@ function renderDashboard(){
     <div class="panel" style="margin-bottom:18px"><h4>Today's priorities</h4>
       ${alerts.length?alerts.map(a=>`<button class="wx-alert-btn" onclick="${a.onclick}"><div class="wx-alert ${a.tone}">
           <div class="wx-alert-ico"></div>
-          <div class="wx-alert-body"><div class="wx-alert-ttl">${a.text}</div></div>
+          <div class="wx-alert-body"><div class="wx-alert-ttl">${escapeHtmlSafe(a.text)}</div></div>
         </div></button>`).join(''):'<div class="empty-state" style="padding:20px"><div class="sm">Nothing needs your attention right now — nice.</div></div>'}
     </div>
     <div class="dash-grid">
@@ -6871,7 +6881,7 @@ function renderDashboard(){
       ${byTech.length?`<div class="bar-chart">${byTech.map(b=>`<div class="bcol"><div class="bval">${money(b.v)}</div><div class="bar" style="height:${Math.max(6,b.v/maxV*100)}%"></div><div class="blabel">${b.t}</div></div>`).join('')}</div>`:'<div class="empty-state"><div class="sm">No approved jobs yet.</div></div>'}
     </div>
     <div class="panel" style="margin-top:16px"><h4>Lead source</h4>
-      ${sourceRows.length?sourceRows.map(([src,n])=>`<div class="kv"><span class="k">${src}</span><span class="v" style="display:flex;align-items:center;gap:8px"><span style="display:inline-block;height:6px;width:${Math.max(6,n/maxSource*80)}px;background:var(--teal);border-radius:3px"></span>${n}</span></div>`).join(''):'<div class="empty-state" style="padding:16px"><div class="sm">No leads yet.</div></div>'}
+      ${sourceRows.length?sourceRows.map(([src,n])=>`<div class="kv"><span class="k">${escapeHtmlSafe(src)}</span><span class="v" style="display:flex;align-items:center;gap:8px"><span style="display:inline-block;height:6px;width:${Math.max(6,n/maxSource*80)}px;background:var(--teal);border-radius:3px"></span>${n}</span></div>`).join(''):'<div class="empty-state" style="padding:16px"><div class="sm">No leads yet.</div></div>'}
       <p style="font-size:12px;color:var(--ink-faint);margin-top:12px">Meta spend, lead costs and campaign results are shown below when reporting is connected.</p><button class="btn ghost sm" onclick="openMetaAdsAnalytics()">Open detailed Meta report</button>
     </div>
 `;
@@ -6999,7 +7009,7 @@ function renderJobsFlow(){
     ${picker}
     <div class="jf-card">
       <div class="jf-cardhead">
-        <div><div class="jf-name">${r.name}</div><div class="jf-sub">${r.suburb||r.address||''} · ${r.total?money(r.total):'no quote'}</div></div>
+        <div><div class="jf-name">${escapeHtmlSafe(r.name)}</div><div class="jf-sub">${r.suburb||r.address||''} · ${r.total?money(r.total):'no quote'}</div></div>
         ${jobStatusBadge(r)}
       </div>
       <div class="jf-track">
@@ -7283,7 +7293,7 @@ function renderJobScheduleCard(r){
     <div class="booked-actions">
       <button class="btn ghost sm" onclick="openSchedule(${r.id})">↻ Reschedule</button>
       ${addr?`<button class="btn ghost sm" onclick="window.open('https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}','_blank')">Navigate</button>`:''}
-      ${r.phone?`<button class="btn ghost sm" onclick="window.location.href='tel:${r.phone.replace(/\s/g,'')}'">Call customer</button>`:''}
+      ${r.phone?`<button class="btn ghost sm" onclick="window.location.href='tel:${telSafe(r.phone)}'">Call customer</button>`:''}
       ${notStarted?`<button class="btn accent sm" onclick="startJob(${r.id})">▶ Start job</button>`:''}
     </div>
   </div>`;
@@ -7307,7 +7317,7 @@ function renderJobToolbar(r){
     <button class="jt-danger" onclick="cancelJob(${r.id})">✕ Cancel</button>
     <button onclick="pickJobPhoto(${r.id},'${nextPhotoSlot}')">Photos</button>
     <button onclick="promptJobNote(${r.id})">Note</button>
-    ${r.phone?`<button onclick="window.location.href='tel:${r.phone.replace(/\s/g,'')}'">Call</button>`:''}
+    ${r.phone?`<button onclick="window.location.href='tel:${telSafe(r.phone)}'">Call</button>`:''}
     ${addr?`<button onclick="window.open('https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}','_blank')">Navigate</button>`:''}
   </div>`;
 }
@@ -7772,7 +7782,7 @@ function openCalPicker(iso){
         <div class="cjr-main" style="cursor:pointer" onclick="closeModal('cal-pick-overlay');openDetail(${r.id})">
           <span class="cjr-dot" style="background:${JOB_STATUS_CAL_COLOR[jobStatusKeyOf(r)]||'#3a5e9c'}"></span>
           <div class="cjr-info">
-            <div class="cjr-name">${r.name}</div>
+            <div class="cjr-name">${escapeHtmlSafe(r.name)}</div>
             <div class="cjr-meta">${start?start+' (est.) · ':''}${r.tech&&r.tech!=='Unassigned'?r.tech:'Unassigned'}</div>
           </div>
           <div class="cjr-right">${jobStatusBadge(r)}${r.total?`<div class="cjr-amt">${money(r.total)}</div>`:''}</div>
@@ -7782,7 +7792,7 @@ function openCalPicker(iso){
     }).join(''):'<div class="empty-state" style="padding:16px"><div class="sm">Nothing scheduled yet.</div></div>'}`;
   const bookSection=`
     <div class="more-group-label" style="margin-top:18px">Book a won job on this day</div>
-    ${unscheduled.length?unscheduled.map(r=>`<div class="kv" style="cursor:pointer" onclick="closeModal('cal-pick-overlay');openSchedule(${r.id},'${iso}')"><span class="k">${r.name}</span><span class="v">${r.suburb||''} · ${r.total?money(r.total):'no quote'}</span></div>`).join(''):'<div class="empty-state" style="padding:16px"><div class="sm">No won jobs waiting to be scheduled.</div></div>'}`;
+    ${unscheduled.length?unscheduled.map(r=>`<div class="kv" style="cursor:pointer" onclick="closeModal('cal-pick-overlay');openSchedule(${r.id},'${iso}')"><span class="k">${escapeHtmlSafe(r.name)}</span><span class="v">${escapeHtmlSafe(r.suburb||'')} · ${r.total?money(r.total):'no quote'}</span></div>`).join(''):'<div class="empty-state" style="padding:16px"><div class="sm">No won jobs waiting to be scheduled.</div></div>'}`;
   document.getElementById('cp-list').innerHTML=jobsSection+bookSection;
   openModal('cal-pick-overlay');
 }
@@ -7795,7 +7805,7 @@ function openDueRepeats(){
   const due=records.filter(r=>r.nextDueDate&&r.nextDueDate<=todayIso);
   document.getElementById('cp-title').textContent='Due for their repeat clean';
   document.getElementById('cp-list').innerHTML=due.length
-    ?due.map(r=>`<div class="kv"><span class="k">${r.name}${r.suburb?' · '+r.suburb:''}</span><span class="v">due ${isoToLabel(r.nextDueDate)} <button class="btn accent sm" style="margin-left:8px" onclick="closeModal('cal-pick-overlay');openNewJobModal('${r.customerId||''}')">Book next visit</button></span></div>`).join('')
+    ?due.map(r=>`<div class="kv"><span class="k">${escapeHtmlSafe(r.name)}${r.suburb?' · '+r.suburb:''}</span><span class="v">due ${isoToLabel(r.nextDueDate)} <button class="btn accent sm" style="margin-left:8px" onclick="closeModal('cal-pick-overlay');openNewJobModal('${r.customerId||''}')">Book next visit</button></span></div>`).join('')
     :'<div class="empty-state" style="padding:20px"><div class="sm">Nobody\'s due right now.</div></div>';
   openModal('cal-pick-overlay');
 }
@@ -7811,7 +7821,7 @@ function renderCalendarSidebar(){
       <div class="wx-dow">${w.day}<span>${w.date}</span></div>
       <div class="wx-temp">${w.tempHi}°</div>
       <div class="wx-meta">${w.rainPct}% rain · ${w.windKmh}km/h</div>
-      <div class="wx-verdict ${v.tone}">${v.label}</div>
+      <div class="wx-verdict ${v.tone}">${escapeHtmlSafe(v.label)}</div>
     </div>`;
   };
 
@@ -7968,7 +7978,7 @@ function openCalendarJobModal(presetISO){
   document.getElementById('l-schedule-fields').style.display='';
   document.getElementById('l-save-btn').textContent='Create job';
   const svcSel=document.getElementById('l-svc');
-  svcSel.innerHTML='<option value="">— none yet —</option>'+Object.entries(SERVICES).map(([k,v])=>`<option value="${k}">${v.label}</option>`).join('');
+  svcSel.innerHTML='<option value="">— none yet —</option>'+Object.entries(SERVICES).map(([k,v])=>`<option value="${k}">${escapeHtmlSafe(v.label)}</option>`).join('');
   document.getElementById('l-assign').innerHTML=staffOptionsHtml(true);
   document.getElementById('l-date').value=presetISO||todayISO();
   if(calAddPresetMin!=null)document.getElementById('l-start').value=fmtTime24(calAddPresetMin);
@@ -10084,7 +10094,7 @@ function iwRenderUpload(){
       <div class="iw-upload-label"><b>${ent.label}</b>${ent.required?' <span style="color:var(--coral)">*</span>':' <span style="color:var(--ink-faint);font-weight:400">(optional)</span>'}</div>
       <input type="file" accept=".csv,text/csv" id="iw-file-${key}" style="display:none" onchange="iwFileChosen('${key}',this)">
       <button class="btn ghost sm" onclick="document.getElementById('iw-file-${key}').click()">${f?'Change file':'Choose CSV'}</button>
-      ${f?`<span class="iw-upload-status">✓ ${f.name} — ${f.rows.length} row${f.rows.length!==1?'s':''}</span>`:''}
+      ${f?`<span class="iw-upload-status">✓ ${escapeHtmlSafe(f.name)} — ${f.rows.length} row${f.rows.length!==1?'s':''}</span>`:''}
     </div>`;
   }).join('');
   const ready=!!importWizard.files.customers;
@@ -10119,7 +10129,7 @@ function sm8RenderUpload(){
     <input type="file" accept=".csv,text/csv" id="iw-sm8-files" multiple style="display:none" onchange="sm8FilesChosen(this)">
     <button class="btn ghost sm" onclick="document.getElementById('iw-sm8-files').click()">Choose CSV file(s)</button>
     <div class="panel" style="margin-top:14px">
-      <div class="kv"><span class="k">Clients <span style="color:var(--coral)">*</span></span><span class="v">${c?`✓ ${c.name} — ${c.rows.length} row${c.rows.length!==1?'s':''}`:'Not uploaded yet'}</span></div>
+      <div class="kv"><span class="k">Clients <span style="color:var(--coral)">*</span></span><span class="v">${c?`✓ ${escapeHtmlSafe(c.name)} — ${c.rows.length} row${c.rows.length!==1?'s':''}`:'Not uploaded yet'}</span></div>
       <div class="kv"><span class="k">Jobs</span><span class="v">${j?`✓ ${j.name} — ${j.rows.length} row${j.rows.length!==1?'s':''}`:'Not uploaded yet (optional)'}</span></div>
     </div>
     ${warnings.length?`<p style="font-size:12.5px;color:var(--coral);margin-top:10px">${warnings.join('<br>')}</p>`:''}
@@ -10131,7 +10141,7 @@ function sm8FilesChosen(el){
   importWizard.sm8UploadWarnings=[];
   const oversized=files.filter(f=>f.size>IW_MAX_FILE_BYTES);
   if(oversized.length){
-    importWizard.sm8UploadWarnings.push(...oversized.map(f=>`"${f.name}" is too large (${Math.round(f.size/1024/1024)}MB) — split it into smaller files under 25MB.`));
+    importWizard.sm8UploadWarnings.push(...oversized.map(f=>`"${escapeHtmlSafe(f.name)}" is too large (${Math.round(f.size/1024/1024)}MB) — split it into smaller files under 25MB.`));
     files=files.filter(f=>f.size<=IW_MAX_FILE_BYTES);
   }
   if(!files.length){renderImportWizard();return;}
@@ -10180,14 +10190,14 @@ function sm8RenderValidatePreview(){
   if(v.autoCreatedCustomers.length)notes.push(`${v.autoCreatedCustomers.length} job(s) reference a customer not present in the Clients file — a placeholder customer will be created so no job history is lost: ${v.autoCreatedCustomers.slice(0,5).map(n=>`"${n}"`).join(', ')}${v.autoCreatedCustomers.length>5?', …':''}.`);
   if(v.skippedJobRows.length)notes.push(`${v.skippedJobRows.length} job row(s) had no Job Number and will be skipped — they can't be tracked or de-duplicated without one.`);
   if(v.noCompanyCount)notes.push(`${v.noCompanyCount} job(s) had a blank Company field — filed under an auto-generated placeholder customer name.`);
-  const noteHtml=notes.length?`<div class="info-strip" style="margin-top:14px">${notes.map(n=>`<div>${n}</div>`).join('')}</div>`:'';
+  const noteHtml=notes.length?`<div class="info-strip" style="margin-top:14px">${notes.map(n=>`<div>${escapeHtmlSafe(n)}</div>`).join('')}</div>`:'';
 
   const custSample=s.customers.slice(0,5);
   const jobSample=s.jobs.slice(0,5);
   const custTable=`<div class="panel" style="margin-top:14px"><h4>Customers <span class="demo-tag">${s.customers.length}</span></h4>
     <div style="overflow-x:auto"><table class="contact-table" style="min-width:520px">
       <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Address</th></tr></thead>
-      <tbody>${custSample.map(c=>`<tr><td>${c.name}</td><td>${c.email||'—'}</td><td>${c.phone||'—'}</td><td>${c.address||'—'}</td></tr>`).join('')}</tbody>
+      <tbody>${custSample.map(c=>`<tr><td>${escapeHtmlSafe(c.name)}</td><td>${c.email||'—'}</td><td>${c.phone||'—'}</td><td>${c.address||'—'}</td></tr>`).join('')}</tbody>
     </table></div>${s.customers.length>5?`<p style="font-size:11px;color:var(--ink-faint);margin-top:6px">+ ${s.customers.length-5} more not shown</p>`:''}</div>`;
   const jobTable=s.jobs.length?`<div class="panel" style="margin-top:14px"><h4>Jobs <span class="demo-tag">${s.jobs.length}</span></h4>
     <div style="overflow-x:auto"><table class="contact-table" style="min-width:520px">
@@ -10219,11 +10229,11 @@ function iwRenderMapping(){
     const f=importWizard.files[key];
     const rowsHtml=ent.fields.map(fl=>{
       const current=importWizard.mapping[key][fl.key]||'';
-      const options=['<option value="">— Skip —</option>'].concat(f.headers.map(h=>`<option value="${h.replace(/"/g,'&quot;')}" ${h===current?'selected':''}>${h}</option>`)).join('');
+      const options=['<option value="">— Skip —</option>'].concat(f.headers.map(h=>`<option value="${escapeHtmlSafe(h)}" ${h===current?'selected':''}>${escapeHtmlSafe(h)}</option>`)).join('');
       return `<div class="iw-map-row"><label>${fl.label}${fl.required?' <span style="color:var(--coral)">*</span>':''}${fl.hint?`<div class="iw-map-hint">${fl.hint}</div>`:''}</label>
         <select onchange="iwSetMapping('${key}','${fl.key}',this.value)">${options}</select></div>`;
     }).join('');
-    return `<div class="panel" style="margin-bottom:14px"><h4>${ent.label} <span class="demo-tag">${f.name}</span></h4>${rowsHtml}</div>`;
+    return `<div class="panel" style="margin-bottom:14px"><h4>${ent.label} <span class="demo-tag">${escapeHtmlSafe(f.name)}</span></h4>${rowsHtml}</div>`;
   }).join('');
   const allRequiredMet=Object.entries(IMPORT_ENTITIES).filter(([key])=>importWizard.files[key])
     .every(([key,ent])=>ent.fields.filter(fl=>fl.required).every(fl=>importWizard.mapping[key][fl.key]));
@@ -10333,7 +10343,7 @@ function iwRenderRun(){
   }
   const r=importWizard.result;
   if(r.error){
-    return `<div class="empty-state"><div class="big">Import failed</div><div class="sm">${r.error}</div></div>
+    return `<div class="empty-state"><div class="big">Import failed</div><div class="sm">${escapeHtmlSafe(r.error)}</div></div>
       <div class="iw-foot"><button class="btn ghost" onclick="iwGoStep(6)">← Back</button><button class="btn primary" onclick="importWizard.result=null;renderImportWizard()">Try again</button></div>`;
   }
   const c=r.counts||{};
