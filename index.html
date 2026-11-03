@@ -9054,28 +9054,9 @@ async function handleSignIn(){
   catch(e){setAuthMsg(friendlyAuthError(e?.message||'Could not reach the sign-in service. Check your connection and try again.'));return;}
   finally{setAuthBusy(false);}
   if(error){
-    // TEMPORARY (frontend-only UX change, not a backend/Supabase setting):
-    // don't show any "too many attempts"-style message on the login screen
-    // — silently reset the form instead so the user can just try again.
-    // Every other auth error (wrong password, invalid email, network, etc.)
-    // still shows normally below via friendlyAuthError().
-    //
-    // Checks the HTTP status (429 = rate limited) FIRST, not just message
-    // text — Supabase's actual wording for this varies ("rate limit
-    // exceeded", "too many requests", "for security purposes, you can only
-    // request this after...", etc. depending on version/endpoint), so a
-    // single hardcoded phrase match was silently missing real cases. The
-    // regex stays as a fallback for the rare case status isn't populated.
-    // setAuthBusy(false) above already re-enables the Sign in button
-    // regardless of which branch runs, so a retry is never actually
-    // blocked — this only ever changes what MESSAGE is shown.
-    //
-    // To revert entirely: delete this if-block and go back to
-    // unconditionally calling setAuthMsg(friendlyAuthError(error.message)).
     const isRateLimited=error.status===429||/rate.?limit|too many (requests|attempts)|security purposes/i.test(error.message||'');
     if(isRateLimited){
-      document.getElementById('auth-password').value='';
-      setAuthMsg('');
+      setAuthMsg('Too many attempts. Wait a minute, then try again.');
       return;
     }
     setAuthMsg(friendlyAuthError(error.message));
