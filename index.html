@@ -5841,14 +5841,14 @@ function renderCustomers(){
       ${filtered.length?filtered.map(g=>{
         const st=stageObj(g.stage);
         const latest=g.jobs.reduce((a,b)=>(b.createdAt||0)>(a.createdAt||0)?b:a,g.jobs[0]);
-        return `<button class="customer-card" onclick="openCustomerProfile(${g.firstId})">
-          <div class="cc-top"><div class="cc-name">${g.name}</div>${g.jobs.length>1?`<span class="pill">${g.jobs.length} jobs</span>`:jobStatusBadge(latest)}</div>
-          <div class="cc-sub">${TK_FORMAT.address(g,{fallback:'No address on file'})}</div>
+        return `<div class="customer-card" role="button" tabindex="0" onclick="openCustomerProfile(${g.firstId})" onkeydown="if(event.target===this&amp;&amp;(event.key==='Enter'||event.key===' ')){event.preventDefault();openCustomerProfile(${g.firstId});}">
+          <div class="cc-top"><div class="cc-name">${escapeHtmlSafe(g.name)}</div>${g.jobs.length>1?`<span class="pill">${g.jobs.length} jobs</span>`:jobStatusBadge(latest)}</div>
+          <div class="cc-sub">${escapeHtmlSafe(TK_FORMAT.address(g,{fallback:'No address on file'}))}</div>
           <div class="cc-contact">
             ${g.phone?`<a href="tel:${telSafe(g.phone)}" onclick="event.stopPropagation()">${escapeHtmlSafe(g.phone)}</a>`:''}
-            ${g.email?`<a href="mailto:${g.email}" onclick="event.stopPropagation()">${g.email}</a>`:''}
+            ${g.email?`<a href="mailto:${escapeHtmlSafe(g.email)}" onclick="event.stopPropagation()">${escapeHtmlSafe(g.email)}</a>`:''}
           </div>
-        </button>`;
+        </div>`;
       }).join(''):`<div class="empty-state"><div class="big">${q?'No matches':'No customers yet'}</div><div class="sm">${q?'Try a different search.':'They\'ll appear here as soon as you add a lead or one comes in from your booking page.'}</div></div>`}
     </div>`;
 }
