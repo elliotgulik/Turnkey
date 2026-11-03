@@ -10501,8 +10501,23 @@ function subscribeRealtime(){
     .on('postgres_changes',{event:'*',schema:'public',table:'calendar_events',filter:'business_id=eq.'+currentBusinessId},handleServiceM8CalendarRealtimeEvent)
     .subscribe();
 }
+function applySharedSalespersonUpdate(row){
+  if(!row||row.business_id!==currentBusinessId||!row.details)return false;
+  const current=records.find(r=>r.jobId===row.id);
+  if(!current)return false;
+  const id=row.details.assignedSalespersonId||null,name=row.details.salespersonName||null;
+  if((current.assignedSalespersonId||null)===id&&(current.salespersonName||null)===name)return false;
+  current.assignedSalespersonId=id;current.salespersonName=name;
+  // A server update must not schedule an autosave back to the server, and
+  // must not replace notes or contact forms while a colleague is editing.
+  const editing=document.querySelector('.overlay.open,.nlm-detail,dialog[open]')||document.activeElement?.matches?.('input,textarea,select,[contenteditable="true"]');
+  if(!editing){const wasReady=businessStateReady;businessStateReady=false;try{render();renderAll();}finally{businessStateReady=wasReady;}}
+  return true;
+}
 async function handleServiceM8JobRealtimeEvent(payload){
-  const row=payload&&payload.new;if(!row||!row.details?.serviceM8SyncedAt)return;
+  const row=payload&&payload.new;if(!row||row.business_id!==currentBusinessId)return;
+  applySharedSalespersonUpdate(row);
+  if(!row.details?.serviceM8SyncedAt)return;
   const current=records.find(r=>r.jobId===row.id);
   if(current&&current.serviceM8SyncedAt===row.details.serviceM8SyncedAt)return;
   const hadOverlay=!!document.querySelector('.overlay.open');

@@ -133,3 +133,31 @@ test('confirmed contact repair clears the incomplete flag without changing the l
  vm.runInContext(section('async function saveCustomerContact(btn){','async function saveCustomerNotes'),ctx);
  await ctx.saveCustomerContact();assert.equal(ctx.records[0]._customerMissing,false);assert.equal(ctx.records[0].name,'Recovered Name');assert.equal(ctx.records[0].jobId,'original-job');assert.ok(filters.some(([k,v])=>k==='business_id'&&v==='A'));
 });
+
+
+test('company salesperson changes reach other sessions without ServiceM8 and without autosaving',async()=>{
+ const row={id:'job-shared',business_id:'A',details:{assignedSalespersonId:'servicem8:luca',salespersonName:'Luca Anderson'}};
+ let renders=0,loads=0,editing=false;
+ const ctx=context({records:[{id:1,jobId:'job-shared',name:'Customer',assignedSalespersonId:'servicem8:elliot',salespersonName:'Elliot Gulik',salesNotes:'Draft note'}],document:{querySelector(){return editing?{}:null;},activeElement:null},render(){assert.equal(ctx.businessStateReady,false);renders++;},renderAll(){},loadFromSupabase:async()=>{loads++;}});
+ vm.runInContext(section('function applySharedSalespersonUpdate(row){','async function handleServiceM8CalendarRealtimeEvent('),ctx);
+ await ctx.handleServiceM8JobRealtimeEvent({new:row});
+ assert.equal(ctx.records[0].salespersonName,'Luca Anderson');assert.equal(ctx.records[0].salesNotes,'Draft note');assert.equal(renders,1);assert.equal(loads,0);assert.equal(ctx.businessStateReady,true);
+ // Duplicate deliveries do nothing; another company's data is ignored.
+ await ctx.handleServiceM8JobRealtimeEvent({new:row});assert.equal(renders,1);
+ await ctx.handleServiceM8JobRealtimeEvent({new:{...row,business_id:'B',details:{salespersonName:'Other company'}}});assert.equal(ctx.records[0].salespersonName,'Luca Anderson');
+ // Clearing the assignee propagates too, even while an editor is open.
+ editing=true;await ctx.handleServiceM8JobRealtimeEvent({new:{...row,details:{assignedSalespersonId:null,salespersonName:null}}});
+ assert.equal(ctx.records[0].assignedSalespersonId,null);assert.equal(ctx.records[0].salesNotes,'Draft note');assert.equal(renders,1);
+});
+
+test('a saved salesperson is restored on another company member’s fresh session',async()=>{
+ let job={id:'job-shared',business_id:'A',customer_id:'customer-shared',status:'new',details:{}},customer={id:'customer-shared',business_id:'A',name:'Shared Customer'};
+ function db(){return {from(table){let patch,filters=[];const q={select(){return q;},eq(k,v){filters.push([k,v]);return q;},order(){return q;},update(value){patch=value;return q;},then(resolve){assert.ok(filters.some(([k,v])=>k==='business_id'&&v==='A'));if(table==='jobs')job={...job,...structuredClone(patch)};else customer={...customer,...structuredClone(patch)};return Promise.resolve({error:null}).then(resolve);},range(start){return Promise.resolve({data:table==='jobs'&&!start?[{...structuredClone(job),customer:structuredClone(customer)}]:[]});}};return q;}};}
+ const writer=context({currentUserId:'elliot',sb:db(),isWon:()=>false});
+ vm.runInContext(section('const recordSaveQueue = new WeakMap();','/* ===== Supabase Storage:'),writer);
+ const r={id:1,jobId:job.id,customerId:customer.id,name:customer.name,stage:'new',total:0,assignedSalespersonId:'servicem8:luca',salespersonName:'Luca Anderson'};writer.recordBusinesses.set(r,'A');
+ await writer.syncRecordToSupabase(r);assert.equal(job.details.assignedSalespersonId,'servicem8:luca');
+ const reader=context({currentUserId:'luca',sb:db(),newRecord:d=>({...d})});
+ vm.runInContext(section('async function loadFromSupabase(){','function scheduleSupabaseSync(){'),reader);
+ assert.equal(await reader.loadFromSupabase(),true);assert.equal(reader.records[0].salespersonName,'Luca Anderson');assert.equal(reader.records[0].assignedSalespersonId,'servicem8:luca');
+});
