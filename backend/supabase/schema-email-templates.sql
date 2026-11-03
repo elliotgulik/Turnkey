@@ -1,3 +1,4 @@
+-- LEGACY: do not run. Use supabase/migrations/.
 -- TurnKey email templates: per-business, editable quote/invoice email content
 -- (separate from docTemplate, which only styles the attached/embedded PDF
 -- look — this governs the actual email subject/body sent through Gmail).

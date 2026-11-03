@@ -1,3 +1,4 @@
+-- LEGACY: do not run. Use supabase/migrations/.
 -- TurnKey Customer Profile hub: communication timeline + before/after photos.
 -- Run this once in the Supabase SQL editor. Safe to re-run: idempotent.
 -- Depends on public.current_business_id() from fix-rls-recursion.sql.

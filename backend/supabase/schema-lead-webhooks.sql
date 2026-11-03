@@ -1,3 +1,4 @@
+-- LEGACY: do not run. Use supabase/migrations/.
 -- Wix + Meta (Facebook/Instagram) Lead Ads webhook ingestion.
 -- Run this after schema-leads-business.sql / schema-leads-claim.sql.
 -- Safe to re-run: every statement is idempotent.

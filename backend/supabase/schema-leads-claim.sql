@@ -1,3 +1,4 @@
+-- LEGACY: do not run. Use supabase/migrations/.
 -- Fixes a real double-ingestion race on public.leads.
 -- Run this once in the Supabase SQL editor. Safe to re-run: idempotent.
 --

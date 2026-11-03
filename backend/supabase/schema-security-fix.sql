@@ -1,3 +1,4 @@
+-- LEGACY: do not run. Use supabase/migrations/.
 -- CRITICAL SECURITY FIX — run this in the Supabase SQL editor immediately.
 --
 -- The "self update" policy added in schema-app.sql let a signed-in user run

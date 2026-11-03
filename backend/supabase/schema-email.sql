@@ -1,3 +1,4 @@
+-- LEGACY: do not run. Use supabase/migrations/.
 -- TurnKey email integration: OAuth-connected mailboxes (Gmail now, Microsoft
 -- 365 later via the same tables/engine) + a client-readable email log that
 -- feeds the Customer Profile's communication timeline.

@@ -1,3 +1,4 @@
+-- LEGACY: do not run. Use supabase/migrations/.
 -- Fix: infinite recursion (42P17) in public.users RLS.
 -- Run this once in the Supabase SQL editor. Safe to re-run: idempotent.
 --

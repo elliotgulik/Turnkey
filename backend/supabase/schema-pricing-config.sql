@@ -1,3 +1,4 @@
+-- LEGACY: do not run. Use supabase/migrations/.
 -- TurnKey: business-specific pricing configuration (service rates, chemical
 -- costs, labour/travel/margin inputs), persisted server-side. Previously
 -- SERVICES.rate/CHEMICALS.perL only saved to localStorage (per-device, lost

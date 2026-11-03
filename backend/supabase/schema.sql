@@ -1,3 +1,4 @@
+-- LEGACY: do not run. Use supabase/migrations/.
 -- Supabase schema for TurnKey backend (STORAGE=supabase)
 -- Run in Supabase SQL editor or: supabase db push
 

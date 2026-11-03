@@ -1,3 +1,4 @@
+-- LEGACY: do not run. Use supabase/migrations/.
 -- Scheduling system hardening: closes the gap where the base `jobs` table
 -- was never captured in a migration (only ALTERs against a table created ad
 -- hoc in the Supabase dashboard — see schema-app.sql/schema-team.sql), adds

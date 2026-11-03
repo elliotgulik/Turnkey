@@ -1,3 +1,4 @@
+-- LEGACY: do not run. Use supabase/migrations/.
 -- TurnKey push notifications (OneSignal) — Phase 1/2.
 -- Run this once in the Supabase SQL editor, after schema-notifications.sql
 -- and schema-public-quote.sql. Safe to re-run: idempotent.

@@ -1,3 +1,4 @@
+-- LEGACY: do not run. Use supabase/migrations/.
 -- TurnKey: structured send-log for quote/invoice/lifecycle emails, and
 -- saved-but-unsent email drafts for the composer's "Save draft" button.
 -- Run once in the Supabase SQL editor. Safe to re-run: idempotent.

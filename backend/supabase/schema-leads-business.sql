@@ -1,3 +1,4 @@
+-- LEGACY: do not run. Use supabase/migrations/.
 -- Multi-tenant fix for the public lead-intake table.
 -- Run this once in the Supabase SQL editor. Safe to re-run: idempotent.
 --

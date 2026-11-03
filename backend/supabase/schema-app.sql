@@ -1,3 +1,4 @@
+-- LEGACY: do not run. Use supabase/migrations/.
 -- TurnKey app schema: customers + auth-linked users + RLS.
 -- Run this once in the Supabase SQL editor (or `supabase db push` if you link the project).
 -- Safe to re-run: every statement is idempotent.

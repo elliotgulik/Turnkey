@@ -1,3 +1,4 @@
+-- LEGACY: do not run. Use supabase/migrations/.
 -- Business Settings → Workflows: per-business defaults for whether the job
 -- checklist, after photos, and customer sign-off are required or purely
 -- optional helpers. Mirrors the existing pricing_config column on

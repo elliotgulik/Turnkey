@@ -1,3 +1,4 @@
+-- LEGACY: do not run. Use supabase/migrations/.
 -- TurnKey team management: roles, invites, job assignment.
 -- Run this once in the Supabase SQL editor. Safe to re-run: idempotent.
 

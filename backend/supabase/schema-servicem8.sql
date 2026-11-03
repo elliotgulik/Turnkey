@@ -1,3 +1,4 @@
+-- LEGACY: do not run. Use supabase/migrations/.
 -- ServiceM8 integration: connections, object mapping, outbound handoff
 -- tracking, and inbound webhook durability/dedup.
 -- Run this after schema-app.sql (customers/jobs) and schema-leads-claim.sql.

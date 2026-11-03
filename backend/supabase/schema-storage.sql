@@ -1,3 +1,4 @@
+-- LEGACY: do not run. Use supabase/migrations/.
 -- TurnKey Storage: attachments table + storage.objects RLS.
 -- Run this once in the Supabase SQL editor. Safe to re-run: idempotent.
 -- The 'turnkey-uploads' bucket itself was created via the Storage API (private,

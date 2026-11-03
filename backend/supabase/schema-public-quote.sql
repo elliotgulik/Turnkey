@@ -1,3 +1,4 @@
+-- LEGACY: do not run. Use supabase/migrations/.
 -- Customer-facing quote approval: the single biggest missing piece of the
 -- Lead -> Quote -> Customer Approval -> Schedule workflow. Today "accept" is
 -- a business-side-only button (markWon() in index.html) — there is no way

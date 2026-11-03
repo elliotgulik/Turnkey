@@ -1,3 +1,4 @@
+-- LEGACY: do not run. Use supabase/migrations/.
 -- Fixes the data left behind by a real bug in index.html's loadFromSupabase():
 -- jobs.quote_id was written correctly on every save, but never read back
 -- into the in-memory record on load. The next time an already-quoted job's

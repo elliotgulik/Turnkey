@@ -1,3 +1,4 @@
+-- LEGACY: do not run. Use supabase/migrations/.
 -- Fixes a real bug in run_import() (schema-import-servicem8.sql): the
 -- invoices insert wrote row_data->>'payment_status' straight through, which
 -- is SQL NULL for every source except ServiceM8 (the generic import wizard

@@ -1,3 +1,4 @@
+-- LEGACY: do not run. Use supabase/migrations/.
 -- TurnKey: owner-facing notification preferences (distinct from
 -- lifecycle_emails, which are customer-facing). Run once in the Supabase
 -- SQL editor. Safe to re-run: idempotent.

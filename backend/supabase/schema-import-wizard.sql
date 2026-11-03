@@ -1,3 +1,4 @@
+-- LEGACY: do not run. Use supabase/migrations/.
 -- TurnKey Import Wizard: transactional multi-entity CSV import engine.
 -- Run this once in the Supabase SQL editor. Safe to re-run: idempotent.
 -- Depends on public.current_business_id() / current_business_role() from

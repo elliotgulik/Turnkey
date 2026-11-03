@@ -1,3 +1,4 @@
+-- LEGACY: do not run. Use supabase/migrations/.
 -- TurnKey: real long-range calendar support, external calendar connections,
 -- customizable job checklists, and invoice payment-status tracking.
 -- Run once in the Supabase SQL editor. Safe to re-run: idempotent.

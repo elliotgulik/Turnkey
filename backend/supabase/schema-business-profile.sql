@@ -1,3 +1,4 @@
+-- LEGACY: do not run. Use supabase/migrations/.
 -- TurnKey business profiles: per-business name/phone/email/region/logo, used
 -- to brand each business's own public booking page instead of a hardcoded
 -- placeholder. Run this once in the Supabase SQL editor. Safe to re-run: idempotent.
@@ -23,9 +24,6 @@ alter table public.businesses enable row level security;
 -- business's name/phone/email/region/logo by id. Same trust level as what's
 -- already shown on the public booking page today (name, rough location).
 drop policy if exists "public read" on public.businesses;
-create policy "public read" on public.businesses
-  for select
-  using (true);
 
 -- Owner or manager can create/edit their own business's profile — matches
 -- the existing owner/manager gating used for invites (schema-team.sql).

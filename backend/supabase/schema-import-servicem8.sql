@@ -1,3 +1,4 @@
+-- LEGACY: do not run. Use supabase/migrations/.
 -- ServiceM8 importer: extends the generic import engine (schema-import-wizard.sql)
 -- with the extra fields a ServiceM8 export carries that the generic importer
 -- didn't need — billing/tax details on customers, and richer job/invoice
