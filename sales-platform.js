@@ -37,7 +37,7 @@
     serial = 0,
     activeId = null,
     mappings = [],
-    pipelineScope="all", pipelineSearch="", pipelineDueOnly=false;
+    pipelineScope="all", pipelineSearch="", pipelineDueOnly=false, pipelineFiltersOpen=false;
   const oldRender = render,
     oldAll = renderAll,
     oldConnections = openConnections,
@@ -517,9 +517,10 @@
     let list = pipelineRecords.filter(r => pipelineScope === 'all' ? !['completed','lost'].includes(uiStage(r)) : inScope(r, pipelineScope));
     if (pipelineSearch.trim()) list = list.filter(r => [r.name, r.address, r.email, r.phone, r.source].join(' ').toLowerCase().includes(pipelineSearch.trim().toLowerCase()));
     if (pipelineDueOnly) list = list.filter(isOverdue);
+    const filterCount = Number(Boolean(pipelineSearch.trim())) + Number(pipelineDueOnly) + Number(['completed', 'lost'].includes(pipelineScope));
     document.getElementById('view-pipeline').innerHTML = header('Sales pipeline', 'See where every opportunity stands and give each customer a clear next step.', button('Build a quote', 'quote-home') + `<details class="nlm-tools"><summary>Pipeline tools</summary><div>${button('+ New lead', 'new')}${button('Follow-ups', 'followups')}${button('Activity & replies', 'activity')}${button('Pipeline settings', 'stages')}</div></details>`) +
-      `<div class="sale-pipeline-toolbar">${scopeButtons('pipeline-scope', pipelineScope, [['all', 'All active', pipelineRecords.filter(r=>!['completed','lost'].includes(uiStage(r))).length], ['open', 'Open opportunities', pipelineRecords.filter(isOpen).length], ['won', 'Quote confirmed', records.filter(r => uiStage(r) === 'won').length]])}<details class="sale-past-jobs"><summary>${pipelineScope==='completed'?'Completed':pipelineScope==='lost'?'Cancelled':'Past jobs'} <span>${pipelineRecords.filter(r=>['completed','lost'].includes(uiStage(r))).length}</span><span aria-hidden="true">⌄</span></summary><div class="sale-past-menu">${scopeButtons('pipeline-scope',pipelineScope,[['completed','Completed',pipelineRecords.filter(r=>uiStage(r)==='completed').length],['lost','Cancelled',pipelineRecords.filter(r=>uiStage(r)==='lost').length]])}</div></details>
-      ${field('Search pipeline', `<input id="pipeline-search" type="search" value="${esc(pipelineSearch)}" placeholder="Customer, address or source">`)}<label class="sale-check"><input type="checkbox" id="pipeline-due" ${pipelineDueOnly ? 'checked' : ''}> Follow-ups overdue</label></div>` +
+      `<div class="sale-pipeline-toolbar">${scopeButtons('pipeline-scope', pipelineScope, [['all', 'All active', pipelineRecords.filter(r=>!['completed','lost'].includes(uiStage(r))).length], ['open', 'Open opportunities', pipelineRecords.filter(isOpen).length], ['won', 'Quote confirmed', records.filter(r => uiStage(r) === 'won').length]])}<button type="button" id="pipeline-filter-toggle" class="btn ghost sale-pipeline-filter-toggle" data-sale-action="pipeline-filters" aria-expanded="${pipelineFiltersOpen}" aria-controls="pipeline-filter-panel">Filters${filterCount ? ` <span class="sale-filter-count" aria-label="${filterCount} active filters">${filterCount}</span>` : ''}</button><div id="pipeline-filter-panel" class="sale-pipeline-filter-panel" data-open="${pipelineFiltersOpen}"><details class="sale-past-jobs"><summary>${pipelineScope==='completed'?'Completed':pipelineScope==='lost'?'Cancelled':'Past jobs'} <span>${pipelineRecords.filter(r=>['completed','lost'].includes(uiStage(r))).length}</span><span aria-hidden="true">⌄</span></summary><div class="sale-past-menu">${scopeButtons('pipeline-scope',pipelineScope,[['completed','Completed',pipelineRecords.filter(r=>uiStage(r)==='completed').length],['lost','Cancelled',pipelineRecords.filter(r=>uiStage(r)==='lost').length]])}</div></details>
+      ${field('Search pipeline', `<input id="pipeline-search" type="search" value="${esc(pipelineSearch)}" placeholder="Customer, address or source">`)}<label class="sale-check"><input type="checkbox" id="pipeline-due" ${pipelineDueOnly ? 'checked' : ''}> Follow-ups overdue</label></div></div>` +
       resultBar(list.length, pipelineRecords.length, pipelineScope !== 'all' || pipelineSearch || pipelineDueOnly, 'pipeline-reset', pipelineDueOnly ? 'Overdue follow-ups' : pipelineScope === 'all' ? 'Active stages' : pipelineScope === 'open' ? 'Open opportunities' : uiStages().find(s => s.key === pipelineScope)?.label || pipelineScope) +
       `<nav class="sale-stage-jump" aria-label="Jump to stage">${scopeStages.map(s => `<button class="btn ghost sm" data-sale-action="pipeline-jump" data-id="${s.key}">${esc(s.label)} · ${list.filter(r => uiStage(r) === s.key).length}</button>`).join('')}</nav><p class="sale-board-hint">Open a customer name for details. Move an opportunity with its Sales stage menu or drag it to a stage.</p>` +
       (!list.length ? `<div class="sale-no-results">${empty('No matching opportunities. Reset filters to see your pipeline.')}${button('Reset filters', 'pipeline-reset')}</div>` : '') +
@@ -1136,7 +1137,8 @@
       if(a==='followup-record'){document.getElementById('sales-dialog')?.close();openDetail(r.id);return;}
       if(a==='followup-email'){document.getElementById('sales-dialog')?.close();openComposeModal({to:r.email||'',subject:r.quoteSentAt?'Following up on your quote':'Your enquiry',customerId:r.customerId,jobId:r.jobId,opportunityId:String(r.id)});return;}
       if(['followup-tomorrow','followup-three','followup-done'].includes(a)){let date=null;if(a!=='followup-done'){const next=new Date();next.setDate(next.getDate()+(a==='followup-three'?3:1));next.setHours(9,0,0,0);date=next.toISOString();}await saveFollowup(r,date,a==='followup-done'?'Follow-up completed':'Follow-up rescheduled');return;}
-      if(a==='pipeline-reset'){pipelineScope='all';pipelineSearch='';pipelineDueOnly=false;render();document.getElementById('pipeline-search')?.focus();return;}
+      if(a==='pipeline-filters'){pipelineFiltersOpen=!pipelineFiltersOpen;render();document.querySelector('[data-sale-action="pipeline-filters"]')?.focus();return;}
+      if(a==='pipeline-reset'){pipelineScope='all';pipelineSearch='';pipelineDueOnly=false;render();const focusId=window.matchMedia('(max-width: 640px)').matches&&!pipelineFiltersOpen?'pipeline-filter-toggle':'pipeline-search';document.getElementById(focusId)?.focus();return;}
       if(a==='leads-reset'){search='';sourceFilter='';stageFilter='';leadSort='newest';leadsDueOnly=false;renderLeads();document.getElementById('sale-search')?.focus();return;}
       if(a==='leads-layout'){leadLayout=b.dataset.id==='table'?'table':'cards';renderLeads();document.querySelector(`#view-leads [data-sale-action="leads-layout"][data-id="${leadLayout}"]`)?.focus();return;}
       if(a==='leads-scope'){stageFilter=b.dataset.id;renderLeads();document.querySelector(`#view-leads [data-sale-action="leads-scope"][data-id="${stageFilter}"]`)?.focus();return;}
@@ -1566,7 +1568,7 @@
     listServiceM8Jobs,
     report: currentReport,
     reset: () => {
-      pipelineScope="all"; pipelineSearch=""; pipelineDueOnly=false;
+      pipelineScope="all"; pipelineSearch=""; pipelineDueOnly=false; pipelineFiltersOpen=false;
       search=""; sourceFilter=""; stageFilter=""; leadSort="newest"; leadLayout="cards"; leadsDueOnly=false; activeId=null;
       cloudGoals = [];
       spend = [];

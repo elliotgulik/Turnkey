@@ -117,7 +117,11 @@
   #view-detail .sale-detail-layout { grid-template-columns: 1fr; gap: 0; }
   #view-detail .sale-detail-next { align-items: flex-start; flex-direction: column; gap: 16px; }
 }
+/* Keep the existing toolbar layout above the phone breakpoint. */
+#view-pipeline .sale-pipeline-filter-toggle { display: none; }
+#view-pipeline .sale-pipeline-filter-panel { display: contents; }
 @media (max-width: 760px) {
+  #view-pipeline .sale-pipeline-filter-panel > .sale-field { width: 100%; }
   :is(#view-leads, #view-pipeline) .sale-head > .sale-actions { width: 100%; }
   :is(#view-leads, #view-pipeline) .sale-head > .sale-actions .btn { flex: 1 1 auto; }
   :is(#view-leads, #view-pipeline) .sale-scope-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
@@ -149,4 +153,16 @@
   #view-detail .sale-form-pair { grid-template-columns: 1fr; gap: 0; }
   #view-detail .sale-detail-nav { gap: 6px; }
   #view-detail .sale-detail-nav a { padding-inline: 10px; font-size: 12px; }
+}
+
+@media (max-width: 640px) {
+  #view-pipeline .sale-pipeline-filter-toggle { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; }
+  #view-pipeline .sale-filter-count { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; min-height: 24px; padding: 0 6px; border-radius: 12px; background: var(--sale-ink); color: #fff; font-variant-numeric: tabular-nums; }
+  #view-pipeline .sale-pipeline-filter-panel { display: none; }
+  #view-pipeline .sale-pipeline-filter-panel[data-open="true"] { display: flex; flex-direction: column; gap: 12px; width: 100%; min-width: 0; padding: 14px; box-sizing: border-box; background: var(--sale-soft); border: 1px solid var(--sale-line); border-radius: 12px; }
+  #view-pipeline .sale-pipeline-filter-panel > .sale-field { margin: 0; }
+  #view-pipeline .sale-pipeline-filter-panel input[type="search"] { width: 100%; min-width: 0; font-size: 16px; }
+  #view-pipeline .sale-pipeline-filter-panel .sale-past-jobs { width: 100%; }
+  #view-pipeline .sale-pipeline-filter-panel .sale-past-jobs summary { min-height: 44px; box-sizing: border-box; }
+  #view-pipeline .sale-pipeline-filter-panel .sale-past-menu { position: static; margin-top: 6px; min-width: 0; box-shadow: none; }
 }
