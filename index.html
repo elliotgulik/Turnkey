@@ -1349,7 +1349,7 @@ location.replace('/reset-password.html'+location.search+location.hash);
 
 </style>
 <link rel="stylesheet" href="pricing-learning.css?v=20261101h">
-<link rel="stylesheet" href="sales-platform.css?v=20261103followups1">
+<link rel="stylesheet" href="sales-platform.css?v=20261108history1">
 <link rel="stylesheet" href="nova-lead-manager.css?v=20261102e">
 <link rel="stylesheet" href="quote-workspace.css?v=20261017a">
 <link rel="stylesheet" href="conversations.css?v=20261102k">
@@ -4816,7 +4816,7 @@ function buildDocPDF(mode,r,outputType){
     y+=4.5;
     doc.setFont('helvetica','normal');doc.setFontSize(8);
     doc.setTextColor(100,110,120);
-    var sub=s.priceSnapshot!=null||s.fixedPrice!=null?(s.qty+' '+v.unit+' \u00b7 agreed price'):(s.qty+' '+v.unit+' \u00d7 '+TK_FORMAT.money(rate)+'/'+v.unit+(note?' \u00b7 '+note:''));
+    var sub=s.svc==='windows'?'Service total':s.priceSnapshot!=null||s.fixedPrice!=null?(s.qty+' '+v.unit+' \u00b7 agreed price'):(s.qty+' '+v.unit+' \u00d7 '+TK_FORMAT.money(rate)+'/'+v.unit+(note?' \u00b7 '+note:''));
     doc.text(sub,ML,y);
     doc.setTextColor(30,40,50);
     y+=7;
@@ -4889,7 +4889,7 @@ function buildDocEmailBody(mode,r){
     var rate=TK_PRICING.effectiveRate(s);
     var amt=s._price!=null?s._price:Math.round(TK_PRICING.lineTotal(s));
     var note=lineVariantNote(s);
-    var desc=s._price!=null?v.label+' ('+s.qty+' panes)':s.fixedPrice!=null?v.label+' (fixed price)':v.label+': '+s.qty+' '+v.unit+' × '+TK_FORMAT.money(rate)+'/'+v.unit+(note?' · '+note:'');
+    var desc=s.svc==='windows'?v.label:s._price!=null?v.label+' ('+s.qty+' panes)':s.fixedPrice!=null?v.label+' (fixed price)':v.label+': '+s.qty+' '+v.unit+' × '+TK_FORMAT.money(rate)+'/'+v.unit+(note?' · '+note:'');
     return '  · '+desc+' = '+money(amt);
   }).join('\n');
   var gst=TK_PRICING.gstFromInclusive(r.total).gst;
@@ -4930,7 +4930,7 @@ function renderDocHTML(mode,r){
   const rows=(r.services||[]).map((s,i)=>{
     const v=SERVICES[s.svc]||{label:s.svc||'Service',unit:''};
     const note=lineVariantNote(s),fixed=s.priceSnapshot!=null||s.fixedPrice!=null;
-    return `<tr><td><div class="di-name">${esc(v.label)}</div><div class="di-sub">${esc(s.qty+' '+v.unit+(fixed?' · agreed price':' @ '+docMoney(TK_PRICING.effectiveRate(s))+'/'+v.unit)+(note?' · '+note:''))}</div></td><td class="di-amt">${docMoney(f.lines[i])}</td></tr>`;
+    return `<tr><td><div class="di-name">${esc(v.label)}</div><div class="di-sub">${esc(s.svc==='windows'?'Service total':s.qty+' '+v.unit+(fixed?' · agreed price':' @ '+docMoney(TK_PRICING.effectiveRate(s))+'/'+v.unit)+(note?' · '+note:''))}</div></td><td class="di-amt">${docMoney(f.lines[i])}</td></tr>`;
   }).join('');
   const terms=mode==='quote'?t.quoteTerms:t.invoiceTerms;
   const title=mode==='quote'?'QUOTE':f.taxed?'TAX INVOICE':'INVOICE';
@@ -11118,7 +11118,7 @@ async function retryPendingPhotos(){
 <script src="lead-request-view.js?v=20261102-wix-answers"></script>
 <script src="servicem8-pricing-view.js?v=20261102d"></script>
 <script src="lead-identity.js?v=20261103b"></script>
-<script src="sales-platform.js?v=20261103followups1"></script>
+<script src="sales-platform.js?v=20261108history1"></script>
 <script type="module" src="measurement-import.js?v=20261017a"></script>
 <script src="pricing-learning-engine.js?v=20261102k"></script>
 <script src="quote-workspace.js?v=20261017a"></script>

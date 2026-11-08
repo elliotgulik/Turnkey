@@ -2078,6 +2078,83 @@ export function installSalesPlatform(
     }
     throw fail("Business settings changed while saving. Reload and retry.", 409);
   }));
+  // Automatic history is a privileged audit, never a general mailbox browser.
+  app.get("/api/sales/followup-history", requireBusiness, admin, wrap(async (req, res) => {
+    const integer = (key, fallback, max) => {
+      const raw = req.query[key];
+      if (raw === undefined) return fallback;
+      if (typeof raw !== "string" || !/^\d+$/.test(raw) || !Number.isSafeInteger(Number(raw)) ||
+          Number(raw) < (key.endsWith("Limit") || key === "limit" ? 1 : 0) || Number(raw) > max)
+        throw fail("Invalid history pagination.");
+      return Number(raw);
+    };
+    const limit = integer("limit", 50, 100), offset = integer("offset", 0, Number.MAX_SAFE_INTEGER - 101);
+    const repliesLimit = integer("repliesLimit", 25, 100), repliesOffset = integer("repliesOffset", 0, Number.MAX_SAFE_INTEGER - 101);
+    const tasks = await unwrap(db.from("integration_tasks")
+      .select("id,dedupe_key,payload,state,created_at,completed_at").eq("business_id", req.businessId)
+      .eq("kind", "reminder").eq("payload->>automaticCustomerFollowup", "true")
+      .order("created_at", { ascending: false }).order("id").range(offset, offset + limit));
+    const items = [];
+    const business = await unwrap(db.from("businesses").select("pricing_config").eq("id", req.businessId).maybeSingle());
+    for (const task of tasks.slice(0, limit)) {
+      const jobId = task.payload?.jobId || null;
+      const draftId = SM.stableUuid("automatic-followup", req.businessId, task.dedupe_key);
+      const [draft, job] = await Promise.all([
+        unwrap(db.from("conversation_drafts").select("id,user_id,payload,status,sent_message_id,created_at,updated_at")
+          .eq("business_id", req.businessId).eq("id", draftId).maybeSingle()),
+        jobId ? unwrap(db.from("jobs").select("id,customer_id,quote_id,status,details").eq("business_id", req.businessId).eq("id", jobId).maybeSingle()) : null,
+      ]);
+      const customer = job?.customer_id ? await unwrap(db.from("customers").select("id,name,email,followups_disabled")
+        .eq("business_id", req.businessId).eq("id", job.customer_id).maybeSingle()) : null;
+      const quote = job?.quote_id ? await unwrap(db.from("quotes").select("status")
+        .eq("business_id", req.businessId).eq("id", job.quote_id).maybeSingle()) : null;
+      const senderId = draft?.user_id || business?.pricing_config?.followups?.senderUserId;
+      const account = senderId ? await unwrap(db.from("email_accounts").select("id")
+        .eq("business_id", req.businessId).eq("user_id", senderId).eq("provider", "gmail").maybeSingle()) : null;
+      const sent = account && draft?.sent_message_id ? await unwrap(db.from("emails")
+        .select("subject,body_text,sent_at,thread_id").eq("business_id", req.businessId).eq("account_id", account.id)
+        .eq("direction", "sent").eq("provider_message_id", draft.sent_message_id).maybeSingle()) : null;
+      // Use the immutable task anchor, including for drafts created before the
+      // opportunityId overwrite fix. Current quote dates can have moved on.
+      const anchor = Number(String(task.dedupe_key).split(":")[2]);
+      const address = value => String(value || "").match(/<([^>]+)>/)?.[1]?.trim().toLowerCase() || String(value || "").trim().toLowerCase();
+      const recipient = address(draft?.payload?.to || customer?.email);
+      const replies = [];
+      let matched = 0, anyReply = false;
+      if (account && Number.isFinite(anchor) && anchor > 0) {
+        for (let start = 0; ; start += 1000) {
+          const page = await unwrap(db.from("emails").select("id,subject,body_text,sent_at,thread_id,customer_id,from_address")
+            .eq("business_id", req.businessId).eq("account_id", account.id).eq("direction", "received")
+            .gt("sent_at", new Date(anchor).toISOString()).order("sent_at").order("id").range(start, start + 999));
+          for (const mail of page) {
+            const fromCustomer = !!((customer && mail.customer_id === customer.id) || (recipient && address(mail.from_address) === recipient));
+            if (fromCustomer) anyReply = true;
+            const associated = sent?.thread_id ? mail.thread_id === sent.thread_id :
+              fromCustomer && (!sent?.sent_at || Date.parse(mail.sent_at) > Date.parse(sent.sent_at));
+            if (!associated) continue;
+            anyReply = true;
+            if (matched++ >= repliesOffset) replies.push({ id: mail.id, subject: mail.subject || "", bodyText: mail.body_text || "", sent_at: mail.sent_at });
+            if (replies.length > repliesLimit) break;
+          }
+          if (replies.length > repliesLimit || page.length < 1000) break;
+        }
+      }
+      const stoppedReason = anyReply ? "customer_replied" : !job ? "job_unavailable" :
+        customer?.followups_disabled ? "customer_opted_out" : job.details?.clientResponded ? "customer_responded" :
+        !["quoted", "followup"].includes(job.status) || job.details?.approvedAt ? "job_closed" :
+        !quote || !["sent", "viewed"].includes(quote.status) ? "quote_closed" :
+        business?.pricing_config?.followups?.enabled !== true ? "followups_disabled" : null;
+      const repliesHasMore = replies.length > repliesLimit;
+      items.push({ id: task.id, jobId, customer_name: customer?.name || "", subject: sent?.subject ?? draft?.payload?.subject ?? "",
+        bodyText: sent?.body_text ?? draft?.payload?.bodyText ?? "", sent_at: sent?.sent_at || null,
+        status: draft?.status || task.state, created_at: task.created_at || draft?.created_at || null,
+        stepId: task.payload?.stepId || null, task_status: task.state, stoppedReason,
+        replyMatch: sent?.thread_id ? "thread" : sent?.sent_at ? "customer_after_send" : "customer_after_quote",
+        replies: replies.slice(0, repliesLimit), repliesHasMore, repliesNextOffset: repliesHasMore ? repliesOffset + repliesLimit : null });
+    }
+    const hasMore = tasks.length > limit;
+    res.json({ items, limit, offset, hasMore, nextOffset: hasMore ? offset + limit : null });
+  }));
   const followupAnchor = job => {
     const raw = job?.details?.quoteSentAt;
     const at = typeof raw === "number" ? raw : typeof raw === "string" ? Date.parse(raw) : NaN;
@@ -2145,7 +2222,7 @@ export function installSalesPlatform(
       { onConflict: "id", ignoreDuplicates: true }));
     // Reuse Conversations' permanent send guard, beyond the queue's expiring
     // lease. A crashed/ambiguous send remains 'sending'/'unknown', never resent.
-    const claimed = await unwrap(scopeDraft(db.from("conversation_drafts").update({ status: "sending", payload: context.message,
+    const claimed = await unwrap(scopeDraft(db.from("conversation_drafts").update({ status: "sending", payload: { ...context.message, opportunityId: context.job.id },
       updated_at: new Date().toISOString() })).eq("status", "draft").select("id"));
     if (!claimed.length) return;
     const currentTask = await unwrap(db.from("integration_tasks").select("id").eq("id", task.id)

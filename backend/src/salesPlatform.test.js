@@ -21,7 +21,8 @@ function database(tables = {}) {
           return q;
         },
         eq(k, v) {
-          filters.push((r) => k === "pricing_config" && typeof v === "string" ? JSON.stringify(r[k]) === v
+          filters.push((r) => k === "payload->>automaticCustomerFollowup" ? String(r.payload?.automaticCustomerFollowup) === v
+            : k === "pricing_config" && typeof v === "string" ? JSON.stringify(r[k]) === v
             : k === "snapshot->>accepted" ? String(r.snapshot?.accepted) === v
             : k === "lease_until" && r[k] && v ? Date.parse(r[k]) === Date.parse(v) : r[k] === v);
           return q;
@@ -2095,7 +2096,7 @@ test('automatic follow-ups dedupe concurrent scheduling and delivery, render saf
  assert.equal(f.sends.length,1);assert.equal(f.sends[0].to,'jane@example.test');
  assert.equal(f.sends[0].subject,'Hi Jane');assert.match(f.sends[0].bodyText,/quote\.html\?t=public-token/);
  assert.match(f.sends[0].bodyHtml,/Wash &amp; Co/);assert.match(f.sends[0].bodyHtml,/&lt;Thanks&gt;/);
- assert.equal(f.db.tables.conversation_drafts[0].status,'sent');assert.equal(f.db.tables.emails[0].direction,'sent');
+ assert.equal(f.db.tables.conversation_drafts[0].status,'sent');assert.equal(f.db.tables.conversation_drafts[0].payload.opportunityId,f.job.id);assert.equal(f.db.tables.emails[0].direction,'sent');
  assert.equal(f.db.tables.integration_tasks[0].state,'succeeded');
 });
 test('queued follow-ups recheck opt-out, replies, terminal stages, quote acceptance and tenant ownership before sending',async()=>{
@@ -2151,4 +2152,105 @@ test('an opt-out arriving during send-guard acquisition prevents provider delive
   return false;
  };
  await f.deliver();assert.equal(f.sends.length,0);
+});
+
+const followupHistoryPath = '/api/sales/followup-history';
+function historyFixture() {
+ const f=automaticFollowupFixture();
+ f.db.tables.email_accounts=[{...f.auth.account,provider:'gmail',access_token:'private-account-token'}];
+ return f;
+}
+test('follow-up history is authenticated, tenant and role scoped, read-only and rejects invalid pagination',async()=>{
+ const f=historyFixture(),req={businessId:'A',userId:f.sender};
+ const protectedRoute=setup(f.db,undefined,{requireBusiness:(_req,res)=>res.status(401).json({error:'Authentication required'})});
+ assert.equal((await protectedRoute.route('GET',followupHistoryPath,req)).statusCode,401);
+ for(const role of ['staff','technician',null]){
+  f.db.tables.users[0].role=role;
+  assert.equal((await f.route('GET',followupHistoryPath,req)).statusCode,403);
+ }
+ f.db.tables.users[0].role='manager';
+ assert.equal((await f.route('GET',followupHistoryPath,{...req,businessId:'B'})).statusCode,403);
+ for(const query of [{limit:'0'},{limit:'101'},{offset:'-1'},{offset:'2junk'},{offset:'9007199254740992'},{repliesLimit:'0'},{repliesOffset:['1']}])
+  assert.equal((await f.route('GET',followupHistoryPath,{...req,query})).statusCode,400);
+ await f.schedule();
+ f.db.tables.integration_tasks[0].state='pending';
+ const before=structuredClone(f.db.tables);
+ f.db.fail=(_table,op)=>{assert.equal(op,'select');return false;};
+ const result=await f.route('GET',followupHistoryPath,req);
+ assert.equal(result.statusCode,200);assert.equal(result.body.items.length,1);
+ assert.deepEqual(f.db.tables,before);
+ assert.equal(result.body.items[0].subject,'');assert.equal(result.body.items[0].sent_at,null);
+ assert.equal(result.body.items[0].status,'pending');
+});
+test('follow-up history recovers deterministic legacy drafts, returns only safe fields and pages all tasks',async()=>{
+ const f=historyFixture();await f.schedule();await f.deliver();
+ const task=f.db.tables.integration_tasks[0],draft=f.db.tables.conversation_drafts[0];
+ delete draft.payload.opportunityId; // Historical sending update discarded correlation.
+ task.created_at='2026-01-01T00:00:00Z';task.last_error='private-provider-secret';task.lease_token='private-lease';
+ f.db.tables.integration_tasks.push({...structuredClone(task),id:id(701),created_at:'2026-01-02T00:00:00Z',dedupe_key:task.dedupe_key+':other',payload:{...task.payload,stepId:'other'}},
+  {...structuredClone(task),id:id(702),business_id:'B'},
+  {id:id(703),business_id:'A',kind:'reminder',payload:{jobId:f.job.id},created_at:'2026-01-03T00:00:00Z'});
+ const req={businessId:'A',userId:f.sender,query:{limit:'1',offset:'0'}};
+ const first=(await f.route('GET',followupHistoryPath,req)).body;
+ assert.equal(first.items.length,1);assert.equal(first.items[0].id,id(701));assert.equal(first.hasMore,true);assert.equal(first.nextOffset,1);
+ const second=(await f.route('GET',followupHistoryPath,{...req,query:{limit:'1',offset:'1'}})).body;
+ const item=second.items[0];assert.equal(item.id,task.id);assert.equal(item.jobId,f.job.id);assert.equal(item.customer_name,'Jane Smith');
+ assert.equal(item.subject,'Hi Jane');assert.match(item.bodyText,/Wash & Co/);assert.equal(item.status,'sent');assert(item.sent_at);
+ assert.equal(second.hasMore,false);assert.equal(second.nextOffset,null);
+ assert.doesNotMatch(JSON.stringify(second),/private-|access_token|provider_message_id|lease_token|public_token|sent_message_id/);
+ assert.equal((await f.route('GET',followupHistoryPath,{...req,query:{offset:'2'}})).body.items.length,0);
+});
+test('history paginates associated thread replies and excludes other quotes, accounts and businesses',async()=>{
+ const f=historyFixture();await f.schedule();await f.deliver();
+ const received=(n,extra={})=>({id:id(n),business_id:'A',account_id:f.auth.account.id,direction:'received',customer_id:null,
+  from_address:'Jane <JANE@example.test>',subject:'Reply '+n,body_text:'Response '+n,thread_id:'thread-1',sent_at:new Date(Date.now()+n*1000).toISOString(),...extra});
+ f.db.tables.emails.push(received(710),received(711),received(712),received(713,{thread_id:'another-quote'}),
+  received(714,{business_id:'B'}),received(715,{account_id:id(999)}));
+ const req={businessId:'A',userId:f.sender,query:{repliesLimit:'2'}};
+ const first=(await f.route('GET',followupHistoryPath,req)).body.items[0];
+ assert.deepEqual(first.replies.map(r=>r.id),[id(710),id(711)]);assert.equal(first.stoppedReason,'customer_replied');
+ assert.equal(first.repliesHasMore,true);assert.equal(first.repliesNextOffset,2);
+ const second=(await f.route('GET',followupHistoryPath,{...req,query:{repliesLimit:'2',repliesOffset:'2'}})).body.items[0];
+ assert.deepEqual(second.replies.map(r=>r.id),[id(712)]);assert.equal(second.repliesHasMore,false);
+ assert.equal(second.repliesNextOffset,null);
+ // An unrelated thread still stops automation, but is not presented as a response.
+ f.db.tables.emails=f.db.tables.emails.filter(m=>m.direction==='sent'||m.thread_id==='another-quote');
+ const other=(await f.route('GET',followupHistoryPath,req)).body.items[0];
+ assert.equal(other.stoppedReason,'customer_replied');assert.deepEqual(other.replies,[]);
+});
+test('history fallback associates only replies after send, and a pre-send unlinked reply stops queued automation',async()=>{
+ const f=historyFixture();await f.schedule();await f.deliver();
+ const sent=f.db.tables.emails[0];sent.thread_id=null;
+ const anchor=f.job.details.quoteSentAt;
+ f.db.tables.emails.push({id:id(720),business_id:'A',account_id:f.auth.account.id,direction:'received',customer_id:null,
+  from_address:'jane@example.test',subject:'Before follow-up',sent_at:new Date(anchor+1000).toISOString()},
+ {id:id(721),business_id:'A',account_id:f.auth.account.id,direction:'received',customer_id:f.customerId,
+  from_address:'jane@example.test',subject:'After follow-up',sent_at:new Date(Date.parse(sent.sent_at)+1000).toISOString()});
+ const req={businessId:'A',userId:f.sender};
+ const item=(await f.route('GET',followupHistoryPath,req)).body.items[0];
+ assert.deepEqual(item.replies.map(r=>r.id),[id(721)]);assert.equal(item.stoppedReason,'customer_replied');
+ const g=historyFixture();await g.schedule();
+ g.db.tables.emails.push({id:id(722),business_id:'A',account_id:g.auth.account.id,direction:'received',customer_id:null,
+  from_address:'Jane <jane@example.test>',subject:'Please stop',sent_at:new Date().toISOString()});
+ await g.deliver();assert.equal(g.sends.length,0);
+ const stopped=(await g.route('GET',followupHistoryPath,{businessId:'A',userId:g.sender})).body.items[0];
+ assert.equal(stopped.stoppedReason,'customer_replied');assert.equal(stopped.sent_at,null);assert.equal(stopped.bodyText,'');
+ assert.equal(stopped.replies[0].id,id(722));
+});
+test('history reports safe stop reasons without disclosing raw integration errors',async()=>{
+ for(const [reason,mutate] of [
+  ['customer_opted_out',f=>{f.db.tables.customers[0].followups_disabled=true;}],
+  ['customer_responded',f=>{f.job.details.clientResponded=true;}],
+  ['job_closed',f=>{f.job.status='won';}],
+  ['quote_closed',f=>{f.db.tables.quotes[0].status='accepted';}],
+  ['followups_disabled',f=>{f.config.enabled=false;}],
+  ['job_unavailable',f=>{f.db.tables.jobs=[];}],
+ ]){
+  const f=historyFixture();await f.schedule();mutate(f);
+  const result=await f.route('GET',followupHistoryPath,{businessId:'A',userId:f.sender});
+  assert.equal(result.body.items[0].stoppedReason,reason);
+ }
+ const f=historyFixture();f.db.fail=table=>table==='integration_tasks';
+ const result=await f.route('GET',followupHistoryPath,{businessId:'A',userId:f.sender});
+ assert.equal(result.statusCode,503);assert.doesNotMatch(JSON.stringify(result.body),/secret database detail/);
 });

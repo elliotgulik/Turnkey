@@ -455,7 +455,7 @@
   }
   let followupScope='due';
   function followupRows(scope=followupScope){const now=Date.now(),end=new Date();end.setHours(23,59,59,999);return records.filter(isOpen).filter(r=>!followupsOff(r)).filter(r=>{const at=followupTime(r);return scope==='all'||scope==='due'&&at!==null&&at<now||scope==='today'&&at!==null&&at>=now&&at<=end.getTime()||scope==='upcoming'&&at!==null&&at>end.getTime()||scope==='unscheduled'&&at===null;}).sort((a,b)=>(followupTime(a)??Infinity)-(followupTime(b)??Infinity));}
-  function openFollowups(){const rows=followupRows();modal('Follow-ups',`<p>Plan the next contact, email your customer, or mark a follow-up done. Customer emails are sent only when you press Send.</p><div class="sale-scope-tabs">${[['due','Overdue'],['today','Today'],['upcoming','Upcoming'],['unscheduled','Needs a date'],['all','All open']].map(([key,label])=>button(label+' ('+followupRows(key).length+')','followup-scope',key,`aria-pressed="${followupScope===key}"`)).join('')}</div><div class="sale-followup-queue">${rows.map(r=>`<article class="sale-followup-row"><div><button type="button" class="sale-customer-link" data-sale-action="followup-record" data-id="${esc(r.id)}">${esc(r.name||'Customer')}</button><p>${esc(r.address||'')} · ${esc(r.salespersonName||'Unassigned')}</p>${followupLabel(r)}<small>${r.clientResponded?'Customer responded — review their reply':r.quoteSentAt?'Quote sent · awaiting response':'Awaiting next contact'}</small></div><div class="sale-followup-actions"><label class="sale-field"><span>Next follow-up</span><input type="datetime-local" data-followup-date="${esc(r.id)}" value="${followupTime(r)===null?'':esc(localDateTime(r.nextFollowUpAt))}"></label><div class="sale-actions">${r.email?button('Email','followup-email',r.id):''}${r.phone?`<a class="btn ghost sm" href="tel:${esc(String(r.phone).replace(/[^+\d]/g,''))}">Call</a>`:''}${button('Tomorrow','followup-tomorrow',r.id)}${button('In 3 days','followup-three',r.id)}${button('Done','followup-done',r.id)}</div></div></article>`).join('')||empty('No follow-ups in this group.')}</div>`);}
+  function openFollowups(){const rows=followupRows();modal('Follow-ups',`${followupHistoryButton()}<p>Plan the next contact, email your customer, or mark a follow-up done. Manual emails are sent when you press Send. Saved, enabled automatic quote follow-ups also send on their configured schedule.</p><div class="sale-scope-tabs">${[['due','Overdue'],['today','Today'],['upcoming','Upcoming'],['unscheduled','Needs a date'],['all','All open']].map(([key,label])=>button(label+' ('+followupRows(key).length+')','followup-scope',key,`aria-pressed="${followupScope===key}"`)).join('')}</div><div class="sale-followup-queue">${rows.map(r=>`<article class="sale-followup-row"><div><button type="button" class="sale-customer-link" data-sale-action="followup-record" data-id="${esc(r.id)}">${esc(r.name||'Customer')}</button><p>${esc(r.address||'')} · ${esc(r.salespersonName||'Unassigned')}</p>${followupLabel(r)}<small>${r.clientResponded?'Customer responded — review their reply':r.quoteSentAt?'Quote sent · awaiting response':'Awaiting next contact'}</small></div><div class="sale-followup-actions"><label class="sale-field"><span>Next follow-up</span><input type="datetime-local" data-followup-date="${esc(r.id)}" value="${followupTime(r)===null?'':esc(localDateTime(r.nextFollowUpAt))}"></label><div class="sale-actions">${r.email?button('Email','followup-email',r.id):''}${r.phone?`<a class="btn ghost sm" href="tel:${esc(String(r.phone).replace(/[^+\d]/g,''))}">Call</a>`:''}${button('Tomorrow','followup-tomorrow',r.id)}${button('In 3 days','followup-three',r.id)}${button('Done','followup-done',r.id)}</div></div></article>`).join('')||empty('No follow-ups in this group.')}</div>`);}
   async function saveFollowup(r,date,label){if(r&&followupsOff(r))throw Error('Follow-ups are off for this customer. Enable reminders on their customer record first.');if(!r||!isOpen(r))throw Error('Only open opportunities need sales follow-ups.');const previous={nextFollowUpAt:r.nextFollowUpAt,salesHistory:r.salesHistory};r.nextFollowUpAt=date;r.salesHistory=[...(r.salesHistory||[]),{at:Date.now(),label}];try{await syncRecordToSupabase(r);saveState();render();openFollowups();toast('Follow-up updated.');}catch(e){Object.assign(r,previous);throw e;}}
   function followupLabel(r) {
     if(followupsOff(r))return '<span class="sale-followup sale-followup-unset">Follow-ups off</span>';
@@ -761,6 +761,72 @@
     document.getElementById('sale-quote-search')?.focus();
   }
   // Only the settings endpoint persists automation. Editing this form never sends mail.
+  let followupHistorySerial = 0, followupHistoryOffset = 0, followupHistoryItems = [];
+  const followupHistoryLimit = 20;
+  function followupHistoryButton() {
+    return canEditFollowupSettings() ? button('Sent follow-ups','followup-history') : '';
+  }
+  function followupHistoryDate(value) {
+    return value && Number.isFinite(Date.parse(value)) ? dates(value) : 'Not recorded';
+  }
+  function followupHistoryRow(item) {
+    const statuses={draft:'Not sent',sending:'Sending',sent:'Sent',unknown:'Delivery unconfirmed',pending:'Queued',running:'Processing',succeeded:'Processed',failed:'Failed',cancelled:'Cancelled',stopped:'Stopped'};
+    const reasons={customer_replied:'Customer replied',customer_responded:'Customer responded',customer_opted_out:'Follow-ups off for customer',job_closed:'Job closed',quote_closed:'Quote closed',followups_disabled:'Automatic follow-ups disabled',job_unavailable:'Job unavailable'};
+    return `<article class="sale-followup-history-row" data-history-id="${esc(item.id)}"><div class="sale-followup-history-heading"><h3>${esc(item.customer_name||'Customer unavailable')}</h3><span class="sale-followup">${esc(statuses[item.status]||'Status unavailable')}</span></div><p class="sale-muted">${item.sent_at?'Sent':'Created'} · ${esc(followupHistoryDate(item.sent_at||item.created_at))}</p>${item.stoppedReason?`<p class="sale-followup-safety">Stopped · ${esc(reasons[item.stoppedReason]||String(item.stoppedReason).replace(/_/g,' '))}</p>`:''}<details><summary>${esc(item.subject||'Follow-up message')}</summary><div class="sale-followup-message">${esc(item.bodyText||'Message unavailable.')}</div></details><section class="sale-followup-replies" aria-label="Customer responses"><h4>${esc(({thread:'Thread replies',customer_after_send:'Customer replies after follow-up',customer_after_quote:'Customer replies after quote'})[item.replyMatch]||'Customer responses')}</h4>${(item.replies||[]).map(reply=>`<article><p class="sale-muted">Received · ${esc(followupHistoryDate(reply.sent_at))}</p><strong>${esc(reply.subject||'Customer response')}</strong><div class="sale-followup-message">${esc(reply.bodyText||'Response text unavailable.')}</div></article>`).join('')||'<p class="sale-muted">No responses recorded.</p>'}${item.repliesHasMore?button(item.loadingReplies?'Loading responses…':'More responses','followup-history-replies',item.id,item.loadingReplies?'disabled':''):''}${item.replyError?'<p role="alert">Responses could not be loaded. Try More responses again.</p>':''}</section></article>`;
+  }
+  function followupHistoryPage(data) {
+    const offset=followupHistoryOffset,items=followupHistoryItems;
+    return `<p>Automatic quote follow-ups and customer responses recorded in TurnKey. Replies appear after the connected mailbox syncs. Queued or stopped attempts may not have been sent.</p><div class="sale-followup-history-list">${items.map(followupHistoryRow).join('')||empty('No follow-up history on this page.')}</div><nav class="sale-followup-history-pages" aria-label="Follow-up history pages">${button('Previous','followup-history-page',Math.max(0,offset-followupHistoryLimit),offset===0?'disabled':'')}<p role="status">${items.length?`${offset+1}–${offset+items.length}`:'No entries'} · Page ${Math.floor(offset/followupHistoryLimit)+1}</p>${button('Next','followup-history-page',offset+followupHistoryLimit,data.hasMore===true?'':'disabled')}</nav>`;
+  }
+  async function openFollowupHistory(offset=0) {
+    if(!canEditFollowupSettings())return;
+    offset=Number.isSafeInteger(offset)&&offset>=0?offset:0;
+    closeModal('settings-overlay');
+    modal('Sent follow-ups','<div id="sale-followup-history" tabindex="-1" aria-busy="true"><p role="status">Loading follow-up history…</p></div>');
+    const call=++followupHistorySerial,scope=peopleScope(),dialog=document.getElementById('sales-dialog'),host=document.getElementById('sale-followup-history');
+    followupHistoryOffset=offset;followupHistoryItems=[];
+    const current=()=>call===followupHistorySerial&&scope===peopleScope()&&canEditFollowupSettings()&&dialog.open&&host.isConnected;
+    try {
+      const data=await api(`/api/sales/followup-history?limit=${followupHistoryLimit}&offset=${offset}&repliesLimit=25&repliesOffset=0`);
+      if(!current())return;
+      if(!Array.isArray(data.items))throw Error('Invalid history response');
+      followupHistoryItems=data.items;
+      host.innerHTML=followupHistoryPage(data);
+      host.setAttribute('aria-busy','false');
+      host.focus({preventScroll:true});
+    } catch(err) {
+      if(!current())return;
+      host.innerHTML=`<p role="alert">Follow-up history could not be loaded. Please try again.</p>${button('Retry','followup-history-page',offset)}`;
+      host.setAttribute('aria-busy','false');
+    }
+  }
+  async function loadFollowupReplies(id) {
+    if(!canEditFollowupSettings())return;
+    const item=followupHistoryItems.find(row=>String(row.id)===String(id));
+    if(!item||!item.repliesHasMore||item.loadingReplies||!Number.isSafeInteger(item.repliesNextOffset)||item.repliesNextOffset<0)return;
+    const call=followupHistorySerial,scope=peopleScope(),dialog=document.getElementById('sales-dialog'),host=document.getElementById('sale-followup-history');
+    if(!dialog?.open||!host)return;
+    const current=()=>call===followupHistorySerial&&scope===peopleScope()&&canEditFollowupSettings()&&dialog.open&&host.isConnected;
+    const update=()=>{
+      const find=()=>Array.from(host.querySelectorAll('[data-history-id]')).find(el=>el.dataset.historyId===String(id));
+      const row=find();if(!row)return;
+      const opened=row.querySelector('details')?.open,focused=row.contains(document.activeElement);
+      row.outerHTML=followupHistoryRow(item);
+      const next=find();if(opened)next?.querySelector('details')?.setAttribute('open','');
+      if(focused||!item.loadingReplies){const target=next?.querySelector('[data-sale-action="followup-history-replies"]')||next?.querySelector('summary');target?.focus({preventScroll:true});}
+    };
+    item.loadingReplies=true;item.replyError=false;update();
+    try {
+      const data=await api(`/api/sales/followup-history?limit=${followupHistoryLimit}&offset=${followupHistoryOffset}&repliesLimit=25&repliesOffset=${item.repliesNextOffset}`);
+      if(!current())return;
+      const next=data.items?.find(row=>String(row.id)===String(id));
+      if(!next||!Array.isArray(next.replies))throw Error('Responses unavailable');
+      const seen=new Set((item.replies||[]).map(reply=>reply.id));
+      item.replies=[...(item.replies||[]),...next.replies.filter(reply=>!seen.has(reply.id))];
+      item.repliesHasMore=next.repliesHasMore===true;item.repliesNextOffset=next.repliesNextOffset;
+    } catch(err) {if(current())item.replyError=true;}
+    finally {if(current()){item.loadingReplies=false;update();}}
+  }
   let followupEditorSerial = 0;
   const canEditFollowupSettings = () => typeof currentUserRole !== 'undefined' && ['owner','manager'].includes(currentUserRole);
   function newFollowupStep(delayDays = 2) {
@@ -996,7 +1062,7 @@
     oldSettings();
     const body = document.getElementById("settings-body");
     body.insertAdjacentHTML('beforeend',settingsGroup('Pipeline',`<p>Configure stage names, order and sales probabilities for your business.</p>${button('Manage pipeline stages','stages')}`));
-    body.insertAdjacentHTML('beforeend',settingsGroup('Automatic quote follow-ups',`<p>Choose when to follow up on quotes and write a different email for each step. Automatic emails stay off until you save and enable them.</p>${button('Manage automatic follow-ups','followup-settings')}`));
+    body.insertAdjacentHTML('beforeend',settingsGroup('Automatic quote follow-ups',`<p>Choose when to follow up on quotes and write a different email for each step. Automatic emails stay off until you save and enable them.</p><div class="sale-actions">${button('Manage automatic follow-ups','followup-settings')}${followupHistoryButton()}</div>`));
   };
   const oldSaveLead = saveLead;
   saveLead = function () {
@@ -1250,6 +1316,9 @@
     const a = b.dataset.saleAction,
       r = record(b.dataset.id);
     try {
+      if(a==='followup-history'){await openFollowupHistory();return;}
+      if(a==='followup-history-page'){await openFollowupHistory(Number(b.dataset.id));return;}
+      if(a==='followup-history-replies'){await loadFollowupReplies(b.dataset.id);return;}
       if(a==='followup-settings'){await openFollowupSettings();return;}
       if(a==='followup-step-add'||a==='followup-step-remove'){editFollowupSteps(a,b.dataset.id);return;}
       if(a==='followups'){followupScope='due';openFollowups();return;}
@@ -1682,7 +1751,7 @@
   });
   window.TK_SALES_PLATFORM = {
     loadPeople, salespeople, salespersonControl, assignSalesperson, openFollowups, followupRows, followupControl, followupsOff, setFollowupsDisabled,
-    openFollowupSettings,
+    openFollowupSettings, openFollowupHistory,
     request: api,
     moveStage: async (id, key) => move(record(id), key),
     transferQuote: async (id) => {
@@ -1705,6 +1774,9 @@
       spend = [];
       settings = {};
       ++followupEditorSerial;
+      ++followupHistorySerial;followupHistoryItems=[];
+      const history=document.getElementById('sale-followup-history');
+      if(history){history.replaceChildren();document.getElementById('sales-dialog')?.close();}
       metrics = null;
       mappings = [];
       migrationError = "";
