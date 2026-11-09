@@ -1,6 +1,6 @@
 # The Post Office production workspace
 
-Operate mode. Separate local route: /post-office.html. Jackie requested a custom version for jackie@thepostoffice.co.nz; no deployment or live account changes authorized yet.
+Operate mode. Separate local route: /post-office.html. Jackie requested a custom version for jackie@thepostoffice.co.nz. The base workspace is deployed for her company; this visual refinement remains local for review.
 
 ## Direction contract
 
@@ -10,7 +10,7 @@ OWN-WORLD: Use the official Auckland company's white stacked logo on charcoal #2
 
 STORY: Jackie can schedule a shoot, see its client and crew, price its production work, and check deliverables without changing context.
 
-FIRST VIEWPORT: Narrow branded rail; content header with project creation action; calendar immediately below. Mobile places four labelled navigation controls in a stable bottom bar and defaults to an agenda list.
+FIRST VIEWPORT: Narrow branded rail; content header with project creation action; calendar immediately below. Mobile places six labelled icon controls in a single stable bottom bar and defaults to an agenda list.
 
 FORM: Extend TurnKey's existing operate interface in a separate company workspace; no redesign of shared TurnKey screens. Empty project and calendar state, never fabricated activity.
 
@@ -23,3 +23,11 @@ assets/post-office/logo-white.png is the official logo downloaded 9 November 202
 ## Finish review, 9 November 2026
 
 Local calendar and quote flows rendered in Chromium at desktop and 390px mobile widths; no horizontal page overflow or JavaScript errors in the checked flow. User-requested phase filters use selected button state and were verified against the supplied schedule; explicit shoot-window cells are retained as production bookings. Crew names come only from entered job crew or booking assignment. Mechanical design detector found no issues; nothing suppressed. Verdict: usable local first version, not a live company deployment. Shared TurnKey DESIGN.md remains the incumbent authority; this surface's charcoal logo treatment is scoped to The Post Office.
+
+## Visual refinement, 9 November 2026
+
+Preserve the official logo, charcoal/white palette and Barlow type pairing. The smaller branded rail uses consistent authored line icons. Calendar entry rendering separates project, milestone and assigned crew, with restrained phase tints, limited month rows, full labels in booking details, and clear month/week/day/agenda controls. Production-phase filters use an underlined active state and shorter visible mobile labels with full accessible names. Import/template actions remain available.
+
+Desktop job cards pair the overview with crew, and the estimate with collapsible checklist phases. Templates also use progressive disclosure. Crew has a compact directory with initials, roles and contacts; work-hour forms and recorded totals share the desktop row and stack on phones. Shared TurnKey views, pricing rules, authorization and saved business data remain unchanged.
+
+Verified by using the local application at 390px phone and 1440px desktop widths: phone page and phase-filter widths stay within the viewport; checklist changes save and progress updates correctly; all six sections are reachable. The mechanical scan reported undersized text; those text sizes were raised to 12px, with no suppressions. No live data writes or publishing during this visual pass. Verdict: local review ready.

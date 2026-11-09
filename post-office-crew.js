@@ -121,13 +121,13 @@ function renderCrew(api, view={}) {
   }
   return;
  }
- api.content.innerHTML=`<div class="poc-page"><div class="toolbar"><h2>Crew</h2>${api.canManage?'<button data-add class="primary">Add person</button>':''}</div><div class="fields"><div class="field"><label for="poc-search">Search name, role or contact</label><input id="poc-search" type="search" autocomplete="off"></div>${select(api,'Filter by project','crewProject',list(s,'projects'),'','All projects',false)}</div><section class="surface" data-people aria-live="polite"></section></div>`;
+ api.content.innerHTML=`<div class="poc-page"><div class="toolbar"><h2>Crew directory</h2>${api.canManage?'<button data-add class="primary">Add person</button>':''}</div><div class="fields"><div class="field"><label for="poc-search">Search name, role or contact</label><input id="poc-search" type="search" autocomplete="off"></div>${select(api,'Filter by project','crewProject',list(s,'projects'),'','All projects',false)}</div><section class="surface" data-people aria-live="polite"></section></div>`;
  const draw=()=>{
   const q=api.content.querySelector('#poc-search').value.trim().toLowerCase();
   const state=api.state(), pid=api.content.querySelector('#poc-crewProject').value;
   const project=list(state,'projects').find(p=>p.id===pid);
   const people=list(state,'crew').filter(c=>(!pid||project&&list(project,'crew').some(a=>assigned(a,c)))&&[c.name,c.role,c.email,c.phone].some(v=>String(v||'').toLowerCase().includes(q)));
-  api.content.querySelector('[data-people]').innerHTML=people.map(c=>`<div class="list-row"><div><h3>${e(c.name)}</h3><p>${e(c.role)}</p><p>${e(c.email)} ${e(c.phone)}</p></div><button data-person="${e(c.id)}">View person</button></div>`).join('')||'<p class="empty">No crew members found.</p>';
+  api.content.querySelector('[data-people]').innerHTML=people.map(c=>`<div class="list-row"><span class="po-person-initials" aria-hidden="true">${e(c.name.trim().split(/\s+/).map(n=>n[0]).slice(0,2).join(''))}</span><div><h3>${e(c.name)}</h3><p>${e(c.role)}</p><p>${e(c.email)} ${e(c.phone)}</p></div><button data-person="${e(c.id)}">View person</button></div>`).join('')||'<p class="empty">No crew members found.</p>';
   api.content.querySelectorAll('[data-person]').forEach(b=>b.onclick=()=>renderCrew(api,{personId:b.dataset.person}));
  };
  api.content.querySelector('#poc-search').oninput=draw;
