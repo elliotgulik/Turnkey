@@ -1,0 +1,26 @@
+/* Scoped additions to the shared Post Office workspace styles. */
+.poc-page{display:grid;gap:22px;min-width:0}
+.poc-page .toolbar{margin-bottom:0}
+.poc-page .toolbar h2{margin-right:auto}
+.poc-page .surface{min-width:0}
+.poc-page .surface>h2{margin-bottom:16px}
+.poc-page form>.muted{margin-bottom:16px}
+.poc-page .poc-filters{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.poc-page .poc-notes{white-space:pre-wrap;overflow-wrap:anywhere}
+.poc-page [data-preview]{min-height:24px;margin:16px 0}
+.poc-page [data-filter-error]:empty{display:none}
+.poc-page [data-filter-error]{color:var(--po-error,#a02d28)}
+.poc-page input[type=time]{min-height:48px;font-size:18px}
+.poc-page button,.poc-editor input,.poc-editor select{min-height:44px}
+.poc-page [data-weekly]{margin-bottom:24px}
+.poc-page [data-weekly] .list-row{align-items:flex-start}
+.poc-page [data-logs] p{overflow-wrap:anywhere}
+@media(max-width:760px){
+ .poc-page .poc-filters{grid-template-columns:1fr;gap:0}
+ .poc-page .fields{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+ .poc-page .fields .field:first-child,.poc-page .fields .field:nth-child(2),.poc-page .fields .field:nth-child(3){grid-column:1/-1}
+ .poc-page .row-actions button{flex:1}
+ .poc-page form>button{width:100%}
+ .poc-page .list-row>button{min-width:120px}
+ .poc-editor.fields{grid-template-columns:1fr}
+}

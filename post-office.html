@@ -5,13 +5,14 @@
 <title>The Post Office — Production workspace</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Semi+Condensed:wght@500;600;700&display=swap">
 <link rel="stylesheet" href="post-office.css">
+<link rel="stylesheet" href="post-office-crew.css">
 <script src="config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.6" integrity="sha384-GyhLKJoRcMXYwIJUTyx0/uSPYliVPdRYYXJm3G6zyMjKShNs8jLM7WaLpk8Vr4W/" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js" integrity="sha384-B1OFx8Gy9GjPu8UbUyXbGQpzll9ubAUQ9agInFJ8NnD7nYG1u/CLR+Sqr5yifl4q" crossorigin="anonymous"></script>
 </head>
 <body>
-<aside class="po-rail"><img src="assets/post-office/logo-white.png" alt="The Post Office" width="155" height="105"><p>Production workspace</p><nav aria-label="Workspace"><button data-page="calendar">Calendar</button><button data-page="projects">Projects &amp; quotes</button><button data-page="checklists">SOP checklists</button><button data-page="settings">Settings</button></nav><a href="index.html">Back to TurnKey</a></aside>
+<aside class="po-rail"><img src="assets/post-office/logo-white.png" alt="The Post Office" width="155" height="105"><p>Production workspace</p><nav aria-label="Workspace"><button data-page="calendar">Calendar</button><button data-page="projects">Projects &amp; quotes</button><button data-page="checklists">SOP checklists</button><button data-page="crew">Crew</button><button data-page="hours">Work hours</button><button data-page="settings">Settings</button></nav><a href="index.html?standard=1">Back to TurnKey</a></aside>
 <main><header class="po-header"><div><h1 id="page-title">Production calendar</h1><p id="account-status">Checking your account…</p></div><button id="new-project" class="primary" hidden>New project</button></header><p id="notice" role="status" aria-live="polite"></p><div id="content"></div></main>
 <dialog id="editor"><form id="editor-form"><header><h2 id="editor-title"></h2><button type="button" data-close aria-label="Close editor">Close</button></header><div id="editor-fields"></div><footer><button type="button" data-close>Cancel</button><button class="primary" type="submit">Save</button></footer></form></dialog>
-<script src="post-office-model.js"></script><script src="post-office-workspace.js"></script>
+<script src="post-office-model.js"></script><script src="post-office-crew.js"></script><script src="post-office-weather.js"></script><script src="post-office-workspace.js"></script>
 </body></html>

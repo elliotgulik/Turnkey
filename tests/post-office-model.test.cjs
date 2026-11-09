@@ -206,7 +206,7 @@ test('unknown cost hides all profitability and invalid financial inputs fail clo
   assert.throws(() => model.totals([{ qty: 1e20, rate: 1 }]));
 });
 
-test('workspace migration enforces business/email/role isolation and optimistic revisions in local Postgres', async () => {
+test('workspace migration pins company membership, scopes staff RPCs and enforces revisions in local Postgres', async () => {
   const db = new PGlite();
   try {
     // Mirror the repo helpers and trusted users-table read scope, without live connections.
@@ -225,23 +225,25 @@ test('workspace migration enforces business/email/role isolation and optimistic 
       alter table public.users enable row level security;
       grant select on public.users to authenticated;
       create policy teammate_read on public.users for select to authenticated using (business_id=public.current_business_id());
-      insert into businesses values ('post'), ('other');
+      insert into businesses values ('83c8112c-ad39-468d-b384-de593767e291'), ('other');
       insert into users values
-        ('00000000-0000-4000-8000-000000000001','post','JACKIE@THEPOSTOFFICE.CO.NZ','owner'),
-        ('00000000-0000-4000-8000-000000000002','post','manager@example.com','manager'),
-        ('00000000-0000-4000-8000-000000000003','post','crew@example.com','technician'),
+        ('00000000-0000-4000-8000-000000000001','83c8112c-ad39-468d-b384-de593767e291','JACKIE@THEPOSTOFFICE.CO.NZ','owner'),
+        ('00000000-0000-4000-8000-000000000002','83c8112c-ad39-468d-b384-de593767e291','manager@example.com','manager'),
+        ('00000000-0000-4000-8000-000000000003','83c8112c-ad39-468d-b384-de593767e291','crew@example.com','technician'),
         ('00000000-0000-4000-8000-000000000004','other','other@example.com','owner');
     `);
     const migration = fs.readdirSync(path.join(__dirname, '../supabase/migrations')).filter(name => name.endsWith('_post_office_workspaces.sql'));
     assert.equal(migration.length, 1);
-    await db.exec(fs.readFileSync(path.join(__dirname, '../supabase/migrations', migration[0]), 'utf8'));
+    const sql = fs.readFileSync(path.join(__dirname, '../supabase/migrations', migration[0]), 'utf8');
+    await db.exec(sql);
+    await db.exec(sql); // The un-applied migration is safe to rerun locally.
     const login = async n => {
       await db.exec('reset role');
       await db.query("select set_config('test.uid', $1, false)", ['00000000-0000-4000-8000-' + String(n).padStart(12, '0')]);
       await db.exec('set role authenticated');
     };
     await login(1);
-    await db.exec("insert into post_office_workspaces(business_id,state) values ('post','{}')");
+    await db.exec("insert into post_office_workspaces(business_id,state) values ('83c8112c-ad39-468d-b384-de593767e291','{}')");
     await assert.rejects(db.exec("insert into post_office_workspaces(business_id,state) values ('other','{}')"), /row-level security/);
     const original = (await db.query('select * from post_office_workspaces')).rows[0];
     assert.equal(original.revision, 0);
@@ -257,17 +259,99 @@ test('workspace migration enforces business/email/role isolation and optimistic 
     assert.equal((await db.query('select * from post_office_workspaces')).rows.length, 1);
     assert.equal((await db.query('update post_office_workspaces set revision=2 returning *')).rows.length, 0);
     assert.equal((await db.query('delete from post_office_workspaces returning *')).rows.length, 0);
-    await assert.rejects(db.exec("insert into post_office_workspaces(business_id,state) values ('post','{}')"), /row-level security/);
+    await assert.rejects(db.exec("insert into post_office_workspaces(business_id,state) values ('83c8112c-ad39-468d-b384-de593767e291','{}')"), /row-level security/);
+    await login(1);
+    const staffId = '00000000-0000-4000-8000-000000000003';
+    const initialState = {
+      crew: [{ id: 'crew-staff', userId: staffId }, { id: 'crew-manager', userId: '00000000-0000-4000-8000-000000000002' }, { id: 'freelance' }],
+      projects: [{ id: 'project-one', checklist: [{ id: 'task-one', text: 'Safety', done: false }], lines: [{ rate: 500 }] }],
+      workLogs: [], settings: { protected: true }
+    };
+    await db.query('update post_office_workspaces set state=$1,revision=revision+1', [initialState]);
+    const rpc = async (name, args) => (await db.query(`select public.${name}(${args.map((_, i) => '$' + (i + 1)).join(',')}) as result`, args)).rows[0].result;
+    const entry = { id: '10000000-0000-4000-8000-000000000001', crewId: 'crew-staff', projectId: 'project-one',
+      date: '2026-11-24', start: '09:00', end: '17:00', breakMinutes: 30, travelMinutes: 60, notes: 'Shoot',
+      hours: 999, productiveHours: 999, userId: 'spoof', submittedBy: 'spoof', settings: { protected: false } };
+    await login(3);
+    const added = await rpc('post_office_log_hours', [entry]);
+    assert.equal(added.revision, 3);
+    assert.deepEqual(added.state.projects, initialState.projects);
+    assert.deepEqual(added.state.settings, initialState.settings);
+    assert.deepEqual(added.state.workLogs[0], { id: entry.id, crewId: entry.crewId, projectId: entry.projectId,
+      date: entry.date, start: entry.start, end: entry.end, breakMinutes: 30, travelMinutes: 60, notes: 'Shoot',
+      hours: 7.5, productiveHours: 6.5, userId: staffId, submittedBy: staffId });
+    const edited = await rpc('post_office_log_hours', [{ ...entry, end: '16:00' }]);
+    assert.equal(edited.revision, 4);
+    assert.equal(edited.state.workLogs.length, 1);
+    assert.equal(edited.state.workLogs[0].hours, 6.5);
+    for (const invalid of [
+      { id: '../bad' }, { crewId: 'missing' }, { projectId: 'missing' }, { date: '2026-02-30' },
+      { date: '24/11/2026' }, { start: '24:00' }, { start: '17:00', end: '09:00' }, { end: '09:00' },
+      { breakMinutes: -1 }, { travelMinutes: -1 }, { breakMinutes: 450, travelMinutes: 31 }, { breakMinutes: 'NaN' }, { travelMinutes: null }
+    ]) await assert.rejects(rpc('post_office_log_hours', [{ ...entry, ...invalid }]));
+    await assert.rejects(rpc('post_office_log_hours', [{ ...entry, crewId: 'crew-manager' }]), /only their mapped/);
+    await assert.rejects(rpc('post_office_log_hours', [{ ...entry, crewId: 'freelance' }]), /only their mapped/);
+    const toggled = await rpc('post_office_toggle_task', ['project-one', 'task-one', true]);
+    assert.equal(toggled.revision, 5);
+    assert.equal(toggled.state.projects[0].checklist[0].done, true);
+    assert.deepEqual(toggled.state.workLogs, edited.state.workLogs);
+    assert.deepEqual(toggled.state.projects[0].lines, initialState.projects[0].lines);
+    await assert.rejects(rpc('post_office_toggle_task', ['missing', 'task-one', true]), /Project not found/);
+    await assert.rejects(rpc('post_office_toggle_task', ['project-one', 'missing', true]), /task not found/);
+    await assert.rejects(rpc('post_office_toggle_task', ['project-one', 'task-one', null]), /required/);
+    const removed = await rpc('post_office_remove_hours', [entry.id]);
+    assert.equal(removed.revision, 6);
+    assert.deepEqual(removed.state.workLogs, []);
+    await assert.rejects(rpc('post_office_remove_hours', [entry.id]), /not found/);
+    await assert.rejects(rpc('post_office_remove_hours', ['invalid']), /UUID/);
+    await login(2);
+    const managerEntry = await rpc('post_office_log_hours', [{ ...entry, crewId: 'crew-manager' }]);
+    assert.equal(managerEntry.state.workLogs[0].userId, '00000000-0000-4000-8000-000000000002');
+    await login(3);
+    // Reusing someone else's id cannot turn their entry into the caller's log.
+    await assert.rejects(rpc('post_office_log_hours', [entry]), /own existing/);
+    await assert.rejects(rpc('post_office_remove_hours', [entry.id]), /own existing/);
+    await login(2);
+    await rpc('post_office_remove_hours', [entry.id]);
+    const unlinked = await rpc('post_office_log_hours', [{ ...entry, crewId: 'freelance' }]);
+    assert.equal(unlinked.state.workLogs[0].userId, '00000000-0000-4000-8000-000000000002');
+    await rpc('post_office_remove_hours', [entry.id]);
+    await login(1);
+    // Owner-created hours are credited to mapped staff, not to the submitter.
+    const ownerLogged = await rpc('post_office_log_hours', [entry]);
+    assert.equal(ownerLogged.state.workLogs[0].userId, staffId);
+    assert.equal(ownerLogged.state.workLogs[0].submittedBy, '00000000-0000-4000-8000-000000000001');
+    await login(3);
+    await rpc('post_office_remove_hours', [entry.id]);
+    await login(1);
+    await db.exec(`update post_office_workspaces set state=jsonb_set(state,'{crew,0,userId}',
+      '"00000000-0000-4000-8000-000000000004"'),revision=revision+1`);
+    await assert.rejects(rpc('post_office_log_hours', [entry]), /Crew user must belong/);
     await login(4);
     // Spoofed metadata is ignored: the users table still says this is another business.
     await db.query("select set_config('request.jwt.claims', $1, false)", [JSON.stringify({ user_metadata: { email: 'jackie@thepostoffice.co.nz' } })]);
     assert.equal((await db.query('select * from post_office_workspaces')).rows.length, 0);
     await assert.rejects(db.exec("insert into post_office_workspaces(business_id,state) values ('other','{}')"), /row-level security/);
+    for (const [name, args] of [['post_office_log_hours', [entry]], ['post_office_remove_hours', [entry.id]], ['post_office_toggle_task', ['project-one', 'task-one', true]]]) {
+      await assert.rejects(rpc(name, args), /membership required/);
+    }
+    // Even a trusted users row bearing Jackie's email cannot unlock another company.
+    await db.exec('reset role');
+    await db.exec("update users set email='jackie@thepostoffice.co.nz' where business_id='other'");
+    await login(4);
+    await assert.rejects(rpc('post_office_log_hours', [entry]), /membership required/);
     await db.exec('reset role');
     await db.exec("update users set email='removed@example.com' where email='JACKIE@THEPOSTOFFICE.CO.NZ'");
     await login(1);
-    assert.equal((await db.query('select * from post_office_workspaces')).rows.length, 0);
+    assert.equal((await db.query('select * from post_office_workspaces')).rows.length, 1); // Email changes do not revoke pinned company access.
     await db.exec('reset role; set role anon');
     await assert.rejects(db.query('select * from post_office_workspaces'), /permission denied/);
+    for (const [name, args] of [['post_office_log_hours', [entry]], ['post_office_remove_hours', [entry.id]], ['post_office_toggle_task', ['project-one', 'task-one', true]]]) {
+      await assert.rejects(rpc(name, args), /permission denied/);
+    }
+    await db.exec('reset role');
+    await db.query("select set_config('test.uid', '', false)");
+    await db.exec('set role authenticated');
+    await assert.rejects(rpc('post_office_log_hours', [entry]), /membership required/);
   } finally { await db.close(); }
 });
