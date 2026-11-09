@@ -13,6 +13,11 @@ fs.rmSync(target, { recursive: true, force: true });
 fs.mkdirSync(target, { recursive: true });
 const assets = [
   "index.html",
+  "post-office.html",
+  "post-office.css",
+  "post-office-workspace.js",
+  "post-office-model.js",
+  "post-office-link.js",
   "tokens.css",
   "redesign.css",
   "reference-shell.css",
