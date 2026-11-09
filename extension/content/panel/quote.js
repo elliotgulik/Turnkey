@@ -35,24 +35,41 @@ export function renderQuotePanel(container, ctx, actions) {
   const quoteKey=crypto.randomUUID();
   let nextKey=0, pendingTotal=null, totalError='';
   const key=()=>`earth-${nextKey++}`;
-  const lineState = ctx.measurements.map((m) => ({
-    lineKey:key(),
-    measurementId: m.id,
-    include: true,
-    svc: m.service || Object.keys(SERVICES)[0],
-    qty: m.size,
-    unit: m.unit,
-    categoryLabel: m.categoryLabel,
-    storeys: Number(m.storeys) || Number(ctx.boundJob?.details?.services?.find(line => line.svc === (m.service || Object.keys(SERVICES)[0]))?.storeys) || 1
-  }));
+  const savedServices=ctx.boundJob?.details?.services || [];
+  const matchedServices=new Set();
+  function savedMeasuredLine(m,svc) {
+    const candidates=savedServices.filter(line=>line.svc===svc&&!matchedServices.has(line));
+    const byId=candidates.filter(line=>(m.lineKey&&line.lineKey===m.lineKey)||line.measurementId===m.id||line.lineKey===m.id);
+    const byQuantity=candidates.filter(line=>Number(line.qty)===measurementQuantity(m,SERVICES[svc]));
+    // Ambiguous identical services must not borrow another outline's name.
+    const match=byId.length===1?byId[0]:byQuantity.length===1?byQuantity[0]:null;
+    if(match)matchedServices.add(match);
+    return match;
+  }
+  const lineState = ctx.measurements.map((m) => {
+    const svc=m.service || Object.keys(SERVICES)[0],saved=savedMeasuredLine(m,svc);
+    return {
+      lineKey:key(),measurementId:m.id,include:true,svc,qty:m.size,unit:m.unit,
+      categoryLabel:m.categoryLabel,
+      label:saved?.label ?? m.categoryLabel ?? SERVICES[svc].label,
+      storeys:Number(m.storeys)||Number(saved?.storeys)||1
+    };
+  });
   let localMargin=ctx.TK_COST.targetMargin(ctx.TK_COST.COST_INPUTS.targetMargin), travelKm=ctx.TK_COST.COST_INPUTS.avgKm;
   const estimatedAt=new Date().toISOString();
   let access=ctx.boundJob?.details?.assumptions?.access || 'standard';
-  const priceModel=(ignoreManual=false)=>learningPricing(ctx.TK_PRICING,ctx.TK_COST,computeLines().map(l=>ignoreManual?{...l,manualPrice:undefined}:l),{targetMargin:localMargin,travelKm,estimatedAt,access,engine:ctx.TK_PRICE_LEARNING,learningState:ctx.learningState,businessId:ctx.business?.id});
-  const savedWindows = ctx.boundJob?.details?.services?.find(line => line.svc === 'windows');
-  const paneCount = Number.isInteger(savedWindows?.qty) && savedWindows.qty > 0 ? savedWindows.qty : 0;
-  const wantsWindows = ctx.manualWindows || requestedServices(ctx.boundCustomer || {},ctx.boundJob).some(service => service.service_id === 'windows');
-  const extraLines = wantsWindows ? [{lineKey:key(),include:true,svc:'windows',qty:paneCount}] : []; // ad-hoc services not tied to a drawn measurement
+  const priceModel=(ignoreManual=false)=>learningPricing(ctx.TK_PRICING,ctx.TK_COST,computeLines().map(l=>ignoreManual?{...l,manualPrice:undefined,label:undefined}:l),{targetMargin:localMargin,travelKm,estimatedAt,access,engine:ctx.TK_PRICE_LEARNING,learningState:ctx.learningState,businessId:ctx.business?.id});
+  const savedWindows=savedServices.filter(line=>line.svc==='windows'&&!matchedServices.has(line));
+  const wantsWindows = ctx.manualWindows || savedWindows.length || requestedServices(ctx.boundCustomer || {},ctx.boundJob).some(service => service.service_id === 'windows');
+  const extraLines = wantsWindows ? (savedWindows.length?savedWindows:[{}]).map(line=>({
+    lineKey:key(),include:true,svc:'windows',label:line.label ?? SERVICES.windows.label,
+    qty:Number.isInteger(line.qty)&&line.qty>0?line.qty:0
+  })) : []; // ad-hoc services not tied to a drawn measurement
+  // Explicit provenance on new custom lines avoids guessing whether an old
+  // service was a drawn measurement or an additional manual service.
+  savedServices.filter(line=>line.manual===true&&line.svc!=='windows'&&!matchedServices.has(line)&&SERVICES[line.svc]).forEach(line=>{
+    extraLines.push({lineKey:key(),include:true,svc:line.svc,label:line.label??SERVICES[line.svc].label,qty:Number(line.qty)||0,storeys:line.storeys||1});
+  });
   // When this tab was opened from an existing customer's "Build quote"
   // button (see app.js's loadBoundCustomerContext()), the quote is for
   // THAT customer and nothing else — no re-picking, no "new customer" path.
@@ -62,8 +79,9 @@ export function renderQuotePanel(container, ctx, actions) {
 
   const activeRows=()=>lineState.concat(extraLines).filter(l=>l.include);
   const rawQuantity=l=>l.measurementId?measurementQuantity(ctx.measurements.find(m=>m.id===l.measurementId),SERVICES[l.svc]):l.qty;
+  const displayLabel=row=>row.label.trim() || SERVICES[row.svc].label;
   function computeLines() {
-    return activeRows().map(l=>({lineKey:l.lineKey,svc:l.svc,qty:l.appliedQuantity??rawQuantity(l),originalQuantity:l.originalQuantity??rawQuantity(l),manualPrice:l.manualPrice,distributedPrice:l.distributedPrice,reason:l.reason,verifiedQuantity:l.verifiedQuantity,measurementReason:l.measurementReason,...(l.svc==='housewash'?{storeys:Number(l.storeys)||1}:{})}));
+    return activeRows().map(l=>({lineKey:l.lineKey,measurementId:l.measurementId,label:displayLabel(l),manual:!l.measurementId,svc:l.svc,qty:l.appliedQuantity??rawQuantity(l),originalQuantity:l.originalQuantity??rawQuantity(l),manualPrice:l.manualPrice,distributedPrice:l.distributedPrice,reason:l.reason,verifiedQuantity:l.verifiedQuantity,measurementReason:l.measurementReason,...(l.svc==='housewash'?{storeys:Number(l.storeys)||1}:{})}));
   }
   function changeService(line,svc) {
     line.svc=svc;
@@ -76,7 +94,7 @@ export function renderQuotePanel(container, ctx, actions) {
     const hint=Number(rec.measurement?.suggestedQuantity);
     const hasHint=ctx.learningState?.settings?.enabled!==false&&Number(rec.measurement?.sampleCount)>=Math.max(5,ctx.learningState?.settings?.minSamples||5)&&Math.abs((rec.measurement?.factor||1)-1)>.00001;
     return `<section class="tk-learning-line" data-service-price="${escapeHtml(l.svc)}">
-      <div class="tk-price-line"><span>${escapeHtml(SERVICES[l.svc]?.label||l.svc)} · ${l.qty} ${escapeHtml(SERVICES[l.svc]?.unit)}${l.svc==='housewash'?' · '+Number(l.storeys||1)+' storey':''}</span><strong>${money(l.fixedPrice)}</strong></div>
+      <div class="tk-price-line"><span><span data-line-title="${escapeHtml(l.lineKey)}">${escapeHtml(displayLabel(row))}</span> · ${l.qty} ${escapeHtml(SERVICES[l.svc]?.unit)}${l.svc==='housewash'?' · '+Number(l.storeys||1)+' storey':''}</span><strong>${money(l.fixedPrice)}</strong></div>
       <p class="tk-modal-sub">Configured ${money(rec.configuredPrice)} · Target margin floor ${money(rec.marginFloor)}<br>Base ${money(rec.baselinePrice)} → Learned adjustment ${rec.learnedAdjustment<0?'−':'+'}${money(Math.abs(rec.learnedAdjustment))} → Recommended ${money(rec.recommendedPrice)}</p>
       <p class="tk-modal-sub">${escapeHtml(rec.explanation||'Base price shown until enough eligible quotes are available (default: 5 distinct quotes).')} · ${Number(rec.sampleCount)||0} quotes · Confidence: ${escapeHtml(rec.confidence??'insufficient')}</p>
       <label class="tk-price-line">Final service price (GST inclusive dollars)<input class="tk-qty-input" style="width:120px" aria-label="Final service price for ${escapeHtml(SERVICES[l.svc]?.label)}" data-line-price="${escapeHtml(l.lineKey)}" type="number" min="0" step="0.01" value="${row.manualPrice==null?l.fixedPrice:Number.isFinite(row.manualPrice)?row.manualPrice:''}"></label>
@@ -132,7 +150,7 @@ export function renderQuotePanel(container, ctx, actions) {
                   (l, i) => `
                 <div class="tk-line-row">
                   <input type="checkbox" aria-label="Include ${escapeHtml(l.categoryLabel)}" data-line="${i}" ${l.include ? 'checked' : ''}/>
-                  <span class="tk-line-cat">${escapeHtml(l.categoryLabel)}</span>
+                  <input type="text" class="tk-input" aria-label="Service name" maxlength="120" placeholder="${escapeHtml(SERVICES[l.svc]?.label)}" data-line-label="${escapeHtml(l.lineKey)}" value="${escapeHtml(l.label)}"/>
                   <select class="tk-select" data-line-svc="${i}">${renderServiceOptions(l.svc, ctx.measurements.find(m => m.id === l.measurementId))}</select>
                   <span class="tk-line-qty">${measuredQuantity(l)} ${escapeHtml(SERVICES[l.svc]?.unit)}</span>
                   ${l.svc==='housewash'?`<label class="tk-quote-field">House levels<select class="tk-select" aria-label="House levels for ${escapeHtml(l.categoryLabel)}" data-storeys="${i}">${Object.entries(ctx.TK_PRICING.STOREY_TYPES).map(([n,v])=>`<option value="${n}" ${Number(l.storeys)===Number(n)?'selected':''}>${escapeHtml(v.label)}</option>`).join('')}</select></label>`:''}
@@ -143,13 +161,14 @@ export function renderQuotePanel(container, ctx, actions) {
               ${extraLines
                 .map(
                   (l, i) => `
-                <label class="tk-line-row">
+                <div class="tk-line-row">
                   <input type="checkbox" data-extra="${i}" ${l.include ? 'checked' : ''}/>
+                  <input type="text" class="tk-input" aria-label="Service name" maxlength="120" placeholder="${escapeHtml(SERVICES[l.svc]?.label)}" data-line-label="${escapeHtml(l.lineKey)}" value="${escapeHtml(l.label)}"/>
                   <select class="tk-select" data-extra-svc="${i}">${renderServiceOptions(l.svc, null)}</select>
                   <input type="number" min="0" step="${SERVICES[l.svc]?.unit === 'panes' ? '1' : '0.1'}" class="tk-qty-input" aria-label="Manual ${escapeHtml(SERVICES[l.svc]?.unit)} for ${escapeHtml(SERVICES[l.svc]?.label)}" data-extra-qty="${i}" value="${l.qty || ''}"/>
                   <span class="tk-line-qty">Manual ${escapeHtml(SERVICES[l.svc]?.unit)}</span>
                   ${l.svc==='housewash'?`<label class="tk-quote-field">House levels<select class="tk-select" aria-label="House levels for manual ${escapeHtml(SERVICES[l.svc]?.label)}" data-extra-storeys="${i}">${Object.entries(ctx.TK_PRICING.STOREY_TYPES).map(([n,v])=>`<option value="${n}" ${Number(l.storeys||1)===Number(n)?'selected':''}>${escapeHtml(v.label)}</option>`).join('')}</select></label>`:''}
-                </label>`
+                </div>`
                 )
                 .join('')}
             </div>
@@ -212,6 +231,21 @@ export function renderQuotePanel(container, ctx, actions) {
       </div>`;
 
     const rowFor=key=>activeRows().find(l=>l.lineKey===key);
+    container.querySelectorAll('[data-line-label]').forEach(input=>{
+      const update=()=>{
+        const row=lineState.concat(extraLines).find(l=>l.lineKey===input.dataset.lineLabel);
+        row.label=input.value;
+        const title=container.querySelector(`[data-line-title="${input.dataset.lineLabel}"]`);
+        if(title)title.textContent=displayLabel(row);
+        let error='';
+        try{priceModel();}catch(e){error=e.message;}
+        const errorEl=container.querySelector('[data-pricing-error]');
+        errorEl.textContent=error;errorEl.hidden=!error;
+        container.querySelector('[data-create]').disabled=!!error||!computeLines().length;
+      };
+      input.addEventListener('input',update);
+      input.addEventListener('change',update);
+    });
     // Never replace a price input or Create button on input/blur. In-place
     // updates preserve decimal typing/caret and the pending click target.
     function updateServicePrice(input) {
@@ -302,16 +336,16 @@ export function renderQuotePanel(container, ctx, actions) {
       const original = lineState[+button.getAttribute('data-reuse')];
       const measurement = ctx.measurements.find(m => m.id === original.measurementId);
       const next = Object.keys(SERVICES).find(key => key !== original.svc && measurementQuantity(measurement, SERVICES[key]) !== null);
-      lineState.push({lineKey:key(),measurementId:original.measurementId,categoryLabel:original.categoryLabel,storeys:original.storeys,svc:next||original.svc,include:true});
+      lineState.push({lineKey:key(),measurementId:original.measurementId,categoryLabel:original.categoryLabel,label:original.categoryLabel || SERVICES[next||original.svc].label,storeys:original.storeys,svc:next||original.svc,include:true});
       paint();
     }));
-    const addManual = svc => { extraLines.push({lineKey:key(),include:true,svc,qty:0}); paint(); };
+    const addManual = svc => { extraLines.push({lineKey:key(),include:true,svc,label:SERVICES[svc].label,qty:0}); paint(); };
     container.querySelector('[data-add-windows]').addEventListener('click', () => addManual('windows'));
     container.querySelectorAll('[data-add-request]').forEach(button => button.addEventListener('click', () => addManual(button.getAttribute('data-add-request'))));
     const addExtraBtn = container.querySelector('[data-add-extra]');
     if (addExtraBtn)
       addExtraBtn.addEventListener('click', () => {
-        extraLines.push({ lineKey:key(), include: true, svc: Object.keys(SERVICES)[0], qty: 0 });
+        extraLines.push({ lineKey:key(), include: true, svc: Object.keys(SERVICES)[0], label: SERVICES[Object.keys(SERVICES)[0]].label, qty: 0 });
         paint();
       });
 
@@ -400,7 +434,7 @@ export function renderQuoteCreated(container, { address, total, lines, SERVICES,
         <p class="tk-modal-sub">${escapeHtml(address)}</p>
         <div class="tk-created-total">${money(total)}</div>
         <div class="tk-created-lines">
-          ${lines.map((l) => `<div class="tk-kv"><span>${escapeHtml(SERVICES[l.svc] ? SERVICES[l.svc].label : l.svc)}${l.svc==='housewash'?' · '+Number(l.storeys||1)+' storey':''}</span><span>${l.qty} ${escapeHtml(SERVICES[l.svc]?.unit || '')} · ${money(l.fixedPrice)}</span></div>`).join('')}
+          ${lines.map((l) => `<div class="tk-kv"><span>${escapeHtml(l.label ?? SERVICES[l.svc]?.label ?? l.svc)}${l.svc==='housewash'?' · '+Number(l.storeys||1)+' storey':''}</span><span>${l.qty} ${escapeHtml(SERVICES[l.svc]?.unit || '')} · ${money(l.fixedPrice)}</span></div>`).join('')}
         </div>
         <div class="tk-modal-foot tk-created-foot">
           <button type="button" class="tk-btn" data-copy>Copy Quote Link</button>

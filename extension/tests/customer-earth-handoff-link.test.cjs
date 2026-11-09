@@ -160,7 +160,8 @@ test('a "Build quote" click is intercepted even when the extension is not ready 
   assert.match(text, /Address: 1 Test St, Ponsonby/);
   assert.ok(findByAttr(modal, 'data-eh-earth-link'), 'a manual Open Google Earth link must be present');
   assert.ok(findByAttr(modal, 'data-eh-install'), 'install/update instructions must be shown while the extension is not ready');
-  assert.match(text, /turnkey-earth-extension-0\.2\.10\.zip/);
+  const version=JSON.parse(fs.readFileSync('extension/manifest.json','utf8')).version;
+  assert.ok(text.includes('turnkey-earth-extension-'+version+'.zip'));
 });
 
 test('the manual Earth link encodes the exact customer address and points at earth.google.com', () => {

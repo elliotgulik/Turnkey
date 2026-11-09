@@ -188,3 +188,17 @@ test('a failed screenshot upload does not block quote/job creation or get silent
   assert.equal(api.calls.createJob.length, 1);
   assert.ok(result.job.id);
 });
+
+test('custom names persist per service on save and retry, with prices and service keys unchanged',async()=>{
+ const {createQuoteDraft}=await loadModule();const api=makeApi(),progress={};
+ const payload={...samplePayload,lines:[{svc:'roof',qty:80,label:'  Front roof  ',fixedPrice:300},{svc:'roof',qty:40,label:'Rear roof',fixedPrice:150}]};
+ await createQuoteDraft(api,progress,{businessId:'B',payload});
+ await createQuoteDraft(api,progress,{businessId:'B',payload});
+ assert.deepEqual(api.calls.createJob[0].payload.details.services,[{svc:'roof',qty:80,label:'Front roof',fixedPrice:300},{svc:'roof',qty:40,label:'Rear roof',fixedPrice:150}]);
+ assert.equal(api.calls.createQuote[0].payload.amount,450);assert.equal(api.calls.createJob.length,1);
+ for(const label of ['  ','x'.repeat(121)]){
+   const invalidApi=makeApi();
+   await assert.rejects(()=>createQuoteDraft(invalidApi,{}, {businessId:'B',payload:{...payload,lines:[{...payload.lines[0],label}]}}),/service name/);
+   assert.equal(invalidApi.calls.createCustomer.length,0);assert.equal(invalidApi.calls.createQuote.length,0);
+ }
+});

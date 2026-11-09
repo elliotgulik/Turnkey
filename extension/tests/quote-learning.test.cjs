@@ -79,3 +79,24 @@ test('direct service edits learn automatically, distributed totals and generated
  // Revisiting changed service context must keep the actual edited price.
  assert.equal(snapshot(rows.map(l=>({...l,storeys:3}))).observations[1].chosenPrice,650);
 });
+
+test('per-line labels survive repricing without changing prices, costs or learning identity',async()=>{
+ const {learningPricing,observationLines}=await load(),{TK_PRICING:p,TK_COST:c}=engines();
+ const rows=lines(),named=rows.map((line,i)=>({...line,label:'  Custom service '+i+'  '}));
+ const serviceNames=JSON.stringify(p.SERVICES);
+ for(const access of ['standard','hard'])for(const targetMargin of [.3,.8]){
+   const options={access,targetMargin,estimatedAt:'2026-11-09T00:00:00.000Z',engine,learningState:{settings:{},observations:[]}};
+   const baseline=learningPricing(p,c,rows,options),model=learningPricing(p,c,named,options);
+   assert.deepEqual(model.lines.map(l=>l.label),['Custom service 0','Custom service 1','Custom service 2']);
+   assert.deepEqual(model.lines.map(({label,...l})=>l),baseline.lines);
+   for(const field of ['total','exGst','gst','profit','marginPct'])assert.equal(model[field],baseline[field]);
+   const breakdown={...model.breakdown,lines:model.breakdown.lines.map(row=>{const {label,...line}=row.line;return {...row,line};})};
+   assert.deepEqual(JSON.parse(JSON.stringify(breakdown)),JSON.parse(JSON.stringify(baseline.breakdown)));assert.deepEqual(model.snapshot,baseline.snapshot);
+   assert.deepEqual(model.recommendations,baseline.recommendations);
+   assert.deepEqual(observationLines(model,named,p),observationLines(baseline,rows,p));
+ }
+ assert.equal(JSON.stringify(p.SERVICES),serviceNames);
+ assert.equal(named[0].label,'  Custom service 0  ','input rows are not mutated');
+ for(const label of ['', '  ', 'x'.repeat(121), null, 42])assert.throws(()=>learningPricing(p,c,[{...rows[0],label}]),/service name/);
+ assert.equal(learningPricing(p,c,[{...rows[0],label:' '+ 'x'.repeat(120)+' '}]).lines[0].label.length,120);
+});

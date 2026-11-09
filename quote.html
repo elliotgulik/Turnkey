@@ -6,7 +6,7 @@
 
 <meta charset="utf-8">
 <script src="config.js?v=20261017a"></script>
-<script src="pricing-engine.js?v=20261021a"></script>
+<script src="pricing-engine.js?v=20261109names1"></script>
 <script src="format-utils.js?v=20261102b"></script>
 <script src="map-snapshot.js?v=20261017a"></script>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
@@ -107,7 +107,7 @@
   .svc-list{border:1px solid var(--line);border-radius:var(--radius-sm);overflow:hidden;margin-bottom:18px}
   .svc-row{display:flex;justify-content:space-between;gap:10px;padding:13px 15px;font-size:14px;border-bottom:1px solid var(--line-soft)}
   .svc-row:last-child{border-bottom:none}
-  .svc-row .n{color:var(--ink);font-weight:500}
+  .svc-row .n{min-width:0;overflow-wrap:anywhere;color:var(--ink);font-weight:500}
   .svc-row .n .note{display:block;font-size:11.5px;color:var(--ink-faint);font-weight:400;margin-top:1px}
   .svc-row .q{color:var(--ink-faint);font-size:12.5px}
   .svc-row .amt{color:var(--ink);font-weight:600;font-size:13.5px;white-space:nowrap}
@@ -388,11 +388,11 @@ function pubPropertySummary(services){
   if(!services||!services.length)return '';
   const rows=services.map(s=>{
     const svc=TK_PRICING.SERVICES[s.svc]; if(!svc)return '';
-    return `<div class="psum-row"><span class="n">${escapeHtml(svc.label)}</span><span class="v">${s.svc==='windows'?'Included':escapeHtml(s.qty)+' '+escapeHtml(svc.unit)}</span></div>`;
+    return `<div class="psum-row"><span class="n">${escapeHtml(TK_PRICING.lineLabel(s))}</span><span class="v">${s.svc==='windows'?'Included':escapeHtml(s.qty)+' '+escapeHtml(svc.unit)}</span></div>`;
   }).join('');
   const checks=services.map(s=>{
     const svc=TK_PRICING.SERVICES[s.svc]; if(!svc)return '';
-    return `<div class="svc-check"><span class="tick">✓</span>${escapeHtml(svc.label)}</div>`;
+    return `<div class="svc-check"><span class="tick">✓</span>${escapeHtml(TK_PRICING.lineLabel(s))}</div>`;
   }).join('');
   return `<div class="psum">
     <div class="psum-title">Property summary</div>
@@ -410,7 +410,7 @@ function pubPriceBreakdown(q){
       :(s.svc==='housewash'&&s.storeys&&TK_PRICING.STOREY_TYPES[s.storeys])?TK_PRICING.STOREY_TYPES[s.storeys].label
       :(s.svc==='fence'&&s.sides&&TK_PRICING.FENCE_SIDES[s.sides])?TK_PRICING.FENCE_SIDES[s.sides].label:'';
     const sub=s.svc==='windows'?'Service total':s.fixedPrice!=null?'Fixed price':(s.qty+' '+svc.unit+' × '+TK_FORMAT.money(TK_PRICING.effectiveRate(s))+'/'+svc.unit+(note?' · '+note:''));
-    return `<div class="svc-row"><span class="n">${escapeHtml(svc.label)}<span class="note">${escapeHtml(sub)}</span></span><span class="amt">${money(TK_PRICING.lineTotal(s))}</span></div>`;
+    return `<div class="svc-row"><span class="n">${escapeHtml(TK_PRICING.lineLabel(s))}<span class="note">${escapeHtml(sub)}</span></span><span class="amt">${money(TK_PRICING.lineTotal(s))}</span></div>`;
   }).join('')||'<div class="svc-row"><span class="n">Service details</span><span class="q">as discussed</span></div>';
   const gstSplit=TK_PRICING.gstFromInclusive(q.amount);
   const bd=[];

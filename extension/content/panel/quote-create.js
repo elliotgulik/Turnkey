@@ -1,3 +1,5 @@
+import { normalizeQuoteLine } from './quote-pricing.js';
+
 // Idempotent quote/job creation, pulled out of app.js so it can be unit
 // tested without a DOM/chrome runtime (see extension/tests/quote-create.test.cjs).
 // `progress` is a plain object the caller persists across retries of the
@@ -6,6 +8,7 @@
 // once per intent, so retrying after a failed step reuses the ids already
 // created instead of creating duplicate customers/quotes/jobs.
 export async function createQuoteDraft(api, progress, { businessId, payload, binding = null, screenshotDataUrl }) {
+  payload={...payload,lines:payload.lines.map(normalizeQuoteLine)};
   if (binding && (binding.businessId !== businessId || payload.isNewCustomer || payload.customer.id !== binding.customerId)) throw new Error('This draft must stay linked to its original business and customer.');
   if (binding?.recordId != null && !binding.jobId) throw new Error('Reopen this opportunity from an updated TurnKey CRM with its saved job ID.');
   if (progress.binding && JSON.stringify(progress.binding) !== JSON.stringify(binding)) throw new Error('This draft must stay linked to its original opportunity.');

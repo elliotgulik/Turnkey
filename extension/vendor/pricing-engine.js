@@ -142,8 +142,13 @@ window.TK_PRICING = (function(){
     Object.entries(rates).forEach(([k,v])=>{if(SERVICES[k]&&typeof v==='number')SERVICES[k].rate=v;});
   }
 
+  // Per-quote wording only; service identity and pricing stay unchanged.
+  function lineLabel(line){
+    const custom=typeof line?.label==='string'?line.label.replace(/[\u0000-\u001f\u007f]/g,' ').trim().slice(0,120):'';
+    return custom||SERVICES[line?.svc]?.label||'Service';
+  }
   return {
-    SERVICES, ROOF_TYPES, STOREY_TYPES, FENCE_SIDES, ACCESS_OPTS, PREMIUM_MULT,
+    SERVICES, ROOF_TYPES, STOREY_TYPES, FENCE_SIDES, ACCESS_OPTS, PREMIUM_MULT, lineLabel,
     effectiveRate, lineTotal, linesBaseTotal, accessPremiumMult, quoteTotal, applyRateOverrides, gstFromInclusive
   };
 })();

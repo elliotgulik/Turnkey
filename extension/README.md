@@ -9,6 +9,10 @@ folder, replace that copy's `manifest.json` with `manifest.dev.json`, and load
 that folder unpacked in Chrome. Keep the production manifests for packaging.
 `chrome-extension/measurement.js` remains required by `scripts/build-static.js`.
 
+## Version 0.2.12: editable service names
+
+Each measured or manual quote line now has an editable service name. Names are saved with that quote and carried into TurnKey documents and ServiceM8; quantities and pricing rules remain attached to the original service. Install the new package and refresh Google Earth.
+
 ## Version 0.2.11: return to Earth and automatic price feedback
 
 After **Finish**, the measurement workspace returns to the original Earth tab and closes only after Earth accepts the measurement. If navigation fails, the saved measurement stays accepted and the page explains how to return manually.
@@ -19,7 +23,7 @@ Each service shows configured pricing, its target-margin floor, base, learned do
 
 Learning uses the connected business’s authenticated backend. Open the extension popup and **Enable quote learning & ServiceM8** if backend access has not yet been granted. If learning is unavailable, base pricing and manual edits still work. Learning is submitted after the quote is saved; a failed submission shows a warning and a safe retry button on the saved-quote screen. Manage learning settings and resets in TurnKey.
 
-Build the downloadable ZIP with `node extension/scripts/pack.cjs`; this refreshes all vendored engines from the root source and writes `extension/dist/turnkey-earth-extension-0.2.11.zip`. Unzip, load the folder containing `manifest.json`, and refresh Earth and TurnKey. Main publishes the download in the site's assets.
+Build the downloadable ZIP with `node extension/scripts/pack.cjs`; this refreshes all vendored engines from the root source and writes `extension/dist/turnkey-earth-extension-0.2.12.zip`. Unzip, load the folder containing `manifest.json`, and refresh Earth and TurnKey. Main publishes the download in the site's assets.
 
 ## Version 0.2.8: quote levels and access settings
 

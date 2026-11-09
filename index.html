@@ -22,7 +22,7 @@ location.replace('/reset-password.html'+location.search+location.hash);
 <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js" integrity="sha384-B1OFx8Gy9GjPu8UbUyXbGQpzll9ubAUQ9agInFJ8NnD7nYG1u/CLR+Sqr5yifl4q" crossorigin="anonymous"></script>
 <script src="config.js?v=20261017a"></script>
 <script src="session-flow.js?v=20261019a"></script>
-<script src="pricing-engine.js?v=20261021a"></script>
+<script src="pricing-engine.js?v=20261109names1"></script>
 <script src="cost-engine.js?v=20261018f"></script>
 <script src="sales-engine.js?v=20261103analyticsreview1"></script>
 <script src="map-snapshot.js?v=20261022a"></script>
@@ -342,6 +342,7 @@ location.replace('/reset-password.html'+location.search+location.hash);
   .req-svc-windows{font-size:12px;color:#1f5d50;margin-top:10px;padding-top:10px;border-top:1px solid #cde8df}
 
   .svc-builder{display:flex;flex-direction:column;gap:10px}
+  .sl-service{min-width:0;display:grid;gap:6px}.sl-service select{width:100%;min-width:0}.sl-custom-name{display:grid;gap:3px;font-size:11px;color:var(--ink-muted)}.sl-custom-name input{width:100%;min-width:0}
   .svc-line{display:grid;grid-template-columns:1.4fr 80px 1fr auto auto;gap:8px;align-items:center;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--radius-sm);padding:11px 12px}
   .svc-line select,.svc-line input{padding:8px 10px;font-size:13px;background:var(--surface)}
   .sl-roof{grid-column:1/-1;margin-top:4px;width:100%}
@@ -1305,7 +1306,7 @@ location.replace('/reset-password.html'+location.search+location.hash);
   .doc-table th{text-align:left;font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#9aa7b1;padding:8px 0;border-bottom:1px solid #e9edf1}
   .doc-table th.r{text-align:right}
   .doc-table td{padding:12px 0;border-bottom:1px solid #f0f3f6;vertical-align:top}
-  .di-name{font-weight:600;font-size:13.5px}
+  .di-name{overflow-wrap:anywhere;font-weight:600;font-size:13.5px}
   .di-sub{font-size:11.5px;color:#5b6b78;margin-top:2px}
   .di-amt{text-align:right;font-weight:600;white-space:nowrap}
   .doc-totals{margin:16px 0 0;margin-left:auto;width:250px}
@@ -4141,7 +4142,7 @@ function reviewQuote(){
   const marginTone=margin>=50?'good':margin>=40?'ok':'low';
   document.getElementById('review-body').innerHTML=`
     <div class="rv-line"><span>Client</span><b>${escapeHtmlSafe(r.name)}</b></div>
-    <div class="rv-line"><span>Services</span><b>${lines.map(l=>SERVICES[l.svc].label.split(' ')[0]+' '+l.qty+SERVICES[l.svc].unit).join(', ')}</b></div>
+    <div class="rv-line"><span>Services</span><b>${lines.map(l=>escapeHtmlSafe(TK_PRICING.lineLabel(l))+' '+l.qty+SERVICES[l.svc].unit).join(', ')}</b></div>
     <div class="rv-line"><span>Access</span><b>${ACCESS_OPTS[a.access].label}</b></div>
     <div class="rv-line"><span>Premium surface</span><b>${a.premium?'Yes (+12%)':'No'}</b></div>
     <div class="rv-line"><span>Cost to deliver</span><b>${money(e.cost)}</b></div>
@@ -4223,7 +4224,8 @@ function renderSvcLines(){
     const priceField=isFixed
       ?`<input class="price-input fixed" type="number" min="0" value="${line.fixedPrice}" oninput="draftLines[${i}].fixedPrice=this.value;updateQuoteTotal()">`
       :`<span class="sl-rate-wrap"><span class="sl-at">@</span><input class="price-input" type="number" min="0" step="0.5" value="${displayRate.toFixed(2)}" oninput="draftLines[${i}].customRate=this.value;updateQuoteTotal()"><span class="sl-unit">/${svc.unit}</span></span>`;
-    el.innerHTML=svcSelect+qtyField+
+    const nameField=`<label class="sl-custom-name">Quote name<input type="text" maxlength="120" aria-label="Service name for quote line ${i+1}" value="${escapeHtmlSafe(TK_PRICING.lineLabel(line))}" oninput="draftLines[${i}].label=this.value" placeholder="${escapeHtmlSafe(svc.label)}"></label>`;
+    el.innerHTML='<div class="sl-service">'+svcSelect+nameField+'</div>'+qtyField+
       `<div class="sl-price">${priceField}<button class="sl-mode ${isFixed?'active':''}" onclick="toggleFixedPrice(${i})">${isFixed?'fixed':'per\u00a0'+svc.unit}</button></div>`+
       `<span class="sub" data-sub="${i}">${money(sub)}</span>`+
       `<button class="rm" onclick="rmSvcLine(${i})" aria-label="Remove ${svc.label} line">\u00d7</button>${extraRow}${priceCompareHtml(sub,rec,i)}`;
@@ -4470,6 +4472,8 @@ function confirmQuoteSend(){
   r.travelSource=quoteTravelInfo?quoteTravelInfo.source:'default';
   r.services=lines.map(l=>{
     const o={svc:l.svc,qty:parseFloat(l.qty)};
+    if(typeof l.label==='string'&&l.label.trim())o.label=TK_PRICING.lineLabel(l);
+    if(l.manual===true)o.manual=true;
     if(l.roofType)o.roofType=l.roofType;
     if(l.storeys)o.storeys=l.storeys;
     if(l.sides)o.sides=l.sides;
@@ -4811,9 +4815,10 @@ function buildDocPDF(mode,r,outputType){
     var lineAmt=financials.lines[index];
     var note=lineVariantNote(s);
     doc.setFont('helvetica','bold');doc.setFontSize(9.5);
-    doc.text(v.label,ML,y);
+    var serviceNameLines=doc.splitTextToSize(TK_PRICING.lineLabel(s),110);
+    doc.text(serviceNameLines,ML,y);
     doc.text(docMoney(lineAmt),MR,y,{align:'right'});
-    y+=4.5;
+    y+=4.5*Math.max(1,serviceNameLines.length);
     doc.setFont('helvetica','normal');doc.setFontSize(8);
     doc.setTextColor(100,110,120);
     var sub=s.svc==='windows'?'Service total':s.priceSnapshot!=null||s.fixedPrice!=null?(s.qty+' '+v.unit+' \u00b7 agreed price'):(s.qty+' '+v.unit+' \u00d7 '+TK_FORMAT.money(rate)+'/'+v.unit+(note?' \u00b7 '+note:''));
@@ -4889,7 +4894,7 @@ function buildDocEmailBody(mode,r){
     var rate=TK_PRICING.effectiveRate(s);
     var amt=s._price!=null?s._price:Math.round(TK_PRICING.lineTotal(s));
     var note=lineVariantNote(s);
-    var desc=s.svc==='windows'?v.label:s._price!=null?v.label+' ('+s.qty+' panes)':s.fixedPrice!=null?v.label+' (fixed price)':v.label+': '+s.qty+' '+v.unit+' × '+TK_FORMAT.money(rate)+'/'+v.unit+(note?' · '+note:'');
+    var desc=s.svc==='windows'?TK_PRICING.lineLabel(s):s._price!=null?TK_PRICING.lineLabel(s)+' ('+s.qty+' panes)':s.fixedPrice!=null?TK_PRICING.lineLabel(s)+' (fixed price)':TK_PRICING.lineLabel(s)+': '+s.qty+' '+v.unit+' × '+TK_FORMAT.money(rate)+'/'+v.unit+(note?' · '+note:'');
     return '  · '+desc+' = '+money(amt);
   }).join('\n');
   var gst=TK_PRICING.gstFromInclusive(r.total).gst;
@@ -4930,7 +4935,7 @@ function renderDocHTML(mode,r){
   const rows=(r.services||[]).map((s,i)=>{
     const v=SERVICES[s.svc]||{label:s.svc||'Service',unit:''};
     const note=lineVariantNote(s),fixed=s.priceSnapshot!=null||s.fixedPrice!=null;
-    return `<tr><td><div class="di-name">${esc(v.label)}</div><div class="di-sub">${esc(s.svc==='windows'?'Service total':s.qty+' '+v.unit+(fixed?' · agreed price':' @ '+docMoney(TK_PRICING.effectiveRate(s))+'/'+v.unit)+(note?' · '+note:''))}</div></td><td class="di-amt">${docMoney(f.lines[i])}</td></tr>`;
+    return `<tr><td><div class="di-name">${esc(TK_PRICING.lineLabel(s))}</div><div class="di-sub">${esc(s.svc==='windows'?'Service total':s.qty+' '+v.unit+(fixed?' · agreed price':' @ '+docMoney(TK_PRICING.effectiveRate(s))+'/'+v.unit)+(note?' · '+note:''))}</div></td><td class="di-amt">${docMoney(f.lines[i])}</td></tr>`;
   }).join('');
   const terms=mode==='quote'?t.quoteTerms:t.invoiceTerms;
   const title=mode==='quote'?'QUOTE':f.taxed?'TAX INVOICE':'INVOICE';
@@ -5371,7 +5376,7 @@ function openDetail(id){
   const photosOk=workflowConfig.requirePhotos?(r.photoBefore&&r.photoAfter):true;
   const allDone=checklistOk&&photosOk;
   const approved=lastIdx>=0&&r.sop[lastIdx];
-  const svcRows=r.services.map(s=>{const svc=SERVICES[s.svc];const note=lineVariantNote(s);return `<div class="kv"><span class="k">${svc.label} · ${s.qty}${svc.unit}${note?' · '+note:''}</span><span class="v">${money(lineSubtotal(s))}</span></div>`}).join('')||'<div class="kv"><span class="k">No services yet</span><span class="v">—</span></div>';
+  const svcRows=r.services.map(s=>{const svc=SERVICES[s.svc];const note=lineVariantNote(s);return `<div class="kv"><span class="k">${escapeHtmlSafe(TK_PRICING.lineLabel(s))} · ${s.qty}${svc.unit}${note?' · '+note:''}</span><span class="v">${money(lineSubtotal(s))}</span></div>`}).join('')||'<div class="kv"><span class="k">No services yet</span><span class="v">—</span></div>';
   const sopHtml=checklist.steps.map((step,i)=>{const checked=r.sop[i];const locked=i===lastIdx&&!allDone;return `<div class="sop-step ${checked?'checked':''} ${locked?'locked':''}"><button class="sop-check" onclick="toggleSop(${id},${i})" ${locked?'disabled':''}>${checked?'✓':''}</button><span class="sop-num">${i+1}</span><span class="sop-label">${escapeHtmlSafe(step.t)}${step.s?`<small>${escapeHtmlSafe(step.s)}</small>`:''}</span></div>`}).join('');
   let approvalHtml;
   const lockedReasons=[];
@@ -11129,7 +11134,7 @@ async function retryPendingPhotos(){
 <script src="servicem8-import.js?v=20261017a"></script>
 <script src="marketing-analytics.js?v=20261102b"></script>
 <footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a> · <span id="tk-app-version">v20261103d</span></footer>
-<script src="extension-quote-link.js?v=20261102k"></script>
+<script src="extension-quote-link.js?v=20261109names1"></script>
 <script src="job-workspace.js?v=20261031a"></script>
 <script src="job-calendar.js?v=20261103bugaudit2"></script>
 <script src="operations-workspace.js?v=20261103bugaudit2"></script>

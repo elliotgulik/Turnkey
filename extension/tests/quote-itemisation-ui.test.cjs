@@ -41,6 +41,24 @@ test('quote UI reuses outline quantities, requires manual panes and saves exactl
     assert.equal(await page.locator('[data-line-svc="0"] option[value="windows"]').count(),0);
     await page.locator('[data-extra-qty="0"]').fill('12');
     await page.locator('[data-extra-qty="0"]').dispatchEvent('change');
+    const labelInputs=page.locator('[data-line-label]');
+    assert.deepEqual(await labelInputs.evaluateAll(inputs=>inputs.map(input=>input.value)),['Driveway','Window Cleaning']);
+    const labelTotal=await page.locator('[data-price]').inputValue();
+    const customLabel='Front <img src=x onerror="window.bad=true"> & path';
+    await labelInputs.first().fill('  '+customLabel+'  ');
+    await labelInputs.nth(1).fill('Rear windows');
+    assert.equal(await page.locator('[data-price]').inputValue(),labelTotal,'renaming does not change pricing');
+    if(process.env.TK_QUOTE_NAME_SCREENSHOT){await labelInputs.first().fill('Front entrance & pathway');await page.screenshot({path:process.env.TK_QUOTE_NAME_SCREENSHOT,clip:{x:300,y:365,width:500,height:410}});await labelInputs.first().fill('  '+customLabel+'  ');}
+    await labelInputs.first().fill('   ');
+    assert.equal(await page.locator('[data-create]').isDisabled(),false,'clearing a name restores the standard service name');
+    assert.equal(await page.locator('[data-line-title]').first().innerText(),'Driveway / Patio Cleaning');
+    assert.equal(await page.locator('[data-price]').inputValue(),labelTotal);
+    await page.locator('[data-create]').click();
+    assert.equal((await page.evaluate(()=>window.saved)).lines[0].label,'Driveway / Patio Cleaning');
+    assert.equal((await page.evaluate(()=>window.saved)).total,Number(labelTotal));
+    await labelInputs.first().fill('  '+customLabel+'  ');
+    assert.equal(await page.locator('[data-create]').isDisabled(),false);
+    // A re-render escapes the label in both the attribute and service heading.
     assert.match(await page.locator('[data-service-price]').first().innerText(),/6 distinct comparable quotes/);
     assert.equal(await page.locator('[data-measure-hint]').count(),1);
     await page.locator('[data-measure-hint]').click();
@@ -49,6 +67,8 @@ test('quote UI reuses outline quantities, requires manual panes and saves exactl
     await page.locator('[data-reuse="0"]').click();
     assert.equal(await page.locator('[data-line-svc="1"]').inputValue(),'housewash');
     assert.match(await page.locator('.tk-line-row').nth(1).innerText(),/60 m/);
+    assert.equal(await page.locator('[data-line-label]').first().inputValue(),'  '+customLabel+'  ');
+    assert.equal(await page.locator('[data-service-price] img').count(),0);
     const standardPrice=Number(await page.locator('[data-price]').inputValue());
     await page.locator('[data-storeys="1"]').selectOption('3');
     assert.ok(Number(await page.locator('[data-price]').inputValue())>standardPrice,'house levels update recommended pricing');
@@ -89,6 +109,8 @@ test('quote UI reuses outline quantities, requires manual panes and saves exactl
     await page.locator('[data-create]').click();
     const saved=await page.evaluate(()=>window.saved);
     assert.equal(saved.total,650.37);
+    assert.deepEqual(saved.lines.map(line=>line.label),[customLabel,'Driveway','Rear windows']);
+    assert.equal(await page.evaluate(()=>window.TK_PRICING.SERVICES.driveway.label),'Driveway / Patio Cleaning');
     assert.equal(saved.quoteLearning.lines[0].measuredQuantity,200);
     assert.equal(saved.quoteLearning.lines[0].verifiedQuantity,240);
     assert.equal(saved.quoteLearning.lines[0].quantity,240);
@@ -115,6 +137,7 @@ test('quote UI reuses outline quantities, requires manual panes and saves exactl
     assert.equal(await page.locator('[data-create]').isDisabled(),false);
     await page.locator('[data-create]').click();
     assert.equal((await page.evaluate(()=>window.saved)).areaPolys.length,0);
+    await page.locator('[data-line-label]').fill('  Manual side windows  ');
     const beforeSaves=await page.evaluate(()=>window.saveCount);
     const priceHandle=await page.locator('[data-line-price]').first().elementHandle();
     const createHandle=await page.locator('[data-create]').elementHandle();
@@ -123,13 +146,46 @@ test('quote UI reuses outline quantities, requires manual panes and saves exactl
     await page.locator('[data-create]').click(); // actual blur + pointer click; no synthetic change
     assert.equal(await page.evaluate(()=>window.saveCount),beforeSaves+1,'a single click immediately after editing saves once');
     assert.equal((await page.evaluate(()=>window.saved)).lines[0].fixedPrice,203.47);
+    assert.equal((await page.evaluate(()=>window.saved)).lines[0].label,'Manual side windows');
     assert.equal(await priceHandle.evaluate(el=>el.isConnected),true,'price input remains mounted');
     assert.equal(await createHandle.evaluate(el=>el.isConnected),true,'Create button remains mounted');
+    await page.locator('[data-access]').selectOption('hard');
+    assert.equal(await page.locator('[data-line-label]').inputValue(),'  Manual side windows  ');
+    assert.equal(await page.locator('[data-line-price]').inputValue(),'203.47');
     assert.equal(await page.evaluate(()=>!!window.bad),false);
+    await page.locator('[data-line-label]').fill(' Side windows ');
+    const beforeLabelSave=await page.evaluate(()=>window.saveCount);
+    await page.locator('[data-create]').click();
+    assert.equal(await page.evaluate(()=>window.saveCount),beforeLabelSave+1,'a click after editing a name saves once');
+    assert.equal((await page.evaluate(()=>window.saved)).lines[0].label,'Side windows');
+    await page.locator('[data-line-label]').fill('');
+    const manualClearPrice=await page.locator('[data-price]').inputValue();
+    await page.locator('[data-create]').click();
+    assert.equal((await page.evaluate(()=>window.saved)).lines[0].label,'Window Cleaning');
+    assert.equal((await page.evaluate(()=>window.saved)).total,Number(manualClearPrice));
+    await page.evaluate(()=>{
+      const measurement=(id,size,lineKey)=>({id,lineKey,type:'area',service:'driveway',size,unit:'m²',categoryLabel:'Driveway',quantities:{area:size,perimeter:60},geoPts:[],points:[]});
+      window.paintQuote({measurements:[measurement('A',100),measurement('B',200),measurement('C',100,'saved-C')],boundJob:{details:{services:[
+        {svc:'driveway',qty:100,label:'Identity C',lineKey:'saved-C'},
+        {svc:'driveway',qty:200,label:'Quantity B'},
+        {svc:'driveway',qty:100,label:'Identity A',measurementId:'A'},
+        {svc:'windows',qty:8,label:'Saved rear panes'},
+        {svc:'deck',qty:20,label:'Custom side deck',manual:true}
+      ]}}});
+    });
+    assert.deepEqual(await page.locator('[data-line-label]').evaluateAll(inputs=>inputs.map(input=>input.value)),['Identity A','Quantity B','Identity C','Saved rear panes','Custom side deck']);
+    await page.locator('[data-access]').selectOption('hard');
+    await page.locator('[data-create]').click();
+    const reopened=await page.evaluate(()=>window.saved);
+    assert.deepEqual(reopened.lines.map(line=>line.label),['Identity A','Quantity B','Identity C','Saved rear panes','Custom side deck']);
+    assert.deepEqual(reopened.lines.slice(0,3).map(line=>line.measurementId),['A','B','C']);
+    assert.equal(reopened.lines.at(-1).manual,true);
     await page.evaluate(async()=>{
       const {renderQuoteCreated}=await import('/extension/content/panel/quote.js');window.retries=0;
-      renderQuoteCreated(document.querySelector('#quote'),{address:'Saved property',total:123.45,lines:[{svc:'driveway',qty:200,fixedPrice:123.45}],SERVICES:window.TK_PRICING.SERVICES,learningWarning:'Your quote is saved. Learning was not saved.'},{onRetryLearning:async()=>{if(++window.retries===1)throw Error('Temporary outage');},onDone:()=>{}});
+      renderQuoteCreated(document.querySelector('#quote'),{address:'Saved property',total:123.45,lines:[{svc:'driveway',label:'Front <img src=x onerror="window.bad=true"> & path',qty:200,fixedPrice:123.45}],SERVICES:window.TK_PRICING.SERVICES,learningWarning:'Your quote is saved. Learning was not saved.'},{onRetryLearning:async()=>{if(++window.retries===1)throw Error('Temporary outage');},onDone:()=>{}});
     });
+    assert.match(await page.locator('.tk-created-lines').innerText(),/Front <img/);
+    assert.equal(await page.locator('.tk-created-lines img').count(),0);
     await page.locator('[data-retry-learning]').click();assert.match(await page.locator('[data-learning-status]').innerText(),/quote is saved.*Temporary outage/);
     assert.match(await page.locator('.tk-created-total').innerText(),/NZ\$123\.5/);
     await page.locator('[data-retry-learning]').click();await page.locator('[data-retry-learning]').waitFor({state:'hidden'});assert.equal(await page.locator('[data-retry-learning]').isHidden(),true);

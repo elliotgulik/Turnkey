@@ -1,4 +1,4 @@
-import { instantPricing } from './quote-pricing.js';
+import { instantPricing, normalizeQuoteLine } from './quote-pricing.js';
 
 export const REASONS = {unexplained:'Exclude from price learning',pricing_correction:'Pricing correction',difficult_access:'Difficult access',extra_work:'Extra work',discount:'Discount',measurement_correction:'Measurement correction'};
 export const cents = n => Math.round(Number(n)*100);
@@ -16,6 +16,7 @@ export function allocatePrices(total, weights) {
 
 // Edits live in the panel's row state, never in generated HTML or engine output.
 export function learningPricing(pricing,cost,lines,options={}) {
+  lines=lines.map(normalizeQuoteLine);
   const base=instantPricing(pricing,cost,lines,options);
   if(!lines.length)return {...base,recommendations:[]};
   const inputs=lines.map((line,i)=>{

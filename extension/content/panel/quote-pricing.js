@@ -1,3 +1,10 @@
+// Labels describe one quote line only; service keys remain the pricing identity.
+export function normalizeQuoteLine(line) {
+  if (line.label === undefined) return line; // Legacy callers without display labels.
+  if (typeof line.label !== 'string' || !line.label.trim() || line.label.trim().length > 120)
+    throw Error('Enter a service name of 1–120 characters for every included line.');
+  return {...line,label:line.label.trim()};
+}
 // Internal-only cost configuration. Keep the customer-facing pricing engine separate.
 const defaults=new WeakMap();
 export function configureCosts(engine,config={}){
@@ -14,6 +21,7 @@ export function configureCosts(engine,config={}){
   for(const [key,value] of Object.entries(config.overheads||{}))if(Object.hasOwn(engine.OVERHEADS,key)&&Number.isFinite(value)&&value>=0)engine.OVERHEADS[key].perMonth=value;
 }
 export function instantPricing(pricing,cost,lines,{targetMargin,price,travelKm,estimatedAt,access='standard'}={}){
+  lines=lines.map(normalizeQuoteLine);
   if(!lines.length)return {total:0,lines:[],breakdown:null};
   if(lines.some(l=>pricing.SERVICES[l.svc]?.unit==='panes'&&(!Number.isInteger(l.qty)||l.qty<=0)))throw Error('Enter a positive whole-number manual pane count for windows.');
   if(lines.some(l=>!cost.SVC_COST[l.svc]||!Number.isFinite(l.qty)||l.qty<=0))throw Error('Every service needs a positive quantity and configured delivery costs.');

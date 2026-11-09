@@ -12,6 +12,6 @@ test('public quote hides window counts and unit rates while preserving line pric
 });
 test('customer document renderers hide windows counts in PDF, HTML and email descriptions',()=>{
  assert.match(crmHtml,/var sub=s\.svc==='windows'\?'Service total'/);
- assert.match(crmHtml,/var desc=s\.svc==='windows'\?v\.label/);
+ assert.match(crmHtml,/var desc=s\.svc==='windows'\?TK_PRICING\.lineLabel\(s\)/);
  assert.match(crmHtml,/esc\(s\.svc==='windows'\?'Service total'/);
 });
