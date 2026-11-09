@@ -2,3 +2,5 @@
 .toolbar button[aria-pressed=true]{background:#272727;color:#fff;border-color:#272727}#content>section+section{margin-top:22px}
 
 .po-day-weather{padding:3px 5px;font-size:12px;line-height:1.25;color:#913426;overflow-wrap:anywhere}.po-weather{margin:14px 0;padding:12px;background:#f5f5f6;border-radius:6px}.po-weather-risk{color:#913426;font-weight:600}@media(max-width:760px){.po-rail nav{grid-template-columns:repeat(3,minmax(0,1fr))}.po-rail nav button{min-height:44px;padding:7px 4px}main{padding-bottom:145px}}
+
+[hidden]{display:none!important}
