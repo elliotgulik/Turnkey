@@ -47,6 +47,7 @@ test('service area preferences are isolated by TurnKey business ID', () => {
 function statusFixture() {
   const host = { innerHTML: '', classList: { contains() { return true; } } };
   const handlers = {};
+  const store = new Map();
   const records = ['new', 'scheduled', 'won', 'completed', 'paid', 'cancelled', 'lost'].map((stage, id) => ({
     id, stage, name: `Customer ${id}`, source: 'ServiceM8', total: 100,
     nextFollowUpAt: new Date(Date.now() - 86400000).toISOString(),
@@ -55,7 +56,7 @@ function statusFixture() {
     records, money: n => '$' + n, currentBusinessId: 'test',
     render() {}, switchView() {}, handleAuthedSession() {}, openMoreSheet() {}, requestAnimationFrame() {},
     document: { activeElement: null, addEventListener(k, fn) { handlers[k] = fn; }, querySelector() { return null; }, getElementById(id) { return id === 'view-leads' ? host : null; } },
-    localStorage: { getItem() { return null; }, setItem() {} },
+    localStorage: { getItem(k) { return store.get(k) ?? null; }, setItem(k,v) { store.set(k,v); } },
     window: { TK_PIPELINE: require('../pipeline-model.js') },
   };
   context.window.TK_LEAD_ANSWERS = require('../lead-answer-utils.js');
@@ -81,6 +82,7 @@ test('lead cards show received date and exact Auckland time from the original su
   f.records[0].requestSubmittedAt = '2026-10-31T23:04:05Z';
   f.records[0].createdAt = '2026-11-01T01:00:00Z';
   f.manager.render();
+  f.scope('all');
   assert.match(f.host.innerHTML, /1 Nov 2026, 12:04:05 pm NZDT/);
   f.records[0].requestSubmittedAt = 'invalid';
   f.manager.render();
@@ -282,4 +284,37 @@ test('commercial intake answers receive the commercial grade and match its filte
   f.records.splice(0, f.records.length, { id: 1, stage: 'new', formAnswers: [{ label: 'Property Type', answer: 'Commercial' }] });
   f.handlers.change({ target: { matches: s => s === '[data-nlm-filter]', dataset: { nlmFilter: 'grade' }, value: 'A' } });
   assert.match(f.host.innerHTML, /data-nlm-record="1"/);
+});
+
+test('personal dashboard defaults to own assignments and resets on another company member signing in',()=>{
+ const f=statusFixture();
+ f.context.currentUserId='elliot';
+ f.context.window.TK_CURRENT_SESSION={user:{id:'elliot',email:'elliot@example.test',user_metadata:{full_name:'Elliot Gulik'}}};
+ f.context.window.TK_SALES_PLATFORM={salespeople:()=>[
+  {id:'elliot',name:'Elliot Gulik',aliases:['elliot','servicem8:elliot']},
+  {id:'luca',name:'Luca Anderson',aliases:['luca','servicem8:luca']}
+ ]};
+ f.records.splice(0,f.records.length,
+  {id:11,stage:'new',name:'Elliot customer',assignedSalespersonId:'servicem8:elliot'},
+  {id:12,stage:'new',name:'Luca customer',assignedSalespersonId:'luca'},
+  {id:13,stage:'new',name:'Unassigned customer'},
+  {id:14,stage:'new',name:'Different person',assignedSalespersonId:'different-elliot',salespersonName:'Elliot Gulik'});
+ const ids=()=>[...f.host.innerHTML.matchAll(/data-nlm-record="(\d+)"/g)].map(m=>Number(m[1]));
+ const owner=key=>f.handlers.click({target:{closest:selector=>selector==='[data-nlm-owner]'?{dataset:{nlmOwner:key}}:null}});
+ f.manager.render();assert.match(f.host.innerHTML,/Elliot’s Leads Dashboard/);assert.deepEqual(ids(),[11]);
+ owner('unassigned');assert.deepEqual(ids(),[13]);
+ owner('');assert.equal(ids().length,4);
+ f.context.currentUserId='luca';
+ f.context.window.TK_CURRENT_SESSION={user:{id:'luca',email:'luca@example.test',user_metadata:{full_name:'Luca Anderson'}}};
+ f.manager.render();assert.match(f.host.innerHTML,/Luca’s Leads Dashboard/);assert.deepEqual(ids(),[12]);
+});
+
+test('recent unread leads are NEW; older unread leads are UNREAD; opened leads hide their badge',()=>{
+ const f=statusFixture();f.records[0].createdAt=Date.now();f.manager.render();
+ assert.match(f.host.innerHTML,/class="nlm-new" >NEW</);
+ f.records[0].createdAt=Date.now()-5*86400000;f.scope('all');
+ assert.match(f.host.innerHTML,/class="nlm-new" >UNREAD</);
+ f.manager.setRead(f.records[0],true);f.manager.render();
+ assert.match(f.host.innerHTML,/class="nlm-new" hidden>UNREAD</);
+ assert.match(require('node:fs').readFileSync('reference-leads.css','utf8'),/\.nlm-new\[hidden\]\s*\{\s*display:\s*none\s*!important/);
 });

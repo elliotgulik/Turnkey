@@ -680,3 +680,16 @@ test('GET /staff uses named ServiceM8 staff, merges local logins, excludes apps 
  assert.ok(!result.body.staff.some(u=>['Zapier','Other Business'].includes(u.name)));
  const technician=await h.run('get','/api/job-calendar/staff',{userId:tech});assert.deepEqual(technician.body.staff.map(u=>u.id),[tech]);
 });
+
+test('salesperson directory includes unnamed company owners and excludes other companies',async()=>{
+ const h=setup();
+ h.tables.users.find(x=>x.id===manager).name=null;
+ h.tables.servicem8_connections=[{business_id:BIZ,generation:'current'}];
+ h.tables.external_object_mappings=[{business_id:BIZ,connection_generation:'current',object_type:'staff',local_id:'servicem8:remote',external_uuid:'remote',snapshot:{name:'ServiceM8 Person'}}];
+ const result=await h.run('get','/api/job-calendar/staff',{userId:manager});
+ assert.equal(result.statusCode,200);
+ assert.ok(result.body.staff.some(x=>x.id===manager));
+ assert.ok(!result.body.staff.some(x=>x.id===foreignUser));
+ const limited=await h.run('get','/api/job-calendar/staff',{userId:tech});
+ assert.deepEqual(limited.body.staff.map(x=>x.id),[tech]);
+});

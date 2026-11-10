@@ -217,7 +217,7 @@ export function installJobCalendar(app, { db, requireBusiness, getGoogleCalendar
       unwrap(db.from('servicem8_connections').select('generation').eq('business_id',req.businessId).maybeSingle()),
       fetchAllPaged(()=>db.from('external_object_mappings').select('local_id,external_uuid,snapshot,connection_generation').eq('business_id',req.businessId).eq('object_type','staff'),1000,'local_id')
     ]);
-    res.json({staff:staffDirectory(locals,mappedStaff(remote,connection?.generation))});
+    res.json({staff:staffDirectory(locals,mappedStaff(remote,connection?.generation),{includeAccounts:true})});
   }));
 
   /* ========================= GET /range ========================= */

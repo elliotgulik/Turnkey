@@ -99,3 +99,14 @@
 #view-leads .nlm-reference .nlm-answer-group dt { color:var(--tk-muted); font-size:13px; }
 #view-leads .nlm-reference .nlm-answer-group dd { margin:0; color:var(--tk-ink); font-size:15px; line-height:1.5; white-space:pre-wrap; overflow-wrap:anywhere; }
 #view-leads .nlm-reference .nlm-answer-clarify { display:block; margin-top:6px; color:var(--tk-muted); font-size:12px; line-height:1.5; }
+/* Personal assignment scope and explicit per-user unread state. */
+#view-leads .nlm-reference .nlm-owner-tabs{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 18px}
+#view-leads .nlm-reference .nlm-owner-tabs button{display:inline-flex;align-items:center;gap:9px;min-height:42px;padding:9px 14px;border:1px solid var(--tk-line,#d5dde1);border-radius:6px;background:#fff;color:var(--tk-muted,#53626c);font:inherit;font-size:14px;cursor:pointer}
+#view-leads .nlm-reference .nlm-owner-tabs button[aria-pressed=true]{color:#fff;background:var(--tk-ink,#0a1c2b);border-color:var(--tk-ink,#0a1c2b)}
+#view-leads .nlm-reference .nlm-owner-tabs button span{font-size:12px;font-variant-numeric:tabular-nums;opacity:.85}
+#view-leads .nlm-reference .nlm-new{display:inline-flex;align-items:center;gap:5px;font-size:12px;line-height:1.4;padding:3px 7px;font-weight:600;letter-spacing:0;background:#e2f0ec;color:#0b5f52;border-radius:4px}
+#view-leads .nlm-reference .nlm-new[hidden]{display:none!important}
+#view-leads .nlm-reference .nlm-card.unread .nlm-name{font-weight:700}
+#view-leads .nlm-reference .nlm-card.unread .nlm-name::before{content:'';display:inline-block;width:7px;height:7px;margin-right:7px;border-radius:50%;background:#0f7d6b;vertical-align:2px}
+#view-leads .nlm-reference .nlm-card.read .nlm-name{font-weight:500}
+@media(max-width:760px){#view-leads .nlm-reference .nlm-owner-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}#view-leads .nlm-reference .nlm-owner-tabs button{min-height:44px;justify-content:center;padding:8px 5px;font-size:13px;gap:5px}#view-leads .nlm-reference .nlm-header h2{font-size:27px;overflow-wrap:anywhere}}

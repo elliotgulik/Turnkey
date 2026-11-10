@@ -46,18 +46,29 @@
     originalCustomerProfile = openCustomerProfile;
   let people=[],peopleKey='',peopleLoadedAt=0,peoplePending=null;
   const peopleScope=()=>String(typeof currentBusinessId!=='undefined'?currentBusinessId||'':'')+':'+String(typeof currentUserId!=='undefined'?currentUserId||'':'')+':'+String(typeof businessSessionVersion!=='undefined'?businessSessionVersion:0);
-  function salespeople(){return peopleKey===peopleScope()?people:[];}
+  function salespeople(){
+    const list=peopleKey===peopleScope()?[...people]:[];
+    const local=typeof staff!=='undefined'&&Array.isArray(staff)?staff:[];
+    for(const account of local){
+      if(!account.id||account.business_id!==currentBusinessId)continue;
+      const linked=list.find(person=>person.id===account.id||(person.aliases||[]).includes(account.id)||account.email&&person.email?.toLowerCase()===account.email.toLowerCase());
+      if(linked){linked.aliases=[...new Set([...(linked.aliases||[]),account.id])];continue;}
+      const name=String(account.name||account.email?.split('@')[0]?.replace(/[._-]+/g,' ')||'Company member').trim();
+      list.push({...account,name,aliases:[account.id]});
+    }
+    return list;
+  }
   async function loadPeople(force=false){
     if(typeof currentBusinessId==='undefined'||!currentBusinessId||typeof currentUserId==='undefined'||!currentUserId)return [];
     const key=peopleScope();if(peopleKey!==key){peopleKey=key;people=[];peopleLoadedAt=0;peoplePending=null;}
     if(peoplePending)return peoplePending;
-    if(!force&&Date.now()-peopleLoadedAt<300000)return people;
+    if(!force&&Date.now()-peopleLoadedAt<300000)return salespeople();
     peoplePending=(async()=>{try{const data=await api('/api/job-calendar/staff');if(key!==peopleScope()||peopleKey!==key)return [];people=Array.isArray(data.staff)?data.staff:[];peopleLoadedAt=Date.now();render();return people;}
-      catch(e){if(key===peopleScope()){peopleLoadedAt=Date.now();toast('Could not load staff: '+e.message);}return [];}
+      catch(e){if(key===peopleScope()){peopleLoadedAt=Date.now()-285000;toast('Showing saved company staff. Could not refresh staff: '+e.message);}return [];}
       finally{if(peopleKey===key)peoplePending=null;}})();return peoplePending;
   }
   function salespersonOptions(r){const list=salespeople();return options([['','Unassigned'],...list.map(x=>[x.id,x.name]),...(r.assignedSalespersonId&&!list.some(x=>x.id===r.assignedSalespersonId)?[[r.assignedSalespersonId,r.salespersonName||'Previously assigned staff']]:[])],r.assignedSalespersonId||'');}
-  function salespersonControl(r){void loadPeople();const allowed=typeof currentUserRole!=='undefined'&&['owner','manager'].includes(currentUserRole);return `<label class="sale-person-control"><span>Salesperson</span><select data-sale-assignee="${esc(r.id)}" aria-label="Salesperson for ${esc(r.name||'lead')}" ${allowed&&salespeople().length?'':'disabled'}>${salespersonOptions(r)}</select></label>`;}
+  function salespersonControl(r){void loadPeople();const allowed=typeof currentUserRole!=='undefined'&&['owner','manager'].includes(currentUserRole);return `<label class="sale-person-control"><span>Salesperson</span><select data-sale-assignee="${esc(r.id)}" aria-label="Salesperson for ${esc(r.name||'lead')}" ${allowed?'':'disabled'}>${salespersonOptions(r)}</select></label>`;}
   async function assignSalesperson(id,staffId){
     const r=record(id),person=salespeople().find(x=>x.id===staffId),key=peopleScope();
     if(!r||typeof currentUserRole==='undefined'||!['owner','manager'].includes(currentUserRole))throw Error('Only an owner or manager can assign salespeople.');

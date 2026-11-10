@@ -17,3 +17,13 @@ test('only unique email or exact full-name matches are merged; original data sta
  assert.equal(staffDirectory([{id:'x',name:'Unknown Person',email:'shared@example.test'}],[{id:'a',name:'Alice',email:'shared@example.test'},{id:'b',name:'Bob',email:'shared@example.test'}]).length,3);
 });
 test('old connection generations never appear in the staff directory',()=>{assert.equal(mappedStaff([{connection_generation:'old',external_uuid:'x',snapshot:{name:'Old'}}],'current').length,0);});
+test('sales assignment keeps unnamed company accounts even when ServiceM8 staff exist',()=>{
+ const locals=[{id:'luca-account',name:null,email:'lucaganderson@gmail.com',role:'owner'}];
+ const remote=[{id:'servicem8:someone',name:'Other Worker'}];
+ const result=staffDirectory(locals,remote,{includeAccounts:true});
+ assert.equal(result.length,2);
+ assert.equal(result.find(x=>x.id==='luca-account').name,'lucaganderson');
+ assert.deepEqual(result.find(x=>x.id==='luca-account').aliases,['luca-account']);
+ // Calendar continues to use the filtered human display directory.
+ assert.equal(staffDirectory(locals,remote).length,1);
+});

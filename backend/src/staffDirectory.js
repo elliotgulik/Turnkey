@@ -7,7 +7,7 @@ export function humanStaff(row) {
   return row.active !== 0 && row.active !== '0' && row.active !== false && row.hideFromSchedule !== 1 && row.hideFromSchedule !== '1' && row.hideFromSchedule !== true &&
     !(/\bapi\s*key\b|\bintegration\b/i.test(name) || /^(zapier|make|apingo\s*\.?|my custom calendar|test test)$/i.test(name));
 }
-export function staffDirectory(localRows=[],remoteRows=[]) {
+export function staffDirectory(localRows=[],remoteRows=[],{includeAccounts=false}={}) {
   const remote=remoteRows.filter(humanStaff), used=new Set(), result=[];
   const matching=(local)=>{
     const byEmail=local.email?remote.filter(r=>email(r.email)===email(local.email)):[];
@@ -18,7 +18,7 @@ export function staffDirectory(localRows=[],remoteRows=[]) {
   for(const local of localRows.filter(humanStaff)){
     const match=matching(local);
     if(match&&used.has(match.id))continue;
-    if(!match&&remote.length&&(!local.name||local.name.includes('@')))continue;
+    if(!includeAccounts&&!match&&remote.length&&(!local.name||local.name.includes('@')))continue;
     const name=clean(match?.name)||clean(local.name)||clean(local.email).split('@')[0].replace(/[._-]+/g,' ');
     if(!name)continue;
     if(match)used.add(match.id);
