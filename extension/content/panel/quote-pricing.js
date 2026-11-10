@@ -1,5 +1,19 @@
+export const isCustomLine = line => line.pricingMode === 'fixed' && line.svc === 'custom';
+// Custom costs are optional TOTAL line delivery costs, ex GST. Missing is unknown.
+export function normalizeCustomLine(line) {
+  if (!isCustomLine(line)) return line;
+  const label=typeof line.label==='string'?line.label.trim():'';
+  if(!label || label.length>120) throw Error('Enter a custom service name of 1–120 characters.');
+  const qty=line.qty===undefined?1:line.qty,unit=line.unit||'item',unitPrice=line.unitPrice;
+  if(!Number.isFinite(qty)||qty<=0||qty>1e8)throw Error('Enter a positive custom quantity.');
+  if(!['item','hour','day'].includes(unit))throw Error('Choose item, hour or day for a custom service.');
+  if(!Number.isFinite(unitPrice)||unitPrice<0||unitPrice>1e8||qty*unitPrice>1e8)throw Error('Enter a valid custom unit price (GST inclusive, zero or more).');
+  if(line.customCost!=null&&(!Number.isFinite(line.customCost)||line.customCost<0||line.customCost>1e8))throw Error('Enter a valid custom delivery cost or leave it blank for unknown.');
+  return {...line,label,qty,unit,unitPrice,fixedPrice:Math.round(qty*unitPrice*100)/100,customCost:line.customCost??null};
+}
 // Labels describe one quote line only; service keys remain the pricing identity.
 export function normalizeQuoteLine(line) {
+  if (isCustomLine(line)) return normalizeCustomLine(line);
   if (line.label === undefined) return line; // Legacy callers without display labels.
   if (typeof line.label !== 'string' || !line.label.trim() || line.label.trim().length > 120)
     throw Error('Enter a service name of 1–120 characters for every included line.');

@@ -1,3 +1,4 @@
+import { isCustomLine } from './quote-pricing.js';
 import { TurnKeyApi } from '../../api/client-bridge.js';
 import { learningPricing, allocatePrices, observationLines, REASONS } from './quote-learning.js';
 import { measurementQuantity, measurementForService } from './measurements.js';
@@ -38,7 +39,7 @@ export function renderQuotePanel(container, ctx, actions) {
   const savedServices=ctx.boundJob?.details?.services || [];
   const matchedServices=new Set();
   function savedMeasuredLine(m,svc) {
-    const candidates=savedServices.filter(line=>line.svc===svc&&!matchedServices.has(line));
+    const candidates=savedServices.filter(line=>!isCustomLine(line)&&line.svc===svc&&!matchedServices.has(line));
     const byId=candidates.filter(line=>(m.lineKey&&line.lineKey===m.lineKey)||line.measurementId===m.id||line.lineKey===m.id);
     const byQuantity=candidates.filter(line=>Number(line.qty)===measurementQuantity(m,SERVICES[svc]));
     // Ambiguous identical services must not borrow another outline's name.
@@ -58,7 +59,7 @@ export function renderQuotePanel(container, ctx, actions) {
   let localMargin=ctx.TK_COST.targetMargin(ctx.TK_COST.COST_INPUTS.targetMargin), travelKm=ctx.TK_COST.COST_INPUTS.avgKm;
   const estimatedAt=new Date().toISOString();
   let access=ctx.boundJob?.details?.assumptions?.access || 'standard';
-  const priceModel=(ignoreManual=false)=>learningPricing(ctx.TK_PRICING,ctx.TK_COST,computeLines().map(l=>ignoreManual?{...l,manualPrice:undefined,label:undefined}:l),{targetMargin:localMargin,travelKm,estimatedAt,access,engine:ctx.TK_PRICE_LEARNING,learningState:ctx.learningState,businessId:ctx.business?.id});
+  const priceModel=(ignoreManual=false)=>learningPricing(ctx.TK_PRICING,ctx.TK_COST,computeLines().map(l=>ignoreManual?(isCustomLine(l)?{...l,label:l.label||'Custom item',qty:l.qty>0?l.qty:1,unitPrice:Number.isFinite(l.unitPrice)&&l.unitPrice>=0?l.unitPrice:0,customCost:Number.isFinite(l.customCost)&&l.customCost>=0?l.customCost:null}:{...l,manualPrice:undefined,label:undefined}):l),{allowZeroTotal:ignoreManual,targetMargin:localMargin,travelKm,estimatedAt,access,engine:ctx.TK_PRICE_LEARNING,learningState:ctx.learningState,businessId:ctx.business?.id});
   const savedWindows=savedServices.filter(line=>line.svc==='windows'&&!matchedServices.has(line));
   const wantsWindows = ctx.manualWindows || savedWindows.length || requestedServices(ctx.boundCustomer || {},ctx.boundJob).some(service => service.service_id === 'windows');
   const extraLines = wantsWindows ? (savedWindows.length?savedWindows:[{}]).map(line=>({
@@ -70,6 +71,7 @@ export function renderQuotePanel(container, ctx, actions) {
   savedServices.filter(line=>line.manual===true&&line.svc!=='windows'&&!matchedServices.has(line)&&SERVICES[line.svc]).forEach(line=>{
     extraLines.push({lineKey:key(),include:true,svc:line.svc,label:line.label??SERVICES[line.svc].label,qty:Number(line.qty)||0,storeys:line.storeys||1});
   });
+  savedServices.filter(isCustomLine).forEach(line=>extraLines.push({...line,lineKey:key(),include:true}));
   // When this tab was opened from an existing customer's "Build quote"
   // button (see app.js's loadBoundCustomerContext()), the quote is for
   // THAT customer and nothing else — no re-picking, no "new customer" path.
@@ -79,9 +81,9 @@ export function renderQuotePanel(container, ctx, actions) {
 
   const activeRows=()=>lineState.concat(extraLines).filter(l=>l.include);
   const rawQuantity=l=>l.measurementId?measurementQuantity(ctx.measurements.find(m=>m.id===l.measurementId),SERVICES[l.svc]):l.qty;
-  const displayLabel=row=>row.label.trim() || SERVICES[row.svc].label;
+  const displayLabel=row=>row.label.trim() || (isCustomLine(row)?'':SERVICES[row.svc].label);
   function computeLines() {
-    return activeRows().map(l=>({lineKey:l.lineKey,measurementId:l.measurementId,label:displayLabel(l),manual:!l.measurementId,svc:l.svc,qty:l.appliedQuantity??rawQuantity(l),originalQuantity:l.originalQuantity??rawQuantity(l),manualPrice:l.manualPrice,distributedPrice:l.distributedPrice,reason:l.reason,verifiedQuantity:l.verifiedQuantity,measurementReason:l.measurementReason,...(l.svc==='housewash'?{storeys:Number(l.storeys)||1}:{})}));
+    return activeRows().map(l=>isCustomLine(l)?{lineKey:l.lineKey,svc:'custom',pricingMode:'fixed',label:displayLabel(l),qty:l.qty,unit:l.unit,unitPrice:l.unitPrice,customCost:l.customCost,manual:true}:({lineKey:l.lineKey,measurementId:l.measurementId,label:displayLabel(l),manual:!l.measurementId,svc:l.svc,qty:l.appliedQuantity??rawQuantity(l),originalQuantity:l.originalQuantity??rawQuantity(l),manualPrice:l.manualPrice,distributedPrice:l.distributedPrice,reason:l.reason,verifiedQuantity:l.verifiedQuantity,measurementReason:l.measurementReason,...(l.svc==='housewash'?{storeys:Number(l.storeys)||1}:{})}));
   }
   function changeService(line,svc) {
     line.svc=svc;
@@ -91,6 +93,7 @@ export function renderQuotePanel(container, ctx, actions) {
   }
   function priceCard(l,i,model) {
     const rec=model.recommendations[i],row=activeRows()[i];
+    if(isCustomLine(l))return `<section class="tk-learning-line" data-service-price="custom"><div class="tk-price-line"><span data-line-title="${escapeHtml(l.lineKey)}">${escapeHtml(l.label)} · ${l.qty} ${escapeHtml(l.unit)}</span><strong>${money(l.fixedPrice)}</strong></div><p class="tk-modal-sub">Custom fixed price · excluded from measurement and price learning.</p></section>`;
     const hint=Number(rec.measurement?.suggestedQuantity);
     const hasHint=ctx.learningState?.settings?.enabled!==false&&Number(rec.measurement?.sampleCount)>=Math.max(5,ctx.learningState?.settings?.minSamples||5)&&Math.abs((rec.measurement?.factor||1)-1)>.00001;
     return `<section class="tk-learning-line" data-service-price="${escapeHtml(l.svc)}">
@@ -164,15 +167,19 @@ export function renderQuotePanel(container, ctx, actions) {
                 <div class="tk-line-row">
                   <input type="checkbox" data-extra="${i}" ${l.include ? 'checked' : ''}/>
                   <input type="text" class="tk-input" aria-label="Service name" maxlength="120" placeholder="${escapeHtml(SERVICES[l.svc]?.label)}" data-line-label="${escapeHtml(l.lineKey)}" value="${escapeHtml(l.label)}"/>
-                  <select class="tk-select" data-extra-svc="${i}">${renderServiceOptions(l.svc, null)}</select>
+                  ${isCustomLine(l)?`<input type="number" class="tk-qty-input" aria-label="Custom quantity" data-custom-field="qty" data-custom-key="${escapeHtml(l.lineKey)}" min="0.01" step="any" value="${escapeHtml(l.qty)}">
+                  <select class="tk-select" aria-label="Custom unit" data-custom-field="unit" data-custom-key="${escapeHtml(l.lineKey)}">${['item','hour','day'].map(u=>`<option ${l.unit===u?'selected':''}>${u}</option>`).join('')}</select>
+                  <label>Unit price (GST inclusive)<input class="tk-qty-input" type="number" aria-label="Custom unit price" data-custom-field="unitPrice" data-custom-key="${escapeHtml(l.lineKey)}" min="0" step="0.01" value="${Number.isFinite(l.unitPrice)?l.unitPrice:''}"></label>
+                  <label>Total delivery cost (ex GST, optional)<input class="tk-qty-input" type="number" aria-label="Custom delivery cost" data-custom-field="customCost" data-custom-key="${escapeHtml(l.lineKey)}" min="0" step="0.01" placeholder="Unknown" value="${escapeHtml(l.customCost??'')}"></label>`:`<select class="tk-select" data-extra-svc="${i}">${renderServiceOptions(l.svc, null)}</select>
                   <input type="number" min="0" step="${SERVICES[l.svc]?.unit === 'panes' ? '1' : '0.1'}" class="tk-qty-input" aria-label="Manual ${escapeHtml(SERVICES[l.svc]?.unit)} for ${escapeHtml(SERVICES[l.svc]?.label)}" data-extra-qty="${i}" value="${l.qty || ''}"/>
                   <span class="tk-line-qty">Manual ${escapeHtml(SERVICES[l.svc]?.unit)}</span>
                   ${l.svc==='housewash'?`<label class="tk-quote-field">House levels<select class="tk-select" aria-label="House levels for manual ${escapeHtml(SERVICES[l.svc]?.label)}" data-extra-storeys="${i}">${Object.entries(ctx.TK_PRICING.STOREY_TYPES).map(([n,v])=>`<option value="${n}" ${Number(l.storeys||1)===Number(n)?'selected':''}>${escapeHtml(v.label)}</option>`).join('')}</select></label>`:''}
-                </div>`
+                `}</div>`
                 )
                 .join('')}
             </div>
             <button type="button" class="tk-link-btn" data-add-extra>+ Add a manual service</button>
+            <button type="button" class="tk-link-btn" data-add-custom>+ Add a custom fixed-price item</button>
 
             <button type="button" class="tk-link-btn" data-add-windows>+ Windows — manual pane count</button>
 
@@ -203,7 +210,8 @@ export function renderQuotePanel(container, ctx, actions) {
               ${totalError?`<p class="tk-error" role="alert">${escapeHtml(totalError)}</p>`:''}
               <div class="tk-section-label">Internal delivery estimate</div>
               <p class="tk-modal-sub">Based on your business’s saved cost settings. Travel is an estimate, not a live route calculation.</p>
-              ${bd ? [ ['Labour + setup ('+bd.labourHrs.toFixed(1)+' hours × '+ctx.TK_COST.COST_INPUTS.crew+' crew)',bd.wageCost],['Materials / chemicals',bd.unsetChemicals?.length?null:bd.chem],['Travel / fuel',bd.fuelCost],['Equipment',bd.equipmentCost],['Consumables',bd.consumablesCost],['Allocated overheads',bd.overheadCost],['Total estimated costs (ex GST)',bd.costUnrounded] ].map(([label,value])=>`<div class="tk-price-line"><span>${label}</span><strong>${value===null?'Incomplete':money(value)}</strong></div>`).join('') : ''}
+              ${bd ? [ ['Labour + setup ('+bd.labourHrs.toFixed(1)+' hours × '+ctx.TK_COST.COST_INPUTS.crew+' crew)',bd.wageCost],['Materials / chemicals',bd.unsetChemicals?.length?null:bd.chem],['Travel / fuel',bd.fuelCost],['Equipment',bd.equipmentCost],['Consumables',bd.consumablesCost],['Allocated overheads',bd.overheadCost],...(bd.knownCost!=null?[['Known costs (including custom)',bd.knownCost]]:[]),['Total estimated costs (ex GST)',bd.costUnrounded] ].map(([label,value])=>`<div class="tk-price-line"><span>${label}</span><strong data-cost-label="${escapeHtml(label)}">${value===null?'Incomplete':money(value)}</strong></div>`).join('') : ''}
+              <p class="tk-error" role="status" data-unknown-cost ${bd?.costComplete===false?'':'hidden'}>Custom delivery cost unknown. Total cost, profit and margin are incomplete.</p>
               ${bd?.unsetChemicals?.length?`<p class="tk-error" role="status">Supplier cost not set: ${bd.unsetChemicals.map(id=>escapeHtml(ctx.TK_COST.CHEMICALS[id].label)).join(', ')}. Costs, recommended price and margin are incomplete. Enter actual supplier costs in TurnKey Pricing.</p>`:''}
               <label class="tk-price-line">Round-trip travel estimate (km) <input class="tk-qty-input" aria-label="Round-trip travel estimate in km" data-travel type="number" min="0" step="0.1" value="${travelKm}"></label>
               <label class="tk-price-line">Target gross margin (%) <input class="tk-qty-input" aria-label="Target gross margin" data-margin type="number" min="0" max="99" step="1" value="${Math.round(localMargin*100)}"></label>
@@ -213,9 +221,9 @@ export function renderQuotePanel(container, ctx, actions) {
               <button type="button" class="tk-link-btn" data-distribute-total>Distribute entered total across services (replaces manual line prices)</button>
               <p class="tk-modal-sub" data-price-adjustment>The total saves as the exact sum of service prices. An entered total takes effect only when you choose Distribute.</p>
               <button type="button" class="tk-link-btn" data-use-recommended>Reset all services to recommended price</button>
-              <div class="tk-price-line"><span>Expected gross profit</span><strong data-profit>${money(model.profit||0)}</strong></div>
-              <div class="tk-price-line"><span>Expected gross margin</span><strong data-margin-result>${(model.marginPct||0).toFixed(1)}%</strong></div>
-              <p role="status" class="tk-error" data-total-floor-warning ${bd&&model.marginPct+0.01<localMargin*100?'':'hidden'}>This price is below your target gross margin.</p>
+              <div class="tk-price-line"><span>Expected gross profit</span><strong data-profit>${model.profit===null?'Unknown':money(model.profit||0)}</strong></div>
+              <div class="tk-price-line"><span>Expected gross margin</span><strong data-margin-result>${model.marginPct===null?'Unknown':(model.marginPct||0).toFixed(1)+'%'}</strong></div>
+              <p role="status" class="tk-error" data-total-floor-warning ${bd&&model.marginPct!=null&&model.marginPct+0.01<localMargin*100?'':'hidden'}>This price is below your target gross margin.</p>
               <div class="tk-price-line"><span>Subtotal${ctx.TK_COST.COST_INPUTS.gstRegistered?' (ex GST)':''}</span><span data-subtotal>${money(exGst)}</span></div>
               <div class="tk-price-line"><span>${ctx.TK_COST.COST_INPUTS.gstRegistered?'GST':'GST (not registered)'}</span><span data-gst>${money(gst)}</span></div>
               <div class="tk-price-total"><span>Final customer total</span><span data-final-total>${money(total)}</span></div>
@@ -231,17 +239,21 @@ export function renderQuotePanel(container, ctx, actions) {
       </div>`;
 
     const rowFor=key=>activeRows().find(l=>l.lineKey===key);
+    container.querySelector('[data-add-custom]').addEventListener('click',()=>{
+      extraLines.push({lineKey:key(),include:true,svc:'custom',pricingMode:'fixed',label:'',qty:1,unit:'item',unitPrice:null,customCost:null});paint();
+    });
+    container.querySelectorAll('[data-custom-field]').forEach(input=>input.addEventListener(input.tagName==='SELECT'?'change':'input',()=>{
+      const row=lineState.concat(extraLines).find(l=>l.lineKey===input.dataset.customKey),field=input.dataset.customField;
+      row[field]=field==='unit'?input.value:input.value===''?null:Number(input.value);
+      pendingTotal=null;refreshPricing();
+    }));
     container.querySelectorAll('[data-line-label]').forEach(input=>{
       const update=()=>{
         const row=lineState.concat(extraLines).find(l=>l.lineKey===input.dataset.lineLabel);
         row.label=input.value;
         const title=container.querySelector(`[data-line-title="${input.dataset.lineLabel}"]`);
         if(title)title.textContent=displayLabel(row);
-        let error='';
-        try{priceModel();}catch(e){error=e.message;}
-        const errorEl=container.querySelector('[data-pricing-error]');
-        errorEl.textContent=error;errorEl.hidden=!error;
-        container.querySelector('[data-create]').disabled=!!error||!computeLines().length;
+        refreshPricing();
       };
       input.addEventListener('input',update);
       input.addEventListener('change',update);
@@ -252,23 +264,33 @@ export function renderQuotePanel(container, ctx, actions) {
       rowFor(input.dataset.linePrice).manualPrice=input.value===''?NaN:Number(input.value);
       delete rowFor(input.dataset.linePrice).distributedPrice;
       pendingTotal=null;
+      input.closest('[data-service-price]').querySelector('[data-reset-line]').hidden=false;
+      refreshPricing();
+    }
+    function refreshPricing() {
       let model,error='';
       try{model=priceModel();}catch(e){error=e.message;}
       const errorEl=container.querySelector('[data-pricing-error]');errorEl.textContent=error;errorEl.hidden=!error;
       container.querySelector('[data-create]').disabled=!!error||!computeLines().length;
-      input.closest('[data-service-price]').querySelector('[data-reset-line]').hidden=false;
       if(!model)return;
       container.querySelectorAll('[data-service-price]').forEach((card,i)=>{
         card.querySelector('strong').textContent=money(model.lines[i].fixedPrice);
+        if(isCustomLine(model.lines[i]))card.querySelector('[data-line-title]').textContent=model.lines[i].label+' · '+model.lines[i].qty+' '+model.lines[i].unit;
+        if(!card.querySelector('[data-line-floor-warning]'))return;
         card.querySelector('[data-line-floor-warning]').hidden=model.lines[i].fixedPrice+0.001>=model.recommendations[i].marginFloor;
       });
-      container.querySelector('[data-price]').value=model.total;
+      container.querySelectorAll('[data-cost-label]').forEach(el=>{
+        if(el.dataset.costLabel==='Total estimated costs (ex GST)')el.textContent=model.breakdown.costUnrounded===null?'Incomplete':money(model.breakdown.costUnrounded);
+        if(el.dataset.costLabel==='Known costs (including custom)')el.textContent=money(model.breakdown.knownCost);
+      });
+      container.querySelector('[data-unknown-cost]').hidden=model.breakdown?.costComplete!==false;
+      container.querySelector('[data-price]').value=pendingTotal??model.total;
       container.querySelector('[data-final-total]').textContent=money(model.total);
       container.querySelector('[data-subtotal]').textContent=money(model.exGst);
       container.querySelector('[data-gst]').textContent=money(model.gst);
-      container.querySelector('[data-profit]').textContent=money(model.profit);
-      container.querySelector('[data-margin-result]').textContent=model.marginPct.toFixed(1)+'%';
-      container.querySelector('[data-total-floor-warning]').hidden=model.marginPct+0.01>=localMargin*100;
+      container.querySelector('[data-profit]').textContent=model.profit===null?'Unknown':money(model.profit);
+      container.querySelector('[data-margin-result]').textContent=model.marginPct===null?'Unknown':model.marginPct.toFixed(1)+'%';
+      container.querySelector('[data-total-floor-warning]').hidden=model.marginPct==null||model.marginPct+0.01>=localMargin*100;
     }
     container.querySelectorAll('[data-line-price]').forEach(input=>{
       input.addEventListener('input',()=>updateServicePrice(input));
@@ -289,6 +311,7 @@ export function renderQuotePanel(container, ctx, actions) {
     container.querySelector('[data-distribute-total]').addEventListener('click',()=>{
       try {
         const total=Number(pendingTotal),model=priceModel();
+        if(activeRows().some(isCustomLine))throw Error('Edit custom unit prices directly; total distribution is available for measured services only.');
         if(!pendingTotal||!Number.isFinite(total)||total<1)throw Error('Enter a positive total before distributing.');
         const amounts=allocatePrices(total,model.lines.map(l=>l.fixedPrice));
         activeRows().forEach((row,i)=>{row.manualPrice=amounts[i];row.distributedPrice=true;row.reason='';});pendingTotal=null;totalError='';
@@ -434,7 +457,7 @@ export function renderQuoteCreated(container, { address, total, lines, SERVICES,
         <p class="tk-modal-sub">${escapeHtml(address)}</p>
         <div class="tk-created-total">${money(total)}</div>
         <div class="tk-created-lines">
-          ${lines.map((l) => `<div class="tk-kv"><span>${escapeHtml(l.label ?? SERVICES[l.svc]?.label ?? l.svc)}${l.svc==='housewash'?' · '+Number(l.storeys||1)+' storey':''}</span><span>${l.qty} ${escapeHtml(SERVICES[l.svc]?.unit || '')} · ${money(l.fixedPrice)}</span></div>`).join('')}
+          ${lines.map((l) => `<div class="tk-kv"><span>${escapeHtml(l.label ?? SERVICES[l.svc]?.label ?? l.svc)}${l.svc==='housewash'?' · '+Number(l.storeys||1)+' storey':''}</span><span>${l.qty} ${escapeHtml(isCustomLine(l)?l.unit:SERVICES[l.svc]?.unit || '')} · ${money(l.fixedPrice)}</span></div>`).join('')}
         </div>
         <div class="tk-modal-foot tk-created-foot">
           <button type="button" class="tk-btn" data-copy>Copy Quote Link</button>

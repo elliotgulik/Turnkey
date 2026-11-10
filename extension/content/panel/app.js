@@ -337,10 +337,6 @@ export async function init(shadowRoot) {
 
   async function openQuotePanel(manualWindows = false) {
     if (!requireConnected()) return;
-    if (!state.measurements.length && !manualWindows) {
-      toast(root, 'Measure at least one area or distance first.', 'error');
-      return;
-    }
     if (state.contextError) { toast(root, state.contextError, 'error'); return; }
     const businessId = state.profile?.business_id;
     const generation = connectionGeneration;

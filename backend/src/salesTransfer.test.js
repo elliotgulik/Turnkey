@@ -70,3 +70,11 @@ test('invalid saved Earth service price is rejected rather than silently aggrega
   const s=snapshot();s.details.services=[{svc:'driveway',qty:10,fixedPrice:-1}];
   assert.throws(()=>approvedLines(s),/invalid service price/);
 });
+
+test('custom fixed services keep customer labels, hour/day units and exact cents in transfer and PDF without costs',()=>{
+ for(const unit of ['item','hour','day']){
+  const s={amount:40.02,details:{gstRegistered:true,estimatedCost:98765,costSnapshot:{secret:'PRIVATE'},services:[{svc:'custom',pricingMode:'fixed',label:'Move patio furniture',qty:2,unit,unitPrice:20.01,fixedPrice:40.02,customCost:98765}]}};
+  const items=approvedLines(s);assert.equal(items[0].name,`Move patio furniture (2 ${unit})`);assert.equal(items[0].displayed_amount,'40.02');
+  const text=pdf(s).toString();assert.match(text,/40\.02/);assert.match(text,/Move patio furniture/);assert.doesNotMatch(text,/98765|PRIVATE|m²|Measured service outlines/);
+ }
+});

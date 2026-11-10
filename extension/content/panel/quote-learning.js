@@ -1,4 +1,4 @@
-import { instantPricing, normalizeQuoteLine } from './quote-pricing.js';
+import { instantPricing, normalizeQuoteLine, isCustomLine } from './quote-pricing.js';
 
 export const REASONS = {unexplained:'Exclude from price learning',pricing_correction:'Pricing correction',difficult_access:'Difficult access',extra_work:'Extra work',discount:'Discount',measurement_correction:'Measurement correction'};
 export const cents = n => Math.round(Number(n)*100);
@@ -17,6 +17,7 @@ export function allocatePrices(total, weights) {
 // Edits live in the panel's row state, never in generated HTML or engine output.
 export function learningPricing(pricing,cost,lines,options={}) {
   lines=lines.map(normalizeQuoteLine);
+  if(lines.some(isCustomLine))return customPricing(pricing,cost,lines,options);
   const base=instantPricing(pricing,cost,lines,options);
   if(!lines.length)return {...base,recommendations:[]};
   const inputs=lines.map((line,i)=>{
@@ -44,7 +45,7 @@ export function learningPricing(pricing,cost,lines,options={}) {
     return {...saved,fixedPrice};
   });
   const total=priced.reduce((sum,line)=>sum+cents(line.fixedPrice),0)/100;
-  if(total<1||total>1e8)throw Error('Enter a valid final price greater than zero.');
+  if((total<1&&!options.allowZeroTotal)||total>1e8)throw Error('Enter a valid final price greater than zero.');
   const recommended=recommendations.reduce((sum,line)=>sum+cents(line.recommendedPrice),0)/100;
   const exGst=cost.exGst(total);
   const observationReasons=lines.map((line,i)=>options.engine?.reasonForPriceEdit?.({
@@ -55,9 +56,32 @@ export function learningPricing(pricing,cost,lines,options={}) {
   return {...base,lines:priced,total,exGst,gst:total-exGst,profit:cost.profit(total,base.breakdown.costUnrounded),marginPct:cost.marginPct(total,base.breakdown.costUnrounded),breakdown:{...base.breakdown,recommended},snapshot:{...base.snapshot,price:total,recommended},recommendations,engineError,observationReasons};
 }
 
+// Keep calibration and measurement cost models completely unaware of custom items.
+function customPricing(pricing,cost,lines,options) {
+  const measured=lines.filter(l=>!isCustomLine(l));
+  const base=learningPricing(pricing,cost,measured,{...options,allowZeroTotal:true});
+  const empty={lines:[],labourHrs:0,wageCost:0,chem:0,fuelCost:0,equipmentCost:0,consumablesCost:0,overheadCost:0,totalTimeMin:0,costUnrounded:0,recommended:0};
+  const bd=base.breakdown||empty;
+  const custom=lines.filter(isCustomLine),complete=custom.every(l=>l.customCost!=null);
+  const knownCost=bd.costUnrounded+custom.reduce((s,l)=>s+(l.customCost??0),0);
+  let i=0;
+  const priced=lines.map(l=>isCustomLine(l)?l:base.lines[i++]);
+  i=0;
+  const recommendations=lines.map(l=>isCustomLine(l)?{lineKey:l.lineKey,unit:l.unit,configuredPrice:l.fixedPrice,baselinePrice:l.fixedPrice,recommendedPrice:l.fixedPrice,marginFloor:0}:base.recommendations[i++]);
+  const total=priced.reduce((s,l)=>s+cents(l.fixedPrice),0)/100;
+  if((total<1&&!options.allowZeroTotal)||total>1e8)throw Error('Enter a valid final price greater than zero.');
+  const recommended=recommendations.reduce((s,l)=>s+cents(l.recommendedPrice),0)/100;
+  const breakdown={...bd,recommended,knownCost,costComplete:complete,cost:complete?Math.round(knownCost):null,costUnrounded:complete?knownCost:null};
+  i=0;
+  return {...base,lines:priced,recommendations,total,exGst:cost.exGst(total),gst:total-cost.exGst(total),
+    profit:complete?cost.profit(total,knownCost):null,marginPct:complete?cost.marginPct(total,knownCost):null,
+    observationReasons:lines.map(l=>isCustomLine(l)?'':base.observationReasons[i++]),breakdown,
+    snapshot:{...base.snapshot,...breakdown,price:total,customLines:custom.map(l=>({lineKey:l.lineKey,cost:l.customCost})),estimatedAt:options.estimatedAt||new Date().toISOString()}};
+}
+
 export function observationLines(model,lines,pricing) {
   if(lines.some(l=>l.reason==='measurement_correction'&&!(l.verifiedQuantity>0)))throw Error('Apply a verified quantity and measurement reason for each measurement correction before saving.');
-  return model.lines.map((line,i)=>({lineKey:line.lineKey,svc:line.svc,unit:pricing.SERVICES[line.svc].unit,quantity:line.qty,baselinePrice:model.recommendations[i].baselinePrice,chosenPrice:line.fixedPrice,reason:lines[i].reason||model.observationReasons?.[i]||'',storeys:line.storeys||1,access:model.recommendations[i].access,...(lines[i].verifiedQuantity!=null?{measuredQuantity:lines[i].originalQuantity,verifiedQuantity:lines[i].verifiedQuantity,measurementReason:lines[i].measurementReason||''}:{})}));
+  return model.lines.map((line,i)=>isCustomLine(line)?null:({lineKey:line.lineKey,svc:line.svc,unit:pricing.SERVICES[line.svc].unit,quantity:line.qty,baselinePrice:model.recommendations[i].baselinePrice,chosenPrice:line.fixedPrice,reason:lines[i].reason||model.observationReasons?.[i]||'',storeys:line.storeys||1,access:model.recommendations[i].access,...(lines[i].verifiedQuantity!=null?{measuredQuantity:lines[i].originalQuantity,verifiedQuantity:lines[i].verifiedQuantity,measurementReason:lines[i].measurementReason||''}:{})})).filter(Boolean);
 }
 
 // The POST is deliberately separate from draft persistence. Reuse this exact
@@ -67,7 +91,7 @@ export function observationSubmission(api,businessId,quote,job,quoteLearning,isC
   const body={quoteKey:quoteLearning.quoteKey,jobId:job.id,lines:quoteLearning.lines,context:quoteLearning.context};
   let done=false,pending=null;
   return async function submit() {
-    if(done)return;
+    if(done||!body.lines.length)return;
     if(pending)return pending;
     if(!isCurrent())throw Error('Your account changed. Reopen the saved quote in TurnKey.');
     if(!quote.id||job.quote_id!==quote.id||job.business_id!==businessId||quote.business_id!==businessId)throw Error('Saved quote context could not be verified.');

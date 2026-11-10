@@ -170,7 +170,7 @@ const STATE_ICONS={
 function escapeHtml(v){
   return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
-function money(n){return TK_FORMAT.money(n);}
+function money(n){return 'NZ$'+Number(n||0).toLocaleString('en-NZ',{minimumFractionDigits:2,maximumFractionDigits:2});}
 function fmtDur(min){if(!min)return '';const h=Math.floor(min/60),m=Math.round(min%60);return h?(h+'h'+(m?' '+m+'m':'')):(m+'m');}
 function fmtDate(iso){try{return new Date(iso).toLocaleDateString('en-NZ',{day:'numeric',month:'short',year:'numeric'});}catch(e){return '';}}
 function getToken(){try{return new URL(location.href).searchParams.get('t')||'';}catch(e){return '';}}
@@ -387,11 +387,11 @@ function pubMountMap(areaPolys){
 function pubPropertySummary(services){
   if(!services||!services.length)return '';
   const rows=services.map(s=>{
-    const svc=TK_PRICING.SERVICES[s.svc]; if(!svc)return '';
+    const svc=s.svc==='custom'&&s.pricingMode==='fixed'?{unit:['item','hour','day'].includes(s.unit)?s.unit:'item'}:TK_PRICING.SERVICES[s.svc]; if(!svc)return '';
     return `<div class="psum-row"><span class="n">${escapeHtml(TK_PRICING.lineLabel(s))}</span><span class="v">${s.svc==='windows'?'Included':escapeHtml(s.qty)+' '+escapeHtml(svc.unit)}</span></div>`;
   }).join('');
   const checks=services.map(s=>{
-    const svc=TK_PRICING.SERVICES[s.svc]; if(!svc)return '';
+    const svc=s.svc==='custom'&&s.pricingMode==='fixed'?{unit:['item','hour','day'].includes(s.unit)?s.unit:'item'}:TK_PRICING.SERVICES[s.svc]; if(!svc)return '';
     return `<div class="svc-check"><span class="tick">✓</span>${escapeHtml(TK_PRICING.lineLabel(s))}</div>`;
   }).join('');
   return `<div class="psum">
@@ -403,13 +403,13 @@ function pubPropertySummary(services){
 function pubPriceBreakdown(q){
   const services=q.services||[];
   const lineSum=services.reduce((s,x)=>s+TK_PRICING.lineTotal(x),0);
-  const adjustment=Math.round((q.amount||0)-lineSum);
+  const adjustment=Math.round(((q.amount||0)-lineSum)*100)/100;
   const rows=services.map(s=>{
-    const svc=TK_PRICING.SERVICES[s.svc]; if(!svc)return '';
+    const svc=s.svc==='custom'&&s.pricingMode==='fixed'?{unit:['item','hour','day'].includes(s.unit)?s.unit:'item'}:TK_PRICING.SERVICES[s.svc]; if(!svc)return '';
     const note=(svc.usesRoofType&&s.roofType&&TK_PRICING.ROOF_TYPES[s.roofType])?TK_PRICING.ROOF_TYPES[s.roofType].label
       :(s.svc==='housewash'&&s.storeys&&TK_PRICING.STOREY_TYPES[s.storeys])?TK_PRICING.STOREY_TYPES[s.storeys].label
       :(s.svc==='fence'&&s.sides&&TK_PRICING.FENCE_SIDES[s.sides])?TK_PRICING.FENCE_SIDES[s.sides].label:'';
-    const sub=s.svc==='windows'?'Service total':s.fixedPrice!=null?'Fixed price':(s.qty+' '+svc.unit+' × '+TK_FORMAT.money(TK_PRICING.effectiveRate(s))+'/'+svc.unit+(note?' · '+note:''));
+    const sub=s.svc==='windows'?'Service total':s.svc==='custom'&&s.pricingMode==='fixed'?s.qty+' '+svc.unit+' · agreed price':s.fixedPrice!=null?'Fixed price':(s.qty+' '+svc.unit+' × '+TK_FORMAT.money(TK_PRICING.effectiveRate(s))+'/'+svc.unit+(note?' · '+note:''));
     return `<div class="svc-row"><span class="n">${escapeHtml(TK_PRICING.lineLabel(s))}<span class="note">${escapeHtml(sub)}</span></span><span class="amt">${money(TK_PRICING.lineTotal(s))}</span></div>`;
   }).join('')||'<div class="svc-row"><span class="n">Service details</span><span class="q">as discussed</span></div>';
   const gstSplit=TK_PRICING.gstFromInclusive(q.amount);
@@ -542,12 +542,23 @@ async function respond(action,message){
     if(msgEl){msgEl.textContent='Something went wrong — please try again, or call us directly.';msgEl.className='msg err';}
   }
 }
+async function hydratePublicServices(q){
+  const backend=window.TURNKEY_CONFIG?.backendUrl;
+  if(!backend){if(q.services?.some(s=>s.svc==='custom'))throw Error('Custom quote details unavailable');return q;}
+  try{
+    const response=await fetch(backend.replace(/\/$/,'')+'/api/public/quotes/'+encodeURIComponent(token)+'/services',{cache:'no-store'});
+    if(!response.ok)throw Error('Quote service details unavailable');
+    const data=await response.json();
+    if(data.quoteId!==q.quoteId||Number(data.amount)!==Number(q.amount)||data.status!==q.status||!Array.isArray(data.services))throw Error('Quote changed; refresh to view it');
+    return {...q,services:data.services};
+  }catch(error){if(q.services?.some(s=>s.svc==='custom'))throw error;return q;}
+}
 async function boot(){
   if(!token){renderState(STATE_ICONS.link,'Link looks incomplete','This quote link is missing some information — ask the business to resend it.');return;}
   try{
     const q=await callRpc('get_public_quote',{p_token:token});
     if(!q||q.error){renderState(STATE_ICONS.search,'Quote not found','This link may have expired or been mistyped — contact the business for a fresh one.');return;}
-    renderQuote(q);
+    renderQuote(await hydratePublicServices(q));
     notifyBackend('/api/notifications/quote-viewed',{token});
   }catch(e){
     renderState(STATE_ICONS.warn,'Could not load your quote','Check your connection and try refreshing this page.');

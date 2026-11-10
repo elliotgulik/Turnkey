@@ -47,11 +47,15 @@
   let people=[],peopleKey='',peopleLoadedAt=0,peoplePending=null;
   const peopleScope=()=>String(typeof currentBusinessId!=='undefined'?currentBusinessId||'':'')+':'+String(typeof currentUserId!=='undefined'?currentUserId||'':'')+':'+String(typeof businessSessionVersion!=='undefined'?businessSessionVersion:0);
   function salespeople(){
-    const list=peopleKey===peopleScope()?[...people]:[];
+    const list=peopleKey===peopleScope()?people.map(person=>({...person,aliases:[...(person.aliases||[])]})):[];
     const local=typeof staff!=='undefined'&&Array.isArray(staff)?staff:[];
     for(const account of local){
       if(!account.id||account.business_id!==currentBusinessId)continue;
-      const linked=list.find(person=>person.id===account.id||(person.aliases||[]).includes(account.id)||account.email&&person.email?.toLowerCase()===account.email.toLowerCase());
+      let linked=list.find(person=>person.id===account.id||(person.aliases||[]).includes(account.id));
+      if(!linked&&account.email){
+        const matches=list.filter(person=>person.email?.toLowerCase()===account.email.toLowerCase());
+        if(matches.length===1)linked=matches[0];
+      }
       if(linked){linked.aliases=[...new Set([...(linked.aliases||[]),account.id])];continue;}
       const name=String(account.name||account.email?.split('@')[0]?.replace(/[._-]+/g,' ')||'Company member').trim();
       list.push({...account,name,aliases:[account.id]});

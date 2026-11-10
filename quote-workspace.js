@@ -88,7 +88,7 @@
     $('qw-progress').textContent = `${step + 1} of 4`; message('');
     if (step === 2) renderEstimate();
     if (step === 3) {
-      $('qw-preview').innerHTML = `<p><strong>${esc(r.name)}</strong><br>${esc(r.address)}${r.suburb ? ', ' + esc(r.suburb) : ''}</p><ul>${draftLines.filter(l => parseFloat(l.qty) > 0).map(l => `<li>${esc(SERVICES[l.svc]?.label || l.svc)} · ${esc(l.qty)} ${esc(SERVICES[l.svc]?.unit)} <strong>${money(lineSubtotal(l))}</strong></li>`).join('')}</ul><div class="qw-preview-total">Customer total <strong>${money(quoteTotal())}</strong></div><p>${COST_INPUTS.gstRegistered ? 'Includes GST.' : 'Business is not GST registered.'} Internal costs are excluded from the customer document.</p>`;
+      $('qw-preview').innerHTML = `<p><strong>${esc(r.name)}</strong><br>${esc(r.address)}${r.suburb ? ', ' + esc(r.suburb) : ''}</p><ul>${draftLines.filter(l => parseFloat(l.qty) > 0).map(l => `<li>${esc(TK_PRICING.lineLabel(l))} · ${esc(l.qty)} ${esc(quoteService(l).unit)} <strong>${docMoney(lineSubtotal(l))}</strong></li>`).join('')}</ul><div class="qw-preview-total">Customer total <strong>${docMoney(quoteTotal())}</strong></div><p>${COST_INPUTS.gstRegistered ? 'Includes GST.' : 'Business is not GST registered.'} Internal costs are excluded from the customer document.</p>`;
     }
     $('quote-overlay').querySelector('.modal-body').scrollTop = 0;
     nav.children[step].focus();

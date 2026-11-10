@@ -1322,6 +1322,9 @@ test('draft-to-approved metadata changes preserve commercial fingerprint and pro
 test('draft-to-approved commercial, terms, geometry and public identity changes remain fenced before provider calls',async()=>{
   const changes={
     service:s=>{s.details.services[0].svc='roof';},
+    customUnit:s=>{s.details.services[0].unit='hour';},
+    customUnitPrice:s=>{s.details.services[0].unitPrice=115;},
+    customPricingMode:s=>{s.details.services[0].pricingMode='fixed';},
     price:s=>{s.details.services[0].priceSnapshot=230;},
     amount:s=>{s.amount=230;},
     gst:s=>{s.details.gstRegistered=false;},
@@ -2253,4 +2256,15 @@ test('history reports safe stop reasons without disclosing raw integration error
  const f=historyFixture();f.db.fail=table=>table==='integration_tasks';
  const result=await f.route('GET',followupHistoryPath,{businessId:'A',userId:f.sender});
  assert.equal(result.statusCode,503);assert.doesNotMatch(JSON.stringify(result.body),/secret database detail/);
+});
+
+test('custom public service metadata is token scoped, read only, cost private and frozen after approval',async()=>{
+ const token=id(8001),quoteId=id(8002),line={svc:'custom',pricingMode:'fixed',label:'Move furniture',qty:2,unit:'hour',unitPrice:20.01,fixedPrice:40.02,customCost:98765,estCost:98765,recommendedPrice:88888};
+ const db=database({quotes:[{id:quoteId,business_id:'A',public_token:token,amount:40.02,status:'sent'}],jobs:[{id:id(8003),quote_id:quoteId,business_id:'A',details:{services:[line],costSnapshot:{secret:'PRIVATE'},estimatedCost:98765}},{id:id(1),quote_id:quoteId,business_id:'B',details:{services:[{label:'FOREIGN'}]}}]});
+ const {route}=setup(db),path='/api/public/quotes/:token/services',get=t=>route('GET',path,{params:{token:t}});
+ let res=await get(token);assert.equal(res.statusCode,200);assert.equal(res.body.services[0].label,'Move furniture');assert.equal(res.body.services[0].unit,'hour');assert.equal(res.body.services[0].fixedPrice,40.02);assert.doesNotMatch(JSON.stringify(res.body),/98765|88888|costSnapshot|customCost|estCost|PRIVATE|FOREIGN/);
+ assert.equal((await get('invalid')).statusCode,404);assert.equal((await get(id(9999))).statusCode,404);
+ db.tables.quotes[0].status='accepted';db.tables.quote_versions=[{id:id(8004),quote_id:quoteId,business_id:'A',created_at:'2026-11-10',snapshot:{accepted:true,details:{services:[structuredClone(line)]}}}];db.tables.jobs[0].details.services[0].label='Changed after approval';
+ res=await get(token);assert.equal(res.body.services[0].label,'Move furniture');
+ const history=await route('GET','/api/sales/quotes/:quoteId/history',{...owner,params:{quoteId}});assert.equal(history.body.versions[0].snapshot.details.services[0].unitPrice,20.01);assert.equal(history.body.versions[0].snapshot.details.services[0].fixedPrice,40.02);assert.doesNotMatch(JSON.stringify(history.body),/customCost|98765|estCost/);
 });

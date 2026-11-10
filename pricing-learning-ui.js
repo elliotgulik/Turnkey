@@ -17,7 +17,7 @@
   const cash=n=>typeof money==='function'?money(n):Number(n).toFixed(2);
   function draft(){
     scoped();if(typeof draftLines==='undefined'||typeof TK_COST==='undefined')return [];
-    const lines=draftLines.filter(l=>Number(l.qty)>0),marginInput=document.getElementById('qw-margin');
+    const lines=draftLines.filter(l=>Number(l.qty)>0&&!(l.svc==='custom'&&l.pricingMode==='fixed')),marginInput=document.getElementById('qw-margin');
     const margin=marginInput&&marginInput.value!==''?TK_COST.targetMargin(Number(marginInput.value)/100):TK_COST.targetMargin(COST_INPUTS.targetMargin);
     const bd=TK_COST.costBreakdown(lines,typeof quoteTravelInfo!=='undefined'?quoteTravelInfo:null,{targetMargin:margin,access:quoteAssumptions.access});
     const multiplier=TK_PRICING.accessPremiumMult(quoteAssumptions);
@@ -42,7 +42,8 @@
   function allocate(total,weights){const cents=Math.round(total*100),sum=weights.reduce((a,b)=>a+b,0);const exact=weights.map(w=>cents*(sum?w/sum:1/weights.length)),amounts=exact.map(Math.floor);const order=exact.map((v,i)=>({i,r:v-amounts[i]})).sort((a,b)=>b.r-a.r||a.i-b.i);for(let n=cents-amounts.reduce((a,b)=>a+b,0),i=0;i<n;i++)amounts[order[i%order.length].i]++;return amounts.map(n=>n/100);}
   function capture(record){
     const {lines,results}=recommendations();if(!lines.length)return null;
-    const choices=allocate(quoteTotal(),lines.map(e=>Math.max(0,TK_PRICING.lineTotal(e.line))));
+    const customTotal=draftLines.filter(l=>l.svc==='custom'&&l.pricingMode==='fixed').reduce((sum,line)=>sum+TK_PRICING.lineTotal(line),0);
+    const choices=allocate(Math.max(0,quoteTotal()-customTotal),lines.map(e=>Math.max(0,TK_PRICING.lineTotal(e.line))));
     const cost=TK_COST.costBreakdown(lines.map(e=>e.line),quoteTravelInfo,{targetMargin:TK_COST.targetMargin(Number(document.getElementById('qw-margin')?.value||COST_INPUTS.targetMargin*100)/100),access:quoteAssumptions.access});
     return {quoteKey:record.quoteLearning?.quoteKey||record.quoteId||crypto.randomUUID(),lines:lines.map((entry,i)=>{const meta=draftMeta.get(entry.line)||{};return {lineKey:entry.lineKey,svc:entry.svc,unit:entry.unit,quantity:entry.quantity,baselinePrice:Math.round(entry.baselinePrice*100)/100,chosenPrice:choices[i],storeys:entry.storeys,access:entry.access,reason:meta.reason||root.TK_PRICE_LEARNING?.reasonForPriceEdit?.({isManual:quoteTotalOverride==null&&(entry.line.customRate!=null||entry.line.fixedPrice!=null&&Number(entry.line.fixedPrice)!==meta.appliedPrice),unit:entry.unit,chosenPrice:choices[i],recommendedPrice:results[i]?.recommendedPrice,verifiedQuantity:meta.verifiedQuantity})||'',...(meta.verifiedQuantity?{measuredQuantity:meta.measuredQuantity,verifiedQuantity:meta.verifiedQuantity,measurementReason:meta.measurementReason}:{})};}),context:{estimatedCost:cost.costUnrounded,estimatedDurationMin:cost.labourMin,travelMins:cost.travelMins,targetMargin:TK_COST.targetMargin(Number(document.getElementById('qw-margin')?.value||COST_INPUTS.targetMargin*100)/100),gstRegistered:!!COST_INPUTS.gstRegistered,travelKm:quoteTravelInfo?.km??COST_INPUTS.avgKm}};
   }

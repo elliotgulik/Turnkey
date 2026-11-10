@@ -13,7 +13,7 @@ const output=path.join(extension,'dist',`turnkey-earth-extension-${version}.zip`
 fs.mkdirSync(path.dirname(output),{recursive:true});
 const stage=fs.mkdtempSync(path.join(os.tmpdir(),'turnkey-extension-pack-'));
 try {
-  for(const name of ['manifest.json','README.md','geometry.js','api','background','content','icons','popup','vendor'])fs.cpSync(path.join(extension,name),path.join(stage,name),{recursive:true});
+  for(const name of ['manifest.json','README.md','CUSTOM_FIXED_CONTRACT.md','geometry.js','api','background','content','icons','popup','vendor'])fs.cpSync(path.join(extension,name),path.join(stage,name),{recursive:true});
   fs.rmSync(output,{force:true});
   execFileSync('zip',['-q','-r',output,'.'],{cwd:stage});
   console.log(output);

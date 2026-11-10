@@ -168,7 +168,7 @@ const contentFingerprint = (s) => {
     details: {
       ...pick(d, ["gstRegistered", "publicTerms", "jobNotes", "salesNotes"]),
       services: (d.services || []).map(line => pick(line, ["svc", "label", "qty", "priceSnapshot",
-        "roofType", "storeys", "sides", "customRate", "fixedPrice"])),
+        "roofType", "storeys", "sides", "customRate", "fixedPrice", "pricingMode", "unit", "unitPrice"])),
       areaPolys: (d.areaPolys || []).map(area => ({
         ...pick(area, ["service", "svc"]),
         geoPts: area?.geoPts?.map(point => pick(point, ["lat", "lng"])),
@@ -184,6 +184,9 @@ const contentFingerprint = (s) => {
 // Property address and customer identity remain part of the immutable boundary.
 const handoffContentBasis = snapshot => contentFingerprint({ ...snapshot,
   customer: pick(snapshot.customer, ["id", "business_id", "address"]) });
+// Explicit public allowlist: never spread service rows containing internal costs.
+const publicQuoteServices = services => (Array.isArray(services)?services:[]).map(line =>
+  pick(line,["svc","label","qty","roofType","storeys","sides","customRate","priceSnapshot","fixedPrice","pricingMode","unit","unitPrice"]));
 const publicVersion = (v) => {
   const s = v.snapshot || {}, d = s.details || {};
   return { id: v.id, fingerprint: v.fingerprint, createdAt: v.created_at,
@@ -191,8 +194,7 @@ const publicVersion = (v) => {
       customer: { name: s.customer?.name, address: s.customer?.address },
       business: { name: s.business?.name },
       details: { gstRegistered: d.gstRegistered, publicTerms: d.publicTerms, jobNotes: d.jobNotes,
-        services: (Array.isArray(d.services) ? d.services : []).map(l => ({ svc: l.svc, label: l.label,
-          qty: l.qty, priceSnapshot: l.priceSnapshot })) } } };
+        services: publicQuoteServices(d.services) } } };
 };
 export async function allRows(db, table, businessId, columns = "*", orderBy = "id") {
   let rows = [];
@@ -941,6 +943,33 @@ export function installSalesPlatform(
     }),
   );
   app.get(
+    "/api/public/quotes/:token/services",
+    wrap(async (req,res) => {
+      if(!SM.uuid(req.params.token))throw fail("Quote not found.",404);
+      const quote=await unwrap(db.from("quotes").select("id,business_id,amount,status")
+        .eq("public_token",req.params.token).maybeSingle());
+      if(!quote)throw fail("Quote not found.",404);
+      let details;
+      if(quote.status==="accepted"){
+        const versions=await unwrap(db.from("quote_versions").select("snapshot").eq("quote_id",quote.id)
+          .eq("business_id",quote.business_id).eq("snapshot->>accepted","true").order("created_at",{ascending:false}).order("id",{ascending:false}).limit(1));
+        details=versions?.[0]?.snapshot?.details;
+        if(!details){
+          const latest=await unwrap(db.from("quote_versions").select("snapshot").eq("quote_id",quote.id)
+            .eq("business_id",quote.business_id).order("created_at",{ascending:false}).order("id",{ascending:false}).limit(1));
+          details=latest?.[0]?.snapshot?.details;
+        }
+      }
+      if(!details){
+        const jobs=await unwrap(db.from("jobs").select("details").eq("quote_id",quote.id)
+          .eq("business_id",quote.business_id).order("id").limit(1));
+        details=jobs?.[0]?.details;
+      }
+      res.set("Cache-Control","no-store");
+      res.json({quoteId:quote.id,amount:quote.amount,status:quote.status,services:publicQuoteServices(details?.services)});
+    }),
+  );
+  app.get(
     "/api/sales/quotes/:quoteId/history",
     requireBusiness,
     wrap(async (req, res) => {
@@ -1313,7 +1342,7 @@ export function installSalesPlatform(
     const reference = "Q-" + q.id.slice(-6).toUpperCase();
     const description = [
       "TurnKey " + (mode === "quote" ? "draft" : "approved") + " quote " + reference,
-      ...(snapshot.details.services || []).map((x) => `${x.svc}: ${x.qty}`),
+      ...(snapshot.details.services || []).map((x) => `${x.label || x.svc}: ${x.qty}${x.svc === "custom" && x.pricingMode === "fixed" ? " " + (["item","hour","day"].includes(x.unit) ? x.unit : "item") : ""}`),
       snapshot.details.jobNotes || "",
       snapshot.details.salesNotes || "",
     ]

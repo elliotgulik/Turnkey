@@ -137,7 +137,7 @@ export function approvedLines(snapshot, { mode = "approved" } = {}) {
     return {
       name:
         String(l.label || PUBLIC_SERVICES[l.svc]?.label || PUBLIC_SERVICES[l.svc]?.name || l.svc || "Service").slice(0, 200) +
-        ` (${Number(l.qty) || 0} units)`,
+        ` (${Number(l.qty) || 0} ${l.svc === "custom" && l.pricingMode === "fixed" ? (["item","hour","day"].includes(l.unit) ? l.unit : "item") : "units"})`,
       quantity: "1",
       price: (cents / 100 / (d.gstRegistered ? 1.15 : 1)).toFixed(6),
       displayed_amount: (cents / 100).toFixed(2),
@@ -209,10 +209,10 @@ export function quotePdf({ reference, business, customer, snapshot, mode = "appr
     "Property: " + (customer.address || ""),
     "",
     ...approvedLines(snapshot, { mode }).map(
-      (x) => `${x.name}    NZ$${Number(x.displayed_amount).toFixed(1)}`,
+      (x) => `${x.name}    NZ$${Number(x.displayed_amount).toFixed(2)}`,
     ),
     "",
-    (mode === "quote" ? "Quoted customer total: NZ$" : "Approved customer total: NZ$") + Number(snapshot.amount).toFixed(1),
+    (mode === "quote" ? "Quoted customer total: NZ$" : "Approved customer total: NZ$") + Number(snapshot.amount).toFixed(2),
     snapshot.details?.gstRegistered ? "Includes GST (15%)." : "No GST charged.",
     "",
     ...String(snapshot.details?.publicTerms || "").split("\n"),

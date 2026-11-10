@@ -1368,7 +1368,7 @@ location.replace('/reset-password.html'+location.search+location.hash);
 <link rel="stylesheet" href="redesign.css?v=20261103design1">
 <link rel="stylesheet" href="reference-shell.css?v=20261103pdf1">
 <link rel="stylesheet" href="reference-sales.css?v=20261103workflow1">
-<link rel="stylesheet" href="reference-leads.css?v=20261103answers1">
+<link rel="stylesheet" href="reference-leads.css?v=20261110a">
 </head>
 <body data-session-checking>
 <div id="workspace-loading" class="ux-boot" role="status" aria-live="polite"><img src="icon-192.png" width="48" height="48" alt="TurnKey"><h1>Opening your workspace</h1><p id="workspace-loading-message">Restoring your secure session…</p><button class="btn ghost" id="workspace-retry" hidden onclick="retryWorkspaceSession()">Try again</button></div>
@@ -2043,7 +2043,30 @@ const SVC_COST=TK_COST.SVC_COST, CHEMICALS=TK_COST.CHEMICALS, COST_INPUTS=TK_COS
 // Thin compatibility wrapper — existing callers (renderEstimate,
 // confirmQuoteSend's duration estimate) get the same shape as before;
 // TK_COST.costBreakdown() is the one real implementation.
-function estimateJob(services,travel,access){return TK_COST.costBreakdown((services||[]).map(s=>({ ...s })),travel,access?{access}:undefined);}
+function isCustomQuoteLine(line){return line?.svc==='custom'&&line.pricingMode==='fixed';}
+function quoteService(line){
+  return isCustomQuoteLine(line)?{label:TK_PRICING.lineLabel(line),unit:['item','hour','day'].includes(line.unit)?line.unit:'item'}:SERVICES[line.svc]||{label:TK_PRICING.lineLabel(line),unit:''};
+}
+function normalizeCustomQuoteLine(line){
+  if(!isCustomQuoteLine(line))return line;
+  const label=typeof line.label==='string'?line.label.trim():'',qty=line.qty===undefined?1:Number(line.qty);
+  if(!label||label.length>120)throw Error('Enter a custom service name of 1–120 characters.');
+  if(!Number.isFinite(qty)||qty<=0||qty>1e8)throw Error('Enter a positive custom quantity.');
+  if(!['item','hour','day'].includes(line.unit||'item'))throw Error('Choose item, hour or day.');
+  if(!Number.isFinite(line.unitPrice)||line.unitPrice<0||qty*line.unitPrice>1e8)throw Error('Enter a valid GST-inclusive custom unit price.');
+  if(line.customCost!=null&&(!Number.isFinite(line.customCost)||line.customCost<0||line.customCost>1e8))throw Error('Enter a valid custom cost or leave it blank.');
+  return {...line,label,qty,unit:line.unit||'item',customCost:line.customCost??null,fixedPrice:Math.round(qty*line.unitPrice*100)/100};
+}
+function quoteCostBreakdown(lines,travel,options){
+  const custom=lines.filter(isCustomQuoteLine);
+  if(!custom.length)return TK_COST.costBreakdown(lines,travel,options);
+  const measured=lines.filter(l=>!isCustomQuoteLine(l));
+  const bd=measured.length?TK_COST.costBreakdown(measured,travel,options):{lines:[],labourMin:0,labourHrs:0,wageCost:0,chem:0,litres:0,fuelCost:0,equipmentCost:0,consumablesCost:0,overheadCost:0,travelKm:0,travelMins:null,totalTimeMin:0,costUnrounded:0,recommended:0};
+  const complete=custom.every(l=>Number.isFinite(l.customCost)&&l.customCost>=0);
+  const knownCost=(bd.costUnrounded??bd.cost)+custom.reduce((sum,l)=>sum+(Number.isFinite(l.customCost)?l.customCost:0),0);
+  return {...bd,knownCost,costComplete:complete,cost:complete?knownCost:null,costUnrounded:complete?knownCost:null,recommended:Math.round((bd.recommended+custom.reduce((sum,l)=>sum+TK_PRICING.lineTotal(l),0))*100)/100,customLines:custom.map(l=>({lineKey:l.lineKey,cost:l.customCost??null}))};
+}
+function estimateJob(services,travel,access){return quoteCostBreakdown((services||[]).map(s=>({ ...s })),travel,access?{access}:undefined);}
 function fmtDur(min){const h=Math.floor(min/60),m=Math.round(min%60);return h?`${escapeHtmlSafe(h)}h ${m?m+'m':''}`.trim():`${m}m`}
 const DAY_START_MIN = 8*60; // crews start at 8:00am
 function fmtTime(mins){let h=Math.floor(mins/60),m=Math.round(mins%60);const ap=h>=12?'pm':'am';let h12=h%12;if(h12===0)h12=12;return `${h12}:${String(m).padStart(2,'0')}${ap}`;}
@@ -2356,8 +2379,8 @@ async function loadEmailTemplates(){
 function emailTemplateVars(r,mode){
   const addr=TK_FORMAT.address(r,{fallback:'—'});
   const servicesList=(r.services||[]).map(s=>{
-    const v=SERVICES[s.svc];
-    return v?v.label+(s.qty?' ('+s.qty+' '+v.unit+')':''):s.svc;
+    const v=quoteService(s);
+    return v?TK_PRICING.lineLabel(s)+(s.qty?' ('+s.qty+' '+v.unit+')':''):s.svc;
   }).join(', ')||'—';
   return {
     customer_name:(r.name||'').split(' ')[0]||r.name||'there',
@@ -2891,7 +2914,7 @@ function sendFollowNow(id,fid){
 }
 function buildFollowBody(r,f){
   const first=(r.name||'').split(' ')[0]||'there';
-  const svcs=r.services.map(s=>SERVICES[s.svc].label.split(' ')[0].toLowerCase()).join(' and ');
+  const svcs=r.services.map(s=>TK_PRICING.lineLabel(s).split(' ')[0].toLowerCase()).join(' and ');
   return `Hi ${first},\n\n${f.label}${svcs?`\n\n(Re: your ${svcs} quote for ${r.total?money(r.total):''})`:''}\n\nCheers,\n${docBizName()}${docTemplate.phone?'\n'+docTemplate.phone:''}`;
 }
 
@@ -4132,22 +4155,24 @@ document.addEventListener('keydown',function(e){
   if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='d'){if(qe.selectedId){e.preventDefault();qeDuplicateArea(qe.selectedId);}return;}
 });
 function reviewQuote(){
-  const lines=draftLines.filter(l=>(parseFloat(l.qty)||0)>0);
+  let normalized;
+  try{normalized=draftLines.map(normalizeCustomQuoteLine);}catch(error){toast(error.message);return;}
+  const lines=normalized.filter(l=>(parseFloat(l.qty)||0)>0);
   if(!lines.length){toast('Add at least one service with a quantity');return}
   const r=records.find(x=>x.id===activeLeadId);
   const e=estimateJob(lines.map(l=>({...l,qty:parseFloat(l.qty)||0})),quoteTravelInfo,quoteAssumptions.access);
   const total=quoteTotal();
-  const margin=Math.round(TK_COST.marginPct(total,e.cost));
+  const margin=e.cost===null?null:Math.round(TK_COST.marginPct(total,e.cost));
   const a=quoteAssumptions;
   const marginTone=margin>=50?'good':margin>=40?'ok':'low';
   document.getElementById('review-body').innerHTML=`
     <div class="rv-line"><span>Client</span><b>${escapeHtmlSafe(r.name)}</b></div>
-    <div class="rv-line"><span>Services</span><b>${lines.map(l=>escapeHtmlSafe(TK_PRICING.lineLabel(l))+' '+l.qty+SERVICES[l.svc].unit).join(', ')}</b></div>
+    <div class="rv-line"><span>Services</span><b>${lines.map(l=>escapeHtmlSafe(TK_PRICING.lineLabel(l))+' '+l.qty+quoteService(l).unit).join(', ')}</b></div>
     <div class="rv-line"><span>Access</span><b>${ACCESS_OPTS[a.access].label}</b></div>
     <div class="rv-line"><span>Premium surface</span><b>${a.premium?'Yes (+12%)':'No'}</b></div>
-    <div class="rv-line"><span>Cost to deliver</span><b>${money(e.cost)}</b></div>
-    <div class="rv-line rv-total"><span>Quote total</span><b>${money(total)}</b></div>
-    <div class="rv-margin ${marginTone}">${margin}% margin ${margin>=50?'✓ healthy':margin>=40?'· a bit tight':'below target — consider raising'}</div>
+    <div class="rv-line"><span>Cost to deliver</span><b>${e.cost===null?'Unknown':money(e.cost)}</b></div>
+    <div class="rv-line rv-total"><span>Quote total</span><b>${docMoney(total)}</b></div>
+    <div class="rv-margin ${marginTone}">${margin===null?'Unknown':margin+'%'} margin ${margin===null?'· custom delivery cost unknown':margin>=50?'✓ healthy':margin>=40?'· a bit tight':'below target — consider raising'}</div>
   `;
   closeModal('quote-overlay');
   openModal('review-overlay');
@@ -4188,9 +4213,14 @@ function priceCompareHtml(sub,rec,i){
 }
 function renderSvcLines(){
   const wrap=document.getElementById('svc-builder');wrap.innerHTML='';
-  const costBd=TK_COST.costBreakdown(draftLines,undefined,{access:quoteAssumptions.access});
+  const costBd=quoteCostBreakdown(draftLines,undefined,{access:quoteAssumptions.access});
   draftLines.forEach((line,i)=>{
-    const svc=SERVICES[line.svc];const sub=lineSubtotal(line);
+    if(isCustomQuoteLine(line)){
+      const el=document.createElement('div');el.className='svc-line';
+      el.innerHTML=`<label class="sl-service">Custom service<input aria-label="Custom service name" maxlength="120" value="${escapeHtmlSafe(line.label||'')}" oninput="draftLines[${i}].label=this.value"></label><input aria-label="Custom quantity" type="number" min="0.01" step="any" value="${escapeHtmlSafe(line.qty??1)}" oninput="updateCustomService(${i},'qty',this.value)"><select aria-label="Custom unit" onchange="updateCustomService(${i},'unit',this.value)">${['item','hour','day'].map(unit=>`<option ${line.unit===unit?'selected':''}>${unit}</option>`).join('')}</select><label>Unit price (GST inclusive)<input class="price-input fixed" aria-label="Custom unit price" type="number" min="0" step="0.01" value="${escapeHtmlSafe(line.unitPrice??'')}" oninput="updateCustomService(${i},'unitPrice',this.value)"></label><label>Total delivery cost (ex GST, optional)<input aria-label="Custom delivery cost" type="number" min="0" step="0.01" placeholder="Unknown" value="${escapeHtmlSafe(line.customCost??'')}" oninput="updateCustomService(${i},'customCost',this.value)"></label><span class="sub" data-sub="${i}">${docMoney(lineSubtotal(line))}</span><button class="rm" onclick="rmSvcLine(${i})" aria-label="Remove custom item">×</button>`;
+      wrap.appendChild(el);return;
+    }
+    const svc=quoteService(line);const sub=lineSubtotal(line);
     const rec=costBd.lines.find(b=>b.line===line);
     const displayRate=line.customRate!=null?parseFloat(line.customRate):TK_PRICING.effectiveRate(line);
     let extraRow='';
@@ -4238,8 +4268,15 @@ function renderSvcLines(){
   // updateQuoteTotal() directly, not this), just every structural change.
   if(typeof renderRequestedServicesZone==='function')renderRequestedServicesZone();
 }
+function updateCustomService(i,field,value){
+  const line=draftLines[i];if(!isCustomQuoteLine(line))return;
+  line[field]=field==='unit'?value:value===''?null:Number(value);
+  line.fixedPrice=Number.isFinite(line.qty)&&Number.isFinite(line.unitPrice)?Math.round(line.qty*line.unitPrice*100)/100:0;
+  delete line.priceSnapshot;quoteTotalOverride=null;updateQuoteTotal();
+}
 function toggleFixedPrice(i){
   const line=draftLines[i];
+  if(isCustomQuoteLine(line))return;
   if(line.fixedPrice!=null){
     // switch back to per-unit
     line.fixedPrice=null;line.customRate=null;
@@ -4258,7 +4295,7 @@ let quoteTotalOverride = null; // null = use calculated
 function onQuoteTotalInput(val){
   const n = parseFloat(val);
   quoteTotalOverride = (!val || isNaN(n)) ? null : n;
-  const calc = Math.round(baseQuoteTotal() * assumptionsMult());
+  const calc = calculatedQuoteTotal();
   const note = document.getElementById('qt-override-note');
   const calcEl = document.getElementById('q-calc');
   if(quoteTotalOverride !== null && quoteTotalOverride !== calc){
@@ -4273,7 +4310,7 @@ function onQuoteTotalInput(val){
 }
 function clearQuoteTotalOverride(){
   quoteTotalOverride = null;
-  const calc = Math.round(baseQuoteTotal() * assumptionsMult());
+  const calc = calculatedQuoteTotal();
   const el = document.getElementById('q-total');
   if(el) el.value = calc || '';
   const note = document.getElementById('qt-override-note');
@@ -4282,13 +4319,17 @@ function clearQuoteTotalOverride(){
   if(calcEl) calcEl.textContent = '';
   renderAssumptions(); renderEstimate();
 }
+function calculatedQuoteTotal(){
+  if(!draftLines.some(isCustomQuoteLine))return Math.round(baseQuoteTotal()*assumptionsMult());
+  return draftLines.reduce((sum,line)=>sum+Math.round(lineSubtotal(line)*(line.fixedPrice!=null?1:assumptionsMult())*100),0)/100;
+}
 function quoteTotal(){
-  const calc = Math.round(baseQuoteTotal() * assumptionsMult());
-  return quoteTotalOverride !== null ? Math.round(quoteTotalOverride) : calc;
+  const custom=draftLines.some(isCustomQuoteLine);
+  return quoteTotalOverride!==null?(custom?Math.round(quoteTotalOverride*100)/100:Math.round(quoteTotalOverride)):calculatedQuoteTotal();
 }
 function updateQuoteTotal(){
-  draftLines.forEach((l,i)=>{const el=document.querySelector(`[data-sub="${i}"]`);if(el)el.textContent=money(lineSubtotal(l));});
-  const calc = Math.round(baseQuoteTotal() * assumptionsMult());
+  draftLines.forEach((l,i)=>{const el=document.querySelector(`[data-sub="${i}"]`);if(el)el.textContent=isCustomQuoteLine(l)?docMoney(lineSubtotal(l)):money(lineSubtotal(l));});
+  const calc = calculatedQuoteTotal();
   const el = document.getElementById('q-total');
   if(el && document.activeElement !== el){
     el.value = quoteTotalOverride !== null ? quoteTotalOverride : (calc || '');
@@ -4359,7 +4400,7 @@ function resetLineToRecommended(i){
 function roundAllPrices(){
   let n=0;
   draftLines.forEach(line=>{
-    if(!((parseFloat(line.qty)||0)>0))return;
+    if(isCustomQuoteLine(line)||!((parseFloat(line.qty)||0)>0))return;
     line.fixedPrice=Math.round(lineSubtotal(line)/10)*10;line.customRate=null;n++;
   });
   if(!n){toast('Add a service with a quantity first');return;}
@@ -4373,7 +4414,7 @@ function bulkAdjustPrices(sign){
   const mult=1+sign*(pct/100);
   let n=0;
   draftLines.forEach(line=>{
-    if(!((parseFloat(line.qty)||0)>0))return;
+    if(isCustomQuoteLine(line)||!((parseFloat(line.qty)||0)>0))return;
     line.fixedPrice=Math.max(0,Math.round(lineSubtotal(line)*mult));line.customRate=null;n++;
   });
   if(!n){toast('Add a service with a quantity first');return;}
@@ -4386,6 +4427,11 @@ function renderEstimate(){
   if(!lines.length){zone.innerHTML='';return;}
   const e=estimateJob(lines.map(l=>({ ...l, qty:parseFloat(l.qty)||0 })),quoteTravelInfo,quoteAssumptions.access);
   const finalTotal=quoteTotal();
+  if(lines.some(isCustomQuoteLine)){
+    const complete=e.cost!==null;
+    zone.innerHTML=`<div class="est-box"><h3>Delivery estimate</h3><p>Known costs: ${money(e.knownCost)}. Custom delivery costs cover the entire item, excluding GST.</p><p>Total cost: ${complete?money(e.cost):'Unknown — custom delivery cost not entered'}</p><p>Estimated profit: ${complete?money(TK_COST.profit(finalTotal,e.cost)):'Unknown'}</p><p>Estimated margin: ${complete?TK_COST.marginPct(finalTotal,e.cost).toFixed(1)+'%':'Unknown'}</p><p>Customer total: ${docMoney(finalTotal)}</p></div>`;
+    return;
+  }
   const profit=TK_COST.profit(finalTotal,e.cost);
   const marginPct=TK_COST.marginPct(finalTotal,e.cost);
   const gstNote=COST_INPUTS.gstRegistered?' (ex-GST)':'';
@@ -4418,7 +4464,7 @@ function renderEstimate(){
         <div class="est-rec-amt">${money(e.recommended)}</div>
       </div>
       <div class="est-rec-detail">
-        <span>Estimated Costs <b>${money(e.cost)}</b></span>
+        <span>Estimated Costs <b>${e.cost===null?'Unknown':money(e.cost)}</b></span>
         <span>Estimated Profit${gstNote} <b>${money(TK_COST.profit(e.recommended,e.cost))}</b></span>
         <span>Estimated Margin <b>${targetPct}%</b></span>
       </div>
@@ -4444,7 +4490,9 @@ function renderEstimate(){
     </div>`;
 }
 function confirmQuoteSend(){
-  const lines=draftLines.filter(l=>(parseFloat(l.qty)||0)>0);
+  let normalized;
+  try{normalized=draftLines.map(normalizeCustomQuoteLine);}catch(error){toast(error.message);return;}
+  const lines=normalized.filter(l=>(parseFloat(l.qty)||0)>0);
   if(!lines.length){toast('Add at least one service with a quantity');return}
   const r=records.find(x=>x.id===activeLeadId);
   if(!r||isWon(r)||r.quoteStatus==='accepted'){toast('Approved quote is locked.');return;}
@@ -4466,11 +4514,12 @@ function confirmQuoteSend(){
   // margin actually was at the time, not get silently recalculated against
   // today's rates every time someone reopens it (Reporting needs this to
   // stay historically accurate, not just the live Quote Builder).
-  const costBd=TK_COST.costBreakdown(lines,quoteTravelInfo,{access:quoteAssumptions.access});
+  const costBd=quoteCostBreakdown(lines,quoteTravelInfo,{access:quoteAssumptions.access});
   r.travelKm=costBd.travelKm;
   r.travelMins=costBd.travelMins;
   r.travelSource=quoteTravelInfo?quoteTravelInfo.source:'default';
   r.services=lines.map(l=>{
+    if(isCustomQuoteLine(l))return {...l,priceSnapshot:l.fixedPrice,manual:true};
     const o={svc:l.svc,qty:parseFloat(l.qty)};
     if(typeof l.label==='string'&&l.label.trim())o.label=TK_PRICING.lineLabel(l);
     if(l.manual===true)o.manual=true;
@@ -4488,11 +4537,12 @@ function confirmQuoteSend(){
   r.total=quoteTotal();
   r.recommendedTotal=costBd.recommended;
   r.estimatedCost=costBd.cost;
-  r.estimatedMarginPct=Math.round(TK_COST.marginPct(r.total,costBd.cost)*10)/10;
+  r.estimatedMarginPct=costBd.cost===null?null:Math.round(TK_COST.marginPct(r.total,costBd.cost)*10)/10;
+  if(lines.some(isCustomQuoteLine))r.costSnapshot={...costBd,price:r.total};
   // Rounded on-site time only — never the $ cost/wage/margin behind it —
   // so the customer-facing "Estimated duration" on the public quote page
   // has something real to show without exposing internal cost-model data.
-  r.estimatedDurationMin=estimateJob(r.services,quoteTravelInfo).labourMin;
+  r.estimatedDurationMin=r.services.every(isCustomQuoteLine)?null:estimateJob(r.services,quoteTravelInfo).labourMin;
   // Fire-and-forget — starts fetching the map snapshot now so it's likely
   // already cached by the time the operator actually hits Send, without
   // making quote-confirmation wait on a network round trip.
@@ -4720,7 +4770,7 @@ function hexToRgb(hex){
 
 // Public document amounts: use frozen line prices and explain any difference
 // between the itemised lines and the agreed total (access, discount, rounding).
-function docMoney(value){return TK_FORMAT.money(value);}
+function docMoney(value){return 'NZ$'+Number(value||0).toLocaleString('en-NZ',{minimumFractionDigits:2,maximumFractionDigits:2});}
 function docFinancials(r){
   const cents=n=>Math.round((Number(n)||0)*100)/100;
   const lines=(r.services||[]).map(l=>cents(l.priceSnapshot??TK_PRICING.lineTotal(l)));
@@ -4810,7 +4860,7 @@ function buildDocPDF(mode,r,outputType){
   doc.setTextColor(30,40,50);
   r.services.forEach(function(s,index){
     if(y>245){doc.addPage();y=24;}
-    var v=SERVICES[s.svc]||{label:s.svc||'Service',unit:''};
+    var v=quoteService(s);
     var rate=TK_PRICING.effectiveRate(s);
     var lineAmt=financials.lines[index];
     var note=lineVariantNote(s);
@@ -4890,12 +4940,12 @@ function buildDocEmailBody(mode,r){
   var allSvcs=r.services.slice();
   if(r.windows&&r.windows.panes>0)allSvcs.push({svc:'windows',qty:r.windows.panes,_price:r.windows.price});
   var lines=allSvcs.map(function(s){
-    var v=SERVICES[s.svc];
+    var v=quoteService(s);
     var rate=TK_PRICING.effectiveRate(s);
-    var amt=s._price!=null?s._price:Math.round(TK_PRICING.lineTotal(s));
+    var amt=s._price!=null?s._price:s.priceSnapshot??TK_PRICING.lineTotal(s);
     var note=lineVariantNote(s);
-    var desc=s.svc==='windows'?TK_PRICING.lineLabel(s):s._price!=null?TK_PRICING.lineLabel(s)+' ('+s.qty+' panes)':s.fixedPrice!=null?TK_PRICING.lineLabel(s)+' (fixed price)':TK_PRICING.lineLabel(s)+': '+s.qty+' '+v.unit+' × '+TK_FORMAT.money(rate)+'/'+v.unit+(note?' · '+note:'');
-    return '  · '+desc+' = '+money(amt);
+    var desc=s.svc==='windows'?TK_PRICING.lineLabel(s):isCustomQuoteLine(s)?TK_PRICING.lineLabel(s)+' ('+s.qty+' '+v.unit+')':s._price!=null?TK_PRICING.lineLabel(s)+' ('+s.qty+' panes)':s.fixedPrice!=null?TK_PRICING.lineLabel(s)+' (fixed price)':TK_PRICING.lineLabel(s)+': '+s.qty+' '+v.unit+' × '+TK_FORMAT.money(rate)+'/'+v.unit+(note?' · '+note:'');
+    return '  · '+desc+' = '+docMoney(amt);
   }).join('\n');
   var gst=TK_PRICING.gstFromInclusive(r.total).gst;
   var terms=mode==='quote'?t.quoteTerms:t.invoiceTerms;
@@ -4906,7 +4956,7 @@ function buildDocEmailBody(mode,r){
   // still carry the online approval link \u2014 otherwise a customer sent this
   // way has no way to reach the approve/decline page at all.
   var quoteLinkBlock=(mode==='quote'&&r.quotePublicToken)?('\nView and approve online:\n'+location.origin+location.pathname.replace(/index\.html$/,'')+'quote.html?t='+r.quotePublicToken+'\n'):'';
-  return 'Hi '+first+',\n\n'+heading+'\n\n'+docNumber(mode,r)+'    \u00b7    '+new Date().toLocaleDateString('en-NZ',{day:'numeric',month:'long',year:'numeric'})+'\n\n'+lines+'\n\nSubtotal (excl. GST):  '+money(r.total-gst)+'\nGST 15%:               '+money(gst)+'\n'+(mode==='quote'?'Quote total':'Amount due')+':            '+money(r.total)+'\n'+quoteLinkBlock+'\n'+terms+'\n\nAny questions, just reply to this email.\n\nCheers,\n'+bizName+(signOffContact?'\n'+signOffContact:'');
+  return 'Hi '+first+',\n\n'+heading+'\n\n'+docNumber(mode,r)+'    \u00b7    '+new Date().toLocaleDateString('en-NZ',{day:'numeric',month:'long',year:'numeric'})+'\n\n'+lines+'\n\nSubtotal (excl. GST):  '+docMoney(r.total-gst)+'\nGST 15%:               '+docMoney(gst)+'\n'+(mode==='quote'?'Quote total':'Amount due')+':            '+docMoney(r.total)+'\n'+quoteLinkBlock+'\n'+terms+'\n\nAny questions, just reply to this email.\n\nCheers,\n'+bizName+(signOffContact?'\n'+signOffContact:'');
 }
 
 /* ===== ServiceM8-style quote/invoice document ===== */
@@ -4933,7 +4983,7 @@ function renderDocHTML(mode,r){
   const accent=/^#[0-9a-f]{6}$/i.test(t.accent||'')?t.accent:'#138a72';
   const today=new Date().toLocaleDateString('en-NZ',{day:'numeric',month:'short',year:'numeric'});
   const rows=(r.services||[]).map((s,i)=>{
-    const v=SERVICES[s.svc]||{label:s.svc||'Service',unit:''};
+    const v=quoteService(s);
     const note=lineVariantNote(s),fixed=s.priceSnapshot!=null||s.fixedPrice!=null;
     return `<tr><td><div class="di-name">${esc(TK_PRICING.lineLabel(s))}</div><div class="di-sub">${esc(s.svc==='windows'?'Service total':s.qty+' '+v.unit+(fixed?' · agreed price':' @ '+docMoney(TK_PRICING.effectiveRate(s))+'/'+v.unit)+(note?' · '+note:''))}</div></td><td class="di-amt">${docMoney(f.lines[i])}</td></tr>`;
   }).join('');
@@ -5376,7 +5426,7 @@ function openDetail(id){
   const photosOk=workflowConfig.requirePhotos?(r.photoBefore&&r.photoAfter):true;
   const allDone=checklistOk&&photosOk;
   const approved=lastIdx>=0&&r.sop[lastIdx];
-  const svcRows=r.services.map(s=>{const svc=SERVICES[s.svc];const note=lineVariantNote(s);return `<div class="kv"><span class="k">${escapeHtmlSafe(TK_PRICING.lineLabel(s))} · ${s.qty}${svc.unit}${note?' · '+note:''}</span><span class="v">${money(lineSubtotal(s))}</span></div>`}).join('')||'<div class="kv"><span class="k">No services yet</span><span class="v">—</span></div>';
+  const svcRows=r.services.map(s=>{const svc=quoteService(s);const note=lineVariantNote(s);return `<div class="kv"><span class="k">${escapeHtmlSafe(TK_PRICING.lineLabel(s))} · ${s.qty}${svc.unit}${note?' · '+note:''}</span><span class="v">${money(lineSubtotal(s))}</span></div>`}).join('')||'<div class="kv"><span class="k">No services yet</span><span class="v">—</span></div>';
   const sopHtml=checklist.steps.map((step,i)=>{const checked=r.sop[i];const locked=i===lastIdx&&!allDone;return `<div class="sop-step ${checked?'checked':''} ${locked?'locked':''}"><button class="sop-check" onclick="toggleSop(${id},${i})" ${locked?'disabled':''}>${checked?'✓':''}</button><span class="sop-num">${i+1}</span><span class="sop-label">${escapeHtmlSafe(step.t)}${step.s?`<small>${escapeHtmlSafe(step.s)}</small>`:''}</span></div>`}).join('');
   let approvalHtml;
   const lockedReasons=[];
@@ -5823,7 +5873,7 @@ function renderCustomers(){
     </div>`;
 }
 function cardHtml(r){
-  const tags=r.services.map(s=>`<span class="tag">${SERVICES[s.svc].label.split(' ')[0]}</span>`).join('');
+  const tags=r.services.map(s=>`<span class="tag">${escapeHtmlSafe(TK_PRICING.lineLabel(s).split(' ')[0])}</span>`).join('');
   const flag=cardFlag(r);
   // "Invoiced" is a secondary badge, not a Pipeline stage — the invoice has
   // its own payment status (draft/sent/viewed/approved/paid/overdue)
@@ -6977,7 +7027,7 @@ function renderJobsFlow(){
   // per-step detail + the single next action
   const stepDetail=(i)=>{
     if(i===0)return `Enquiry from ${r.source||'—'}. ${r.jobNotes?('“'+r.jobNotes+'”'):''}`;
-    if(i===1)return r.services.length?`${r.services.map(s=>SERVICES[s.svc].label.split(' ')[0]+' '+s.qty+SERVICES[s.svc].unit).join(', ')} · ${money(r.total)}`:'No quote built yet.';
+    if(i===1)return r.services.length?`${r.services.map(s=>escapeHtmlSafe(TK_PRICING.lineLabel(s).split(' ')[0])+' '+s.qty+quoteService(s).unit).join(', ')} · ${money(r.total)}`:'No quote built yet.';
     if(i===2){const label=r.scheduledDate||isoToLabel(r.scheduledDateISO);return label?`Booked ${label} · ${r.tech}`:(r.stage==='won'?'Won — needs a date.':'Not booked yet.');}
     if(i===3){const done=r.sop.filter(Boolean).length;const total=checklistForRecord(r).steps.length;const checklistBit=r.skipChecklist?'Checklist off':`Checklist ${done}/${total}`;return isJob(r)?`${checklistBit} · ${r.photoBefore?'before ✓':'before ·'} ${r.photoAfter?'after ✓':'after ·'}`:'Starts once booked.';}
     if(i===4)return r.stage==='paid'?`Paid ${r.paidAt?timeAgo(r.paidAt):''}`:(r.stage==='completed'?'Job done — send the invoice.':'After the job is completed.');
@@ -11123,10 +11173,10 @@ async function retryPendingPhotos(){
 <script src="lead-request-view.js?v=20261102-wix-answers"></script>
 <script src="servicem8-pricing-view.js?v=20261102d"></script>
 <script src="lead-identity.js?v=20261103b"></script>
-<script src="sales-platform.js?v=20261108history1"></script>
+<script src="sales-platform.js?v=20261110a"></script>
 <script type="module" src="measurement-import.js?v=20261017a"></script>
 <script src="pricing-learning-engine.js?v=20261102k"></script>
-<script src="quote-workspace.js?v=20261017a"></script>
+<script src="quote-workspace.js?v=20261110customfixed1"></script>
 <script src="workspace-cache.js?v=20261102j"></script>
 <script src="conversations.js?v=20261103a"></script>
 <script src="customer-conversations.js?v=20261103-preview1"></script>
@@ -11134,7 +11184,7 @@ async function retryPendingPhotos(){
 <script src="servicem8-import.js?v=20261017a"></script>
 <script src="marketing-analytics.js?v=20261102b"></script>
 <footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a> · <span id="tk-app-version">v20261103d</span></footer>
-<script src="extension-quote-link.js?v=20261109names1"></script>
+<script src="extension-quote-link.js?v=20261110customfixed1"></script>
 <script src="job-workspace.js?v=20261031a"></script>
 <script src="job-calendar.js?v=20261103bugaudit2"></script>
 <script src="operations-workspace.js?v=20261103bugaudit2"></script>
@@ -11142,8 +11192,8 @@ async function retryPendingPhotos(){
 <script src="workspace-controls.js?v=20261019a"></script>
 <script src="settings-experience.js?v=20261103a"></script>
 <script src="workspace-experience.js?v=20261019b"></script>
-<script src="nova-lead-manager.js?v=20261103bugaudit2"></script>
-<script src="pricing-learning-ui.js?v=20261102k"></script>
+<script src="nova-lead-manager.js?v=20261110a"></script>
+<script src="pricing-learning-ui.js?v=20261110customfixed1"></script>
 <script src="mobile-experience.js?v=20261102h"></script>
 <script src="workspace-help.js?v=20261102a"></script>
 <script src="onboarding.js?v=20261103a"></script>

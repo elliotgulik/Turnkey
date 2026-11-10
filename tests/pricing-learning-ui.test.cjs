@@ -36,3 +36,9 @@ test('acceptance between capture and retry prevents further learning writes',asy
  const {c,calls}=fixture();c.confirmQuoteSend();c.records[0].quoteAcceptedAt='2026-11-02T00:00:00Z';
  await c.syncRecordToSupabase(c.records[0]);assert.equal(calls.length,0);
 });
+
+test('custom fixed items never reach calibration or borrow a share of measured revenue',()=>{
+ const {c}=fixture();c.draftLines.splice(1,0,{svc:'custom',pricingMode:'fixed',label:'Move furniture',qty:2,unit:'hour',unitPrice:20.01,fixedPrice:40.02,customCost:null});c.quoteTotal=()=>265.02;
+ const data=c.window.TK_PRICE_LEARNING_UI.capture(c.records[0]);assert.deepEqual(Array.from(data.lines,l=>l.svc),['driveway','windows']);assert.deepEqual(Array.from(data.lines,l=>l.chosenPrice),[150,75]);
+ c.draftLines=c.draftLines.filter(l=>l.svc==='custom');assert.equal(c.window.TK_PRICE_LEARNING_UI.capture(c.records[0]),null);
+});

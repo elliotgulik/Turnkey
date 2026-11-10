@@ -102,7 +102,8 @@
     const people=window.TK_SALES_PLATFORM?.salespeople?.()||[];
     const person=people.find(p=>String(p.id)===id||(p.aliases||[]).some(a=>String(a)===id))||people.find(p=>account?.email&&p.email?.toLowerCase()===account.email.toLowerCase());
     const ownName=records.find(r=>id&&String(r.assignedSalespersonId||'')===id&&r.salespersonName)?.salespersonName;
-    const fullName=String(person?.name||local?.name||account?.user_metadata?.full_name||account?.user_metadata?.name||account?.user_metadata?.given_name||ownName||'').trim();
+    const profileName=local?.name&&!String(local.name).includes('@')?local.name:'';
+    const fullName=String(profileName||account?.user_metadata?.full_name||account?.user_metadata?.name||account?.user_metadata?.given_name||person?.name||ownName||'').trim();
     const email=account?.email||local?.email||'';
     const localPart=email.split('@')[0];
     const first=fullName.split(/\s+/)[0]||(/[._-]/.test(localPart)?localPart.split(/[._-]/)[0]:'');
