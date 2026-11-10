@@ -693,3 +693,22 @@ test('salesperson directory includes unnamed company owners and excludes other c
  const limited=await h.run('get','/api/job-calendar/staff',{userId:tech});
  assert.deepEqual(limited.body.staff.map(x=>x.id),[tech]);
 });
+
+test('confirmed ServiceM8 identity is shared by salesperson and calendar directories',async()=>{
+ const h=setup(),generation=id(400),remote=id(401);
+ h.tables.users.find(x=>x.id===manager).name=null;
+ h.tables.users.find(x=>x.id===owner).email='shared@example.test';
+ h.tables.servicem8_connections=[{business_id:BIZ,generation}];
+ h.tables.external_object_mappings=[
+  {business_id:BIZ,connection_generation:generation,object_type:'staff',local_id:'servicem8:'+remote,external_uuid:remote,snapshot:{name:'Luca Anderson',email:'shared@example.test'}},
+  {business_id:BIZ,connection_generation:generation,object_type:'staff_identity',local_id:manager,external_uuid:remote},
+  {business_id:OTHER_BIZ,connection_generation:generation,object_type:'staff_identity',local_id:owner,external_uuid:remote}
+ ];
+ const directory=await h.run('get','/api/job-calendar/staff');
+ const calendar=await h.run('get','/api/job-calendar/range',{query:{from:'2026-02-01T00:00:00Z',to:'2026-02-08T00:00:00Z'}});
+ for(const result of [directory,calendar]){
+  assert.equal(result.statusCode,200);
+  assert.ok(result.body.staff.find(x=>x.id===manager)?.aliases.includes('servicem8:'+remote));
+  assert.ok(!result.body.staff.find(x=>x.id===owner)?.aliases.includes('servicem8:'+remote));
+ }
+});

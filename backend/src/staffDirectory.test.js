@@ -27,3 +27,16 @@ test('sales assignment keeps unnamed company accounts even when ServiceM8 staff 
  // Calendar continues to use the filtered human display directory.
  assert.equal(staffDirectory(locals,remote).length,1);
 });
+test('confirmed identity link gives Luca his ServiceM8 alias instead of the shared email login',()=>{
+ const locals=[{id:'shared-login',name:null,email:'office@example.test'},{id:'luca-login',name:null,email:'luca@example.test'}];
+ const rows=[{external_uuid:'staff-luca',connection_generation:'current',snapshot:{name:'luca anderson',email:'office@example.test'}}];
+ const identities=[{local_id:'luca-login',external_uuid:'staff-luca',connection_generation:'current'}];
+ for(const order of [locals,[...locals].reverse()]){
+  const people=staffDirectory(order,mappedStaff(rows,'current',identities),{includeAccounts:true});
+  const luca=people.find(x=>x.id==='luca-login'),shared=people.find(x=>x.id==='shared-login');
+  assert.equal(luca.name,'luca anderson');assert.equal(luca.serviceM8Id,'servicem8:staff-luca');
+  assert.ok(luca.aliases.includes('servicem8:staff-luca'));
+  assert.ok(!shared.aliases.includes('servicem8:staff-luca'));
+ }
+ assert.equal(mappedStaff(rows,'current',[{...identities[0],connection_generation:'old'}])[0].linkedUserId,undefined);
+});

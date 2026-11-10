@@ -213,11 +213,12 @@ export function installJobCalendar(app, { db, requireBusiness, getGoogleCalendar
     const privileged=isPrivileged(await role(req));
     const locals=await fetchAllPaged(()=>db.from('users').select('id,name,email,role').eq('business_id',req.businessId));
     if(!privileged)return res.json({staff:locals.filter(u=>u.id===req.userId)});
-    const [connection,remote]=await Promise.all([
+    const [connection,remote,identityLinks]=await Promise.all([
       unwrap(db.from('servicem8_connections').select('generation').eq('business_id',req.businessId).maybeSingle()),
-      fetchAllPaged(()=>db.from('external_object_mappings').select('local_id,external_uuid,snapshot,connection_generation').eq('business_id',req.businessId).eq('object_type','staff'),1000,'local_id')
+      fetchAllPaged(()=>db.from('external_object_mappings').select('local_id,external_uuid,snapshot,connection_generation').eq('business_id',req.businessId).eq('object_type','staff'),1000,'local_id'),
+      fetchAllPaged(()=>db.from('external_object_mappings').select('local_id,external_uuid,connection_generation').eq('business_id',req.businessId).eq('object_type','staff_identity'),1000,'local_id')
     ]);
-    res.json({staff:staffDirectory(locals,mappedStaff(remote,connection?.generation),{includeAccounts:true})});
+    res.json({staff:staffDirectory(locals,mappedStaff(remote,connection?.generation,identityLinks),{includeAccounts:true})});
   }));
 
   /* ========================= GET /range ========================= */
@@ -233,7 +234,7 @@ export function installJobCalendar(app, { db, requireBusiness, getGoogleCalendar
     if (to.getTime() - from.getTime() > MAX_RANGE_MS) throw fail('Range cannot exceed 93 days')
 
     const eventColumns='id,user_id,title,start_time,end_time,busy_status,source,notes,connection_id,external_id,details'
-    const [allJobs,staffRows,eventRows,completedEvents,blockRows,connection,sm8,remoteStaffRows,seedTasks,remoteSummaries,jobMappings] = await Promise.all([
+    const [allJobs,staffRows,eventRows,completedEvents,blockRows,connection,sm8,remoteStaffRows,seedTasks,remoteSummaries,jobMappings,staffIdentityLinks] = await Promise.all([
       fetchAllPaged(() => db.from('jobs').select('*').eq('business_id',req.businessId)),
       fetchAllPaged(() => db.from('users').select('id,name,email,role').eq('business_id',req.businessId)),
       fetchAllPaged(() => db.from('calendar_events').select(eventColumns).eq('business_id',req.businessId).lt('start_time',to.toISOString()).gt('end_time',from.toISOString())),
@@ -245,6 +246,7 @@ export function installJobCalendar(app, { db, requireBusiness, getGoogleCalendar
       privileged ? unwrap(db.from('integration_tasks').select('state,last_error,created_at').eq('business_id',req.businessId).eq('kind','dispatch_seed').order('created_at',{ascending:false}).limit(1)) : [],
       privileged ? fetchAllPaged(() => db.from('external_object_mappings').select('local_id,external_uuid,snapshot,connection_generation').eq('business_id',req.businessId).eq('object_type','completed_job'),1000,'local_id') : [],
       fetchAllPaged(() => db.from('external_object_mappings').select('local_id,external_uuid,connection_generation').eq('business_id',req.businessId).eq('object_type','job'),1000,'local_id'),
+      privileged ? fetchAllPaged(() => db.from('external_object_mappings').select('local_id,external_uuid,connection_generation').eq('business_id',req.businessId).eq('object_type','staff_identity'),1000,'local_id') : [],
     ])
     const visibleJobs = allJobs.filter((j) => j.status !== 'cancelled' && (privileged || isAssignedToStaff(j, req.userId)))
     const jobs = visibleJobs.filter((j) => {
@@ -273,7 +275,7 @@ export function installJobCalendar(app, { db, requireBusiness, getGoogleCalendar
       details: {...filterCalendarDetails(j.details),...(remoteJobByLocal.has(j.id)?{serviceM8JobUuid:remoteJobByLocal.get(j.id)}:{})}
     }))
 
-    const staff = privileged ? staffDirectory(staffRows,mappedStaff(remoteStaffRows,sm8?.generation)) : staffRows.filter((u) => u.id === req.userId)
+    const staff = privileged ? staffDirectory(staffRows,mappedStaff(remoteStaffRows,sm8?.generation,staffIdentityLinks)) : staffRows.filter((u) => u.id === req.userId)
 
     // Overlap, not "starts inside the range" — a multi-day block/event that
     // started before `from` but is still ongoing into the requested window
