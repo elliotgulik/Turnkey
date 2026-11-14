@@ -1,0 +1,111 @@
+.employee-portal{margin:0;background:var(--paper);color:var(--ink);font:15px/1.5 var(--tk-font);-webkit-text-size-adjust:100%}
+.employee-portal *{box-sizing:border-box}
+.employee-portal [hidden]{display:none!important}
+.employee-portal h1,.employee-portal h2,.employee-portal h3{font-family:var(--tk-font-display);line-height:1.2;font-weight:600}
+.employee-portal h1{font-size:30px;margin:0 0 8px}
+.employee-portal h2{font-size:23px;margin:0 0 8px}
+.employee-portal h3{font-size:19px}
+.employee-portal button,.employee-portal input,.employee-portal select,.employee-portal textarea{font:inherit;color:inherit}
+.employee-portal input:not([type=checkbox]):not([type=radio]),.employee-portal select,.employee-portal textarea{border:1px solid var(--line);border-radius:6px;padding:12px;background:#fff;max-width:100%;min-width:0;min-height:48px;font-size:16px}
+.employee-portal input::placeholder,.employee-portal textarea::placeholder{color:var(--ink-faint);opacity:1}
+.employee-portal :focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.employee-portal .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;text-align:center;text-decoration:none;border:1px solid var(--line);border-radius:6px;padding:10px 16px;min-height:48px;background:#fff;color:var(--ink);font:600 15px/1.35 var(--tk-font);cursor:pointer;white-space:normal;overflow-wrap:anywhere}
+.employee-portal .btn.primary{color:#fff;background:var(--accent);border-color:var(--accent)}
+.employee-portal .btn:hover:not(:disabled){filter:brightness(.96)}
+.employee-portal button:disabled{opacity:.6;cursor:wait}
+.employee-portal a{color:var(--teal-bright);text-underline-offset:3px}
+.employee-top{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px max(24px,calc((100vw - 1040px)/2));background:#fff;border-bottom:1px solid var(--line)}
+.employee-company{display:flex;align-items:center;gap:12px;min-width:0}
+.employee-company img{max-width:110px;max-height:48px;object-fit:contain}
+.employee-company strong,.employee-company span{display:block}
+.employee-company strong{font-size:19px;font-weight:600;overflow-wrap:anywhere}
+.employee-company span{color:var(--ink-faint);font-size:13px}
+.employee-account{display:flex;gap:8px;flex-shrink:0}
+.employee-app main{width:min(100%,1040px);margin:auto;padding:28px 24px 116px}
+.employee-page-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:24px}
+.employee-page-heading p{margin:0;color:var(--ink-faint)}
+.employee-date-controls{display:flex;align-items:flex-end;gap:8px;margin-bottom:16px;max-width:560px}
+.employee-date-controls label{display:flex;flex-direction:column;gap:4px;min-width:0;flex:1;font-size:13px;font-weight:600}
+.employee-date-controls input{width:100%}
+.employee-date-controls button{flex-shrink:0}
+.employee-status{min-height:23px;margin:8px 0 16px;color:var(--ink-faint);font-size:14px}
+.employee-status[data-error=true]{color:var(--tk-alert)}
+.employee-job-list{background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.employee-job-row{display:grid;grid-template-columns:100px minmax(0,1fr) auto;gap:20px;padding:22px 24px;border-bottom:1px solid var(--line);align-items:start}
+.employee-job-row:last-child{border-bottom:0}
+.employee-job-time{display:block;font-variant-numeric:tabular-nums;font-weight:600;line-height:1.4}
+.employee-job-time small{display:block;color:var(--ink-faint);font-weight:400;margin-top:3px;font-size:13px}
+.employee-job-row h2{font-family:var(--tk-font);font-size:18px;margin:0 0 4px;overflow-wrap:anywhere}
+.employee-job-row p{margin:0 0 6px;overflow-wrap:anywhere}
+.employee-job-row .employee-job-meta{font-size:13px;color:var(--ink-faint);margin-top:10px}
+.employee-job-status{display:block;font-size:13px;font-weight:600;margin-bottom:10px;color:var(--teal-bright)}
+.employee-empty{padding:32px 24px}
+.employee-empty h2{font-family:var(--tk-font);font-size:18px}
+.employee-empty p{color:var(--ink-faint);margin:0;max-width:50ch}
+.employee-nav{position:fixed;bottom:0;left:0;right:0;background:#fff;display:flex;justify-content:center;border-top:1px solid var(--line);padding:8px 16px calc(8px + env(safe-area-inset-bottom));z-index:30}
+.employee-nav button{display:flex;flex:1;max-width:240px;min-height:60px;flex-direction:column;align-items:center;justify-content:center;gap:5px;border:0;background:transparent;color:var(--ink-faint);font-size:13px;cursor:pointer;border-radius:6px}
+.employee-nav button[aria-current=page]{color:var(--teal-bright);font-weight:600;background:var(--accent-wash)}
+.employee-nav svg{width:23px;height:23px}
+.employee-week{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px;margin:20px 0}
+.employee-week button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;border:1px solid var(--line);border-radius:6px;min-height:64px;background:#fff;cursor:pointer;font-size:13px}
+.employee-week button[aria-pressed=true]{background:var(--accent-wash);border-color:var(--accent);font-weight:600}
+.employee-week strong{font-size:17px}
+.employee-detail-heading{margin-bottom:20px}
+.employee-detail-heading>button{margin-bottom:20px}
+.employee-detail-heading p{color:var(--ink-faint);margin:0 0 8px;overflow-wrap:anywhere}
+.employee-contact-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+.employee-portal .panel,.employee-instructions{background:#fff;border:1px solid var(--line);border-radius:10px;padding:20px;margin-top:20px;min-width:0}
+.employee-instructions p{white-space:pre-wrap;overflow-wrap:anywhere;margin:8px 0 0}
+.employee-instructions ul{padding-left:20px}
+.employee-detail-schedule{display:grid;grid-template-columns:120px minmax(0,1fr);gap:8px 16px;font-size:15px;margin:0}
+.employee-detail-schedule dt{color:var(--ink-faint)}
+.employee-detail-schedule dd{margin:0;overflow-wrap:anywhere}
+.employee-auth{min-height:100dvh;display:flex;align-items:center;justify-content:center;padding:24px}
+.employee-auth .auth-cards{width:100%;max-width:430px}
+.employee-login,.employee-auth #auth-card-mfa{background:#fff;padding:28px;border:1px solid var(--line);border-radius:14px}
+.employee-login>p{color:var(--ink-faint);margin-bottom:24px}
+.employee-login form{display:flex;flex-direction:column;gap:16px}
+.employee-login label{display:flex;flex-direction:column;gap:6px;font-weight:600}
+.employee-login [role=status]{margin:0;font-size:14px;color:var(--ink-faint)}
+.employee-login [data-error=true]{color:var(--tk-alert)}
+.employee-login>a{display:inline-block;padding:16px 0 0;min-height:44px}
+#employee-toast{position:fixed;bottom:102px;left:16px;right:16px;width:max-content;max-width:calc(100vw - 32px);margin:auto;background:var(--ink);color:#fff;padding:12px 18px;border-radius:8px;z-index:100;font-size:14px}
+.employee-portal #tkj-launcher{display:none}
+.employee-portal #tkj-card [data-tkj=calendar],.employee-portal #tkj-card [data-tkj=equipment]{display:none}
+.employee-portal .tkj-work-heading>div>span{display:none}
+.employee-portal .tkj-work-columns{grid-template-columns:minmax(0,1.3fr) minmax(0,1fr)}
+.employee-portal .tkj-work-card input,.employee-portal .tkj-work-card select,.employee-portal .tkj-work-card textarea{width:100%}
+.employee-portal .tkj-work-card input[type=checkbox]{width:24px;min-width:24px;height:24px}
+.employee-portal .tkj-overlay{z-index:1000}
+.employee-portal .tkj-dialog{max-width:600px;width:100%}
+.employee-portal .tkj-dialog .tkj-row{gap:10px}
+.employee-portal .tkj-dialog .tkj-row>label{min-width:0;flex:1}
+.employee-portal .tkj-dialog input,.employee-portal .tkj-dialog textarea,.employee-portal .tkj-dialog select{width:100%}
+@media(max-width:760px){
+ .employee-top{padding:calc(12px + env(safe-area-inset-top)) 16px 12px;gap:10px}
+ .employee-company strong{font-size:17px}
+ .employee-company img{max-width:80px;max-height:40px}
+ .employee-account .btn{padding:10px;font-size:13px;min-height:44px}
+ .employee-app main{padding:24px 16px 112px}
+ .employee-portal h1{font-size:28px}
+ .employee-page-heading{gap:12px;margin-bottom:20px}
+ .employee-date-controls{gap:6px}
+ .employee-date-controls .btn{padding:10px;min-width:44px}
+ .employee-job-row{grid-template-columns:minmax(0,1fr);gap:10px;padding:20px 16px}
+ .employee-job-time{display:flex;align-items:baseline;gap:8px}
+ .employee-job-time small{margin:0}
+ .employee-job-row h2{font-size:19px}
+ .employee-job-row .btn{width:100%}
+ .employee-job-status{margin-bottom:8px}
+ .employee-week{gap:4px}
+ .employee-week button{font-size:12px}
+ .employee-detail-schedule{grid-template-columns:100px minmax(0,1fr);gap:10px}
+ .employee-contact-actions .btn{flex:1}
+ .employee-portal .tkj-work-columns{grid-template-columns:minmax(0,1fr)}
+ .employee-portal .tkj-row{flex-wrap:wrap}
+ .employee-portal .tkj-work-heading{flex-wrap:wrap}
+ .employee-portal .tkj-work-stats{gap:8px}
+ .employee-portal .tkj-overlay{padding:16px;align-items:flex-end}
+ .employee-portal .tkj-dialog{max-height:calc(100dvh - 32px);overflow:auto;padding:20px}
+}
+@media(prefers-reduced-motion:reduce){.employee-portal *{scroll-behavior:auto!important}}

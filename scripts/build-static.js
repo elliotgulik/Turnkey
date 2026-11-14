@@ -13,6 +13,9 @@ fs.rmSync(target, { recursive: true, force: true });
 fs.mkdirSync(target, { recursive: true });
 const assets = [
   "index.html",
+  "employee.html",
+  "employee-portal.js",
+  "employee-portal.css",
   "post-office.html",
   "post-office.css",
   "post-office-workspace.js",
@@ -53,6 +56,8 @@ const assets = [
   "measurement-editor.js",
   "extension-quote-link.js",
   "job-workspace.js",
+  "post-job-checklist.js",
+  "post-job-checklist.css",
   "job-workspace.css",
   "job-calendar.js",
   "job-calendar.css",

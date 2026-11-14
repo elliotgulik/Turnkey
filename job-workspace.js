@@ -233,14 +233,15 @@
 
   /* ===================== log hours dialog ===================== */
 
-  function overlay(html, scope) {
+  function overlay(html, scope, onClose) {
     const host = document.createElement('div');
     host.className = 'tkj-overlay';
     host.innerHTML = html;
     document.body.appendChild(host);
     let watcher = null;
     const onKey = (e) => { if(e.key==='Escape'){ e.preventDefault(); close(); } };
-    const close = () => { clearInterval(watcher); document.removeEventListener('keydown',onKey); host.remove(); };
+    let closed=false;
+    const close = () => { if(closed)return;closed=true;clearInterval(watcher); document.removeEventListener('keydown',onKey); host.remove();onClose?.(); };
     document.addEventListener('keydown',onKey);
     if (scope) watcher = setInterval(() => { if (scope.isStale()) close(); }, 250);
     host.addEventListener('click', (e) => { if (e.target === host) close(); });
@@ -250,22 +251,22 @@
     return { host, close };
   }
 
-  async function openLogHoursDialog(r) {
+  async function openLogHoursDialog(r, options={}) {
     const scope = makeScope();
     let role, staff = [], equipment = [];
     try {
       role = await myRole(scope);
       if (isPrivileged(role)) staff = staffListCache || [];
       equipment = (await request('/equipment', {}, scope)).equipment;
-    } catch (e) { if (!e.stale) notify(e.message); return; }
-    if (scope.isStale()) return;
+    } catch (e) { if (!e.stale) notify(e.message); return false; }
+    if (scope.isStale()) return false;
 
     const today = localDateStr(new Date());
     const { host, close } = overlay(`
       <form class="tkj-dialog" data-tkj-form="log-hours" role="dialog" aria-modal="true" aria-labelledby="tkj-log-title">
         <h3 id="tkj-log-title">Log hours — ${esc(r.name || 'Job')}</h3>
         <p class="tkj-dialog-message" role="alert"></p>
-        ${staff.length ? `<label>Worker<select name="userId">${staff.map((u) => `<option value="${esc(u.id)}" ${u.id === scope.user ? 'selected' : ''}>${esc(u.email || u.id)}</option>`).join('')}</select></label>` : ''}
+        ${staff.length ? `<label>Worker<select name="userId">${staff.map((u) => `<option value="${esc(u.id)}" ${u.id === scope.user ? 'selected' : ''}>${esc(u.name || u.email || u.id)}</option>`).join('')}</select></label>` : ''}
         <div class="tkj-row">
           <label>Date<input type="date" name="date" value="${today}" required></label>
           <label>Start<input type="time" name="startTime" required></label>
@@ -278,7 +279,7 @@
           <button type="button" data-tkj="cancel">Cancel</button>
           <button type="submit" class="btn primary">Save hours</button>
         </div>
-      </form>`, scope);
+      </form>`, scope, options.onClose);
 
     const addEquipmentRow = () => {
       const fieldset = host.querySelector('.tkj-equipment-rows');
@@ -329,6 +330,7 @@
         if (scope.isStale()) { close(); return; }
         notify('Hours logged');
         root.dispatchEvent(new Event('turnkey:equipment-changed'));
+        root.dispatchEvent(new CustomEvent('turnkey:work-logged',{detail:{jobId:r.jobId}}));
         close();
         renderJobCard(r.id);
       } catch (e2) {
@@ -337,6 +339,7 @@
         submit.disabled = false;
       }
     });
+    return true;
   }
 
   /* ===================== employee work-log page ===================== */
@@ -372,7 +375,7 @@
     const selectedDate = page.querySelector('[name="workDate"]')?.value || localDateStr(new Date());
     ensureWorkRealtime(scope);
     page.innerHTML = `<div class="tkj-work-page">
-      <header class="tkj-work-heading"><div><span>TEAM</span><h1>Staff work log</h1><p>Log one shift against its job. Paid hours stay on the timesheet; travel is excluded from equipment runtime.</p></div><button type="button" class="btn ghost" data-work="refresh">Refresh</button></header>
+      <header class="tkj-work-heading"><div><span>TEAM</span><h1>${config.employeePortal?'My work hours':'Staff work log'}</h1><p>Log one shift against its job. Paid hours stay on the timesheet; travel is excluded from equipment runtime.</p></div><button type="button" class="btn ghost" data-work="refresh">Refresh</button></header>
       <div class="tkj-work-stats" aria-live="polite"><div><span>Shift hours</span><strong data-work-stat="shift">…</strong></div><div><span>Travel</span><strong data-work-stat="travel">…</strong></div><div><span>On-site time</span><strong data-work-stat="onsite">…</strong></div></div>
       <div class="tkj-work-columns"><section class="tkj-work-card"><h2>Submit today’s hours</h2><p class="tkj-sub">Choose the job, enter the full shift and today’s travel. TurnKey calculates equipment runtime automatically.</p>
         <form data-work="form"><label>Work date<input type="date" name="workDate" value="${esc(selectedDate)}" required></label>
@@ -483,7 +486,7 @@
           <button type="button" data-tkj="prev-week" aria-label="Previous week">←</button>
           <span class="tkj-week-label"></span>
           <button type="button" data-tkj="next-week" aria-label="Next week">→</button>
-          ${isPrivileged(role) ? `<select data-tkj="staff-filter"><option value="">All staff</option>${staff.map((u) => `<option value="${esc(u.id)}">${esc(u.email || u.id)}</option>`).join('')}</select>` : ''}
+          ${isPrivileged(role) ? `<select data-tkj="staff-filter"><option value="">All staff</option>${staff.map((u) => `<option value="${esc(u.id)}">${esc(u.name || u.email || u.id)}</option>`).join('')}</select>` : ''}
         </div>
         <div class="tkj-calendar-actions"><button type="button" class="btn primary" data-tkj="open-booking">Open team booking calendar</button><button type="button" class="btn ghost" data-tkj="block-staff">Block leave / unavailable time</button></div>
         <div class="tkj-calendar-summary" aria-live="polite"></div>
@@ -719,6 +722,7 @@
 
     root.TK_JOB_WORK = {
     configure(options) { config = { ...options }; roleCache = null; roleCacheKey = null; staffListCache = null; },
+    openLogHoursDialog,
     openWorkLogPage,
     openCalendar,
     openEquipment,

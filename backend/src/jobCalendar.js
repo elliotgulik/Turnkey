@@ -1,4 +1,5 @@
 import crypto from 'node:crypto'
+import { jobWorkStaffIds, jobWorkAssigned } from './postJobChecklist.js'
 import { staffDirectory, mappedStaff } from './staffDirectory.js'
 
 /* =========================================================================
@@ -202,12 +203,6 @@ export function installJobCalendar(app, { db, requireBusiness, getGoogleCalendar
     return job
   }
 
-  function isAssignedToStaff(job, userId) {
-    if (job.assigned_to === userId) return true
-    const ids = job.details?.assignedStaffIds
-    return Array.isArray(ids) && ids.includes(userId)
-  }
-
   // Shared people picker: authenticated, tenant-scoped, no integration credentials.
   app.get('/api/job-calendar/staff', requireBusiness, wrap(async(req,res)=>{
     const privileged=isPrivileged(await role(req));
@@ -248,7 +243,8 @@ export function installJobCalendar(app, { db, requireBusiness, getGoogleCalendar
       fetchAllPaged(() => db.from('external_object_mappings').select('local_id,external_uuid,connection_generation').eq('business_id',req.businessId).eq('object_type','job'),1000,'local_id'),
       privileged ? fetchAllPaged(() => db.from('external_object_mappings').select('local_id,external_uuid,connection_generation').eq('business_id',req.businessId).eq('object_type','staff_identity'),1000,'local_id') : [],
     ])
-    const visibleJobs = allJobs.filter((j) => j.status !== 'cancelled' && (privileged || isAssignedToStaff(j, req.userId)))
+    const callerStaffIds = privileged ? null : await jobWorkStaffIds(db, req.businessId, req.userId)
+    const visibleJobs = allJobs.filter((j) => j.status !== 'cancelled' && (privileged || jobWorkAssigned(j, callerStaffIds)))
     const jobs = visibleJobs.filter((j) => {
       if (j.status === 'completed' || j.status === 'paid') return true // archive lives in the Completed section, independent of date view
       if (!j.scheduled_date && !j.details?.calendarStartAt) return true // unscheduled — always surfaced for drag-in
@@ -585,7 +581,7 @@ export function installJobCalendar(app, { db, requireBusiness, getGoogleCalendar
   app.post('/api/job-calendar/jobs/:id/google', requireBusiness, wrap(async (req, res) => {
     const r = await role(req)
     const job = await requireJobInBusiness(req, req.params.id)
-    if (!isPrivileged(r) && !isAssignedToStaff(job, req.userId)) throw fail('You can only sync your own bookings', 403)
+    if (!isPrivileged(r) && !jobWorkAssigned(job, await jobWorkStaffIds(db, req.businessId, req.userId))) throw fail('You can only sync your own bookings', 403)
     if (job.status === 'cancelled') throw fail('This job is lost/cancelled — change its stage before syncing it')
     if (!job.details?.calendarStartAt || !job.details?.calendarEndAt) throw fail('Book this job onto the calendar before syncing it to Google')
 

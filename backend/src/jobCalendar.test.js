@@ -712,3 +712,20 @@ test('confirmed ServiceM8 identity is shared by salesperson and calendar directo
   assert.ok(!result.body.staff.find(x=>x.id===owner)?.aliases.includes('servicem8:'+remote));
  }
 });
+
+test('technician calendar shows assigned confirmed ServiceM8 alias jobs without granting calendar management', async () => {
+  const h=setup(), generation=id(80), remote=id(81)
+  h.tables.jobs[0].details={assignedStaffIds:['servicem8:'+remote]}
+  h.tables.servicem8_connections=[{business_id:BIZ,generation}]
+  const link={business_id:BIZ,connection_generation:generation,object_type:'staff_identity',local_id:tech,external_uuid:remote}
+  h.tables.external_object_mappings=[link]
+  const read=()=>h.run('get','/api/job-calendar/range',{userId:tech,query:{from:'2026-02-01T00:00:00Z',to:'2026-02-08T00:00:00Z'}})
+  const good=await read()
+  assert.ok(good.body.jobs.some(j=>j.id===job));assert.equal(good.body.canManage,false)
+  assert.deepEqual(good.body.staff.map(s=>s.id),[tech])
+  assert.equal((await h.run('put',`/api/job-calendar/jobs/${job}`,{userId:tech})).statusCode,403)
+  for(const bad of [{connection_generation:id(82)},{business_id:OTHER_BIZ},{object_type:'staff'},{local_id:otherTech}]) {
+    h.tables.external_object_mappings=[{...link,...bad}]
+    assert.ok(!(await read()).body.jobs.some(j=>j.id===job))
+  }
+})

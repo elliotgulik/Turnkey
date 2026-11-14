@@ -13,7 +13,7 @@ function block(start, end) {
   assert.ok(limit > offset, end)
   return source.slice(offset, limit)
 }
-function harness({ user = { id: 'staff' }, authError = null, profile = { business_id: 'team' }, profileError = null, throwsAt } = {}) {
+function harness({ user = { id: 'staff' }, authError = null, profile = { business_id: 'team', role: 'owner' }, profileError = null, throwsAt } = {}) {
   const calls = [], handlers = {}
   const authClient = {
     auth: { async getUser(token) {
@@ -53,8 +53,8 @@ function harness({ user = { id: 'staff' }, authError = null, profile = { busines
 function response() {
   return { code: 200, status(code) { this.code = code; return this }, json(body) { this.body = body; return this } }
 }
-async function authorize(h, header = 'Bearer valid-token') {
-  const req = { get: () => header, body: { businessId: 'foreign', userId: 'owner', role: 'owner' }, query: { businessId: 'foreign' } }
+async function authorize(h, header = 'Bearer valid-token', path = '/api/leads/pending') {
+  const req = { originalUrl: path, url: '/status', get: () => header, body: { businessId: 'foreign', userId: 'owner', role: 'owner' }, query: { businessId: 'foreign' } }
   const res = response()
   let passed = false
   await h.gate(req, res, () => { passed = true })
@@ -111,11 +111,12 @@ test('thrown auth and profile failures return a safe response without an unhandl
 test('staff, managers and owners use the verified current tenant and never body identities', async () => {
   for (const role of ['technician', 'manager', 'owner']) {
     const h = harness({ profile: { business_id: 'team', role } })
-    const { req, res, passed } = await authorize(h)
+    const { req, res, passed } = await authorize(h, undefined, role === 'technician' ? '/api/job-work/portal' : '/api/leads/pending')
     assert.equal(passed, true)
     assert.equal(req.businessId, 'team')
     assert.equal(req.userId, 'staff')
     assert.ok(h.calls.some(call => JSON.stringify(call) === JSON.stringify(['eq', 'id', 'staff'])))
+    if (role === 'technician') continue
     await h.handlers['/api/leads/pending'](req, res)
     req.body.ids = ['foreign-lead']
     await h.handlers['/api/leads/ack'](req, res)
@@ -124,7 +125,7 @@ test('staff, managers and owners use the verified current tenant and never body 
 })
 
 test('each request revalidates membership after a teammate is moved or removed', async () => {
-  const profile = { business_id: 'team' }
+  const profile = { business_id: 'team', role: 'owner' }
   const h = harness({ profile })
   assert.equal((await authorize(h)).req.businessId, 'team')
   profile.business_id = 'other-team'
@@ -132,4 +133,16 @@ test('each request revalidates membership after a teammate is moved or removed',
   profile.business_id = null
   assert.equal((await authorize(h)).passed, false)
   assert.equal(h.calls.filter(call => call[0] === 'getUser').length, 3)
+})
+
+test('technicians are centrally denied private company APIs, including mounted routes and forged roles', async () => {
+  for (const path of ['/api/email/send','/api/conversations','/api/sales/settings','/api/payments/status','/api/marketing/overview','/api/servicem8/status','/api/pricing-learning/settings','/api/calendar/connections','/api/extension/servicem8/jobs/id','/api/leads/pending','/api/job-calendar/range','/api/job-work-evil/portal']) {
+    const h=harness({profile:{business_id:'team',role:'technician'}})
+    const result=await authorize(h,undefined,path)
+    assert.equal(result.res.code,403,path);assert.equal(result.passed,false,path)
+  }
+  for (const path of ['/api/job-work/portal?date=2026-11-14','/api/job-work/logs','/api/job-work/post-job/settings','/api/job-work/jobs/id/photos']) {
+    assert.equal((await authorize(harness({profile:{business_id:'team',role:'technician'}}),undefined,path)).passed,true)
+  }
+  for (const role of [null,undefined,'owner-from-metadata']) assert.equal((await authorize(harness({profile:{business_id:'team',role}}))).passed,false)
 })

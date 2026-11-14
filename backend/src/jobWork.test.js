@@ -112,7 +112,7 @@ function setup({ rpc, failUpload } = {}) {
       { id: foreignUser, business_id: OTHER_BIZ, email: 'foreign@biz.test', role: 'owner' }
     ],
     jobs: [
-      { id: job, business_id: BIZ },
+      { id: job, business_id: BIZ, assigned_to: worker },
       { id: foreignJob, business_id: OTHER_BIZ }
     ],
     equipment_assets: [
@@ -534,4 +534,63 @@ test('SQL schema: idempotent, overlap-safe, tenant-locked, idempotent RPC retrie
   })
 
   await db.close()
+})
+
+test('hours and job picker accept only confirmed current-tenant ServiceM8 aliases; logs keep local employee identity', async () => {
+  let params
+  const h = setup({ rpc: async (_name, p) => { params=p; return {data:{log_id:id(99),deduped:false},error:null} } })
+  const generation=id(80), remote=id(81)
+  h.tables.jobs[0].assigned_to=null
+  h.tables.jobs[0].scheduled_date='2026-10-31'
+  h.tables.jobs[0].details={assignedStaffIds:['servicem8:'+remote]}
+  h.tables.servicem8_connections=[{business_id:BIZ,generation}]
+  const link={business_id:BIZ,connection_generation:generation,object_type:'staff_identity',local_id:worker,external_uuid:remote}
+  h.tables.external_object_mappings=[link]
+  assert.equal((await h.run('post','/api/job-work/logs',{body:validLog()})).statusCode,201)
+  assert.equal(params.p_user_id,worker)
+  assert.equal((await h.run('get','/api/job-work/jobs',{query:{date:'2026-10-31'}})).body.jobs.length,1)
+  for(const bad of [{connection_generation:id(82)},{business_id:OTHER_BIZ},{object_type:'staff'},{local_id:otherWorker}]) {
+    h.tables.external_object_mappings=[{...link,...bad}]
+    assert.equal((await h.run('post','/api/job-work/logs',{body:validLog()})).statusCode,403)
+    assert.equal((await h.run('get','/api/job-work/jobs',{query:{date:'2026-10-31'}})).body.jobs.length,0)
+  }
+})
+
+test('workers cannot upload/list photos or inspect job-specific logs for an unassigned company job',async()=>{
+  const h=setup();h.tables.jobs[0].assigned_to=otherWorker
+  for(const [method,path,options] of [['get',`/api/job-work/jobs/${job}/photos`,{}],['post',`/api/job-work/jobs/${job}/photos`,{}],['get','/api/job-work/logs',{query:{jobId:job}}]]) {
+    assert.equal((await h.run(method,path,options)).statusCode,403)
+    assert.equal((await h.run(method,path,{...options,userId:owner})).statusCode===403,false)
+  }
+})
+
+test('employee equipment status excludes private maintenance notes and other-job references',async()=>{
+  const h=setup();h.tables.equipment_service_events.push({id:id(91),business_id:BIZ,asset_id:asset,meter_hours:10,serviced_at:'2026-01-01',notes:'private maintenance invoice $500',user_id:otherWorker})
+  const employee=await h.run('get','/api/job-work/equipment')
+  assert.equal(JSON.stringify(employee.body).includes('private maintenance'),false)
+  assert.equal(employee.body.equipment[0].recentServiceEvents,undefined)
+  const admin=await h.run('get','/api/job-work/equipment',{userId:owner})
+  assert.equal(admin.body.equipment[0].recentServiceEvents[0].notes,'private maintenance invoice $500')
+})
+
+test('dispatch-only confirmed assignments authorize hours/photos through the trusted RPC and retain local log ownership',async()=>{
+  let allow=true,recorded
+  const h=setup({rpc:async(name,p)=>{
+    if(name==='job_work_dispatch_access'){
+      assert.equal(p.p_job_id,job);assert.equal(p.p_employee_id,worker);assert.equal(p.p_business_id,BIZ)
+      return {data:allow,error:null}
+    }
+    assert.equal(name,'record_job_work');recorded=p;return {data:{log_id:id(99),deduped:false},error:null}
+  }})
+  const generation=id(80),remote=id(81)
+  h.tables.jobs[0].assigned_to=null;h.tables.jobs[0].details={assignedStaffIds:[]}
+  h.tables.servicem8_connections=[{business_id:BIZ,generation}]
+  h.tables.external_object_mappings=[{business_id:BIZ,connection_generation:generation,object_type:'staff_identity',local_id:worker,external_uuid:remote}]
+  assert.equal((await h.run('post','/api/job-work/logs',{body:validLog()})).statusCode,201)
+  assert.equal(recorded.p_user_id,worker)
+  assert.equal((await h.run('post',`/api/job-work/jobs/${job}/photos`,{body:{kind:'after_photo',dataUrl:dataUrlFor(JPEG_BYTES,'image/jpeg')}})).statusCode,201)
+  assert.equal((await h.run('get',`/api/job-work/jobs/${job}/photos`)).statusCode,200)
+  assert.equal((await h.run('get','/api/job-work/logs',{query:{jobId:job}})).statusCode,200)
+  allow=false
+  for(const [method,path,options] of [['post','/api/job-work/logs',{body:validLog()}],['get',`/api/job-work/jobs/${job}/photos`,{}],['post',`/api/job-work/jobs/${job}/photos`,{}],['get','/api/job-work/logs',{query:{jobId:job}}]])assert.equal((await h.run(method,path,options)).statusCode,403)
 })

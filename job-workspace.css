@@ -249,7 +249,7 @@
   border-radius: 14px;
   padding: 18px;
   background:var(--surface,#fff);
-  box-shadow:0 4px 16px #1423330a;
+  box-shadow:none;
 }
 .tkj-asset-due {
   border-color: #e0a13a;
@@ -306,7 +306,7 @@
 .tkj-work-stats span { color:var(--ink-faint,#667788); font-size:12px; }
 .tkj-work-stats strong { margin-top:5px; font-size:24px; letter-spacing:-.03em; }
 .tkj-work-columns { display:grid; grid-template-columns:minmax(0,1.2fr) minmax(280px,.8fr); gap:16px; align-items:start; }
-.tkj-work-card { min-width:0; margin-bottom:16px; padding:20px; border:1px solid var(--line,#e1e8ec); border-radius:16px; background:var(--surface,#fff); box-shadow:0 5px 20px #14233308; }
+.tkj-work-card { min-width:0; margin-bottom:16px; padding:20px; border:1px solid var(--line,#e1e8ec); border-radius:16px; background:var(--surface,#fff); box-shadow:none; }
 .tkj-work-card h2 { margin:0; font-size:17px; letter-spacing:-.02em; }
 .tkj-work-card form { display:grid; gap:13px; margin-top:16px; }
 .tkj-work-card form > label,.tkj-row label { display:grid; gap:6px; color:var(--ink-soft,#42566a); font-size:12px; font-weight:650; }

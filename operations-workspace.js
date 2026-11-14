@@ -29,7 +29,7 @@
     }));
     const keyOf = c => JSON.stringify([c.businessId,c.userId,c.version,c.role,c.ready]);
     const manager = c => ['owner','manager'].includes(c.role);
-    const assigned = (r,c) => r.assignedStaffId === c.userId || (Array.isArray(r.assignedStaffIds) && r.assignedStaffIds.includes(c.userId));
+    const assigned = (r,c) => options.getContext ? r.assignedStaffId === c.userId || (Array.isArray(r.assignedStaffIds) && r.assignedStaffIds.includes(c.userId)) : root.TK_POST_JOB?.isAssigned(r) ?? (r.assignedStaffId === c.userId || (Array.isArray(r.assignedStaffIds) && r.assignedStaffIds.includes(c.userId)));
     const source = () => get('getRecords', () => typeof records === 'undefined' ? [] : records);
     const staffList = () => get('getStaff', () => typeof staff === 'undefined' ? [] : staff);
     const action = name => Object.prototype.hasOwnProperty.call(options.actions || {}, name) ? options.actions[name] : name === 'calendar' && root.TK_JOB_CALENDAR?.open ? () => root.TK_JOB_CALENDAR.open() : root[name];

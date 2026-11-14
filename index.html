@@ -1358,7 +1358,8 @@ location.replace('/reset-password.html'+location.search+location.hash);
 <link rel="stylesheet" href="marketing-analytics.css?v=20261025b">
 <link rel="stylesheet" href="sales-experience.css?v=20261019a">
 <link rel="stylesheet" href="settings-experience.css?v=20261019a">
-<link rel="stylesheet" href="job-workspace.css?v=20261031.1">
+<link rel="stylesheet" href="post-job-checklist.css?v=20261113a">
+<link rel="stylesheet" href="job-workspace.css?v=20261114a">
 <link rel="stylesheet" href="job-calendar.css?v=20261103b">
 <link rel="stylesheet" href="operations-workspace.css?v=20261018c">
 <link rel="stylesheet" href="workspace-experience.css?v=20261022a">
@@ -5614,6 +5615,11 @@ function resumeJob(id){
 // below) both route through here so there's only one completion code path,
 // not two that could drift apart.
 async function completeJob(id,skipConfirm){
+  const record=records.find(x=>x.id===id);if(!record)return;
+  if(!window.TK_POST_JOB){toast('The job checklist is still loading. Refresh before completing this job.');return;}
+  // Only a server-confirmed disabled setting can enter the legacy flow.
+  return window.TK_POST_JOB.open(id,{whenDisabled:completeWithoutPostJobChecklist});
+  async function completeWithoutPostJobChecklist(){
   const r=records.find(x=>x.id===id);if(!r)return;
   if(!skipConfirm&&!confirm('Mark this job as completed for '+r.name+'?'))return;
   const finishedAt=Date.now();
@@ -5634,6 +5640,8 @@ async function completeJob(id,skipConfirm){
   if(workflowConfig.requireSignoff&&confirm("Get the customer's signature now? (optional)"))openSignaturePad(id);
   if(emailAccount&&r.email&&confirm('Send the completion email to '+r.name+' now?'))sendLifecycleEmail(r,'job_completed');
   if(confirm('Create the invoice now?'))previewInvoice(id);
+
+  }
 }
 // SOPs are useful but not every business/job needs them — this just hides
 // the step list for this one job (before/after photos and sign-off still
@@ -7385,7 +7393,7 @@ function renderJobTimeline(r){
    Profile/Pipeline) needs to treat a manual change any differently. ===== */
 function canEditJobStatus(r){
   if(currentUserRole==='owner'||currentUserRole==='manager')return true;
-  if(currentUserRole==='technician')return r.assignedStaffId===currentUserId;
+  if(currentUserRole==='technician')return window.TK_POST_JOB?.isAssigned(r)??(r.assignedStaffId===currentUserId||(r.assignedStaffIds||[]).includes(currentUserId));
   return false;
 }
 const MANUAL_STATUS_MAP={
@@ -7404,6 +7412,7 @@ async function setManualStatus(id,key){
   const r=records.find(x=>x.id===id);if(!r)return;
   if(!canEditJobStatus(r)){toast('You can only change the status of your own assigned jobs');return;}
   if(key==='quote_accepted'){if(await markWon(id))openDetail(id);return;}
+  if(key==='completed'){await completeJob(id);return;}
   const target=MANUAL_STATUS_MAP[key];
   if(!target){toast('That status follows automatically — nothing to set manually');return;}
   r.stage=target.stage;r.jobStatus=target.jobStatus;
@@ -8410,6 +8419,7 @@ function openSettings(){
   const calConnected=hasGoogleCal||icalConns.length>0;
   document.getElementById('settings-body').innerHTML=`
     <div class="settings-search"><label for="settings-search-input">Find a setting</label><input id="settings-search-input" type="search" placeholder="Search pricing, team, calendar…" oninput="filterSettings(this.value)"></div>
+    ${canEditBusiness?settingsGroup('Job close-out',settingsRow('Post-job checklist','Google review QR code and employee completion checks','TK_POST_JOB.settings()')+settingsRow('Employee portal','Assigned jobs, photos, work hours and site checks',"location.href='employee.html'")):''}
     ${canEditBusiness?settingsGroup('Account security',`<div class="conn-card"><div class="conn-name">Two-factor sign-in</div><p>Manage your authenticator for this account.</p><button class="btn ghost" onclick="TK_MFA.settings()">Manage two-factor sign-in</button></div>`):''}
     ${settingsGroup('Business',`
     <div class="conn-card ${biz.name?'live':''}">
@@ -9221,6 +9231,12 @@ async function handleAuthedSession(session){
     return;
   }
   if(version!==businessSessionVersion||currentUserId!==session.user.id)return;
+  if(profile.role==='technician'){
+    records=[];clearAccountConnections();
+    // The Post Office keeps its separate production workspace.
+    location.replace(profile.businessId==='83c8112c-ad39-468d-b384-de593767e291'?'post-office.html':'employee.html');
+    return;
+  }
   try{if(!await window.TK_MFA.requireFor(session,profile.role))return;}catch(e){if(version===businessSessionVersion){showAuth();setAuthMsg(e.message);}return;}
   if(version!==businessSessionVersion||currentUserId!==session.user.id)return;
   if(currentBusinessId!==profile.businessId){
@@ -11185,9 +11201,9 @@ async function retryPendingPhotos(){
 <script src="marketing-analytics.js?v=20261102b"></script>
 <footer style="padding:16px;text-align:center;font-size:13px"><a href="privacy.html">Privacy &amp; data deletion</a> · <span id="tk-app-version">v20261103d</span></footer>
 <script src="extension-quote-link.js?v=20261110customfixed1"></script>
-<script src="job-workspace.js?v=20261031a"></script>
+<script src="job-workspace.js?v=20261113a"></script>
 <script src="job-calendar.js?v=20261103bugaudit2"></script>
-<script src="operations-workspace.js?v=20261103bugaudit2"></script>
+<script src="operations-workspace.js?v=20261113a"></script>
 <script src="operations-bridge.js?v=20261018c"></script>
 <script src="workspace-controls.js?v=20261019a"></script>
 <script src="settings-experience.js?v=20261103a"></script>
@@ -11198,5 +11214,8 @@ async function retryPendingPhotos(){
 <script src="workspace-help.js?v=20261102a"></script>
 <script src="onboarding.js?v=20261103a"></script>
 <script src="post-office-link.js?v=20261109a"></script>
+<script src="assets/vendor/qrcode-generator-2.0.4.js"></script>
+<script src="assets/vendor/qrcode-generator-utf8-2.0.4.js"></script>
+<script src="post-job-checklist.js?v=20261113a"></script>
 </body>
 </html>

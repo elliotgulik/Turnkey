@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0f7d6b"><meta name="robots" content="noindex,nofollow">
+<title>Employee portal | TurnKey</title>
+<link rel="icon" href="favicon.ico">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Semi+Condensed:wght@600&display=swap">
+<link rel="stylesheet" href="tokens.css?v=20261103design1">
+<link rel="stylesheet" href="auth-mfa.css?v=20261103accounts1">
+<link rel="stylesheet" href="job-workspace.css?v=20261114a">
+<link rel="stylesheet" href="post-job-checklist.css?v=20261113a">
+<link rel="stylesheet" href="employee-portal.css?v=20261114a">
+<script src="config.js?v=20261017a"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.6" integrity="sha384-GyhLKJoRcMXYwIJUTyx0/uSPYliVPdRYYXJm3G6zyMjKShNs8jLM7WaLpk8Vr4W/" crossorigin="anonymous"></script>
+</head>
+<body class="employee-portal">
+<div id="employee-auth" class="employee-auth">
+ <div class="auth-cards"><section id="auth-card-normal" class="employee-login auth-card">
+  <h1>Employee sign-in</h1><p>Your assigned jobs, work hours and site checks.</p>
+  <form id="employee-login-form"><label>Email<input id="employee-email" type="email" autocomplete="username" required></label><label>Password<input id="employee-password" type="password" autocomplete="current-password" required></label><p id="employee-auth-message" role="status">Checking your saved sign-in…</p><button type="submit" class="btn primary" id="employee-sign-in">Sign in</button></form>
+  <a href="reset-password.html">Forgot your password?</a>
+ </section></div>
+</div>
+<div id="employee-app" class="employee-app" hidden>
+ <header class="employee-top"><div class="employee-company"><span id="employee-logo" hidden></span><div><strong id="employee-company-name">Your team</strong><span>Employee portal</span></div></div><div class="employee-account"><a class="btn ghost" id="employee-full-crm" href="index.html" hidden>Full CRM</a><button class="btn ghost" id="employee-sign-out" type="button">Sign out</button></div></header>
+ <main>
+  <section id="employee-jobs" class="employee-section"><header class="employee-page-heading"><div><h1 id="employee-title">Your jobs</h1><p id="employee-greeting"></p></div><button class="btn ghost" id="employee-refresh" type="button">Refresh</button></header>
+   <div class="employee-date-controls"><button class="btn ghost" id="employee-previous" type="button" aria-label="Previous day"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg></button><label>Work date<input id="employee-date" type="date"></label><button class="btn ghost" id="employee-next" type="button" aria-label="Next day"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m10 6 6 6-6 6"/></svg></button><button class="btn ghost" id="employee-today" type="button">Today</button></div>
+   <div id="employee-week" class="employee-week" aria-label="Work week" hidden></div><p id="employee-status" class="employee-status" role="status" aria-live="polite"></p><div id="employee-job-list" class="employee-job-list"></div>
+  </section>
+  <section id="view-detail" class="employee-section" hidden></section>
+  <section id="view-worklog" class="employee-section view" hidden></section>
+ </main>
+ <nav class="employee-nav" aria-label="Employee navigation">
+  <button type="button" data-employee-view="today" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h8M8 17h5"/></svg><span>My jobs</span></button>
+  <button type="button" data-employee-view="schedule"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4M17 3v4M3 11h18M7 15h3M14 15h3"/></svg><span>My schedule</span></button>
+  <button type="button" data-employee-view="hours"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 6v6l4 2"/></svg><span>My hours</span></button>
+ </nav>
+</div>
+<div id="employee-toast" role="status" aria-live="polite" hidden></div>
+<script src="employee-portal.js?v=20261114a"></script>
+<script src="auth-mfa.js?v=20261103accounts1"></script>
+<script src="job-workspace.js?v=20261113a"></script>
+<script src="assets/vendor/qrcode-generator-2.0.4.js"></script>
+<script src="assets/vendor/qrcode-generator-utf8-2.0.4.js"></script>
+<script src="post-job-checklist.js?v=20261113a"></script>
+</body>
+</html>

@@ -4,6 +4,7 @@ import { installConversations } from './conversationsRoutes.js'
 import { installEmailSync } from './emailSync.js'
 import { installMarketingRoutes } from './marketingRoutes.js'
 import { installJobWork } from './jobWork.js'
+import { installPostJobChecklist } from './postJobChecklist.js'
 import { installJobCalendar } from './jobCalendar.js'
 import { installExtensionTransfers } from './extensionTransfers.js'
 import { createPricingLearningRouter } from './pricingLearning.js'
@@ -79,12 +80,12 @@ async function resolveBusiness(accessToken) {
 
   const { data: profile, error: profileErr } = await authClient
     .from('users')
-    .select('business_id')
+    .select('business_id,role')
     .eq('id', userData.user.id)
     .maybeSingle()
 
-  if (profileErr || typeof profile?.business_id !== 'string' || !profile.business_id.trim()) return null
-  return { businessId: profile.business_id, userId: userData.user.id }
+  if (profileErr || typeof profile?.business_id !== 'string' || !profile.business_id.trim() || !['owner','manager','technician'].includes(profile.role)) return null
+  return { businessId: profile.business_id, userId: userData.user.id, role: profile.role }
 }
 
 const storage =
@@ -186,6 +187,13 @@ async function requireBusiness(req, res, next) {
 
   req.businessId = resolved.businessId
   req.userId = resolved.userId
+  req.businessRole = resolved.role
+  // Every private company API uses this gate, including mounted routers.
+  // Inspect the original path so a router mount cannot widen the allowlist.
+  const privatePath = String(req.originalUrl || req.url || '').split('?')[0]
+  if (resolved.role === 'technician' && !privatePath.startsWith('/api/job-work/')) {
+    return res.status(403).json({ error: 'This account can access employee job-work tools only' })
+  }
   next()
 }
 
@@ -1402,6 +1410,7 @@ installMarketingRoutes(app,{db:authClient,requireBusiness,getMetaRetrievalToken:
   if(!data?.token_enc)return null
   return decodeMetaCredentials(decryptToken(data.token_enc)).retrievalToken
 }})
+installPostJobChecklist(app,{db:authClient,requireBusiness})
 installJobWork(app,{db:authClient,requireBusiness})
 installJobCalendar(app,{db:authClient,requireBusiness,getGoogleCalendarToken,googleConfigured:googleCalendar.isConfigured})
 installExtensionTransfers(app,{db:authClient,requireBusiness})

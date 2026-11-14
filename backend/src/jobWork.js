@@ -1,4 +1,5 @@
 import crypto from 'node:crypto'
+import { jobWorkStaffIds, jobWorkCanAccess } from './postJobChecklist.js'
 
 /* =========================================================================
    Job records: worker-submitted work hours, TurnKey's own staff calendar
@@ -85,8 +86,12 @@ export function installJobWork(app, { db, requireBusiness, bucket = 'turnkey-upl
 
   async function requireJobInBusiness(req, jobId) {
     if (!uuid(jobId)) throw fail('Invalid job id')
-    const job = await unwrap(db.from('jobs').select('id, business_id').eq('id', jobId).eq('business_id', req.businessId).maybeSingle())
+    const job = await unwrap(db.from('jobs').select('id, business_id, assigned_to, details').eq('id', jobId).eq('business_id', req.businessId).maybeSingle())
     if (!job) throw fail('Job not found', 404)
+    const r = await role(req)
+    if (!isPrivileged(r) && !await jobWorkCanAccess(db, req.businessId, req.userId, job)) {
+      throw fail('You can only access an assigned job', 403)
+    }
     return job
   }
 
@@ -115,11 +120,9 @@ export function installJobWork(app, { db, requireBusiness, bucket = 'turnkey-upl
       .select('id, status, scheduled_date, assigned_to, customer_id, details')
       .eq('business_id', req.businessId).gte('scheduled_date', from.toISOString().slice(0, 10))
       .lt('scheduled_date', to.toISOString().slice(0, 10)).order('scheduled_date', { ascending: true }))
-    const visible = rows.filter(job => {
-      if (isPrivileged(r)) return true
-      const assigned = Array.isArray(job.details?.assignedStaffIds) ? job.details.assignedStaffIds : []
-      return job.assigned_to === req.userId || assigned.includes(req.userId)
-    })
+    const staffIds = isPrivileged(r) ? null : await jobWorkStaffIds(db, req.businessId, req.userId)
+    const permitted = await Promise.all(rows.map(job => isPrivileged(r) || jobWorkCanAccess(db, req.businessId, req.userId, job, staffIds)))
+    const visible = rows.filter((_job, index) => permitted[index])
     const customerIds = [...new Set(visible.map(job => job.customer_id).filter(Boolean))]
     const customers = []
     for (let i = 0; i < customerIds.length; i += 100) {
@@ -206,6 +209,7 @@ export function installJobWork(app, { db, requireBusiness, bucket = 'turnkey-upl
 
   app.get('/api/job-work/logs', requireBusiness, wrap(async (req, res) => {
     const r = await role(req)
+    if (req.query.jobId) await requireJobInBusiness(req, req.query.jobId)
     const buildQuery = () => {
     let q = db.from('job_work_logs').select('*').eq('business_id', req.businessId).order('start_at', { ascending: true }).order('id', {ascending:true})
 
@@ -269,13 +273,15 @@ export function installJobWork(app, { db, requireBusiness, bucket = 'turnkey-upl
   }
 
   app.get('/api/job-work/equipment', requireBusiness, wrap(async (req, res) => {
+    const r = await role(req)
     const [assets, usage, events] = await Promise.all([
       fetchAllPaged(() => db.from('equipment_assets').select('*').eq('business_id', req.businessId).order('name').order('id')),
       fetchAllPaged(() => db.from('equipment_usage').select('*').eq('business_id', req.businessId).order('id')),
       fetchAllPaged(() => db.from('equipment_service_events').select('*').eq('business_id', req.businessId).order('id'))
     ])
     const equipment = assets.map((a) => computeAssetStatus(a, usage.filter((u) => u.asset_id === a.id), events))
-    res.json({ equipment })
+    const safeKeys = ['id','name','service_interval_hours','baseline_hours','runtimeHours','sinceServiceHours','remainingHours','due','hasServiceHistory','lastServiceAt']
+    res.json({ equipment: isPrivileged(r) ? equipment : equipment.map(asset => Object.fromEntries(safeKeys.map(key => [key, asset[key]]))) })
   }))
 
   function validateAssetCore(body) {
