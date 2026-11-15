@@ -1,0 +1,12 @@
+**
+!Dockerfile
+!backend/
+!backend/package.json
+!backend/package-lock.json
+!backend/src/
+!backend/src/**
+backend/src/**/*.test.js
+!sales-metrics.js
+!lead-identity.js
+!lead-answer-utils.js
+!pricing-engine.js

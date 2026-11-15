@@ -30,6 +30,25 @@ the CRM to hold.
 
 ## Deploy to Render (recommended, ~10 min)
 
+### Existing Docker service
+
+The repository-root `Dockerfile` runs the Express backend and includes the shared
+modules it imports from the repository root. For Render's Docker runtime use:
+
+- **Root directory:** blank (repository root)
+- **Dockerfile path:** `./Dockerfile`
+- **Docker build context:** `.` (repository root)
+- **Docker command:** blank (use the image's default command)
+- Keep existing backend environment variables and the existing service URL.
+
+Render supplies `PORT`; the server already reads it. Use `/api/health` for the
+health check. No database migrations run automatically during image creation.
+The build context excludes environment files, credentials, local dependencies
+and customer data. Do not set the Docker build context to `backend`: shared
+pricing, metrics and lead-normalization modules live above that directory.
+
+### Native Node service
+
 1. Push this repo to GitHub
 2. [render.com](https://render.com) → New → **Web Service**
 3. Connect the repo, set:
