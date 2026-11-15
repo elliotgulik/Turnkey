@@ -30,8 +30,8 @@ language sql stable security invoker set search_path='' as $$
     and i.object_type='staff_identity' and i.local_id=p_employee::text
   join public.calendar_events e on e.business_id=c.business_id and e.source='servicem8'
     and e.external_id=m.snapshot#>>'{booking,activityUuid}'
-    and e.details->>'jobUuid'=m.external_uuid
-  where c.business_id=p_job.business_id and m.snapshot#>>'{booking,jobUuid}'=m.external_uuid
+    and e.details->>'jobUuid'=m.external_uuid::text
+  where c.business_id=p_job.business_id and m.snapshot#>>'{booking,jobUuid}'=m.external_uuid::text
     and m.snapshot->>'status' in ('Work Order','Completed')
     and m.snapshot#>>'{booking,source}'='servicem8'
     and e.start_time=turnkey_private.post_job_time(m.snapshot#>>'{booking,startAt}')

@@ -33,7 +33,7 @@ test('portal SQL and restrictive security migration preserve trusted operations 
     create table customers(id uuid primary key,business_id text,name text,email text,phone text,address text,suburb text,notes text);
     create table jobs(id uuid primary key,business_id text,customer_id uuid,quote_id text,status text default 'scheduled',scheduled_date date,assigned_to uuid,details jsonb,updated_at timestamptz default now());
     create table servicem8_connections(business_id text,generation uuid);
-    create table external_object_mappings(business_id text,connection_generation uuid,object_type text,local_id text,external_uuid text,snapshot jsonb);
+    create table external_object_mappings(business_id text,connection_generation uuid,object_type text,local_id text,external_uuid uuid,snapshot jsonb);
     create table calendar_events(id uuid primary key,business_id text,source text,external_id text,start_time timestamptz,end_time timestamptz,details jsonb);
     create table storage.objects(id uuid,bucket_id text,name text);
     alter table storage.objects enable row level security;
