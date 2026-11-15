@@ -10,7 +10,7 @@
   const empty=()=>({customerHome:null,qualityCheck:false,reviewScanned:false,askedUpcomingWork:false,upcomingWorkNotes:'',askedFrequency:false,frequencyAnswer:'',injectorFlushed:false,fuelSwitchOff:false,objectsReturned:false,propertyLap:false});
   const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const closeIcon='<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>';
-  let config={},active=null,identity=null,identityPending=null,cardSerial=0;
+  let config={},active=null,identity=null,identityPending=null,cardSerial=0,picker=null;
   const ctx=()=>{const value=config.context?config.context():({biz:typeof currentBusinessId==='undefined'?null:currentBusinessId,user:typeof currentUserId==='undefined'?null:currentUserId,version:typeof businessSessionVersion==='undefined'?0:businessSessionVersion,role:typeof currentUserRole==='undefined'?null:currentUserRole});return {...value};};
   const key=c=>JSON.stringify([c.biz,c.user,c.version]);
   const current=c=>key(ctx())===key(c)&&!!c.biz&&!!c.user;
@@ -28,6 +28,42 @@
     return data;
   }
   const route=r=>'/jobs/'+encodeURIComponent(r.jobId)+'/post-job';
+  function pickerJobs(search=''){
+    const scope=ctx(),all=config.records?config.records():typeof records==='undefined'?[]:records;
+    const seen=new Set(),query=search.trim().toLocaleLowerCase();
+    const date=new Date(),today=date.getFullYear()+'-'+String(date.getMonth()+1).padStart(2,'0')+'-'+String(date.getDate()).padStart(2,'0');
+    return all.filter(r=>{
+      if(!r.jobId||seen.has(r.jobId)||r.stage==='cancelled')return false;
+      if(scope.role==='technician'&&!config.assignedRecordsOnly&&!isAssigned(r))return false;
+      if(!['won','scheduled','completed','paid'].includes(r.stage)&&!['booked','in_progress','paused','completed'].includes(r.jobStatus))return false;
+      if(query&&![r.name,r.address,r.jobId].some(v=>String(v||'').toLocaleLowerCase().includes(query)))return false;
+      seen.add(r.jobId);return true;
+    }).sort((a,b)=>{
+      const rank=r=>(['completed','paid'].includes(r.stage)||r.postJobCompletedAt?3:0)+(r.scheduledDateISO===today?-2:0);
+      return rank(a)-rank(b)||String(a.scheduledDateISO||'9999').localeCompare(String(b.scheduledDateISO||'9999'))||String(a.name||'').localeCompare(String(b.name||''));
+    });
+  }
+  function chooseJob(){
+    const scope=ctx();if(!scope.biz||!scope.user){notify('Sign in to choose your job.');return;}
+    if(picker){picker.querySelector('input').focus();return;}
+    if(active){if(active.busy){notify('Wait for this job to finish saving.');return;}close(active);}
+    const focus=document.activeElement,dialog=document.createElement('dialog');picker=dialog;dialog.className='pj-picker';dialog.setAttribute('aria-labelledby','pj-picker-title');
+    dialog.innerHTML=`<header class="pj-heading"><div><h2 id="pj-picker-title">Choose your job</h2><p>Open its checklist, review QR code and work hours.</p></div><button type="button" class="pj-close" aria-label="Close job picker">${closeIcon}</button></header><div class="pj-picker-search"><label for="pj-job-search">Find a job</label><input id="pj-job-search" type="search" placeholder="Customer name or address" autocomplete="off"><p class="pj-help" role="status" data-pj-job-count></p></div><div class="pj-picker-list" data-pj-jobs></div>`;
+    let watcher;const dismiss=()=>{clearInterval(watcher);dialog.close();dialog.remove();if(picker===dialog)picker=null;if(focus?.isConnected)focus.focus({preventScroll:true});};
+    const draw=()=>{
+      const jobs=pickerJobs(dialog.querySelector('input').value),list=dialog.querySelector('[data-pj-jobs]');
+      dialog.querySelector('[data-pj-job-count]').textContent=jobs.length>50?'Showing 50 of '+jobs.length+' jobs. Search to narrow the list.':jobs.length+' '+(jobs.length===1?'job':'jobs');
+      list.innerHTML=jobs.slice(0,50).map(r=>{
+        const completed=['completed','paid'].includes(r.stage)||r.postJobCompletedAt;
+        const when=r.scheduledDateISO?new Date(r.scheduledDateISO+'T12:00:00').toLocaleDateString('en-NZ',{day:'numeric',month:'short',year:'numeric'}):'Date not set';
+        return `<button type="button" class="pj-picker-job" data-pj-job="${esc(r.id)}"><strong>${esc(r.name||'Customer')}</strong><span>${esc(r.address||'Address not set')}</span><small>${esc(when)}, ${completed?'Completed':'Active job'}</small><span class="pj-picker-action">${completed?'View checklist':'Open checklist'}</span></button>`;
+      }).join('')||'<p class="pj-picker-empty">'+(dialog.querySelector('input').value?'No matching jobs. Try the customer’s name or address.':'No assigned or booked jobs are loaded. Refresh your jobs or check the booking with your manager.')+'</p>';
+    };
+    document.body.append(dialog);dialog.querySelector('.pj-close').onclick=dismiss;dialog.addEventListener('cancel',e=>{e.preventDefault();dismiss();});
+    dialog.querySelector('input').oninput=draw;dialog.querySelector('[data-pj-jobs]').onclick=e=>{const button=e.target.closest('[data-pj-job]');if(!button)return;if(!current(scope)){dismiss();return;}const id=button.dataset.pjJob;dismiss();open(id);};
+    watcher=setInterval(()=>{if(!current(scope))dismiss();},300);draw();dialog.showModal();dialog.querySelector('input').focus();
+    if(scope.role==='technician')refreshIdentity().then(()=>{if(dialog.isConnected&&current(scope))draw();});
+  }
   function missing(a){return [...(typeof a.customerHome!=='boolean'?['customerHome']:[]),...essential.filter(([id])=>a[id]!==true).map(([id])=>id),...(a.customerHome===true&&a.qualityCheck!==true?['qualityCheck']:[])];}
   function normalize(a){const result={...empty(),...a};if(result.customerHome!==true){result.qualityCheck=false;result.reviewScanned=false;result.askedUpcomingWork=false;result.upcomingWorkNotes='';result.askedFrequency=false;result.frequencyAnswer='';}return result;}
   function message(s,text,kind=''){if(!s.dialog.isConnected)return;const el=s.dialog.querySelector('[data-pj-message]');el.textContent=text;el.dataset.kind=kind;}
@@ -200,6 +236,7 @@
   root.addEventListener('online',()=>{refreshIdentity();if(active&&current(active.scope)&&active.dirty)enqueue(active);});
   root.addEventListener('focus',()=>refreshIdentity());
   root.addEventListener('pagehide',()=>{if(active)stash(active);});
-  root.TK_POST_JOB={open,settings,renderCard,isAssigned,refreshIdentity,missing,normalize,configure(value){config=value||{};identity=null;identityPending=null;},getActive:()=>active};
+  document.addEventListener('click',e=>{if(e.target.closest('[data-post-job-picker]'))chooseJob();});
+  root.TK_POST_JOB={open,chooseJob,pickerJobs,settings,renderCard,isAssigned,refreshIdentity,missing,normalize,configure(value){config=value||{};identity=null;identityPending=null;},getActive:()=>active};
   if(ctx().biz&&ctx().user)refreshIdentity();
 })(window);

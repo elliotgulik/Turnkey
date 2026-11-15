@@ -41,7 +41,7 @@
  function configureWork(){
   const common={getBusinessId:()=>state.biz,getUserId:()=>state.user,getVersion:()=>state.version,getRecords:()=>state.records,notify,employeePortal:true};
   root.TK_JOB_WORK?.configure({...common,request:(path,options)=>request('/api/job-work'+path,options)});
-  root.TK_POST_JOB?.configure({context:scope,records:()=>state.records,notify,request,onComplete:(result,r)=>{if(result.job?.status)r.stage=result.job.status==='paid'?'completed':result.job.status;renderJobs();writeCache();}});
+  root.TK_POST_JOB?.configure({context:scope,records:()=>state.records,assignedRecordsOnly:true,notify,request,onComplete:(result,r)=>{if(result.job?.status)r.stage=result.job.status==='paid'?'completed':result.job.status;renderJobs();writeCache();}});
  }
  function safeLogo(url){try{return new URL(url).protocol==='https:'?url:'';}catch{return '';}}
  function renderIdentity(){

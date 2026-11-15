@@ -9,7 +9,7 @@
 <link rel="stylesheet" href="tokens.css?v=20261103design1">
 <link rel="stylesheet" href="auth-mfa.css?v=20261103accounts1">
 <link rel="stylesheet" href="job-workspace.css?v=20261114a">
-<link rel="stylesheet" href="post-job-checklist.css?v=20261113a">
+<link rel="stylesheet" href="post-job-checklist.css?v=20261116picker1">
 <link rel="stylesheet" href="employee-portal.css?v=20261114a">
 <script src="config.js?v=20261017a"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.6" integrity="sha384-GyhLKJoRcMXYwIJUTyx0/uSPYliVPdRYYXJm3G6zyMjKShNs8jLM7WaLpk8Vr4W/" crossorigin="anonymous"></script>
@@ -25,6 +25,7 @@
 <div id="employee-app" class="employee-app" hidden>
  <header class="employee-top"><div class="employee-company"><span id="employee-logo" hidden></span><div><strong id="employee-company-name">Your team</strong><span>Employee portal</span></div></div><div class="employee-account"><a class="btn ghost" id="employee-full-crm" href="index.html" hidden>Full CRM</a><button class="btn ghost" id="employee-sign-out" type="button">Sign out</button></div></header>
  <main>
+  <div class="pj-launch-bar"><button type="button" class="btn ghost" data-post-job-picker><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V2h6v2M8 10l2 2 5-5M8 16h8"/></svg>Job checklist</button></div>
   <section id="employee-jobs" class="employee-section"><header class="employee-page-heading"><div><h1 id="employee-title">Your jobs</h1><p id="employee-greeting"></p></div><button class="btn ghost" id="employee-refresh" type="button">Refresh</button></header>
    <div class="employee-date-controls"><button class="btn ghost" id="employee-previous" type="button" aria-label="Previous day"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg></button><label>Work date<input id="employee-date" type="date"></label><button class="btn ghost" id="employee-next" type="button" aria-label="Next day"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m10 6 6 6-6 6"/></svg></button><button class="btn ghost" id="employee-today" type="button">Today</button></div>
    <div id="employee-week" class="employee-week" aria-label="Work week" hidden></div><p id="employee-status" class="employee-status" role="status" aria-live="polite"></p><div id="employee-job-list" class="employee-job-list"></div>
@@ -39,11 +40,11 @@
  </nav>
 </div>
 <div id="employee-toast" role="status" aria-live="polite" hidden></div>
-<script src="employee-portal.js?v=20261114a"></script>
+<script src="employee-portal.js?v=20261116picker1"></script>
 <script src="auth-mfa.js?v=20261103accounts1"></script>
 <script src="job-workspace.js?v=20261113a"></script>
 <script src="assets/vendor/qrcode-generator-2.0.4.js"></script>
 <script src="assets/vendor/qrcode-generator-utf8-2.0.4.js"></script>
-<script src="post-job-checklist.js?v=20261113a"></script>
+<script src="post-job-checklist.js?v=20261116picker1"></script>
 </body>
 </html>

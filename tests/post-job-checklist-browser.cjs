@@ -49,7 +49,7 @@ const jobId='00000000-0000-4000-8000-000000000111';
    const original=qrcode;window.qrcode=Object.assign(function(...args){const qr=original(...args),add=qr.addData;qr.addData=function(value){window.encodedReviewUrl=value;return add.apply(this,arguments);};return qr;},original);
    showApp();openDetail(11);
   },{jobId});};
-  await page.goto('https://fixture.test/');await setup();await page.evaluate(()=>completeJob(11));
+  await page.goto('https://fixture.test/');await setup();await page.getByRole('button',{name:'Job checklist',exact:true}).click();const picker=page.locator('.pj-picker');await picker.getByRole('searchbox').fill('Customer Example');assert.equal(await picker.locator('[data-pj-job]').count(),1);assert.equal(await picker.evaluate(el=>el.scrollWidth>el.clientWidth+1),false);await page.screenshot({path:`/private/tmp/job-checklist-picker-${width}.png`});await picker.locator('[data-pj-job]').click();
   const dialog=page.locator('.pj-dialog');await page.waitForFunction(()=>TK_POST_JOB.getActive()?.loaded);
   await dialog.getByRole('button',{name:'Complete Job',exact:true}).click();assert.equal(state.completed.length,0);assert.equal(await dialog.locator('.pj-missing').count(),5);
   await dialog.getByRole('radio',{name:'Yes',exact:true}).check();await dialog.locator('[name="qualityCheck"]').check();
