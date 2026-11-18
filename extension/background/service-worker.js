@@ -19,13 +19,14 @@
 // would needlessly survive a full browser restart for what's meant to be a
 // short-lived handshake) — see loadPending()/savePending() below.
 import { fetchSiteConfig, TurnKeyClient, TURNKEY_CRM_ORIGINS, TURNKEY_SUPABASE_ORIGIN } from '../api/turnkey-api.js';
+import { recoverFromCRM } from './session-recovery.js';
 import { Storage, connectionChanged } from '../api/storage.js';
 import { dataUrlToBlob } from '../content/panel/screenshot.js';
 import { openTurnKeyTab } from './open-turnkey.js';
 import { registerCustomerHandoff } from './customer-handoff.js';
 
 // Customer → Google Earth handoff (TK_CUSTOMER_LAUNCH / TK_GET_CUSTOMER_CONTEXT) — see customer-handoff.js.
-registerCustomerHandoff();
+registerCustomerHandoff(ensureClient);
 
 // ── 1. Screenshot ────────────────────────────────────────────────────────
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -118,7 +119,7 @@ function bridgeOriginAllowed(siteUrl) {
   }
 }
 
-async function openWorkspace({ category, categoryLabel, kind, lat, lng, address }, earthTabId) {
+async function openWorkspace({ category, categoryLabel, kind, lat, lng, address, propertyLat, propertyLng }, earthTabId) {
   await sweepExpired();
   const config = await Storage.getConfig();
   if (!config || !config.siteUrl) throw new Error('Connect the extension to your TurnKey site first.');
@@ -136,6 +137,10 @@ async function openWorkspace({ category, categoryLabel, kind, lat, lng, address 
   url.searchParams.set('lat', String(lat));
   url.searchParams.set('lng', String(lng));
   if (typeof address === 'string' && address.trim()) url.searchParams.set('address', address.trim().slice(0, 500));
+  if (Number.isFinite(propertyLat) && Math.abs(propertyLat) <= 85 && Number.isFinite(propertyLng) && Math.abs(propertyLng) <= 180) {
+    url.searchParams.set('propertyLat', String(propertyLat));
+    url.searchParams.set('propertyLng', String(propertyLng));
+  }
   const tab = await chrome.tabs.create({ url: url.toString(), active: true });
   pendingRequests.set(requestId, {
     earthTabId,
@@ -280,18 +285,40 @@ const API_ACTIONS = new Set([
 ]);
 
 let client = null;
+let clientLoading = null;
 let apiConnectionGeneration = 0;
+function makeClient(config, session, generation) {
+  return new TurnKeyClient(config, session, async (next) => {
+    if (generation !== apiConnectionGeneration) throw new Error('Your account changed. Reconnect before continuing.');
+    await Storage.setSession(next);
+  }, previous => recoverFromCRM(chrome, config, previous));
+}
 async function ensureClient() {
   if (client) return client;
-  const { config, session } = await Storage.loadAll();
-  if (!config) return null;
-  client = new TurnKeyClient(config, session, (s) => Storage.setSession(s));
-  return client;
+  if (clientLoading) return clientLoading;
+  const generation = apiConnectionGeneration;
+  const loading = (async () => {
+    const { config, session } = await Storage.loadAll();
+    if (generation !== apiConnectionGeneration) throw new Error('Your account changed. Please retry.');
+    if (!config) return null;
+    client = makeClient(config, session, generation);
+    return client;
+  })();
+  clientLoading = loading;
+  try { return await loading; }
+  finally { if (clientLoading === loading) clientLoading = null; }
 }
 
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === 'local' && connectionChanged(changes)) apiConnectionGeneration++;
-  if (area === 'local' && (changes.tk_config || changes.tk_session)) client = null;
+  if (area !== 'local') return;
+  if (connectionChanged(changes) || changes.tk_config) {
+    apiConnectionGeneration++;
+    client = null;
+    clientLoading = null;
+  } else if (changes.tk_session && client) {
+    // Keep the shared refresh lock alive when only the token pair rotates.
+    client.session = changes.tk_session.newValue || null;
+  }
 });
 
 async function handleApiAction(action, args) {
@@ -358,7 +385,7 @@ async function connectFromActiveCRM(sender) {
     throw new Error('Your TurnKey business profile could not be loaded. Refresh TurnKey and retry.');
   }
   await Storage.connect({ config, session: verified.session, profile, business });
-  client = new TurnKeyClient(config, verified.session, (session) => Storage.setSession(session));
+  client = makeClient(config, verified.session, apiConnectionGeneration);
   return { profile: { business_id: profile.business_id, role: profile.role, name: profile.name, email: profile.email }, business: { id: business.id, name: business.name } };
 }
 

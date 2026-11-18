@@ -16,6 +16,9 @@ export function mountToolbar(root, actions) {
       <div class="tk-status" data-role="status"></div>
       <div data-role="customer-context"></div>
       <div class="tk-actions">
+        <button type="button" class="tk-btn tk-btn-custom-area" data-action="measure-custom-area">
+          <span class="tk-btn-ico">＋</span> Custom area
+        </button>
         <button type="button" class="tk-btn" data-action="measure-area">
           <span class="tk-btn-ico">▣</span> Outline
         </button>
@@ -99,7 +102,7 @@ export function mountToolbar(root, actions) {
         (m) =>
           `<div class="tk-meas-row" data-id="${escapeHtml(m.id)}">
             <span class="tk-meas-label">${escapeHtml(m.categoryLabel)}</span>
-            <span class="tk-meas-value">${m.size}${m.unit === 'm²' ? ' m²' : ' m'}</span>
+            <span class="tk-meas-value">${m.size} ${escapeHtml(m.unit || '')}</span>
             <button type="button" class="tk-meas-remove" data-remove="${escapeHtml(m.id)}" aria-label="Remove">×</button>
           </div>`
       )

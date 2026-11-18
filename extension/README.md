@@ -9,6 +9,16 @@ folder, replace that copy's `manifest.json` with `manifest.dev.json`, and load
 that folder unpacked in Chrome. Keep the production manifests for packaging.
 `chrome-extension/measurement.js` remains required by `scripts/build-static.js`.
 
+## Version 0.2.14: stable property pins and Custom area
+
+**Custom area** opens a trace without assigning it to a standard service. In Instant Quote, name the work and enter its quantity and agreed unit price. The outline is reference geometry; it does not override your custom price.
+
+A verified property position is reused between measurement views and subsequent measurements, independently of Earth's moving camera. An unresolved camera location is labelled as unverified rather than being treated as the customer's exact house. Satellite geocoding is an estimate, not a property survey.
+
+Connect to signed-in TurnKey once. The extension keeps the rotated session in browser storage, shares one refresh across simultaneous requests, and can recover the same account from an already signed-in TurnKey tab. Temporary server failures preserve the connection. Explicit sign-out, revoked access, password changes or server session limits can still require reconnecting.
+
+Install the updated ZIP, disable older copies and refresh Earth and TurnKey. Hosted measurement-page changes also require deployment.
+
 ## Version 0.2.13: custom fixed-price items
 
 Open Instant Quote without a measurement and choose **Add a custom fixed-price item**. Enter any service name and a GST-inclusive unit price; quantity defaults to 1 and units can be item, hour or day. Delivery cost is optional (total line cost ex GST); blank means unknown, so profit/margin remain unknown. Custom prices stay fixed when access/margin changes and never train calibration. Total distribution remains available for measured-only quotes; edit custom unit prices directly. Saved custom items reopen with all fields intact.
@@ -29,7 +39,7 @@ Each service shows configured pricing, its target-margin floor, base, learned do
 
 Learning uses the connected business’s authenticated backend. Open the extension popup and **Enable quote learning & ServiceM8** if backend access has not yet been granted. If learning is unavailable, base pricing and manual edits still work. Learning is submitted after the quote is saved; a failed submission shows a warning and a safe retry button on the saved-quote screen. Manage learning settings and resets in TurnKey.
 
-Build the downloadable ZIP with `node extension/scripts/pack.cjs`; this refreshes all vendored engines from the root source and writes `extension/dist/turnkey-earth-extension-0.2.13.zip`. Unzip, load the folder containing `manifest.json`, and refresh Earth and TurnKey. Main publishes the download in the site's assets.
+Build the downloadable ZIP with `node extension/scripts/pack.cjs`; this refreshes all vendored engines from the root source and writes `extension/dist/turnkey-earth-extension-0.2.14.zip`. Unzip, load the folder containing `manifest.json`, and refresh Earth and TurnKey. Main publishes the download in the site's assets.
 
 ## Version 0.2.8: quote levels and access settings
 

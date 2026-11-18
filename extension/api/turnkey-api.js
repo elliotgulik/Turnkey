@@ -90,8 +90,9 @@ export class TurnKeyClient {
    *   content script refreshed first) would fail to refresh and force a
    *   full re-sign-in. Wire this to Storage.setSession() at the call site.
    */
-  constructor(cfg, session, onSessionChange) {
+  constructor(cfg, session, onSessionChange, recoverSession) {
     this.cfg = cfg;
+    this.recoverSession = recoverSession;
     this.session = session || null;
     this.onSessionChange = onSessionChange || (() => {});
   }
@@ -135,37 +136,82 @@ export class TurnKeyClient {
     }
     this.session.userId = user.id;
     if (this.session.expiresAt - Date.now() < 60000) await this.refresh();
-    this.onSessionChange(this.session);
+    await this.onSessionChange(this.session);
     return this.session;
   }
 
-  async refresh() {
-    if (!this.session || !this.session.refreshToken) throw new Error('Not signed in');
+  async refresh(rejectedAccessToken) {
+    // All callers in the worker share this rotation, including a 401 retry.
+    if (this._refreshPromise) return this._refreshPromise;
+    if (rejectedAccessToken && this.session?.accessToken !== rejectedAccessToken) return this.session;
+    this._refreshPromise = this._rotateSession();
+    try { return await this._refreshPromise; }
+    finally { this._refreshPromise = null; }
+  }
+
+  async _rotateSession() {
+    const previous = this.session;
+    if (!previous?.refreshToken) throw new Error('Connect your TurnKey account first.');
     const res = await fetch(this.cfg.supabaseUrl + '/auth/v1/token?grant_type=refresh_token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', apikey: this.cfg.supabaseAnonKey },
-      body: JSON.stringify({ refresh_token: this.session.refreshToken })
+      body: JSON.stringify({ refresh_token: previous.refreshToken })
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error_description || 'Session expired — please sign in again');
-    this.session = {
+    let data;
+    try { data = await res.json(); } catch { throw new Error('TurnKey sign-in is temporarily unavailable. Your connection is saved; please retry.'); }
+    if (!res.ok) {
+      // The CRM may have rotated a shared session while Earth was closed.
+      // Only a verified, same-account CRM session may recover it.
+      if ((res.status === 400 || res.status === 401) && this.recoverSession) {
+        const recovered = await this.recoverSession(previous);
+        if (recovered && recovered.userId === previous.userId) {
+          await this.onSessionChange(recovered);
+          this.session = recovered;
+          return recovered;
+        }
+      }
+      throw new Error(res.status >= 500 || res.status === 429
+        ? 'TurnKey sign-in is temporarily unavailable. Your connection is saved; please retry.'
+        : 'Your TurnKey sign-in was revoked or expired. Open TurnKey and reconnect the extension.');
+    }
+    if (!data.access_token || !data.refresh_token) throw new Error('TurnKey returned an incomplete sign-in response. Please retry.');
+    if (previous.userId && data.user?.id && previous.userId !== data.user.id) throw new Error('Your account changed. Reconnect the extension.');
+    const next = {
       accessToken: data.access_token,
       refreshToken: data.refresh_token,
-      userId: data.user ? data.user.id : this.session.userId,
-      expiresAt: Date.now() + (data.expires_in || 3600) * 1000
+      userId: data.user?.id || previous.userId,
+      expiresAt: Date.now() + (Number(data.expires_in) || 3600) * 1000
     };
-    this.onSessionChange(this.session);
-    return this.session;
+    // Persist before resolving, so a suspended worker restarts with the rotated pair.
+    await this.onSessionChange(next);
+    this.session = next;
+    return next;
   }
 
   async _ensureFreshSession() {
     if (!this.session) throw new Error('Not signed in');
-    if (this.session.expiresAt - Date.now() < 60000) await this.refresh();
+    if (this._refreshPromise) await this._refreshPromise;
+    if (!Number.isFinite(this.session.expiresAt) || this.session.expiresAt - Date.now() < 60000) await this.refresh();
+  }
+
+  async _authenticatedFetch(url, options = {}) {
+    await this._ensureFreshSession();
+    const token = this.session.accessToken;
+    const send = () => fetch(url, { ...options, headers: {
+      ...(options.headers || {}), Authorization: 'Bearer ' + this.session.accessToken
+    }});
+    let response = await send();
+    // Auth rejection happens before application writes; never retry other failures.
+    if (response.status === 401) {
+      await this.refresh(token);
+      response = await send();
+    }
+    return response;
   }
 
   async _rest(path, opts = {}) {
     await this._ensureFreshSession();
-    const res = await fetch(this.cfg.supabaseUrl + '/rest/v1/' + path, {
+    const res = await this._authenticatedFetch(this.cfg.supabaseUrl + '/rest/v1/' + path, {
       ...opts,
       headers: {
         apikey: this.cfg.supabaseAnonKey,
@@ -201,7 +247,7 @@ export class TurnKeyClient {
     }
     await this._ensureFreshSession();
     options.signal?.throwIfAborted();
-    const res=await fetch(this.cfg.backendUrl.replace(/\/$/,'')+path,{
+    const res=await this._authenticatedFetch(this.cfg.backendUrl.replace(/\/$/,'')+path,{
       ...options,headers:{Authorization:'Bearer '+this.session.accessToken,'Content-Type':'application/json'},signal:options.signal||AbortSignal.timeout(30000)
     });
     const text=await res.text();let body={};
@@ -408,7 +454,7 @@ export class TurnKeyClient {
     await this._ensureFreshSession();
     const filename = 'property-screenshot.png';
     const path = businessId + '/quote_attachment/' + Date.now() + '-' + Math.random().toString(36).slice(2, 8) + '-' + filename;
-    const res = await fetch(this.cfg.supabaseUrl + '/storage/v1/object/turnkey-uploads/' + path, {
+    const res = await this._authenticatedFetch(this.cfg.supabaseUrl + '/storage/v1/object/turnkey-uploads/' + path, {
       method: 'POST',
       headers: {
         apikey: this.cfg.supabaseAnonKey,

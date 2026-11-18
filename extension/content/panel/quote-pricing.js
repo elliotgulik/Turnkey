@@ -4,7 +4,7 @@ export function normalizeCustomLine(line) {
   if (!isCustomLine(line)) return line;
   const label=typeof line.label==='string'?line.label.trim():'';
   if(!label || label.length>120) throw Error('Enter a custom service name of 1–120 characters.');
-  const qty=line.qty===undefined?1:line.qty,unit=line.unit||'item',unitPrice=line.unitPrice;
+  const qty=line.qty===undefined?1:line.qty,unit=typeof line.unit==='string'?line.unit.trim():'item',unitPrice=line.unitPrice;
   if(!Number.isFinite(qty)||qty<=0||qty>1e8)throw Error('Enter a positive custom quantity.');
   if(!['item','hour','day'].includes(unit))throw Error('Choose item, hour or day for a custom service.');
   if(!Number.isFinite(unitPrice)||unitPrice<0||unitPrice>1e8||qty*unitPrice>1e8)throw Error('Enter a valid custom unit price (GST inclusive, zero or more).');

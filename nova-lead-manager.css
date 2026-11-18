@@ -69,3 +69,7 @@
 .nlm-alert-row.unread{border-left:3px solid var(--teal,#138574);}
 .nlm-alert-row.read{opacity:.7;}
 .nlm-alert-read-state{font-size:11px;font-weight:500;}
+
+/* Stable badge geometry in the list, preview and lead details. */
+#view-leads .nlm-grade { box-sizing:border-box; flex:none; width:28px; min-width:28px; height:28px; min-height:28px; padding:0; border-radius:4px; font-size:15px; line-height:1; }
+#view-leads .nlm-grade-reason { display:block; margin-top:6px; color:#53626c; font-size:13px; line-height:1.4; }

@@ -1,5 +1,6 @@
 import { Storage, connectionChanged } from '../../api/storage.js';
 import { TurnKeyApi } from '../../api/client-bridge.js';
+import { resolvePropertyLocation } from './customer-context.js';
 import { mountToolbar } from './toolbar.js';
 import { renderQuotePanel, renderQuoteCreated } from './quote.js';
 import { createQuoteDraft } from './quote-create.js';
@@ -115,6 +116,7 @@ export async function init(shadowRoot) {
     business: null,
     settings: null,
     address: '',
+    propertyLocation: null,
     lat: null,
     lng: null,
     measurements: [],
@@ -172,12 +174,15 @@ export async function init(shadowRoot) {
       state.address = ctx.address;
       state.addressLocked = true;
     }
+    const anchor = resolvePropertyLocation({address:state.address,propertyLocation:state.propertyLocation,...ctx});
+    state.propertyLocation = anchor?.source === 'property' ? {...anchor.position,address:state.address} : null;
   }
   try { await loadBoundCustomerContext(); } catch (error) { state.contextError = error.message; toast(root, error.message, 'error'); }
 
   const toolbar = mountToolbar(root, {
     onAction: handleToolbarAction,
     onAddressChange: (v) => {
+      if (state.address !== v) state.propertyLocation = null;
       state.address = v;
       toolbar.update(state);
     },
@@ -230,7 +235,7 @@ export async function init(shadowRoot) {
   }
 
   function requireLocation() {
-    if (state.lat == null) {
+    if (!resolvePropertyLocation({address:state.address,propertyLocation:state.propertyLocation},{lat:state.lat,lng:state.lng})) {
       toast(root, 'Search for or fly to a property in Google Earth first, so TurnKey knows where to measure.', 'error');
       return false;
     }
@@ -274,18 +279,21 @@ export async function init(shadowRoot) {
   async function openWorkspaceMeasure(categoryKey) {
     const category = CATEGORIES.find((c) => c.key === categoryKey);
     const svc = guessServiceForCategory(category.key, category.kind);
+    const anchor = resolvePropertyLocation({address:state.address,propertyLocation:state.propertyLocation},{lat:state.lat,lng:state.lng});
+    if (!anchor) return;
+    const propertyCoords = anchor.source === 'property' ? {propertyLat:anchor.position.lat,propertyLng:anchor.position.lng} : {};
     toast(root, `Opening the TurnKey measurement workspace for ${category.label}…`);
     chrome.runtime.sendMessage(
       {
         type: 'TK_OPEN_WORKSPACE',
-        payload: { category: category.key, categoryLabel: category.label, kind: category.kind, lat: state.lat, lng: state.lng, address: state.address }
+        payload: { category: category.key, categoryLabel: category.label, kind: category.kind, ...anchor.position, ...propertyCoords, address: state.address }
       },
       (res) => {
         if (chrome.runtime.lastError || !res || !res.ok) {
           toast(root, 'Could not open the measurement workspace — ' + ((res && res.error) || (chrome.runtime.lastError && chrome.runtime.lastError.message) || 'unknown error'), 'error');
           return;
         }
-        state.pendingMeasureRequests[res.requestId] = { category: category.key, categoryLabel: category.label, kind: category.kind, serviceId: svc };
+        state.pendingMeasureRequests[res.requestId] = { category: category.key, categoryLabel: category.label, kind: category.kind, serviceId: svc, address:state.address };
       }
     );
   }
@@ -319,6 +327,9 @@ export async function init(shadowRoot) {
       notes: '',
       photoPaths: []
     };
+    const anchor = resolvePropertyLocation({address:pending.address,propertyLocation:result.propertyLocation});
+    if (anchor?.source === 'property' && pending.address === state.address)
+      state.propertyLocation = {...anchor.position,address:state.address};
     state.measurements.push(measurement);
     delete state.pendingMeasureRequests[requestId];
     toolbar.update(state);
@@ -327,6 +338,7 @@ export async function init(shadowRoot) {
   }
 
   function guessServiceForCategory(categoryKey, kind) {
+    if (categoryKey === 'custom' || categoryKey === 'custom-line') return 'custom';
     const hintMap = { roof: 'roof', driveway: 'driveway', concrete: 'driveway', house: 'housewash', fence: 'fence', deck: 'deck' };
     if (hintMap[categoryKey] && SERVICES[hintMap[categoryKey]]) return hintMap[categoryKey];
     const wantShape = interactionForKind(kind);
@@ -366,7 +378,7 @@ export async function init(shadowRoot) {
     state.quoteCreateProgress = null; // fresh quote-panel session — any earlier partial create attempt is unrelated
     renderQuotePanel(
       modalLayer,
-      { measurements: state.measurements, address: state.address, TK_PRICING, TK_COST, business: state.business, boundCustomer: state.boundCustomer, boundJob: state.boundJob, manualWindows, TK_PRICE_LEARNING, learningState, learningWarning },
+      { measurements: state.measurements, address: state.address, propertyLocation:state.propertyLocation, TK_PRICING, TK_COST, business: state.business, boundCustomer: state.boundCustomer, boundJob: state.boundJob, manualWindows, TK_PRICE_LEARNING, learningState, learningWarning },
       {
         onCancel: closeModal,
         onSearchCustomer: async (query) => {
@@ -454,7 +466,10 @@ export async function init(shadowRoot) {
 
   function handleToolbarAction(action) {
     if (!requireConnected()) return;
-    if (action === 'measure-area') {
+    if (action === 'measure-custom-area') {
+      if (!requireLocation()) return;
+      openWorkspaceMeasure('custom');
+    } else if (action === 'measure-area') {
       if (!requireLocation()) return;
       openCategoryPicker('closed');
     } else if (action === 'measure-distance') {
@@ -479,6 +494,7 @@ export async function init(shadowRoot) {
       state.boundCustomer = null;
       state.boundJob = null;
       state.address = '';
+      state.propertyLocation = null;
       state.measurements = [];
       state.pendingMeasureRequests = {};
       state.screenshotDataUrl = null;
@@ -502,6 +518,7 @@ export async function init(shadowRoot) {
       state.boundCustomerBusinessId = null;
       state.addressLocked = false;
       state.address = '';
+      state.propertyLocation = null;
       state.contextError = 'Your account changed. Reopen Google Earth from TurnKey.';
     }
     toolbar.update(state);

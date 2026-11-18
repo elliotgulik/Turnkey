@@ -430,10 +430,6 @@ nav.tabs button.active{box-shadow:none}
 
 /* Lead fit is labelled as well as coloured; owner colours identify people only. */
 .nlm-card[data-nlm-record]{cursor:pointer}
-.nlm-card.nlm-fit-a{background:#f1f9f4}
-.nlm-card.nlm-fit-b{background:#f3f7fd}
-.nlm-card.nlm-fit-c{background:#f8f5fb}
-.nlm-card.nlm-fit-review{background:#fff9ed}
 .nlm-card[data-nlm-record]:hover{background:#eaf3f1}
 .nlm-card[data-nlm-record]:focus-visible{outline:2px solid var(--teal);outline-offset:-3px}
 .nlm-compact .nlm-grade,.nlm-detail .nlm-grade{height:auto;min-height:26px;padding:4px 8px;font-size:11px;line-height:1.35;white-space:nowrap}

@@ -50,6 +50,7 @@ export async function createQuoteDraft(api, progress, { businessId, payload, bin
   }
 
   const details = {
+    ...(payload.propertyLocation?{propertyLocation:payload.propertyLocation}:{}),
     ...(payload.quoteLearning?{quoteLearning:payload.quoteLearning}:{}),
     address:payload.address || '', services:payload.lines, total:payload.total, areaPolys:payload.areaPolys,
     ...(payload.costSnapshot ? {costSnapshot:payload.costSnapshot,estimatedCost:payload.estimatedCost,estimatedMarginPct:payload.estimatedMarginPct,gstRegistered:payload.gstRegistered,targetMargin:payload.targetMargin,assumptions:payload.assumptions} : {})

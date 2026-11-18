@@ -49,7 +49,7 @@ function mapsDouble(legacy,lookup){
  Polyline3DElement:Line3D,AltitudeMode:{ABSOLUTE:'ABSOLUTE',CLAMP_TO_GROUND:'CLAMP_TO_GROUND'},MapMode:{SATELLITE:'SATELLITE'}};}}};
  window.__tkMeasureMapsReady();`;
 }
-for(const legacy of [false,true])for(const lookup of ['success','denied','empty','partial','unavailable','no-address'])test(`workspace preserves trace and resolves property anchor (${legacy?'3D':'DOM'} markers, ${lookup})`,async()=>{
+for(const legacy of [false,true])for(const lookup of ['success','denied','empty','partial','unavailable','no-address','saved-anchor'])test(`workspace preserves trace and resolves property anchor (${legacy?'3D':'DOM'} markers, ${lookup})`,async()=>{
  const browser=await chromium.launch({headless:true});
  try{
   const page=await browser.newPage();const errors=[];
@@ -62,7 +62,7 @@ for(const legacy of [false,true])for(const lookup of ['success','denied','empty'
    if(!['measure.html','measure.js','measure.css','measurement-editor.js','geometry.js'].includes(filename))return route.abort();
    return route.fulfill({contentType:filename.endsWith('.html')?'text/html':filename.endsWith('.css')?'text/css':'application/javascript',body:fs.readFileSync(path.join(root,filename==='geometry.js'?'extension/geometry.js':filename))});
   });
-  await page.goto('https://measurement.test/measure.html?requestId=test&lat=-36.8&lng=174.7'+(lookup==='no-address'?'':'&address=12%20Test%20Road'));
+  await page.goto('https://measurement.test/measure.html?requestId=test&lat=-36.8&lng=174.7'+(lookup==='no-address'?'':'&address=12%20Test%20Road')+(lookup==='saved-anchor'?'&propertyLat=-36.81&propertyLng=174.71':''));
   await page.waitForFunction(()=>window.mapsTest?.map3d);
   await page.locator('[data-view="3d"]').click();
   const emit=async(type,props)=>page.evaluate(({type,props})=>{
@@ -90,19 +90,21 @@ for(const legacy of [false,true])for(const lookup of ['success','denied','empty'
   // Resolve after drawing: a late lookup must move only the anchor, not the
   // camera or canonical points (also asserted in the final Finish payload).
   const cameraBefore=await page.evaluate(()=>({...mapsTest.map3d.center}));
-  if(!['unavailable','no-address'].includes(lookup)){
+  if(!['unavailable','no-address','saved-anchor'].includes(lookup)){
    await page.evaluate(()=>mapsTest.completeLookup());
    await page.waitForFunction(()=>!document.getElementById('tkm-property-address').textContent.includes('locating address'));
    assert.deepEqual(await page.evaluate(()=>mapsTest.geocodeRequest),{address:'12 Test Road'});
   }
-  const anchor=lookup==='success'?{lat:-36.81,lng:174.71}:{lat:-36.8,lng:174.7};
+  if(lookup==='saved-anchor')assert.equal(await page.evaluate(()=>!!mapsTest.geocodeRequest),false,'authoritative geocode must not be replaced by a new lookup');
+  if(!legacy)assert.deepEqual(await page.locator('test-property-marker').evaluate(m=>[m.anchorLeft,m.anchorTop]),['-50%','-100%']);
+  const anchor=['success','saved-anchor'].includes(lookup)?{lat:-36.81,lng:174.71}:{lat:-36.8,lng:174.7};
   const label=await page.locator('#tkm-property-address').textContent();
-  if(lookup==='success')assert.equal(label,'12 Test Road');
+  if(['success','saved-anchor'].includes(lookup))assert.equal(label,'12 Test Road');
   else assert.match(label,/selected location|no property address supplied/i);
   assert.deepEqual(await page.locator('test-property-marker').evaluate(m=>m.position),anchor);
   assert.deepEqual(await page.evaluate(()=>mapsTest.markers2d[0].position),anchor);
   assert.deepEqual(await page.evaluate(()=>({...mapsTest.map3d.center})),cameraBefore);
-  assert.equal(await page.locator('#tkm-return-property').textContent(),lookup==='success'?'Return to property':'Return to location pin');
+  assert.equal(await page.locator('#tkm-return-property').textContent(),['success','saved-anchor'].includes(lookup)?'Return to property':'Return to location pin');
   await page.locator('#tkm-return-property').click();
   assert.deepEqual(await page.evaluate(()=>mapsTest.map3d.lastFlight.endCamera),{
    center:anchor,altitudeMode:'CLAMP_TO_GROUND',range:300,heading:0,tilt:60,roll:0});

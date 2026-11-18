@@ -24,13 +24,20 @@ const kind = ['area', 'perimeter', 'line'].includes(params.get('kind')) ? params
 const interaction = kind === 'line' ? 'open' : 'closed';
 const startLat = parseFloat(params.get('lat'));
 const startLng = parseFloat(params.get('lng'));
-// Keep the original selected location pinned until an address resolves.
-let propertyPosition = Object.freeze({lat:startLat,lng:startLng});
+// Explicit property coordinates are authoritative; legacy lat/lng are only
+// the launch camera and remain a neutral location pin until geocoded.
+const propertyLat = Number(params.get('propertyLat'));
+const propertyLng = Number(params.get('propertyLng'));
+const hasPropertyAnchor = params.has('propertyLat') && params.has('propertyLng') &&
+  params.get('propertyLat').trim() !== '' && params.get('propertyLng').trim() !== '' &&
+  Number.isFinite(propertyLat) && Math.abs(propertyLat)<=85 &&
+  Number.isFinite(propertyLng) && Math.abs(propertyLng)<=180;
+let propertyPosition = Object.freeze(hasPropertyAnchor ? {lat:propertyLat,lng:propertyLng} : {lat:startLat,lng:startLng});
 const propertyAddress = (params.get('address') || params.get('propertyAddress') || '').trim();
-let propertyResolved = false;
-let propertyLabel = propertyAddress
-  ? `${propertyAddress} — locating address; pin marks the selected location`
-  : 'Selected location — no property address supplied';
+let propertyResolved = hasPropertyAnchor;
+let propertyLabel = hasPropertyAnchor ? (propertyAddress || 'Saved property location') : propertyAddress
+  ? `${propertyAddress} — locating address; selected location is the Earth camera target, not a verified property`
+  : 'Selected location — Earth camera target; no property address supplied';
 
 const els = {
   category: document.getElementById('tkm-category'),
@@ -216,7 +223,7 @@ function updatePropertyAnchor(){
   }
 }
 async function resolvePropertyAnchor(){
-  if(!propertyAddress)return;
+  if(hasPropertyAnchor || !propertyAddress)return;
   let timer;
   try {
     const response = await Promise.race([
@@ -236,7 +243,7 @@ async function resolvePropertyAnchor(){
     propertyResolved = true;
     propertyLabel = result.formatted_address || propertyAddress;
   } catch {
-    propertyLabel = `${propertyAddress} — address lookup unavailable or inconclusive; pin remains at the selected location`;
+    propertyLabel = `${propertyAddress} — address lookup unavailable or inconclusive; pin remains at the selected location (Earth camera target, property unverified)`;
   } finally {
     clearTimeout(timer);
     updatePropertyAnchor();
@@ -246,7 +253,7 @@ async function resolvePropertyAnchor(){
 // ── 2D satellite view ────────────────────────────────────────────────────
 function initMap2d() {
   map2d = new google.maps.Map(els.map2d, {
-    center: { lat: startLat, lng: startLng },
+    center: {...propertyPosition},
     zoom: 20,
     mapTypeId: 'satellite',
     tilt: 0,
@@ -296,7 +303,7 @@ async function tryInit3d() {
     maps3dLib=maps3d;
     if (!maps3d || !maps3d.Map3DElement) throw new Error('maps3d library unavailable');
     map3d = new maps3d.Map3DElement({
-      center: { lat: startLat, lng: startLng, altitude: 0 },
+      center: {...propertyPosition, altitude: 0},
       range: 300,
       tilt: 60,
       heading: 0,
@@ -339,6 +346,8 @@ async function tryInit3d() {
         propertyMarker3d.extruded = false;
       } else {
         propertyMarker3d.title = propertyLabel;
+        propertyMarker3d.anchorLeft = '-50%';
+        propertyMarker3d.anchorTop = '-100%';
         const label = document.createElement('span');
         label.className = 'tkm-property-pin'; label.textContent = '⌂ Property';
         propertyMarker3d.appendChild(label);
@@ -513,6 +522,7 @@ els.finish.addEventListener('click', () => {
       category,
       kind,
       mode,
+      ...(propertyResolved ? {propertyLocation:{...propertyPosition,address:propertyAddress}} : {}),
       points: points.map((p) => ({ lat: p.lat, lng: p.lng, ...(p.altitude != null ? { altitude: p.altitude } : {}) }))
     },
     location.origin

@@ -115,7 +115,9 @@ function crmOriginAllowed(url) {
   }
 }
 
+let clientProvider = null;
 async function buildClient() {
+  if (clientProvider) return clientProvider();
   const { config, session } = await Storage.loadAll();
   if (!config) return null;
   return new TurnKeyClient(config, session, (s) => Storage.setSession(s));
@@ -219,7 +221,8 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
   if (contexts.delete(tabId)) await saveContexts();
 });
 
-export function registerCustomerHandoff() {
+export function registerCustomerHandoff(provider = null) {
+  clientProvider = provider;
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg && msg.type === 'TK_CUSTOMER_LAUNCH') {
       handleLaunch(msg, sender)

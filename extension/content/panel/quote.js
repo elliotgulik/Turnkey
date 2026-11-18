@@ -1,7 +1,7 @@
 import { isCustomLine } from './quote-pricing.js';
 import { TurnKeyApi } from '../../api/client-bridge.js';
 import { learningPricing, allocatePrices, observationLines, REASONS } from './quote-learning.js';
-import { measurementQuantity, measurementForService } from './measurements.js';
+import { measurementQuantity, measurementForService, isCustomMeasurement, customMeasurementLine } from './measurements.js';
 import { renderCustomerContext, requestedServices } from './customer-context.js';
 // Instant Quote panel (build brief §9-§12) — turns the measurements list
 // into priced service lines using TurnKey's own shared pricing engine
@@ -47,7 +47,7 @@ export function renderQuotePanel(container, ctx, actions) {
     if(match)matchedServices.add(match);
     return match;
   }
-  const lineState = ctx.measurements.map((m) => {
+  const lineState = ctx.measurements.filter(m=>!isCustomMeasurement(m)).map((m) => {
     const svc=m.service || Object.keys(SERVICES)[0],saved=savedMeasuredLine(m,svc);
     return {
       lineKey:key(),measurementId:m.id,include:true,svc,qty:m.size,unit:m.unit,
@@ -71,7 +71,12 @@ export function renderQuotePanel(container, ctx, actions) {
   savedServices.filter(line=>line.manual===true&&line.svc!=='windows'&&!matchedServices.has(line)&&SERVICES[line.svc]).forEach(line=>{
     extraLines.push({lineKey:key(),include:true,svc:line.svc,label:line.label??SERVICES[line.svc].label,qty:Number(line.qty)||0,storeys:line.storeys||1});
   });
-  savedServices.filter(isCustomLine).forEach(line=>extraLines.push({...line,lineKey:key(),include:true}));
+  ctx.measurements.filter(isCustomMeasurement).forEach(m=>{
+    const saved=savedServices.find(line=>isCustomLine(line)&&line.measurementId===m.id&&!matchedServices.has(line));
+    if(saved)matchedServices.add(saved);
+    extraLines.push({...customMeasurementLine(m,saved),lineKey:key(),include:true});
+  });
+  savedServices.filter(line=>isCustomLine(line)&&!matchedServices.has(line)).forEach(line=>extraLines.push({...line,lineKey:key(),include:true}));
   // When this tab was opened from an existing customer's "Build quote"
   // button (see app.js's loadBoundCustomerContext()), the quote is for
   // THAT customer and nothing else — no re-picking, no "new customer" path.
@@ -83,7 +88,7 @@ export function renderQuotePanel(container, ctx, actions) {
   const rawQuantity=l=>l.measurementId?measurementQuantity(ctx.measurements.find(m=>m.id===l.measurementId),SERVICES[l.svc]):l.qty;
   const displayLabel=row=>row.label.trim() || (isCustomLine(row)?'':SERVICES[row.svc].label);
   function computeLines() {
-    return activeRows().map(l=>isCustomLine(l)?{lineKey:l.lineKey,svc:'custom',pricingMode:'fixed',label:displayLabel(l),qty:l.qty,unit:l.unit,unitPrice:l.unitPrice,customCost:l.customCost,manual:true}:({lineKey:l.lineKey,measurementId:l.measurementId,label:displayLabel(l),manual:!l.measurementId,svc:l.svc,qty:l.appliedQuantity??rawQuantity(l),originalQuantity:l.originalQuantity??rawQuantity(l),manualPrice:l.manualPrice,distributedPrice:l.distributedPrice,reason:l.reason,verifiedQuantity:l.verifiedQuantity,measurementReason:l.measurementReason,...(l.svc==='housewash'?{storeys:Number(l.storeys)||1}:{})}));
+    return activeRows().map(l=>isCustomLine(l)?{lineKey:l.lineKey,measurementId:l.measurementId,svc:'custom',pricingMode:'fixed',label:displayLabel(l),qty:l.qty,unit:l.unit,unitPrice:l.unitPrice,customCost:l.customCost,manual:true}:({lineKey:l.lineKey,measurementId:l.measurementId,label:displayLabel(l),manual:!l.measurementId,svc:l.svc,qty:l.appliedQuantity??rawQuantity(l),originalQuantity:l.originalQuantity??rawQuantity(l),manualPrice:l.manualPrice,distributedPrice:l.distributedPrice,reason:l.reason,verifiedQuantity:l.verifiedQuantity,measurementReason:l.measurementReason,...(l.svc==='housewash'?{storeys:Number(l.storeys)||1}:{})}));
   }
   function changeService(line,svc) {
     line.svc=svc;
@@ -167,7 +172,7 @@ export function renderQuotePanel(container, ctx, actions) {
                 <div class="tk-line-row">
                   <input type="checkbox" data-extra="${i}" ${l.include ? 'checked' : ''}/>
                   <input type="text" class="tk-input" aria-label="Service name" maxlength="120" placeholder="${escapeHtml(SERVICES[l.svc]?.label)}" data-line-label="${escapeHtml(l.lineKey)}" value="${escapeHtml(l.label)}"/>
-                  ${isCustomLine(l)?`<input type="number" class="tk-qty-input" aria-label="Custom quantity" data-custom-field="qty" data-custom-key="${escapeHtml(l.lineKey)}" min="0.01" step="any" value="${escapeHtml(l.qty)}">
+                  ${isCustomLine(l)?`${l.measurementId?`<p class="tk-modal-sub">Measured reference: ${escapeHtml(ctx.measurements.find(m=>m.id===l.measurementId)?.size)} ${escapeHtml(ctx.measurements.find(m=>m.id===l.measurementId)?.unit)}. Set quantity, unit and price independently.</p>`:''}<input type="number" class="tk-qty-input" aria-label="Custom quantity" data-custom-field="qty" data-custom-key="${escapeHtml(l.lineKey)}" min="0.01" step="any" value="${escapeHtml(l.qty)}">
                   <select class="tk-select" aria-label="Custom unit" data-custom-field="unit" data-custom-key="${escapeHtml(l.lineKey)}">${['item','hour','day'].map(u=>`<option ${l.unit===u?'selected':''}>${u}</option>`).join('')}</select>
                   <label>Unit price (GST inclusive)<input class="tk-qty-input" type="number" aria-label="Custom unit price" data-custom-field="unitPrice" data-custom-key="${escapeHtml(l.lineKey)}" min="0" step="0.01" value="${Number.isFinite(l.unitPrice)?l.unitPrice:''}"></label>
                   <label>Total delivery cost (ex GST, optional)<input class="tk-qty-input" type="number" aria-label="Custom delivery cost" data-custom-field="customCost" data-custom-key="${escapeHtml(l.lineKey)}" min="0" step="0.01" placeholder="Unknown" value="${escapeHtml(l.customCost??'')}"></label>`:`<select class="tk-select" data-extra-svc="${i}">${renderServiceOptions(l.svc, null)}</select>
@@ -419,9 +424,10 @@ export function renderQuotePanel(container, ctx, actions) {
           customer: selectedCustomer || newCustomer,
           isNewCustomer: !selectedCustomer,
           address: ctx.address,
+          ...(ctx.propertyLocation ? {propertyLocation:ctx.propertyLocation} : {}),
           lines: finalLines,
           total: finalTotal,
-          areaPolys: lineState.filter(l=>l.include).map((l,i)=>({...measurementForService(ctx.measurements.find(m=>m.id===l.measurementId),l.svc,SERVICES[l.svc]),id:l.measurementId+'_'+i})),
+          areaPolys: lineState.filter(l=>l.include).map((l,i)=>({...measurementForService(ctx.measurements.find(m=>m.id===l.measurementId),l.svc,SERVICES[l.svc]),id:l.measurementId+'_'+i})).concat(extraLines.filter(l=>l.include&&isCustomLine(l)&&l.measurementId).map(l=>({...ctx.measurements.find(m=>m.id===l.measurementId),service:'custom',lineKey:l.lineKey}))),
           costSnapshot:finalModel.snapshot,
           estimatedCost:finalModel.breakdown.costUnrounded,
           estimatedMarginPct:finalModel.marginPct,

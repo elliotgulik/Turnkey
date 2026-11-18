@@ -77,7 +77,7 @@ const assert = require('node:assert/strict');
       await leads.locator('.nlm-close').click();
       await leads.locator('[data-nlm-record="1"]').focus();await page.keyboard.press('Enter');
       assert.equal(await leads.locator('.nlm-detail').isVisible(),true);await leads.locator('.nlm-close').click();
-      assert.match(await leads.locator('[data-nlm-record="1"] .nlm-grade').innerText(),/Grade|Needs review/);
+      assert.match(await leads.locator('[data-nlm-record="1"] .nlm-grade').getAttribute('aria-label'),/Grade [ABC]|Needs review/);
       assert.match(await leads.locator('[data-nlm-record="1"] .nlm-owner-link').innerText(),/Luca Anderson/);
       await leads.locator('.nlm-filter-disclosure summary').click();
       const chooseOwner=async name=>{await leads.getByRole('combobox',{name:/^Filter by salesperson:/}).click();await page.getByRole('option',{name,exact:true}).click();};

@@ -38,3 +38,17 @@ export function renderCustomerContext(customer, job, services = {}) {
   ];
   return `<div class="tk-client-context">${rows.map(([label,value]) => `<div class="tk-context-row"><strong>${label}</strong><span>${escapeHtml(value || '—')}</span></div>`).join('')}</div>`;
 }
+
+// Only explicit property anchors qualify. A mapCenter or Earth @lat,lng is
+// a view target and must never become a customer geocode by inference.
+export function resolvePropertyLocation(context = {}, camera = null) {
+  const address = (context.address || [context.customer?.address,context.customer?.suburb].filter(Boolean).join(', ')).trim();
+  for (const candidate of [context.propertyLocation, context.customer?.propertyLocation, context.job?.details?.propertyLocation]) {
+    if (!candidate || (candidate.address && candidate.address.trim() !== address)) continue;
+    if (Number.isFinite(candidate.lat) && Math.abs(candidate.lat)<=85 && Number.isFinite(candidate.lng) && Math.abs(candidate.lng)<=180)
+      return {position:{lat:candidate.lat,lng:candidate.lng},source:'property'};
+  }
+  if (camera && Number.isFinite(camera.lat) && Math.abs(camera.lat)<=85 && Number.isFinite(camera.lng) && Math.abs(camera.lng)<=180)
+    return {position:{lat:camera.lat,lng:camera.lng},source:'camera'};
+  return null;
+}

@@ -46,6 +46,11 @@
       if (!p || typeof p.lat !== 'number' || typeof p.lng !== 'number') return 'Malformed point.';
       if (p.altitude != null && typeof p.altitude !== 'number') return 'Malformed point altitude.';
     }
+    if (msg.propertyLocation != null) {
+      const p = msg.propertyLocation;
+      if (!Number.isFinite(p.lat) || Math.abs(p.lat)>85 || !Number.isFinite(p.lng) || Math.abs(p.lng)>180 ||
+          (p.address != null && (typeof p.address !== 'string' || p.address.length>500))) return 'Invalid property location.';
+    }
     try {
       if (JSON.stringify(msg).length > MAX_PAYLOAD_BYTES) return 'Measurement payload too large.';
     } catch {
@@ -83,7 +88,10 @@
     const kind = msg.kind;
     const mode = resolveMode(msg.mode);
     geometryModule.validatePoints(msg.points, { kind, mode });
-    return geometryModule.measureGeometry(msg.points, { kind, mode });
+    const result = geometryModule.measureGeometry(msg.points, { kind, mode });
+    // Additive metadata; existing geometry/result consumers remain compatible.
+    if (msg.propertyLocation) result.propertyLocation = {lat:msg.propertyLocation.lat,lng:msg.propertyLocation.lng,address:msg.propertyLocation.address || ''};
+    return result;
   }
 
   const internals = { readFinishEvent, validatePayloadShape, resolveMode, createDedupeTracker, computeResult };

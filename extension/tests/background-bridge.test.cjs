@@ -224,3 +224,17 @@ test('return failure keeps the accepted measurement and cannot deliver it twice'
  assert.equal((await dispatch(listeners,{type:'TK_MEASURE_RESULT',requestId:'focus',result:{}},sender)).ok,false);
  assert.equal(deliveries,1);assert.equal(bg.pendingRequests.get('focus').accepted,true);
 });
+
+test('workspace carries the stable property anchor separately from a moving Earth camera', async () => {
+  const { listeners, createdTabs } = installChromeMock();
+  await loadBackground();
+  const res = await dispatch(listeners, {
+    type: 'TK_OPEN_WORKSPACE', payload: { category: 'custom', kind: 'area', lat: -36.7, lng: 174.9,
+      propertyLat: -36.81, propertyLng: 174.71, address: '12 Test Road' }
+  }, { tab: { id: 55 }, url: 'https://earth.google.com/web/' });
+  assert.equal(res.ok, true);
+  const url = new URL(createdTabs[0].url);
+  assert.equal(url.searchParams.get('lat'), '-36.7');
+  assert.equal(url.searchParams.get('propertyLat'), '-36.81');
+  assert.equal(url.searchParams.get('propertyLng'), '174.71');
+});

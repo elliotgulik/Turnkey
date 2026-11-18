@@ -17,7 +17,7 @@ function manager() {
   return context.window.TK_NOVA_LEAD_MANAGER;
 }
 
-test('lead manager uses the export grading priorities with safe review for missing data', () => {
+test('lead manager uses the grading priorities with review only for empty data', () => {
   const leadManager = manager();
   assert.equal(leadManager.grade({ urgency: 'ASAP' }).grade, 'A');
   assert.equal(leadManager.grade({ propertyType: 'commercial' }).grade, 'A');
@@ -278,8 +278,8 @@ test('commercial intake answers receive the commercial grade and match its filte
     { formAnswers: [{ label: 'Property Type', answer: 'body_corporate' }] },
     { formAnswers: [{ label: 'Residential or Commercial', answer: 'Commercial' }] },
   ]) assert.equal(m.grade(record).grade, 'A');
-  assert.equal(m.grade({ formAnswers: [{ label: 'Message', answer: 'Call after business hours' }] }).grade, 'Review');
-  assert.equal(m.grade({ formAnswers: [{ label: 'Property Type', answer: 'Residential' }] }).grade, 'Review');
+  assert.equal(m.grade({ formAnswers: [{ label: 'Message', answer: 'Call after business hours' }] }).grade, 'B');
+  assert.equal(m.grade({ formAnswers: [{ label: 'Property Type', answer: 'Residential' }] }).grade, 'B');
   const f = statusFixture();
   f.records.splice(0, f.records.length, { id: 1, stage: 'new', formAnswers: [{ label: 'Property Type', answer: 'Commercial' }] });
   f.handlers.change({ target: { matches: s => s === '[data-nlm-filter]', dataset: { nlmFilter: 'grade' }, value: 'A' } });
@@ -317,4 +317,47 @@ test('recent unread leads are NEW; older unread leads are UNREAD; opened leads h
  f.manager.setRead(f.records[0],true);f.manager.render();
  assert.match(f.host.innerHTML,/class="nlm-new" hidden>UNREAD</);
  assert.match(require('node:fs').readFileSync('reference-leads.css','utf8'),/\.nlm-new\[hidden\]\s*\{\s*display:\s*none\s*!important/);
+});
+
+
+test('partial enquiries get explained tentative grades without changing intake data', () => {
+  const m=manager();
+  const cases=[
+    [{name:'Customer'},'B',/confirm service area and requested services/],
+    [{email:'customer@example.test'},'B',/tentative/],
+    [{phone:'021123456'},'B',/tentative/],
+    [{notes:'Please call about cleaning'},'B',/tentative/],
+    [{services:['House wash']},'B',/confirm service area/],
+    [{address:'Auckland',services:['House wash','Windows']},'B',/confirm service area/],
+    [{suburb:'Takapuna'},'B',/confirm requested services/],
+    [{suburb:'Manurewa'},'C',/Outside preferred area, tentative: confirm requested services/],
+    [{urgency:'as_soon_as_possible'},'A',/Urgent enquiry, tentative/],
+    [{propertyType:'commercial'},'A',/Commercial property, tentative/],
+    [{suburb:'Manurewa',urgency:'ASAP',services:['Driveway']},'C',/Lower-fit/],
+    [{suburb:'Manurewa',urgency:'ASAP',services:['Driveway','Windows']},'A',/Urgent/],
+    [{suburb:'Takapuna',services:['Windows']},'C',/Lower-fit/],
+    [{id:42,stage:'new',source:'Meta',createdAt:Date.now(),notes:'  ',services:[]},'Review',/No usable enquiry/],
+  ];
+  for(const [record,expected,reason] of cases){
+    const before=JSON.stringify(record),actual=m.grade(record);
+    assert.equal(actual.grade,expected,JSON.stringify(record));assert.match(actual.why,reason);
+    assert.equal(JSON.stringify(record),before);
+  }
+});
+
+test('square grade badges keep readable labels, reasons and manual overrides across surfaces', () => {
+  const f=statusFixture();
+  const record={id:1,stage:'new',name:'Customer <name>',urgency:'ASAP',novaLeadManager:{gradeOverride:'C'}};
+  f.records.splice(0,f.records.length,record);
+  const before=JSON.stringify(record);f.manager.render();
+  assert.match(f.host.innerHTML,/class="nlm-grade grade-c" role="img" aria-label="Grade C: Manual override" title="Grade C: Manual override">C<\/span>/);
+  assert.match(f.host.innerHTML,/class="nlm-grade-reason">Manual override/);
+  assert.doesNotMatch(f.host.innerHTML,/nlm-fit-|>Grade C</);
+  f.handlers.click({target:{closest:selector=>selector==='[data-nlm]'?{dataset:{nlm:'detail',id:'1'}}:null}});
+  assert.match(f.host.innerHTML,/nlm-detail-grade.*Grade C: Manual override/);
+  assert.equal(JSON.stringify(record),before);
+  record.novaLeadManager.gradeOverride=null;f.manager.render();
+  assert.match(f.host.innerHTML,/aria-label="Grade A: Urgent enquiry, tentative: confirm service area and requested services"/);
+  f.records.splice(0,f.records.length,{id:2,stage:'new'});f.manager.render();
+  assert.match(f.host.innerHTML,/aria-label="Needs review: No usable enquiry details recorded"[^>]*>\?</);
 });

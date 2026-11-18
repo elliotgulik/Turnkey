@@ -43,16 +43,15 @@
 #view-leads .nlm-reference .nlm-preview-actions .primary { grid-column: 1 / -1; }
 #view-leads .nlm-reference .nlm-preview-actions .btn { min-height: 44px; justify-content: center; text-align: center; }
 #view-leads .nlm-reference .nlm-preview-actions a.btn { color: #0a1c2b; }
-/* Grade colour is product information: restore it after redesign's neutral rules. */
-#view-leads .nlm-reference .nlm-card.nlm-fit-a { --lead-tint: #edf8f1; --lead-muted: #315c43; background: var(--lead-tint) !important; }
-#view-leads .nlm-reference .nlm-card.nlm-fit-b { --lead-tint: #eef5ff; --lead-muted: #365578; background: var(--lead-tint) !important; }
-#view-leads .nlm-reference .nlm-card.nlm-fit-c { --lead-tint: #f6f0fc; --lead-muted: #614776; background: var(--lead-tint) !important; }
-#view-leads .nlm-reference .nlm-card.nlm-fit-review { --lead-tint: #fff7e5; --lead-muted: #72551e; background: var(--lead-tint) !important; }
+/* Grade colour belongs only to the compact badge, never the enquiry row. */
+#view-leads .nlm-reference .nlm-card { --lead-muted: #53626c; background: #fff; }
+#view-leads .nlm-reference .nlm-card:hover,
+#view-leads .nlm-reference .nlm-card:focus-within { background: #f3f5f5; }
 #view-leads .nlm-reference .nlm-grade.grade-a { background: #d6efdf !important; color: #165c36 !important; }
 #view-leads .nlm-reference .nlm-grade.grade-b { background: #dceaff !important; color: #204f89 !important; }
 #view-leads .nlm-reference .nlm-grade.grade-c { background: #eae0f6 !important; color: #644082 !important; }
 #view-leads .nlm-reference .nlm-grade.grade-review { background: #ffebbd !important; color: #744609 !important; }
-#view-leads .nlm-reference .nlm-grade { display: inline-flex; align-items: center; min-height: 24px; padding: 3px 7px; border-radius: 4px; font-size: 12px; font-weight: 600; }
+#view-leads .nlm-reference .nlm-grade { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; flex: 0 0 28px; width: 28px; min-width: 28px; height: 28px; min-height: 28px; padding: 0; border-radius: 4px; font-size: 15px; line-height: 1; font-weight: 700; }
 #view-leads .nlm-reference .nlm-card:hover { box-shadow: inset 0 0 0 1px var(--lead-muted); }
 #view-leads .nlm-reference :is(button, a, input, select, summary, [tabindex]):focus-visible { outline: 2px solid #0f7d6b; outline-offset: 2px; }
 #view-leads .nlm-reference ::selection { color: #0a1c2b; background: #cbe6df; }
@@ -104,7 +103,7 @@
 #view-leads .nlm-reference .nlm-owner-tabs button{display:inline-flex;align-items:center;gap:9px;min-height:42px;padding:9px 14px;border:1px solid var(--tk-line,#d5dde1);border-radius:6px;background:#fff;color:var(--tk-muted,#53626c);font:inherit;font-size:14px;cursor:pointer}
 #view-leads .nlm-reference .nlm-owner-tabs button[aria-pressed=true]{color:#fff;background:var(--tk-ink,#0a1c2b);border-color:var(--tk-ink,#0a1c2b)}
 #view-leads .nlm-reference .nlm-owner-tabs button span{font-size:12px;font-variant-numeric:tabular-nums;opacity:.85}
-#view-leads .nlm-reference .nlm-new{display:inline-flex;align-items:center;gap:5px;font-size:12px;line-height:1.4;padding:3px 7px;font-weight:600;letter-spacing:0;background:#e2f0ec;color:#0b5f52;border-radius:4px}
+#view-leads .nlm-reference .nlm-new{display:inline-flex;align-items:center;gap:5px;flex:none;min-height:28px;box-sizing:border-box;font-size:13px;line-height:1.4;padding:4px 9px;font-weight:700;letter-spacing:0;background:#0a1c2b!important;color:#fff!important;border-radius:4px}
 #view-leads .nlm-reference .nlm-new[hidden]{display:none!important}
 #view-leads .nlm-reference .nlm-card.unread .nlm-name{font-weight:700}
 #view-leads .nlm-reference .nlm-card.unread .nlm-name::before{content:'';display:inline-block;width:7px;height:7px;margin-right:7px;border-radius:50%;background:#0f7d6b;vertical-align:2px}

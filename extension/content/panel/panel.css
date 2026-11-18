@@ -299,3 +299,5 @@
  .tk-line-row .tk-quote-field { min-width:130px; flex:1 1 130px; }
  .tk-line-qty { min-width:64px; }
 }
+
+.tk-root .tk-btn-custom-area{border:2px solid var(--tk-teal,#138a72);font-weight:700;grid-column:1/-1}

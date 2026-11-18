@@ -223,6 +223,28 @@ test('quote UI reuses outline quantities, requires manual panes and saves exactl
     assert.equal(await page.locator('[data-create]').isDisabled(),true);
     await page.locator('[data-line-label]').fill('Valid custom label');
     assert.equal(await page.locator('[data-create]').isDisabled(),false);
+    // A measured custom area keeps its geometry but never requires m² pricing.
+    await page.evaluate(()=>window.paintQuote({manualWindows:false,boundJob:null,measurements:[{id:'custom-outline',category:'custom',type:'area',service:'driveway',categoryLabel:'Custom area',size:321,unit:'m²',quantities:{area:321,perimeter:80},geoPts:[{lat:0,lng:0},{lat:0,lng:.001},{lat:.001,lng:0}],points:[]}]}));
+    assert.equal(await page.locator('[data-line-svc]').count(),0);
+    assert.match(await page.locator('.tk-line-row').innerText(),/Measured reference: 321 m²/);
+    assert.equal(await page.locator('[data-custom-field="qty"]').inputValue(),'1');
+    await page.locator('[data-line-label]').fill('Garden <work>');
+    await page.locator('[data-custom-field="unit"]').selectOption('day');
+    await page.locator('[data-custom-field="unitPrice"]').fill('187.65');
+    await page.locator('[data-create]').click();
+    const measuredCustom=await page.evaluate(()=>window.saved);
+    assert.equal(measuredCustom.total,187.65);
+    assert.equal(measuredCustom.lines[0].unit,'day');
+    assert.equal(measuredCustom.lines[0].qty,1);
+    assert.equal(measuredCustom.lines[0].measurementId,'custom-outline');
+    assert.equal(measuredCustom.areaPolys[0].service,'custom');
+    assert.equal(measuredCustom.areaPolys[0].size,321);
+    assert.equal(measuredCustom.areaPolys[0].geoPts.length,3);
+    assert.deepEqual(measuredCustom.quoteLearning.lines,[]);
+    await page.evaluate(()=>window.paintQuote({manualWindows:false,boundJob:{details:{services:window.saved.lines}},measurements:window.saved.areaPolys}));
+    assert.equal(await page.locator('[data-custom-field="unitPrice"]').count(),1);
+    assert.equal(await page.locator('[data-custom-field="unitPrice"]').inputValue(),'187.65');
+    assert.equal(await page.locator('[data-line-label]').inputValue(),'Garden <work>');
     await page.evaluate(async()=>{
       const {renderQuoteCreated}=await import('/extension/content/panel/quote.js');window.retries=0;
       renderQuoteCreated(document.querySelector('#quote'),{address:'Saved property',total:123.45,lines:[{svc:'driveway',label:'Front <img src=x onerror="window.bad=true"> & path',qty:200,fixedPrice:123.45}],SERVICES:window.TK_PRICING.SERVICES,learningWarning:'Your quote is saved. Learning was not saved.'},{onRetryLearning:async()=>{if(++window.retries===1)throw Error('Temporary outage');},onDone:()=>{}});
