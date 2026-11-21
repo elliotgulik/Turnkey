@@ -1,5 +1,6 @@
 import { createServiceM8Router } from './servicem8Routes.js'
 import { installSalesPlatform } from './salesPlatform.js'
+import { installLeadWelcome } from './leadWelcome.js'
 import { installConversations } from './conversationsRoutes.js'
 import { installEmailSync } from './emailSync.js'
 import { installMarketingRoutes } from './marketingRoutes.js'
@@ -1402,6 +1403,7 @@ app.post('/api/ai/marketing', requireBusiness, marketingRateLimit, async (req, r
 })
 
 installSalesPlatform(app,{db:authClient,requireBusiness,sendNotification,getValidAccessToken})
+const leadWelcome=installLeadWelcome(app,{db:authClient,requireBusiness,getValidAccessToken})
 installConversations(app,{db:authClient,requireBusiness,getValidAccessToken})
 installEmailSync(app,{db:authClient,requireBusiness,getValidAccessToken,gmail,sendNotification})
 installMarketingRoutes(app,{db:authClient,requireBusiness,getMetaRetrievalToken:async(businessId)=>{
@@ -1429,7 +1431,7 @@ app.use('/api/servicem8', createServiceM8Router({
 }))
 
 app.listen(PORT, () => {
-  if(STORAGE==='supabase')metaLeadSync.start()
+  if(STORAGE==='supabase'){metaLeadSync.start();leadWelcome.start()}
   console.log(`🚀 TurnKey backend running on port ${PORT}`)
   console.log(`📦 Storage mode: ${STORAGE}`)
   // Loud and specific on purpose — "push notifications aren't delivering"

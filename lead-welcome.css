@@ -1,0 +1,28 @@
+/* Scoped to the existing Settings disclosure; uses TurnKey's job-sheet palette. */
+#lead-welcome-settings { color:var(--tk-ink,#0a1c2b); font-size:15px; line-height:1.5; }
+#lead-welcome-settings .lw-editor { display:grid; gap:12px; padding:0; margin:0; border:0; min-width:0; }
+#lead-welcome-settings p { margin:0 0 12px; max-width:70ch; overflow-wrap:anywhere; }
+#lead-welcome-settings label { display:grid; gap:6px; font-size:15px; }
+#lead-welcome-settings :is(input:not([type=checkbox]),select,textarea) { box-sizing:border-box; width:100%; min-width:0; min-height:44px; padding:10px 12px; border:1px solid var(--tk-line,#d5dde1); border-radius:6px; background:var(--tk-surface,#fff); color:var(--tk-ink,#0a1c2b); font:inherit; caret-color:var(--tk-signal,#0f7d6b); }
+#lead-welcome-settings textarea { resize:vertical; line-height:1.5; }
+#lead-welcome-settings .lw-check { display:flex; align-items:center; gap:10px; min-height:44px; }
+#lead-welcome-settings input[type=checkbox] { width:20px; height:20px; flex:none; margin:0; accent-color:var(--tk-signal,#0f7d6b); }
+#lead-welcome-settings :is(small,.lw-readiness) { color:var(--tk-muted,#53626c); font-size:13px; }
+#lead-welcome-settings .lw-saved { font-weight:600; }
+#lead-welcome-settings .lw-error { color:var(--tk-alert,#a3462a); margin-top:12px; }
+#lead-welcome-settings .lw-sources { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:4px 16px; margin:0; padding:8px 0; border:0; min-width:0; }
+#lead-welcome-settings legend { padding:0; font-weight:600; }
+#lead-welcome-settings :is(.lw-preview,.lw-outcomes) { border-top:1px solid var(--tk-rule,#e6ebee); padding-top:12px; margin-top:8px; }
+#lead-welcome-settings summary { min-height:44px; cursor:pointer; font-weight:600; }
+#lead-welcome-settings [data-lw-preview] { white-space:pre-wrap; }
+#lead-welcome-settings .lw-actions { display:flex; margin-top:4px; }
+#lead-welcome-settings .btn { min-height:44px; }
+#lead-welcome-settings .lw-history { list-style:none; margin:0; padding:0; }
+#lead-welcome-settings .lw-history li { display:flex; flex-wrap:wrap; gap:4px 12px; padding:12px 0; border-bottom:1px solid var(--tk-rule,#e6ebee); }
+#lead-welcome-settings .lw-history time { color:var(--tk-muted,#53626c); font-size:13px; }
+#lead-welcome-settings .lw-history p { flex-basis:100%; margin:0; }
+#lead-welcome-settings :is(input,textarea,select,button,summary):focus-visible { outline:2px solid var(--tk-signal,#0f7d6b); outline-offset:2px; }
+#lead-welcome-settings ::selection { background:#cbe6df; color:#0a1c2b; }
+#lead-welcome-settings [hidden] { display:none!important; }
+#lead-welcome-settings .lw-sr-only { position:absolute; width:1px; height:1px; padding:0; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+@media(max-width:760px) { #lead-welcome-settings .lw-actions .btn { width:100%; } }
