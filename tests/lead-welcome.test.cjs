@@ -6,18 +6,18 @@ const source=fs.readFileSync(require.resolve('../lead-welcome.js'),'utf8');
 function fixture(extra={}){
   const c={window:{},URL,openSettings(){},...extra};vm.runInNewContext(source,c);return {c,api:c.window.TK_LEAD_WELCOME};
 }
-test('welcome defaults keep SMS off, use the provided Instagram link and sample preview only',()=>{
+test('welcome defaults choose email and stay off, use the provided Instagram link and sample preview only',()=>{
   const {api}=fixture({docBizName:()=> 'Nova Exterior'}),d=api.defaults();
-  assert.equal(d.enabled,false);assert.equal(d.channel,'sms');assert.equal(d.consentMode,'explicit');
+  assert.equal(d.enabled,false);assert.equal(d.channel,'email');assert.equal(d.consentMode,'explicit');
   assert.equal(d.trustUrl,'https://www.instagram.com/novaexterior/');
-  assert.equal(d.body,'Hi {customer_name}, thanks for contacting {business_name}! While we review your enquiry, see our work and how we care for your property: {trust_link}');
+  assert.equal(d.body,'Hi {customer_name}, thanks for contacting {business_name}! While we review your enquiry, check out our work and how we care for your property: {trust_link}');
   assert.equal(d.subject,'Thanks for your enquiry — {business_name}');
   assert.match(api.previewText(d),/^Hi Alex, thanks for contacting Nova Exterior!/);
   assert.match(api.previewText(d),/https:\/\/www.instagram.com\/novaexterior\//);
   assert.equal(d.sources.join(','),'wix,meta,booking');d.sources.push('manual');assert.equal(api.defaults().sources.length,3);
 });
 test('welcome validation enforces provider readiness, HTTPS, lengths, placeholders and explicit activation',()=>{
-  const {api}=fixture(),d={...api.defaults(),sources:['wix']};
+  const {api}=fixture(),d={...api.defaults(),channel:'sms',sources:['wix']};
   assert.equal(api.validate(d,{}).enabled,false);
   assert.throws(()=>api.validate({...d,enabled:true},{}),/Twilio/);
   assert.throws(()=>api.validate({...d,enabled:true,channel:'email'},{}),/Gmail/);

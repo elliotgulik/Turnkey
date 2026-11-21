@@ -1,8 +1,8 @@
 import crypto from 'node:crypto';
 import * as gmail from './providers/gmail.js';
 
-export const DEFAULT_WELCOME = Object.freeze({enabled:false,channel:'sms',trustUrl:'https://www.instagram.com/novaexterior/',
- body:'Hi {customer_name}, thanks for contacting {business_name}! While we review your enquiry, see our work and how we care for your property: {trust_link}',
+export const DEFAULT_WELCOME = Object.freeze({enabled:false,channel:'email',trustUrl:'https://www.instagram.com/novaexterior/',
+ body:'Hi {customer_name}, thanks for contacting {business_name}! While we review your enquiry, check out our work and how we care for your property: {trust_link}',
  subject:'Thanks for your enquiry — {business_name}',consentMode:'explicit',sources:['wix','meta','booking']});
 const fail = (message,status=400) => Object.assign(new Error(message),{status});
 const unwrap = async query => {const {data,error}=await query;if(error)throw error;return data;};
@@ -151,7 +151,7 @@ export function installLeadWelcome(app,{db,requireBusiness,getValidAccessToken,e
        const unsubscribe=frontend.replace(/\/$/,'')+'/api/leads/welcome-unsubscribe?id='+row.id+'&token='+sign(row.id);
        const text=body+'\n\nStop welcome emails: '+unsubscribe;
        sending=true;sent=await sendEmail(auth.accessToken,{from:auth.account.email_address,to:recipient,subject,
-         bodyText:text,bodyHtml:'<div style="font-family:Arial,sans-serif;line-height:1.6">'+esc(body).replace(/\n/g,'<br>')+'<p><a href="'+esc(settings.trustUrl)+'">See our work and process</a></p><p><a href="'+esc(unsubscribe)+'">Stop welcome emails</a></p></div>'});
+         bodyText:text,bodyHtml:'<div style="font-family:Arial,sans-serif;line-height:1.6">'+esc(body).replace(/\n/g,'<br>')+'<p><a href="'+esc(settings.trustUrl)+'">Check out our work and process</a></p><p><a href="'+esc(unsubscribe)+'">Stop welcome emails</a></p></div>'});
      }
      await finish(row,'accepted',null,{provider_id:sent.id,sent_at:new Date().toISOString()});
    }catch(error){

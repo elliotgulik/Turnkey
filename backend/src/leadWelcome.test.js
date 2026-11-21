@@ -3,14 +3,14 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {PGlite} from '@electric-sql/pglite';
 import {DEFAULT_WELCOME,validateWelcome,normalizeSmsPhone,welcomeEligibility,welcomeContent,smsReady,sendWelcomeSms,installLeadWelcome} from './leadWelcome.js';
-const settings=()=>({...DEFAULT_WELCOME,sources:['wix','meta','booking']});
+const settings=()=>({...DEFAULT_WELCOME,channel:'sms',sources:['wix','meta','booking']});
 const env={TWILIO_BUSINESS_ID:'b',TWILIO_ACCOUNT_SID:'AC'+'a'.repeat(32),TWILIO_AUTH_TOKEN:'private-fixture',TWILIO_MESSAGING_SERVICE_SID:'MG'+'b'.repeat(32),TWILIO_OPT_OUT_READY:'true',SUPABASE_SERVICE_ROLE_KEY:'fixture-signing-secret'};
 
 test('welcome defaults are off and validation requires a safe link, template and sources',()=>{
- assert.equal(DEFAULT_WELCOME.enabled,false);
+ assert.equal(DEFAULT_WELCOME.enabled,false);assert.equal(DEFAULT_WELCOME.channel,'email');
  assert.equal(validateWelcome(settings()).trustUrl,'https://www.instagram.com/novaexterior/');
  for(const patch of [{trustUrl:'http://example.test'},{trustUrl:'https://user:secret@example.test'},{body:'Hi without link'},{body:'{unknown} {trust_link}'},{subject:'Hi\r\nBcc: x'},{sources:['unknown']}])assert.throws(()=>validateWelcome({...settings(),...patch}));
- assert.equal(welcomeContent(settings(),{name:'Mike Simpson'},'Nova Exterior').body,'Hi Mike, thanks for contacting Nova Exterior! While we review your enquiry, see our work and how we care for your property: https://www.instagram.com/novaexterior/');
+ assert.equal(welcomeContent(settings(),{name:'Mike Simpson'},'Nova Exterior').body,'Hi Mike, thanks for contacting Nova Exterior! While we review your enquiry, check out our work and how we care for your property: https://www.instagram.com/novaexterior/');
 });
 test('NZ SMS numbers normalize; missing, landline and foreign numbers are excluded',()=>{
  for(const input of ['021 605 354','+64 21 605 354','006421605354'])assert.equal(normalizeSmsPhone(input),'+6421605354');

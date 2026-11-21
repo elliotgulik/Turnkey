@@ -1,6 +1,6 @@
 # New-lead welcome messages
 
-Local feature, off by default. No messages have been sent or historical leads queued.
+Local feature, email selected by default and automatic sending off until enabled. No messages have been sent or historical leads queued.
 
 ## Behaviour
 

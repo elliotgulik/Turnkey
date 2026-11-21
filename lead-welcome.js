@@ -4,13 +4,13 @@
   if(window.TK_LEAD_WELCOME)return;
   const endpoint='/api/leads/welcome-settings';
   const sourceNames={wix:'Wix',meta:'Meta',booking:'Booking',manual:'Manual'};
-  const defaults={enabled:false,channel:'sms',trustUrl:'https://www.instagram.com/novaexterior/',body:'Hi {customer_name}, thanks for contacting {business_name}! While we review your enquiry, see our work and how we care for your property: {trust_link}',subject:'Thanks for your enquiry — {business_name}',consentMode:'explicit',sources:['wix','meta','booking']};
+  const defaults={enabled:false,channel:'email',trustUrl:'https://www.instagram.com/novaexterior/',body:'Hi {customer_name}, thanks for contacting {business_name}! While we review your enquiry, check out our work and how we care for your property: {trust_link}',subject:'Thanks for your enquiry — {business_name}',consentMode:'explicit',sources:['wix','meta','booking']};
   const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   let serial=0;
   const allowed=()=>typeof currentUserId!=='undefined'&&!!currentUserId&&typeof currentBusinessId!=='undefined'&&!!currentBusinessId&&typeof currentUserRole!=='undefined'&&['owner','manager'].includes(currentUserRole);
   const scope=()=>[typeof currentBusinessId!=='undefined'?currentBusinessId:'',typeof currentUserId!=='undefined'?currentUserId:'',typeof businessSessionVersion!=='undefined'?businessSessionVersion:'',typeof currentUserRole!=='undefined'?currentUserRole:''].join(':');
   function settings(value={}){
-    return {...defaults,...value,enabled:value.enabled===true,channel:value.channel==='email'?'email':'sms',consentMode:value.consentMode==='enquiries'?'enquiries':'explicit',sources:Array.isArray(value.sources)?Object.keys(sourceNames).filter(s=>value.sources.includes(s)):defaults.sources.slice()};
+    return {...defaults,...value,enabled:value.enabled===true,channel:value.channel==='sms'?'sms':'email',consentMode:value.consentMode==='enquiries'?'enquiries':'explicit',sources:Array.isArray(value.sources)?Object.keys(sourceNames).filter(s=>value.sources.includes(s)):defaults.sources.slice()};
   }
   function validate(draft,readiness={}){
     if(!['sms','email'].includes(draft.channel))throw Error('Choose SMS or email.');

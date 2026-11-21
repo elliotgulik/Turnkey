@@ -32,8 +32,9 @@ test('welcome editor saves explicitly, previews plain text and guards readiness,
       await page.evaluate(()=>openSettings());
       const form=page.locator('#lead-welcome-form');await form.waitFor();
       assert.equal(await form.locator('[name=enabled]').isChecked(),false);
-      assert.equal(await form.locator('[name=channel]').inputValue(),'sms');
-      assert.match(await form.locator('[data-lw-readiness]').innerText(),/Twilio configuration/);
+      assert.equal(await form.locator('[name=channel]').inputValue(),'email');
+      assert.match(await form.locator('[data-lw-readiness]').innerText(),/ready through Gmail/);
+      await form.locator('[name=channel]').selectOption('sms');
       assert.match(await form.locator('[data-lw-preview]').innerText(),/Hi Alex, thanks for contacting Nova Exterior!/);
       assert.equal(await page.locator('.lw-history li').count(),10);assert.equal(await page.locator('.lw-history img').count(),0);
       assert.equal(await page.evaluate(()=>calls.length),1);
